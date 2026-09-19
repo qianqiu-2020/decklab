@@ -18,11 +18,12 @@ set -u
 DEV="${1:-}"
 MODE="${2:-soft}"
 
-# 只接受内核的 USB 设备命名(形如 3-4.2.2),杜绝路径穿越/任意文件写入
-case "$DEV" in
-  [0-9]*-[0-9.]*) ;;
-  *) echo "拒绝:设备名不合法 '$DEV'" >&2; exit 2 ;;
-esac
+# shell 的 glob 中 * 能吞掉斜杠;旧写法会放行 3-4/../../... 并以 root 写任意路径。
+# 必须对整个参数做锚定校验,只接受内核的 USB 设备名(形如 3-4.2.2)。
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || ! [[ "$DEV" =~ ^[0-9]+-[0-9]+(\.[0-9]+)*$ ]]; then
+  echo "拒绝:设备名不合法 '$DEV'" >&2
+  exit 2
+fi
 case "$MODE" in soft|rebind) ;; *) echo "拒绝:模式只能是 soft 或 rebind" >&2; exit 2 ;; esac
 
 D="/sys/bus/usb/devices/$DEV"

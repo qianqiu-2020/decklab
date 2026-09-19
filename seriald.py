@@ -20,9 +20,12 @@
 用法: seriald.py [端口=8898] [绑定地址=10.0.90.177]
 """
 import base64
+import codecs
+import errno
 import fcntl
 import functools
 import http.server
+import hashlib
 import json
 import os
 import pty
@@ -30,6 +33,7 @@ import re
 import secrets
 import select
 import socketserver
+import stat
 import struct
 import subprocess
 import sys
@@ -48,6 +52,8 @@ RESCUE_BIN = '/usr/local/sbin/seriald-rescue.sh'
 
 BAUD = 115200
 SCROLLBACK = 256 * 1024          # 每设备内存缓冲上限(页面实时视图用)
+SSH_LIMIT = 8                   # 防止遗留标签页无限创建 ssh 子进程
+SSH_IDLE = 30 * 60
 DATE_FMT = '%Y%m%d'
 
 # 从控制台流里嗅探 hostname 的几种常见形态
@@ -67,7 +73,7 @@ _lock = threading.Lock()
 def safe_name(s, fallback='unnamed'):
     """把任意字符串收成安全的目录名。"""
     s = re.sub(r'[^A-Za-z0-9._-]+', '-', (s or '').strip()).strip('-')
-    return s[:48] or fallback
+    return s[:48] if s and s not in ('.', '..') else fallback
 
 
 def load_labels():
@@ -86,36 +92,71 @@ def save_labels(d):
     os.replace(tmp, LABELS)
 
 
-def open_serial(dev, flush=True):
+def open_serial(dev, flush=False, identity=None):
     """115200 8N1,无流控,raw,不回显。只有采集器调这个(唯一读者)。
 
-    flush 只在首次打开时用:重开时的 tcflush 会丢掉内核缓冲里尚未读走的数据,
-    实测会把现场截断。
+    默认保留内核里已经排队的字节;重连时 flush 会截断板子的启动现场。
     """
     fd = os.open(dev, os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK)
-    a = termios.tcgetattr(fd)
-    a[0] = 0
-    a[1] = 0
-    a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
-    a[3] = 0
-    a[4] = termios.B115200
-    a[5] = termios.B115200
-    a[6][termios.VMIN] = 0
-    a[6][termios.VTIME] = 0
-    termios.tcsetattr(fd, termios.TCSANOW, a)
-    if flush:
-        termios.tcflush(fd, termios.TCIFLUSH)
-    return fd
+    try:
+        s = os.fstat(fd)
+        if identity is not None and (s.st_dev, s.st_ino, s.st_rdev) != identity:
+            raise OSError(errno.ENODEV, '串口已重新枚举')
+        a = termios.tcgetattr(fd)
+        a[0] = 0
+        a[1] = 0
+        a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+        a[3] = 0
+        a[4] = termios.B115200
+        a[5] = termios.B115200
+        a[6][termios.VMIN] = 0
+        a[6][termios.VTIME] = 0
+        # Manager 在旧采集器彻底退出后才允许进入这里;运行中的读者绝不重新配置。
+        termios.tcsetattr(fd, termios.TCSANOW, a)
+        if flush:
+            termios.tcflush(fd, termios.TCIFLUSH)
+        return fd
+    except BaseException:
+        os.close(fd)                     # tcgetattr/tcsetattr 失败也必须归还 fd
+        raise
 
 
-def write_serial(dev, data):
+def write_all(fd, data, timeout=5.0, cancel=None):
+    """非阻塞 fd 也会短写;串行补齐且有截止时间,不持有输出缓冲锁。"""
+    pending = memoryview(data)
+    deadline = time.monotonic() + timeout
+    while pending:
+        if cancel is not None and cancel.is_set():
+            raise OSError(errno.ECANCELED, '会话已停止')
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise OSError(errno.ETIMEDOUT, '写入超时,可能已发送部分内容')
+        try:
+            n = os.write(fd, pending)
+            if n <= 0:
+                raise OSError(errno.EIO, '写入未取得进展')
+            pending = pending[n:]
+        except InterruptedError:
+            continue
+        except BlockingIOError:
+            try:
+                select.select([], [fd], [], min(left, 0.1))
+            except InterruptedError:
+                continue
+
+
+def write_serial(dev, data, identity=None, cancel=None):
     """铁律 2/3:只写不读、不碰 termios。"""
     try:
         fd = os.open(dev, os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
     except OSError as e:
         return False, str(e)
     try:
-        os.write(fd, data.encode('utf-8', 'replace'))
+        if identity is not None:
+            s = os.fstat(fd)
+            if (s.st_dev, s.st_ino, s.st_rdev) != identity:
+                raise OSError(errno.ENODEV, '串口已重新枚举,拒绝写入')
+        write_all(fd, data.encode('utf-8', 'replace'), cancel=cancel)
         return True, ''
     except OSError as e:
         return False, str(e)
@@ -123,35 +164,32 @@ def write_serial(dev, data):
         os.close(fd)
 
 
-# 一次"识别"采集的内容。用成对标记包起来,便于从串口流里可靠截取 ——
-# 串口上有回显、有提示符、有 ANSI,不定界就没法 parse。
-#
-# 关键:标记后面挂 `$(date +%s)`。回显里显示的是字面量 `__SD_E__$(date +%s)`,
-# 而真实输出是 `__SD_E__1789...`。于是"等 `__SD_E__\d`"就不会被回显骗到 ——
-# 早先标记是纯字面量,_wait 直接匹配上回显,秒返回并 parse 出一堆空值(实测踩到)。
+# 每次命令由 _run_cmd 加独立 nonce 帧;命令回显不含完整 marker,迟到结果不会串单。
+SSH_STATE_CMD = (
+    "if ! command -v systemctl >/dev/null 2>&1; then echo SSHD=unsupported-systemd; "
+    "elif systemctl is-active --quiet ssh; then echo SSHD=active; "
+    "elif systemctl is-active --quiet sshd; then echo SSHD=active; "
+    "else echo SSHD=inactive; fi"
+)
 PROBE_CMD = (
-    "echo __SD_B__$(date +%s); "
-    "echo HOST=$(hostname 2>/dev/null); "
-    "echo SERIAL=$(cat /proc/device-tree/serial-number 2>/dev/null | tr -d '\\0'); "
-    "echo MODEL=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\\0'); "
+    "printf 'HOST=%s\\n' \"$(hostname 2>/dev/null | tr '\\r\\n' '  ')\"; "
+    "printf 'SERIAL=%s\\n' \"$(cat /proc/device-tree/serial-number 2>/dev/null | tr -d '\\0' | tr '\\r\\n' '  ')\"; "
+    "printf 'MODEL=%s\\n' \"$(cat /proc/device-tree/model 2>/dev/null | tr -d '\\0' | tr '\\r\\n' '  ')\"; "
     "ip -4 -o addr show 2>/dev/null | awk '{print \"IP=\"$2\" \"$4}'; "
-    "echo SSHD=$(systemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || echo none); "
-    "echo __SD_E__$(date +%s)"
+    + SSH_STATE_CMD
 )
-
-# 一键开 SSH 服务端(装了就直接启,没装先 apt 装)。同样用 nonce 标记。
 SSH_CMD = (
-    "command -v sshd >/dev/null 2>&1 || "
-    "(apt-get update -qq >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive "
-    "apt-get install -y -qq openssh-server >/dev/null 2>&1); "
+    "if [ \"$(id -u)\" != 0 ]; then echo SSHD=requires-root; "
+    "elif ! command -v systemctl >/dev/null 2>&1; then echo SSHD=unsupported-systemd; "
+    "elif ! command -v sshd >/dev/null 2>&1 && ! command -v apt-get >/dev/null 2>&1; "
+    "then echo SSHD=unsupported-package-manager; else "
+    "if ! command -v sshd >/dev/null 2>&1; then "
+    "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive "
+    "apt-get install -y -qq openssh-server >/dev/null 2>&1; fi; "
+    "if ! command -v sshd >/dev/null 2>&1; then echo SSHD=install-failed; else "
     "systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1; "
-    "sleep 1; echo __SD_SSH__$(date +%s)=$(systemctl is-active ssh 2>/dev/null || "
-    "systemctl is-active sshd 2>/dev/null || echo failed)"
+    + SSH_STATE_CMD + "; fi; fi"
 )
-
-# 结束标记的"展开后"形态
-PROBE_END_RE = r'__SD_E__\d'
-SSH_END_RE = r'__SD_SSH__\d'
 
 # 登录提示符 / 密码提示符 —— **必须中英双认**。
 # 实测:k1 跑 Bianbu 2.3.5 且是中文 locale,getty 显示的是 `密码：`(全角冒号)、
@@ -191,7 +229,10 @@ def try_rescue(dev, mode='soft'):
     name = usb_path_of(dev)
     if not name:
         return False, '找不到 %s 对应的 USB 设备路径' % dev
+    if mode not in ('soft', 'rebind') or not re.fullmatch(r'[0-9]+-[0-9]+(?:\.[0-9]+)*', name):
+        return False, 'USB 路径或自愈模式不合法'
     steps = []
+    failed = False
 
     if os.geteuid() != 0:
         if not os.path.exists(RESCUE_BIN):
@@ -215,6 +256,7 @@ def try_rescue(dev, mode='soft'):
             f.write('on')
         steps.append('autosuspend 已关')
     except OSError as e:
+        failed = True
         steps.append('关 autosuspend 失败: %s' % (e.strerror or e))
     if mode == 'rebind':
         for act in ('unbind', 'bind'):
@@ -223,23 +265,21 @@ def try_rescue(dev, mode='soft'):
                     f.write(name)
                 steps.append(act)
             except OSError as e:
+                failed = True
                 steps.append('%s 失败: %s' % (act, e.strerror or e))
-    ok = any('已关' in s or s == 'bind' for s in steps)
+    # 一步成功不代表整次 rebind 成功;与特权脚本的退出码语义一致。
+    ok = not failed
     return ok, '%s [%s]' % ('; '.join(steps), name)
 
 
 def parse_probe(raw):
-    """从串口回显里解析识别结果。
-
-    串口上命令会被回显一遍,输出再来一遍;且回显里含 `HOST=$(hostname ...)` 这种字面量,
-    会和真实输出撞名。所以:先按成对标记定界,再同名**取最后一次出现**,
-    并丢掉含 `$(` / `2>/dev/null` 的伪匹配(那是回显不是结果)。
-    """
+    """解析已校验的 nonce 帧正文;字段缺失或重复必须报错,不能把残帧当成功。"""
     out = {'hostname': '', 'serial': '', 'model': '', 'ips': [], 'sshd': ''}
-    # 取**最后一个** __SD_B__ 之后的内容:回显里那个是字面量,真实输出在后
-    i = raw.rfind('__SD_B__')
-    body = raw[i:] if i >= 0 else raw
-    body = body.split('__SD_E__')[0]
+    # 调用者已经验证完整 nonce 帧;字段值里的 marker 样文字不能再截断正文。
+    body = raw.replace('\r\n', '\n')
+    for key in ('HOST', 'SERIAL', 'MODEL', 'SSHD'):
+        if len(re.findall(r'^' + key + r'=', body, re.M)) != 1:
+            raise ValueError('识别结果缺少或重复字段: ' + key)
 
     def last(key, pat):
         vals = []
@@ -279,14 +319,27 @@ class SshSession:
         self.buf = bytearray()
         self.base = 0
         self.cv = threading.Condition()
+        self.write_lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
+        self._log_lock = threading.Lock()
+        self._stop = threading.Event()
+        self._disposed = threading.Event()
+        self._thread = None
+        self._started_once = False
+        self.closed = False
         self.fd = None
         self.proc = None
         self.started = time.time()
-        self.last_touch = time.time()
+        self.last_touch = time.monotonic()
         self.cols = 120                   # 默认尺寸;浏览器连上后会按实际宽度覆盖
         self.rows = 32
         self.logf = None
         self.logpath = None
+        self._logdir = logdir
+        self._logday = time.strftime(DATE_FMT)
+        self._log_decoder = codecs.getincrementaldecoder('utf-8')('replace')
+        self._log_pending = ''
+        self._log_finished = False
         self.argv = ['sshpass', '-p', 'bianbu', 'ssh', '-tt',
                      '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=10',
                      '-o', 'ServerAliveInterval=30', 'root@' + ip]
@@ -294,47 +347,87 @@ class SshSession:
 
     def _open_log(self, logdir):
         try:
-            path = os.path.join(logdir, 'ssh-%s.log' % time.strftime(DATE_FMT))
+            day = time.strftime(DATE_FMT)
+            path = os.path.join(logdir, 'ssh-%s.log' % day)
             self.logf = open(path, 'a', encoding='utf-8', buffering=1)
             self.logpath = path
+            self._logday = day
         except OSError:
             self.logf = None
 
-    def _log(self, data):
-        if not self.logf:
-            return
-        text = data.decode('utf-8', 'replace')
-        stamp = time.strftime('%Y-%m-%d %H:%M:%S')
-        try:
-            for raw in text.split('\n'):
-                line = ANSI.sub('', raw.rstrip('\r').split('\r')[-1]).rstrip()
-                if line:
-                    self.logf.write('%s  %s\n' % (stamp, line))
-        except OSError:
-            pass
+    def _log(self, data, final=False):
+        with self._log_lock:
+            if self.logf and not self._log_finished and self._logday != time.strftime(DATE_FMT):
+                # SSH 会话可能跨天,不能一直把后续输出写进连接当天的文件。
+                try:
+                    self.logf.close()
+                except OSError:
+                    pass
+                self.logf = None
+                self._open_log(self._logdir)
+            if not self.logf or self._log_finished:
+                return
+            # read() 可以把一个汉字或一行切开,逐块 decode 会写出乱码和伪换行。
+            self._log_pending += self._log_decoder.decode(data, final=final)
+            self._log_finished = final
+            lines = self._log_pending.split('\n')
+            self._log_pending = lines.pop()
+            if final or len(self._log_pending) > 16384:
+                lines.append(self._log_pending)
+                self._log_pending = ''
+            stamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            try:
+                for raw in lines:
+                    line = ANSI.sub('', raw.rstrip('\r').split('\r')[-1]).rstrip()
+                    if line:
+                        self.logf.write('%s  %s\n' % (stamp, line))
+            except OSError:
+                pass
+
+    def _close_log(self):
+        self._log(b'', final=True)
+        with self._log_lock:
+            if self.logf:
+                try:
+                    self.logf.close()
+                except OSError:
+                    pass
+                self.logf = None
 
     def ensure(self):
-        with self.cv:
-            if self.fd is not None:
-                return
-            master, slave = pty.openpty()
-            self._set_winsize(slave)      # 必须在 spawn 之前:ssh 启动时读本地 tty 尺寸
-                                          # 作为初始 pty 请求发给远端
+        with self._lifecycle_lock:
+            with self.cv:
+                # 旧 sid 曾在写入时偷偷重建连接;结束的会话只能由显式新建替代。
+                if self.closed or self._started_once:
+                    return self.fd is not None and not self.closed
+                self._started_once = True
+            master = slave = proc = None
             try:
-                self.proc = subprocess.Popen(
+                master, slave = pty.openpty()
+                os.set_blocking(master, False)
+                self._set_winsize(slave)  # SSH 初次请求远端 pty 时就使用浏览器尺寸。
+                proc = subprocess.Popen(
                     self.argv, stdin=slave, stdout=slave, stderr=slave,
-                    preexec_fn=os.setsid, env=dict(os.environ, TERM='xterm-256color'),
+                    # 多线程进程里 preexec_fn 可能继承已锁住的锁,导致子进程死锁。
+                    start_new_session=True, env=dict(os.environ, TERM='xterm-256color'),
                     close_fds=True)
-            except OSError as e:
-                os.close(master); os.close(slave)
+                with self.cv:
+                    self.fd, self.proc = master, proc
+                    self.last_touch = time.monotonic()
+                self._append('\r\n*** 已建立 SSH 会话 root@%s (%dx%d) ***\r\n'
+                             % (self.ip, self.cols, self.rows))
+                self._thread = threading.Thread(target=self._reader, args=(master, proc),
+                                                daemon=True)
+                self._thread.start()
+            except (OSError, RuntimeError) as e:
                 self._append('\r\n*** 建立 SSH 会话失败: %s ***\r\n' % e)
-                return
-            os.close(slave)
-            self.fd = master
-            self.last_touch = time.time()
-            threading.Thread(target=self._reader, daemon=True).start()
-            self._append('\r\n*** 已建立 SSH 会话 root@%s (%dx%d) ***\r\n'
-                         % (self.ip, self.cols, self.rows))
+                self._thread = None
+                self._finish(master, proc)
+                return False
+            finally:
+                if slave is not None:
+                    os.close(slave)
+            return True
 
     def _set_winsize(self, fd):
         try:
@@ -351,30 +444,76 @@ class SshSession:
         """
         if cols < 20 or rows < 5 or cols > 500 or rows > 200:
             return False
-        self.cols, self.rows = cols, rows
-        with self.cv:
-            if self.fd is None:
-                return False
-            self._set_winsize(self.fd)
+        with self.write_lock:
+            with self.cv:
+                if self.closed or self.fd is None:
+                    return False
+                self.cols, self.rows = cols, rows
+                self.last_touch = time.monotonic()
+                fd = self.fd
+            self._set_winsize(fd)
         return True
 
-    def _reader(self):
-        while True:
+    def _reader(self, fd, proc):
+        try:
+            while not self._stop.is_set():
+                try:
+                    ready, _, _ = select.select([fd], [], [], 0.25)
+                    if not ready:
+                        continue
+                    data = os.read(fd, 65536)
+                except (BlockingIOError, InterruptedError):
+                    continue
+                except OSError:
+                    break
+                if not data:
+                    break
+                self._append(data)
+        finally:
             try:
-                data = os.read(self.fd, 65536)
-            except OSError:
-                break
-            if not data:
-                break
-            self._append(data)
-        self._append('\r\n*** SSH 会话已结束 ***\r\n')
-        with self.cv:
+                self._append('\r\n*** SSH 会话已结束 ***\r\n')
+            finally:
+                self._finish(fd, proc)
+
+    def _finish(self, fd, proc):
+        self._stop.set()
+        # fd 只由读线程回收;和写入互斥,否则 fd 号码复用后可能写进别的会话。
+        with self.write_lock:
+            with self.cv:
+                self.closed = True
+                self.fd = None
+                self.cv.notify_all()
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        if proc is not None:
+            # sshpass/ssh 属于同一进程组;只发 TERM 而不 wait 曾遗留子进程和僵尸。
             try:
-                os.close(self.fd)
+                os.killpg(proc.pid, 15)
             except OSError:
                 pass
-            self.fd = None
-            self.cv.notify_all()
+            try:
+                proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, 9)
+                except OSError:
+                    pass
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                proc.wait()
+            else:
+                # 组长可能已退出而 ssh 仍存活;回收整组,不只清理直接子进程。
+                try:
+                    os.killpg(proc.pid, 9)
+                except OSError:
+                    pass
+        self._close_log()
+        self._disposed.set()
 
     def _append(self, data):
         b = data if isinstance(data, bytes) else data.encode('utf-8', 'replace')
@@ -390,42 +529,57 @@ class SshSession:
     def read(self, off, wait=15.0):
         if off <= 0:
             wait = 0
-        self.last_touch = time.time()
-        deadline = time.time() + wait
+        deadline = time.monotonic() + wait
         with self.cv:
-            while (self.fd is not None and off >= self.base + len(self.buf)
-                   and time.time() < deadline):
+            self.last_touch = time.monotonic()
+            while (not self.closed and self.fd is not None and off >= self.base + len(self.buf)
+                   and time.monotonic() < deadline):
                 self.cv.wait(1.0)
             start = max(off - self.base, 0) if off > self.base else 0
-            return self.base + len(self.buf), bytes(self.buf[start:]), self.fd is not None
+            return (self.base + len(self.buf), bytes(self.buf[start:]),
+                    self.fd is not None and not self.closed)
 
     def write(self, text):
-        self.last_touch = time.time()
-        self.ensure()
-        with self.cv:
-            if self.fd is None:
-                return False
+        # 慢远端会使写入等待可写;不能持有输出 cv,否则读者也一起停住。
+        with self.write_lock:
+            with self.cv:
+                if self.closed or self.fd is None:
+                    return False
+                self.last_touch = time.monotonic()
+                fd = self.fd
             try:
-                os.write(self.fd, text.encode('utf-8', 'replace'))
+                write_all(fd, text.encode('utf-8', 'replace'), cancel=self._stop)
             except OSError:
                 return False
             return True
 
     def close(self):
-        try:
-            if self.proc:
-                os.killpg(os.getpgid(self.proc.pid), 15)
-        except OSError:
-            pass
-        self.append_marker('*** 会话被手动关闭 ***')
+        with self._lifecycle_lock:
+            if self._disposed.is_set():
+                return
+            with self.cv:
+                self.closed = True
+                self.cv.notify_all()
+            self._stop.set()
+            self.append_marker('*** 会话已关闭 ***')
+            if self._thread is not None:
+                # select 最多等待 250ms;写入由 stop 中断,不能从这里抢关读者的 fd。
+                self._thread.join()
+            else:
+                self._finish(self.fd, self.proc)
+
+    def is_idle(self, now, ttl):
+        with self.cv:
+            return self.closed or now - self.last_touch >= ttl
 
     def append_marker(self, text):
         self._append('\r\n%s\r\n' % text)
 
     def snapshot(self):
-        return {'sid': self.sid, 'kind': 'ssh', 'ip': self.ip,
-                'alive': self.fd is not None, 'started': self.started,
-                'bytes': len(self.buf)}
+        with self.cv:
+            return {'sid': self.sid, 'kind': 'ssh', 'ip': self.ip,
+                    'alive': self.fd is not None and not self.closed,
+                    'started': self.started, 'bytes': len(self.buf)}
 
 
 class Device:
@@ -447,34 +601,56 @@ class Device:
         self.fail_logged = 0.0
         self.last_rescue = 0.0            # 上次尝试自愈的时间
         self.rescue_note = ''             # 自愈结果(页面显示用)
-        self.probing = False              # 识别/开 SSH 进行中(串口是独占的,别并发)
+        self.probing = False
+        self.operation_lock = threading.Lock()  # 整个控制台事务互斥,包含手动输入/探测/自愈
+        self.write_lock = threading.Lock()      # fd 退役与写入串行,绝不占用输出 cv
+        self.sessions_lock = threading.RLock()
+        self.log_lock = threading.RLock()
+        self.stop = threading.Event()
+        self.thread = None
+        self.identity = None
+        self.present = False
+        self.console_tail = ''
+        self.newline = None            # 收到新提示符后才确认本连接的 CR/LF 策略
+        self.decoder = codecs.getincrementaldecoder('utf-8')('replace')
+        self.log_pending = ''
         self.probe_info = {}              # 最近一次识别结果
         self.ssh_sessions = {}            # sid -> SshSession(与串口并存的独立会话)
         self.ssh_seq = 0
+        self.ssh_pending = 0
         self.logf = None
+        # preload 可能在没有日志时早退;所有状态必须先初始化。
+        self.logpath = None
+        self.dead = False
         self.preload()
 
     def preload(self):
         """启动时把最近一份串口日志的尾部装回内存缓冲。
 
-        否则服务一重启、板子又安静,缓冲就是空的——连提示符都判不出来,
-        "识别设备"会在一块明明登录着的板子上失败(实测踩到)。
+        历史只供页面回看;带时间戳和结束标记的旧日志不能代表现场登录状态。
+        识别时先从新收到的 console_tail 确认,必要时请求板子重画提示符。
         """
         try:
             d = self.stable_dir()
             files = sorted(f for f in os.listdir(d)
                            if f.startswith('serial-') and f.endswith('.log'))
             if not files:
+                # 旧版本目录只作历史读取,新日志不再写进可能碰撞的旧目录。
+                d = self.legacy_dir()
+                files = sorted(f for f in os.listdir(d)
+                               if f.startswith('serial-') and f.endswith('.log'))
+            if not files:
                 return
-            with open(os.path.join(d, files[-1]), encoding='utf-8', errors='replace') as f:
-                tail = f.read()[-SCROLLBACK // 4:]
+            with open(os.path.join(d, files[-1]), 'rb') as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - SCROLLBACK // 4))
+                tail = f.read()
             self.buf += ('\r\n--- 以下为历史串口日志(%s) ---\r\n' % files[-1]).encode()
-            self.buf += tail.encode('utf-8')
+            self.buf += tail
             self.buf += '\r\n--- 历史结束 ---\r\n'.encode()
+            # 历史装饰文字不能参与提示符判断;只用新收到的 console_tail 确认现场。
         except OSError:
             pass
-        self.logpath = None
-        self.dead = False
 
     @property
     def label(self):
@@ -490,9 +666,14 @@ class Device:
         by-path 变成 hostname —— 于是同一块板子的日志被劈成两个目录,前半截"消失"。
         落盘路径必须只依赖物理锚点。
         """
-        d = os.path.join(LOG_ROOT, safe_name(self.key.rsplit(':', 1)[0], 'unnamed'))
+        suffix = hashlib.sha256(self.key.encode('utf-8')).hexdigest()[:20]
+        # 去掉接口号/截断前缀曾让不同串口共用日志;摘要必须覆盖完整 by-path。
+        d = os.path.join(LOG_ROOT, safe_name(self.key) + '-' + suffix)
         os.makedirs(d, exist_ok=True)
         return d
+
+    def legacy_dir(self):
+        return os.path.join(LOG_ROOT, safe_name(self.key.rsplit(':', 1)[0], 'unnamed'))
 
     def link_label(self):
         """在稳定目录旁挂一个以编号命名的软链,方便人按编号找日志。"""
@@ -503,8 +684,11 @@ class Device:
                 return
             link = os.path.join(LOG_ROOT, want)
             if os.path.islink(link):
-                if os.readlink(link) == real:
+                target = os.readlink(link)
+                if target == real:
                     return
+                if target != self.legacy_dir():
+                    return                 # 重名标签不能抢走另一设备的日志别名
                 os.unlink(link)
             elif os.path.exists(link):
                 return                     # 已有同名实体目录,别动
@@ -513,39 +697,94 @@ class Device:
             pass
 
     def open_log(self):
-        if self.logf:
-            return
-        self.link_label()
         path = os.path.join(self.stable_dir(), 'serial-%s.log' % time.strftime(DATE_FMT))
-        if self.logpath != path:                     # 跨天换文件
-            if self.logf:
-                self.logf.close()
-            self.logf = open(path, 'a', encoding='utf-8', buffering=1)
-            self.logpath = path
+        if self.logf and self.logpath == path:
+            return
+        if self.logf:
+            self.logf.close()
+            self.logf = None
+        self.logf = open(path, 'a', encoding='utf-8', buffering=1)
+        self.logpath = path
+        self.link_label()
 
-    def append(self, data):
-        self.open_log()
-        b = data if isinstance(data, bytes) else data.encode('utf-8', 'replace')
-        # 落盘:按行时间戳、剥 ANSI;先 rstrip('\r') 否则 \r\n 行尾会整行变空被丢掉
+    def _log_text(self, text):
         try:
-            text = b.decode('utf-8', 'replace')
+            self.open_log()
             stamp = time.strftime('%Y-%m-%d %H:%M:%S')
             for raw in text.split('\n'):
                 line = ANSI.sub('', raw.rstrip('\r').split('\r')[-1]).rstrip()
                 if line:
                     self.logf.write('%s  %s\n' % (stamp, line))
         except (OSError, ValueError):
-            pass
-        with self.cv:
-            self.buf += b
-            if len(self.buf) > SCROLLBACK:
-                drop = len(self.buf) - SCROLLBACK
-                del self.buf[:drop]
-                self.base += drop
-            self.bytes += len(b)
-            self.last_rx = time.time()
-            self.sniff(text)
-            self.cv.notify_all()
+            # 磁盘满/目录不可写不能杀死唯一采集线程,内存扇出仍要继续。
+            if self.logf:
+                try:
+                    self.logf.close()
+                except OSError:
+                    pass
+            self.logf = None
+
+    def append(self, data, received=True):
+        b = data if isinstance(data, bytes) else data.encode('utf-8', 'replace')
+        with self.log_lock:
+            if received:
+                text = self.decoder.decode(b)
+                self.log_pending += text
+                lines = self.log_pending.split('\n')
+                self.log_pending = lines.pop()
+                if lines:
+                    self._log_text('\n'.join(lines))
+                if len(self.log_pending) > 8192:
+                    self._log_text(self.log_pending)
+                    self.log_pending = ''
+            else:
+                text = b.decode('utf-8', 'replace')
+                self._log_text(text)
+                # 状态文字插入半个 UTF-8 字符/ANSI 序列中会破坏原始串口流。
+                # 本地诊断只落日志;终端缓冲始终保持采集器实际收到的字节顺序。
+                return
+            with self.cv:
+                self.buf += b
+                if len(self.buf) > SCROLLBACK:
+                    drop = len(self.buf) - SCROLLBACK
+                    del self.buf[:drop]
+                    self.base += drop
+                if received:
+                    self.bytes += len(b)
+                    self.last_rx = time.time()
+                    self.console_tail = (self.console_tail + text)[-4096:]
+                    self.sniff(self.console_tail)
+                self.cv.notify_all()
+
+    def close_log(self):
+        with self.log_lock:
+            self.log_pending += self.decoder.decode(b'', final=True)
+            if self.log_pending:
+                self._log_text(self.log_pending)
+            self.log_pending = ''
+            self.decoder.reset()
+            if self.logf:
+                try:
+                    self.logf.close()
+                except OSError:
+                    pass
+                self.logf = None
+
+    def _write(self, text):
+        with self.write_lock:
+            if self.stop.is_set() or not self.present or self.fd is None:
+                return False, '设备未打开或已重新枚举'
+            return write_serial(os.path.join(BY_PATH, self.key), text,
+                                identity=self.identity, cancel=self.stop)
+
+    def send(self, text):
+        # probing 布尔值的检查/赋值并不原子;所有写入口共用事务锁才不会串话。
+        if not self.operation_lock.acquire(blocking=False):
+            return False, '已有控制台操作在进行中,稍候'
+        try:
+            return self._write(text)
+        finally:
+            self.operation_lock.release()
 
     def sniff(self, text):
         """被动嗅探 hostname —— 不改动板子,只读它自己吐出来的内容。"""
@@ -567,10 +806,10 @@ class Device:
         if off <= 0:
             wait = 0        # 首次加载/切换设备:立刻返回已有内容。
                             # 否则会白等一次长轮询(最多 15s),表现为"切设备很慢"。
-        deadline = time.time() + wait
+        deadline = time.monotonic() + wait
         with self.cv:
             while (self.fd is not None and off >= self.base + len(self.buf)
-                   and time.time() < deadline):
+                   and time.monotonic() < deadline):
                 self.cv.wait(1.0)
             start = max(off - self.base, 0) if off > self.base else 0
             return self.base + len(self.buf), bytes(self.buf[start:]), self.fd is not None
@@ -590,96 +829,116 @@ class Device:
             return bytes(self.buf[i:]).decode('utf-8', 'replace')
 
     def _say(self, msg):
-        self.append('\r\n*** %s ***\r\n' % msg)
+        self.append('\r\n*** %s ***\r\n' % msg, received=False)
 
     def _wait(self, base, pattern, timeout=20.0):
         rx = re.compile(pattern)
-        end = time.time() + timeout
-        while time.time() < end:
-            m = rx.search(self._since(base))
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if self.stop.is_set() or self.fd is None:
+                return None
+            m = rx.search(ANSI.sub('', self._since(base)))
             if m:
                 return m
-            time.sleep(0.3)
+            self.stop.wait(min(0.3, max(0, end - time.monotonic())))
         return None
 
     def ensure_shell(self, base):
-        """确保板子停在 shell 提示符:在登录提示符就自动登录(默认 root/bianbu)。
-
-        这些开发板的出厂默认凭据,用户指定用它做一键操作。
-        返回 (ok, 新的基准偏移)。
-        """
-        def clean(t):
-            # 提示符后面常紧跟 bracketed-paste 之类的控制序列,先剥掉再判尾
-            return ANSI.sub('', t)
-
-        tail = clean(self._since(max(base - 4096, 0)))
-        if re.search(RE_PROMPT, tail.rstrip()[-60:]):
-            return True, base                       # 已经登录着
-
-        # 状态判断看**已积累的缓冲**;下面的 _wait 只用来等"将要发生的事"。
-        # (踩过两次:先判断出"在登录提示符",又去 _wait 找它 —— 提示符在 base 之前,
-        #  向前找永远找不到,白等到超时,把明明可登录的板子判成失败)
-        at_login = bool(re.search(RE_LOGIN + r'\s*$', tail.rstrip()[-60:]))
-
+        """仅从现场输出判断登录状态,兼容 ANSI、免密码登录以及 CR/LF。"""
+        with self.cv:
+            tail = ANSI.sub('', self.console_tail).rstrip()[-120:]
+        if self.newline is not None and re.search(RE_PROMPT, tail):
+            return True, base
+        at_login = bool(re.search(RE_LOGIN + r'\s*$', tail))
+        if not at_login or self.newline is None:
+            at_login = False
+            # 有的板子只认 LF;先试本连接成功过的换行,只在没收到提示符时尝试另一种。
+            preferred = self.newline or '\r'
+            for newline in (preferred, '\n' if preferred == '\r' else '\r'):
+                base = self.now_off()
+                if not self._write(newline)[0]:
+                    return False, base
+                match = self._wait(base, r'([#$]|' + RE_LOGIN + r')\s*$', 4)
+                if match:
+                    self.newline = newline
+                    if re.search(RE_PROMPT, match.group(0)):
+                        return True, self.now_off()
+                    at_login = True
+                    break
         if not at_login:
-            base = self.now_off()                   # 基准必须在写之前取
-            write_serial(self.dev, '\r')
-            m = self._wait(base, r'([#$]|' + RE_LOGIN + r')\s*$', 8)
-            if not m:
-                return False, base
-            if not re.search(RE_LOGIN, m.group(1)):
-                return True, self.now_off()         # 拿到了 shell 提示符 → 本来就登录着
-            at_login = True
+            return False, base
+        self._say('停在登录提示符,自动登录 root')
+        base = self.now_off()
+        if not self._write('root' + self.newline)[0]:
+            return False, base
+        failure = r'(?:[Ll]ogin incorrect|登录错误|认证失败|Authentication failure)'
+        match = self._wait(base, RE_PASSWD + r'\s*$|' + RE_PROMPT + '|' + failure, 12)
+        if not match or re.search(failure, match.group(0)):
+            return False, base
+        if re.search(RE_PROMPT, match.group(0)):
+            return True, self.now_off()       # 免密码登录不能继续盲发默认密码
+        base = self.now_off()
+        if not self._write('bianbu' + self.newline)[0]:
+            return False, base
+        match = self._wait(base, RE_PROMPT + '|' + failure, 20)
+        return (bool(match and re.search(RE_PROMPT, match.group(0))), self.now_off())
 
-        if at_login:
-            self._say('停在登录提示符,自动登录 root')
-            base = self.now_off()
-            write_serial(self.dev, 'root\r')
-            if not self._wait(base, RE_PASSWD, 12):
-                return False, base
-            base = self.now_off()
-            write_serial(self.dev, 'bianbu\r')
-            if not self._wait(base, RE_PROMPT, 20):
-                return False, base
-            time.sleep(0.5)
-            return True, self.now_off()
-        return False, self.now_off()
-
-    def _run_cmd(self, cmd, end_marker, timeout=30.0):
-        """发一条命令并等结束标记。串口是独占的,所以用 probing 标志互斥。"""
-        if self.fd is None:
-            return False, '设备未打开(串口没接上或已被拔掉)'
-        if self.probing:
+    def _run_cmd(self, cmd, timeout=30.0):
+        """一个事务覆盖登录、完整发送和带 nonce 的响应,禁止其他写入口插队。"""
+        if not self.operation_lock.acquire(blocking=False):
             return False, '已有一次识别/操作在进行中,稍候'
         self.probing = True
         try:
+            if self.fd is None or self.stop.is_set():
+                return False, '设备未打开(串口没接上或已被拔掉)'
             ok, base = self.ensure_shell(self.now_off())
             if not ok:
                 return False, '板子不在 shell 提示符,且自动登录失败(可能需要手动处理)'
+            nonce = secrets.token_hex(12)
+            begin, end = '__SD_B_' + nonce + '__', '__SD_E_' + nonce + '__'
+            # printf 参数拆开 marker,回显再怎么分块也不会成为完整标记行。
+            framed = ("printf '\\n%s%s\\n' '__SD_B_' '%s__'; %s; "
+                      "printf '\\n%s%s\\n' '__SD_E_' '%s__'")
+            framed = framed % ('%s', '%s', nonce, cmd, '%s', '%s', nonce)
             base = self.now_off()
-            write_serial(self.dev, cmd + '\r')
-            if not self._wait(base, end_marker, timeout):
-                return False, '等待板子响应超时'
-            return True, self._since(base)
+            ok, err = self._write(framed + self.newline)
+            if not ok:
+                return False, err
+            if not self._wait(base, r'(?m)^' + re.escape(end) + r'\r?\n', timeout):
+                return False, '等待板子完整响应超时'
+            raw = ANSI.sub('', self._since(base)).replace('\r\n', '\n')
+            match = re.search(r'(?m)^' + re.escape(begin) + r'\n([\s\S]*?)^'
+                              + re.escape(end) + r'\n', raw)
+            if not match:
+                return False, '响应帧不完整(可能超出缓冲上限)'
+            return True, match.group(1)
         finally:
             self.probing = False
+            self.operation_lock.release()
 
     def run_probe(self):
         """识别:hostname / 板子序列号(device-tree serial-number) / IP / sshd 状态。"""
-        ok, raw = self._run_cmd(PROBE_CMD, PROBE_END_RE, 30)
+        origin = self.stop
+        ok, raw = self._run_cmd(PROBE_CMD, timeout=30)
         if not ok:
             return {'ok': False, 'error': raw}
-        info = parse_probe(raw)
+        try:
+            info = parse_probe(raw)
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
         info['ok'] = True
         info['ts'] = time.time()
-        self.probe_info = info
-        # 板子序列号比 hostname 可靠得多:hostname 可能是出厂的默认名、还可能重复。
-        # 但不拿它当目录键 —— 那要能登录才拿得到,离线板子就没有;目录键仍用 by-path。
-        if info.get('serial') and not self.hostname:
-            self.hostname = info['serial']
-        self._say('识别结果: 序列号=%s 主机名=%s IP=%s sshd=%s'
-                  % (info.get('serial') or '-', info.get('hostname') or '-',
-                     ','.join(info.get('ips') or []) or '-', info.get('sshd') or '-'))
+        with self.operation_lock:
+            if self.stop is not origin or origin.is_set():
+                return {'ok': False, 'error': '识别期间设备已重新枚举'}
+            self.probe_info = info
+            # 板子序列号比 hostname 可靠得多:hostname 可能是出厂的默认名、还可能重复。
+            # 但不拿它当目录键 —— 那要能登录才拿得到,离线板子就没有;目录键仍用 by-path。
+            if info.get('serial') and not self.hostname:
+                self.hostname = info['serial']
+            self._say('识别结果: 序列号=%s 主机名=%s IP=%s sshd=%s'
+                      % (info.get('serial') or '-', info.get('hostname') or '-',
+                         ','.join(info.get('ips') or []) or '-', info.get('sshd') or '-'))
         return info
 
     def ssh_connect(self):
@@ -688,6 +947,7 @@ class Device:
         没有 IP 就先识别一次 —— 这正是"识别设备"存在的意义:串口负责拿到
         IP/序列号/sshd 状态,SSH 会话负责后续高效操作。两者并存、各记各的日志。
         """
+        origin = self.stop
         info = self.probe_info
         if not info.get('ips'):
             r = self.run_probe()
@@ -703,26 +963,80 @@ class Device:
             break
         if not ip:
             return None, '没找到可用 IP(只看到 docker0 之类的内部地址)'
-        self.ssh_seq += 1
-        sid = 'ssh%d' % self.ssh_seq
-        s = SshSession(sid, ip, self.label, self.stable_dir())
-        self.ssh_sessions[sid] = s
-        s.ensure()
-        return s, ''
+        self.reap_sessions()
+        with self.sessions_lock:
+            if len(self.ssh_sessions) + self.ssh_pending >= SSH_LIMIT:
+                return None, 'SSH 会话已达上限(%d),请先关闭闲置会话' % SSH_LIMIT
+            self.ssh_seq += 1
+            sid = 'ssh%d' % self.ssh_seq
+            self.ssh_pending += 1
+        session = None
+        try:
+            if self.stop is not origin or origin.is_set():
+                return None, '设备已重新枚举,请重新识别 IP'
+            session = SshSession(sid, ip, self.label, self.stable_dir())
+            if not session.ensure():
+                session.close()
+                return None, '建立 SSH 会话失败'
+            with self.operation_lock:
+                if self.stop is not origin or origin.is_set():
+                    session.close()
+                    return None, '设备已重新枚举,SSH 会话已关闭'
+                with self.sessions_lock:
+                    self.ssh_sessions[sid] = session
+            return session, ''
+        except (OSError, RuntimeError) as e:
+            if session:
+                session.close()
+            return None, str(e)
+        finally:
+            with self.sessions_lock:
+                self.ssh_pending -= 1
+
+    def get_session(self, sid):
+        with self.sessions_lock:
+            return self.ssh_sessions.get(sid)
+
+    def list_sessions(self):
+        with self.sessions_lock:
+            sessions = list(self.ssh_sessions.values())
+        return [s.snapshot() for s in sessions]
+
+    def close_session(self, sid):
+        with self.sessions_lock:
+            session = self.ssh_sessions.pop(sid, None)
+        if session:
+            session.close()                  # join/wait 不得放在注册表锁内
+        return session is not None
+
+    def reap_sessions(self):
+        expired = []
+        now = time.monotonic()
+        with self.sessions_lock:
+            for sid, session in list(self.ssh_sessions.items()):
+                with session.cv:
+                    if not session.is_idle(now, SSH_IDLE):
+                        continue
+                    # 判闲置和标记关闭必须原子;不能把刚被用户续用的会话关掉。
+                    session.closed = True
+                    session._stop.set()
+                expired.append(self.ssh_sessions.pop(sid))
+        for session in expired:
+            session.close()
 
     def run_ssh_enable(self):
         """一键开 SSH:装了就直接启,没装先装(默认 root/bianbu 登录后执行)。"""
-        ok, raw = self._run_cmd(SSH_CMD, SSH_END_RE, 240)
+        ok, raw = self._run_cmd(SSH_CMD, timeout=240)
         if not ok:
             return {'ok': False, 'error': raw}
         m = None
-        for m in re.finditer(r'__SD_SSH__\d+=(\S+)', raw or ''):
+        for m in re.finditer(r'^SSHD=([^\r\n]+)$', raw or '', re.M):
             pass
         state = m.group(1).strip() if m else 'unknown'
         good = state in ('active', 'activating')
         self._say('一键开 SSH: sshd=%s' % state)
         return {'ok': good, 'sshd': state,
-                'error': '' if good else 'sshd 未能进入 active(可能装包失败或没有 apt 源)'}
+                'error': '' if good else 'sshd 未能启动: ' + state}
 
     def snapshot(self):
         tail = ''
@@ -743,120 +1057,173 @@ class Device:
 
 
 class Manager:
-    """设备发现 + 每设备一个采集线程。"""
+    """设备发现 + 每个实际 tty 一个采集线程;旧线程退出后才转移所有权。"""
 
     def __init__(self):
         self.devices = {}
         self.lock = threading.Lock()
+        self.scan_lock = threading.Lock()
+
+    @staticmethod
+    def _matches(d):
+        try:
+            s = os.stat(os.path.join(BY_PATH, d.key))
+            return (s.st_dev, s.st_ino, s.st_rdev) == d.identity
+        except OSError:
+            return False
 
     def scan(self):
-        """按 by-path 枚举,与设备名无关 —— 这是"插拔乱序也能认出来"的根本。"""
-        found = {}
-        try:
-            for name in sorted(os.listdir(BY_PATH)):
+        with self.scan_lock:
+            found = {}
+            try:
+                names = sorted(os.listdir(BY_PATH))
+            except OSError:
+                names = []
+            with self.lock:
+                existing = dict(self.devices)
+            # 新 udev 会给同一 tty 多个别名;优先保留原锚点,按设备号去重。
+            names.sort(key=lambda key: (key not in existing, key))
+            seen = set()
+            for key in names:
+                path = os.path.join(BY_PATH, key)
                 try:
-                    found[name] = os.path.realpath(os.path.join(BY_PATH, name))
+                    dev = os.path.realpath(path)
+                    st = os.stat(path)
+                    if not stat.S_ISCHR(st.st_mode) or st.st_rdev in seen:
+                        continue
+                    seen.add(st.st_rdev)
+                    found[key] = (dev, (st.st_dev, st.st_ino, st.st_rdev))
                 except OSError:
                     continue
-        except OSError:
-            pass
-        with self.lock:
-            for key, dev in found.items():
-                if key not in self.devices:
-                    d = Device(key, dev)
-                    self.devices[key] = d
-                    threading.Thread(target=self._capture, args=(d,), daemon=True).start()
-                else:
-                    self.devices[key].dev = dev          # 设备名可能变了
-        return found
+            stopping = []
+            for key, d in existing.items():
+                if found.get(key) != (d.dev, d.identity):
+                    d.present = False
+                    d.stop.set()
+                    if d.thread and d.thread.is_alive():
+                        stopping.append(d.thread)
+            for thread in stopping:
+                thread.join(timeout=0.1)
+            # 不能直接改 d.dev 让旧线程重开被复用的 ttyUSB;必须先等 close/finally 完成。
+            if any(thread.is_alive() for thread in stopping):
+                return {key: value[0] for key, value in found.items()}
+            for key, (dev, identity) in found.items():
+                with self.lock:
+                    d = self.devices.get(key)
+                if d is None:
+                    d = Device(key, dev)         # 文件 IO 不占用全局注册表锁
+                    with self.lock:
+                        self.devices[key] = d
+                if d.thread and d.thread.is_alive():
+                    continue
+                if not d.operation_lock.acquire(blocking=False):
+                    continue                    # 旧识别事务退出前不能把新连接交给同一对象
+                try:
+                    if d.identity != identity:
+                        d.probe_info = {}
+                        d.hostname = ''
+                    d.dev, d.identity = dev, identity
+                    d.present = True
+                    d.dead = False
+                    d.stop = threading.Event()
+                    d.console_tail = ''
+                    d.newline = None
+                    d.thread = threading.Thread(target=self._capture, args=(d,), daemon=True)
+                    d.thread.start()
+                finally:
+                    d.operation_lock.release()
+            return {key: value[0] for key, value in found.items()}
 
-    def _capture(self, d):
-        """单读者采集线程 —— 铁律 1。设备消失则线程结束,下轮 scan 会重建。"""
-        first = True
-        while True:
-            if d.fd is None:
+    @staticmethod
+    def _close_reader(d):
+        # 写入最多等待 5 秒;关闭不能和写侧交错,更不能占用输出 cv 等待串口。
+        with d.write_lock:
+            fd, d.fd = d.fd, None
+            if fd is not None:
                 try:
-                    d.fd = open_serial(d.dev, flush=first)
-                    first = False
-                    d.fail_count = 0
-                    d.append('\r\n*** seriald 已接入 %s ***\r\n' % d.dev)
-                except OSError as e:
-                    # 退避重试;并只在首次失败及之后每 60s 记一条 ——
-                    # 否则一个坏口(如 Errno 5 那个)会每 5 秒往日志里灌一行,一天 1.7 万行
-                    d.fail_count += 1
-                    wait = min(5 * (2 ** min(d.fail_count - 1, 4)), 60)
-                    if d.fail_count == 1 or time.time() - d.fail_logged > 60:
-                        d.fail_logged = time.time()
-                        d.append('\r\n*** 打不开 %s: %s (退避 %ds 重试,累计失败 %d 次) ***\r\n'
-                                 % (d.dev, e, wait, d.fail_count))
-                    # 连续失败到阈值就尝试自愈。
-                    # 实测结论(2026-09-19,3-4.2.2):只关 autosuspend 无效 —— 设备已从
-                    # suspended 唤醒到 active,口依然 EIO;真正救活它的是软拔插。
-                    # 所以 soft 只是"最轻的先试一下",失败后很快(不是 20 分钟后)就升级到 rebind。
-                    if (d.fail_count in (3, 6) or d.fail_count % 20 == 0) \
-                            and time.time() - d.last_rescue > 120:
-                        d.last_rescue = time.time()
-                        rc_mode = 'soft' if d.fail_count == 3 else 'rebind'
-                        ok, note = try_rescue(d.dev, rc_mode)
-                        d.rescue_note = '自愈(%s)%s: %s' % (rc_mode, '成功' if ok else '未生效', note)
-                        d.append('\r\n*** %s ***\r\n' % d.rescue_note)
-                    time.sleep(wait)
-                    continue
-            try:
-                r, _, _ = select.select([d.fd], [], [], 1.0)
-                if not r:
-                    continue
-                try:
-                    data = os.read(d.fd, 65536)
-                except (BlockingIOError, InterruptedError):
-                    continue
-                if data:
-                    d.append(data)
-            except OSError:
-                try:
-                    os.close(d.fd)
+                    os.close(fd)
                 except OSError:
                     pass
-                d.fd = None
-                d.append('\r\n*** %s 读取中断 ***\r\n' % d.dev)
+        with d.cv:
+            d.cv.notify_all()
+
+    def _capture(self, d):
+        try:
+            while not d.stop.is_set() and self._matches(d):
+                if d.fd is None:
+                    try:
+                        with d.write_lock:
+                            if d.stop.is_set() or not self._matches(d):
+                                break
+                            with d.cv:
+                                d.console_tail = ''
+                                d.newline = None
+                            d.fd = open_serial(os.path.join(BY_PATH, d.key),
+                                               flush=False, identity=d.identity)
+                            # 重连也可能已有启动日志排队,flush 会直接丢掉这些字节。
+                        d.fail_count = 0
+                        d._say('seriald 已接入 %s' % d.dev)
+                    except (OSError, termios.error) as e:
+                        self._close_reader(d)
+                        d.fail_count += 1
+                        delay = min(5 * (2 ** min(d.fail_count - 1, 4)), 60)
+                        if d.fail_count == 1 or time.time() - d.fail_logged > 60:
+                            d.fail_logged = time.time()
+                            d._say('打不开 %s: %s (退避 %ds 重试)' % (d.dev, e, delay))
+                        d.stop.wait(delay)
+                        continue
+                try:
+                    ready, _, _ = select.select([d.fd], [], [], 0.5)
+                    if not ready:
+                        continue
+                    data = os.read(d.fd, 65536)
+                    if not data:
+                        # EOF 的 fd 会一直 readable;不关闭/退避会空转占满 CPU。
+                        raise OSError(errno.EIO, '串口 EOF')
+                    d.append(data)
+                except (BlockingIOError, InterruptedError):
+                    continue
+                except (OSError, ValueError) as e:
+                    self._close_reader(d)
+                    d._say('%s 读取中断: %s' % (d.dev, e))
+                    d.stop.wait(1.0)
+                    # 断线后的重开也属于新连接;交回 scan 等旧操作退出,不能原地换 fd。
+                    break
+        finally:
+            d.stop.set()
+            self._close_reader(d)
+            d.dead = True
+            d.close_log()
 
     def probe_all(self):
-        """对"还没有 hostname 且已安静"的设备发一个回车,让 getty 重画提示符。
-
-        这是本服务唯一会往板子控制台写东西的地方,默认自动执行(用户已确认)。
-        仅对空闲线路生效,避免打断正在输出的板子。
-        """
+        """保留显式探测入口;所有发送必须通过同一个控制台事务锁。"""
         now = time.time()
         with self.lock:
             devs = list(self.devices.values())
         for d in devs:
-            if d.hostname or d.fd is None:
+            if d.hostname or d.fd is None or now - d.started < 20:
                 continue
-            if now - d.started < 20:            # 刚接入先等等,别看走眼
+            if now - d.last_rx < 15 or d.probed >= 5 or now - d.last_probe < 60:
                 continue
-            if now - d.last_rx < 15:            # 线路还在动,别插嘴
-                continue
-            if d.probed >= 5 or now - d.last_probe < 60:
-                continue
-            d.last_probe = now
-            d.probed += 1
-            # 交替发 CR / LF:Linux getty 认 CR,但某些板子的 shell 只认 LF(实测
-            # k1 那块只发 \r 完全无反应),交替两次就能覆盖两种情况。
-            ch = '\r' if d.probed % 2 == 1 else '\n'
-            write_serial(d.dev, ch)
-            d.append('\r\n*** seriald 探测 #%d:已发送 %s ***\r\n'
-                     % (d.probed, 'CR' if ch == '\r' else 'LF'))
+            ch = '\r' if d.probed % 2 == 0 else '\n'
+            ok, _ = d.send(ch)
+            if ok:
+                d.last_probe = now
+                d.probed += 1
+                d._say('seriald 探测 #%d:已发送 %s' % (d.probed, repr(ch)))
 
     def loop(self):
         while True:
             try:
                 self.scan()
-                self.probe_all()
                 with self.lock:
-                    for d in self.devices.values():
-                        d.link_label()       # 编号变了就刷新软链(已正确则直接返回)
-            except Exception:
-                pass
+                    devs = list(self.devices.values())
+                for d in devs:
+                    d.link_label()
+                    d.reap_sessions()
+                # 启动/重连只被动采集;自动回车或 USB 软拔插会干扰正在使用的控制台。
+            except Exception as e:
+                print('seriald scan: %s' % e, file=sys.stderr, flush=True)
             time.sleep(3)
 
 
@@ -867,6 +1234,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     server_version = 'seriald/1.0'
 
     def _json(self, code, payload):
+        if getattr(self, 'response_key', None):
+            payload = dict(payload, key=self.response_key)
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -877,16 +1246,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def _dev(self, q):
         key = (q.get('key') or [''])[0]
+        self.response_key = key
         with MGR.lock:
             return MGR.devices.get(key)
 
     def do_GET(self):
+        self.response_key = None
         u = urlparse(self.path)
         route, q = u.path, parse_qs(u.query)
 
         if route == '/api/devices':
             with MGR.lock:
-                devs = [d.snapshot() for d in MGR.devices.values()]
+                devices = list(MGR.devices.values())
+            devs = [d.snapshot() for d in devices]
             devs.sort(key=lambda x: x['key'])
             return self._json(200, {'devices': devs, 'by_path': BY_PATH,
                                     'server_time': time.time()})
@@ -895,27 +1267,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             d = self._dev(q)
             if not d:
                 return self._json(404, {'error': 'no such device'})
-            off = int((q.get('off') or ['0'])[0] or 0)
+            try:
+                off = int((q.get('off') or ['0'])[0] or 0)
+                if off < 0:
+                    raise ValueError
+            except ValueError:
+                return self._json(400, {'error': 'bad offset'})
             new_off, data, alive = d.read(off)
             return self._json(200, {'key': d.key, 'dev': d.dev, 'off': new_off,
-                                    'alive': alive, 'data': data.decode('utf-8', 'replace')})
+                                    'alive': alive, 'data_b64': base64.b64encode(data).decode('ascii'),
+                                    'data': data.decode('utf-8', 'replace')})
 
         if route == '/api/session':
             d = self._dev(q)
             if not d:
                 return self._json(404, {'error': 'no such device'})
             sid = (q.get('sid') or ['serial'])[0]
-            off = int((q.get('off') or ['0'])[0] or 0)
+            try:
+                off = int((q.get('off') or ['0'])[0] or 0)
+                if off < 0:
+                    raise ValueError
+            except ValueError:
+                return self._json(400, {'error': 'bad offset'})
             if sid == 'serial':
                 new_off, data, alive = d.read(off)
                 return self._json(200, {'sid': 'serial', 'dev': d.dev, 'off': new_off,
-                                        'alive': alive, 'data': data.decode('utf-8', 'replace')})
-            s = d.ssh_sessions.get(sid)
+                                        'alive': alive, 'data_b64': base64.b64encode(data).decode('ascii'),
+                                    'data': data.decode('utf-8', 'replace')})
+            s = d.get_session(sid)
             if not s:
                 return self._json(404, {'error': 'no such session'})
             new_off, data, alive = s.read(off)
             return self._json(200, {'sid': sid, 'ip': s.ip, 'off': new_off,
-                                    'alive': alive, 'data': data.decode('utf-8', 'replace')})
+                                    'alive': alive, 'data_b64': base64.b64encode(data).decode('ascii'),
+                                    'data': data.decode('utf-8', 'replace')})
 
         if route == '/api/sessions':
             d = self._dev(q)
@@ -923,7 +1308,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._json(404, {'error': 'no such device'})
             out = [{'sid': 'serial', 'kind': 'serial', 'dev': d.dev,
                     'alive': d.fd is not None}]
-            out += [s.snapshot() for s in d.ssh_sessions.values()]
+            out += d.list_sessions()
             return self._json(200, {'sessions': out, 'label': d.label})
 
         if route == '/api/logs':
@@ -933,13 +1318,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             d.link_label()
             real = d.stable_dir()
             out = []
-            for fn in sorted(os.listdir(real), reverse=True):
-                p = os.path.join(real, fn)
-                try:
-                    out.append({'name': fn, 'size': os.path.getsize(p),
-                                'path': 'logs/%s/%s' % (os.path.basename(real), fn)})
-                except OSError:
-                    pass
+            directories = [real]
+            legacy = d.legacy_dir()
+            if legacy != real and os.path.isdir(legacy):
+                directories.append(legacy)
+            for directory in directories:
+                for fn in sorted(os.listdir(directory), reverse=True):
+                    if not (fn.startswith(('serial-', 'ssh-')) and fn.endswith('.log')):
+                        continue
+                    p = os.path.join(directory, fn)
+                    try:
+                        out.append({'name': ('旧目录/' if directory != real else '') + fn,
+                                    'size': os.path.getsize(p),
+                                    'path': 'logs/%s/%s' % (os.path.basename(directory), fn)})
+                    except OSError:
+                        pass
             return self._json(200, {'label': d.label, 'dir': os.path.basename(real),
                                     'alias': d.label, 'files': out})
 
@@ -948,12 +1341,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        self.response_key = None
         route = urlparse(self.path).path
         try:
             n = int(self.headers.get('Content-Length') or 0)
-            payload = json.loads(self.rfile.read(n).decode('utf-8')) if n else {}
+            if n < 0 or n > 65536:
+                return self._json(413, {'error': 'body must be at most 65536 bytes'})
+            if self.headers.get('Transfer-Encoding'):
+                return self._json(400, {'error': 'transfer encoding unsupported'})
+            raw = self.rfile.read(n)
+            if len(raw) != n:
+                return self._json(400, {'error': 'incomplete body'})
+            payload = json.loads(raw.decode('utf-8')) if n else {}
+            if not isinstance(payload, dict):
+                return self._json(400, {'error': 'JSON object required'})
         except (ValueError, UnicodeDecodeError):
             return self._json(400, {'error': 'bad json'})
+        except TimeoutError:
+            return self._json(408, {'error': 'request body timed out'})
         q = {'key': [str(payload.get('key') or '')]}
         d = self._dev(q)
         if not d:
@@ -963,14 +1368,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             text = str(payload.get('data') or '')
             if not text:
                 return self._json(400, {'error': 'data required'})
-            ok, err = write_serial(d.dev, text)
+            ok, err = d.send(text)
             return self._json(200 if ok else 503, {'ok': ok, 'error': err, 'dev': d.dev})
 
         if route == '/api/probe':
-            d.last_probe = time.time()
-            d.probed += 1
-            ok, err = write_serial(d.dev, '\r')
-            d.append('\r\n*** 手动探测:已发送回车 ***\r\n')
+            ok, err = d.send('\r')
+            if ok:
+                d.last_probe = time.time()
+                d.probed += 1
+                d._say('手动探测:已发送回车')
             return self._json(200, {'ok': ok, 'error': err})
 
         if route == '/api/rescue':
@@ -979,14 +1385,26 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             mode = str(payload.get('mode') or 'soft')
             if mode not in ('soft', 'rebind'):
                 return self._json(400, {'error': 'mode must be soft|rebind'})
-            d.last_rescue = time.time()
-            ok, note = try_rescue(d.dev, mode)
-            d.rescue_note = note
-            d.fail_count = 0               # 让它立刻重试
-            d.append('\r\n*** 手动自愈(%s)%s: %s ***\r\n'
-                     % (mode, '成功' if ok else '未生效', note))
+            if not d.operation_lock.acquire(blocking=False):
+                return self._json(409, {'ok': False, 'error': '已有控制台操作在进行中'})
+            try:
+                with d.write_lock:
+                    if not d.present or not MGR._matches(d):
+                        return self._json(409, {'ok': False, 'error': '设备已重新枚举,请刷新后重试'})
+                    d.last_rescue = time.time()
+                    rx_before = d.bytes
+                    ok, note = try_rescue(d.dev, mode)
+                d.rescue_note = note
+                d.fail_count = 0
+                d._say('手动自愈(%s)%s: %s' % (mode, '步骤完成' if ok else '失败', note))
+            finally:
+                d.operation_lock.release()
+            # sysfs 写成功只能证明辅助步骤完成;不能据此宣布采集器已恢复。
+            recovered = d.fd is not None and d.bytes > rx_before and MGR._matches(d)
+            requires_setup = not ok and any(x in note.lower() for x in
+                                           ('未安装', 'password', 'not allowed', 'sudo 需要密码'))
             hint = ''
-            if not ok:
+            if requires_setup:
                 hint = (
                     '一次配置,之后免密且只放行这一个脚本(需要 root):\n'
                     '  sudo install -o root -g root -m 0755 \\\n'
@@ -997,7 +1415,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     '\n'
                     '为什么装在 /usr/local/sbin:白名单脚本若对 qiu 可写,'
                     '改一行就等于通用提权 —— 所以它必须在 root 拥有、qiu 不可写的目录里。')
-            return self._json(200, {'ok': ok, 'note': note, 'hint': hint, 'mode': mode})
+            return self._json(200, {'ok': ok, 'recovered': recovered, 'requires_setup': requires_setup,
+                                    'note': note, 'hint': hint, 'mode': mode})
 
         if route == '/api/ssh-connect':
             # 一键 SSH:起一条与串口并存的独立会话,输出单独落盘
@@ -1012,9 +1431,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if not text:
                 return self._json(400, {'error': 'data required'})
             if sid == 'serial':
-                ok, err = write_serial(d.dev, text)
+                ok, err = d.send(text)
             else:
-                s = d.ssh_sessions.get(sid)
+                s = d.get_session(sid)
                 if not s:
                     return self._json(404, {'error': 'no such session'})
                 ok, err = (s.write(text), '')
@@ -1027,17 +1446,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 rows = int(payload.get('rows') or 0)
             except (TypeError, ValueError):
                 return self._json(400, {'error': 'bad cols/rows'})
-            s = d.ssh_sessions.get(sid)
+            s = d.get_session(sid)
             if not s:
                 return self._json(404, {'error': 'no such session'})
             return self._json(200, {'ok': s.resize(cols, rows), 'cols': s.cols, 'rows': s.rows})
 
         if route == '/api/session-close':
             sid = str(payload.get('sid') or '')
-            s = d.ssh_sessions.pop(sid, None)
-            if not s:
+            if not d.close_session(sid):
                 return self._json(404, {'error': 'no such session'})
-            s.close()
             return self._json(200, {'ok': True})
 
         if route == '/api/identify':
@@ -1085,15 +1502,45 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class BoundedThreadingServer(socketserver.ThreadingTCPServer):
+    """长轮询也占一个线程;给连接数和请求读入时间都设硬上限。"""
+    allow_reuse_address = True
+    daemon_threads = True
+    max_workers = 64
+    request_timeout = 15.0
+
+    def __init__(self, *args, **kwargs):
+        self._workers = threading.BoundedSemaphore(self.max_workers)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        # 必须在线程创建之前拿配额;在线程内部排队仍会被慢连接耗尽线程/内存。
+        if not self._workers.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            request.settimeout(self.request_timeout)
+            super().process_request(request, client_address)
+        except BaseException:
+            self._workers.release()
+            self.shutdown_request(request)
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._workers.release()
+
+
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8898
     bind = sys.argv[2] if len(sys.argv) > 2 else '10.0.90.177'
     os.makedirs(LOG_ROOT, exist_ok=True)
-    threading.Thread(target=MGR.loop, daemon=True).start()
-    socketserver.ThreadingTCPServer.allow_reuse_address = True
-    socketserver.ThreadingTCPServer.daemon_threads = True
     handler = functools.partial(Handler, directory=BASE)
-    with socketserver.ThreadingTCPServer((bind, port), handler) as httpd:
+    with BoundedThreadingServer((bind, port), handler) as httpd:
+        # 先占用监听端口再启动采集,否则重复启动失败前就可能多开一组读者。
+        threading.Thread(target=MGR.loop, daemon=True).start()
         print('seriald on http://%s:%d/  (by-path=%s)' % (bind, port, BY_PATH), flush=True)
         httpd.serve_forever()
 
