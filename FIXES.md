@@ -1,7 +1,8 @@
 # seriald 修复记录（2026-09-19）
 
-代码及隔离验证已完成；尚未应用到运行中的 Python 服务。允许的一次重启尚未使用。
-所有修改均位于 `/data/seriald/`，没有打开/发送到真实串口，没有针对硬件执行自愈脚本。
+代码、隔离验证与线上验收均已完成。服务已于 17:03:55 重启（PID 1965206）加载本版代码，
+三台板全部验收通过，详见「线上验收」一节。
+所有修改均位于 `/data/seriald/`。
 
 ## 按审查编号归类
 
@@ -45,28 +46,82 @@
 - 禁止 `.`/`..` 成为标签目录名；重连不 flush 已排队的启动输出。
 - 启动/重连保持被动采集；取消扫描循环中的自动回车和自动 USB rescue，显式操作入口仍保留。
 
-## 验证及当前阻塞
+## 验证
 
-已验证：
+隔离测试：
 
 ```sh
 python3 -m py_compile /data/seriald/seriald.py
 cd /data/seriald
-python3 -m unittest discover -s tests
-node tests/frontend.test.js
+python3 -m unittest discover -s tests     # 82 个通过
+node tests/frontend.test.js               # 14 个通过
 bash -n rescue.sh
 git diff --check
 ```
 
-80 个 Python 隔离测试、11 个无浏览器 JS 隔离测试通过。实际 Handler._page 测试返回与 index.html 完全相同的字节、HTTP 200、正确类型和 Content-Length；这不等同于已验证在线页面。
+## 线上验收（2026-09-19 17:03 重启后）
 
-本会话看到的是隔离的 PID/设备/网络环境：
+**重启前必须知道的一件事**：旧进程 52017 启动于 12:04:52，而 21 项修复提交于 12:51:23 ——
+也就是说旧进程比修复早 47 分钟，**这 21 项在重启前一项都没生效**。当时的两个症状都源于此：
 
-- `curl --max-time 5 -sS http://10.0.90.177:8898/api/devices` 返回 `curl: (7) Couldn't connect to server`。
-- `systemctl` 与 `systemctl --user` 返回 `Failed to connect to bus: Operation not permitted`。
-- `/dev/serial/by-path` 在本沙箱不可见。
+- `Device.append()` 没有 `received` 参数，`_say()` 写的本地诊断文字也被计入 `bytes`，
+  于是 `/api/rescue` 里 `recovered = d.bytes > rx_before` 恒为真，前端据此永远隐藏
+  「重新绑定串口」按钮，状态栏还谎报「采集已恢复」。
+- 诊断文字直接进了终端缓冲（第 12 条声称已修，实际没跑）。
 
-因此未重启服务、未验证线上页面，也未声称三个设备均 alive 或已有新增输出。待访问运行服务的权限恢复后，只重启一次，然后通过 GET `/api/devices` 验证三台均 alive，并被动观察每台 bytes/last_rx 或采集增量增长；不发送字符、不另开 tty、不调用 rescue。
+重启后逐项实测：
+
+| 检查 | 结果 |
+| --- | --- |
+| 三台设备 | 3/3 alive |
+| `recovered` 诚实性 | 对无新输出的设备返回 `false`（旧进程在同样无新输出的 milkv 上返回过 `true`，bytes 前后都是 7546） |
+| 本地诊断文字污染 | 终端缓冲内已无 `手动自愈` 字样 |
+| `/index.html` 缓存头 | `Cache-Control: no-cache, must-revalidate` |
+| 线上页面 == 仓库 index.html | sha256 相同 |
+| 识别设备（milkv / riscv-118） | 自动登录 root 成功，字段完整返回 |
+
+**rebind 全链路**（riscv-118，用户从页面点击）：
+
+```
+17:14:10  unbind: ok; bind: ok            [3-7]
+17:14:10  /dev/ttyUSB2 读取中断: EOF
+17:14:11  root@riscv-118:~#                ← 板子未重启，立刻回来
+17:14:12  seriald 已接入 /dev/ttyUSB3      ← 编号变了，按 by-path 自动重连
+17:14:37  识别成功: 序列号=26abd51e5bc2dbe1 主机名=riscv-118 sshd=active
+```
+
+由此确认三点：设备编号变化不影响跟踪（按 by-path 认设备）、EOF 后自动重连无需人工干预、
+恢复前不谎报 recovered。
+
+**一条硬件侧观察**：milkv(ttyUSB1, FT232B) 的采集曾于 16:23:24 停止，内核报
+`ftdi_sio ttyUSB1: usb_serial_generic_read_bulk_callback - urb stopped: -32`（-EPIPE，
+读取 URB 被 stall），且未跟随任何 USB 重枚举。**重启即恢复**（重开读 fd 清掉了 stall），
+未做 rebind；soft 自愈（只关 autosuspend）对它无效，`runtime_status` 本来就是 active。
+若该现象反复出现，应先怀疑适配器或线材，而非 seriald —— 同日 15:59 该 USB 树曾在一分钟内
+反复枚举三四次。
+
+## 本轮新增修复（提交 83ee06f）
+
+用户报告「网页终端 Ctrl+V 只回显 `^V`、不粘贴」，查出一个前端缺陷与一个只影响 `/index.html`
+的 HTTP 缺陷：
+
+- **Ctrl+V 被 xterm 吃掉**：xterm 按 keyCode 86 把 V 编成 `0x16` 发给板子，随后立即
+  `preventDefault()` —— 浏览器的粘贴事件根本不会派发，挂在 `d-term` 上的 paste 监听器因此
+  永远等不到。改为在 `attachCustomKeyEventHandler` 中对 Ctrl+V（含 Ctrl+Shift+V）返回
+  false：xterm 入口即 return，既不编码也不 preventDefault。Cmd+V 无需特判（已核
+  `evaluateKeyboardEvent` 的 default 分支：带 meta 的键 key 为 undefined、cancel 为 false）。
+- **粘贴监听挂错了节点**：焦点不在终端里时（从别处复制完切回浏览器、没先点一下终端就按
+  Ctrl+V），paste 事件的目标是 `body`，挂在 `d-term` 上的监听器收不到，表现是「按了完全
+  没反应」。改为挂 `document`，并给页面自己的输入框让路（焦点在发送命令框时不抢）。
+- **剪贴板为空时给提示**，不再静默无事发生。
+- **`/index.html` 整页缓存**：该路径原先落到 `SimpleHTTPRequestHandler`，不发
+  `Cache-Control`，浏览器按启发式规则整页缓存 —— 服务换了新页面、用户那边还是旧的。
+  这正是「重新绑定串口」按钮在页面上根本不存在、误导排查方向很久的原因。现在 `/` 与
+  `/index.html` 走同一条路，都带 `no-cache`。
+
+删除了 Ctrl+Shift+V 的「借临时输入框接住粘贴」退路：实测它 40ms 采样全周期都未出现
+（`b-paste` 的 click 处理器确实被调用，但框没留下来，机制未查明），且 Ctrl+Shift+V 现已
+由上述分支交给浏览器原生纯文本粘贴，实测可用。**未查明的部分如实留在此处，不假装已归因。**
 
 ## 特权 helper 安装（由用户执行）
 
