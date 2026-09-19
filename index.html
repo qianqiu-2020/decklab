@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>seriald 串口设备管理</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<!-- 终端模拟器:本地托管,内网不依赖公网 CDN。
+     串口/SSH 上跑 vim、htop、menuconfig 这类全屏程序时会用光标定位重画屏幕,
+     必须由真正的 VT 模拟器渲染,不能"剥掉 ANSI 再线性追加"(那样会糊成一团)。 -->
+<link rel="stylesheet" href="vendor/xterm.css">
+<style>
+  :root{
+    --ground:#F2F4F5; --surface:#FFFFFF; --surface-2:#E9EDEE;
+    --ink:#12161A; --ink-2:#4B545B; --ink-3:#7C868D;
+    --line:#D9DFE1; --line-strong:#BFC7CB;
+    --accent:#0F6E6A; --accent-soft:#E2F0EF; --accent-line:#A8CFCD;
+    --live:#137A4B; --live-soft:#E3F2E9;
+    --dead:#9A2B2B; --dead-soft:#F7E7E6;
+    --idle:#8A6A12; --idle-soft:#F6EFDD;
+    --term:#171B1F; --term-ink:#CFD6DB; --term-dim:#7E888F; --term-hi:#6FD3C8;
+    --shadow:0 1px 2px rgba(18,22,26,.06),0 8px 20px -12px rgba(18,22,26,.18);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E1113; --surface:#161A1D; --surface-2:#1D2226;
+      --ink:#E6EAED; --ink-2:#A3ACB3; --ink-3:#79838A;
+      --line:#282F33; --line-strong:#394247;
+      --accent:#5FC7BE; --accent-soft:#12302E; --accent-line:#2C5B57;
+      --live:#63C793; --live-soft:#122C1F;
+      --dead:#E88C8C; --dead-soft:#2E1717;
+      --idle:#D9B65C; --idle-soft:#2C2615;
+      --term:#0A0D0F; --term-ink:#C8D0D6; --term-dim:#767F86; --term-hi:#7FE0D4;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 20px -12px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E1113; --surface:#161A1D; --surface-2:#1D2226;
+    --ink:#E6EAED; --ink-2:#A3ACB3; --ink-3:#79838A;
+    --line:#282F33; --line-strong:#394247;
+    --accent:#5FC7BE; --accent-soft:#12302E; --accent-line:#2C5B57;
+    --live:#63C793; --live-soft:#122C1F;
+    --dead:#E88C8C; --dead-soft:#2E1717;
+    --idle:#D9B65C; --idle-soft:#2C2615;
+    --term:#0A0D0F; --term-ink:#C8D0D6; --term-dim:#767F86; --term-hi:#7FE0D4;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 20px -12px rgba(0,0,0,.6);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:26px 64px}
+  @media (max-width:520px){.wrap{padding-inline:14px}}
+
+  .top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:27px;
+    letter-spacing:-.005em;margin:0}
+  .sub{color:var(--ink-2);font-size:14px;margin:0 0 20px;max-width:78ch}
+  .mono{font-family:"IBM Plex Mono",monospace}
+  .conn{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11.5px;
+    color:var(--ink-3);display:flex;align-items:center;gap:7px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--live);flex:0 0 auto}
+  .dot.bad{background:var(--dead)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+  .dev{background:var(--surface);border:1px solid var(--line);border-radius:7px;
+    padding:13px 15px;display:flex;flex-direction:column;gap:9px;cursor:pointer;
+    transition:border-color .12s,box-shadow .12s}
+  .dev:hover{border-color:var(--accent-line)}
+  .dev.sel{border-color:var(--accent);box-shadow:var(--shadow)}
+  .dev .r1{display:flex;align-items:center;gap:9px}
+  .dev .nm{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:600;font-size:17px}
+  .dev .pill{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.06em;
+    text-transform:uppercase;padding:1px 6px;border-radius:3px;border:1px solid;font-weight:500}
+  .pill.live{color:var(--live);background:var(--live-soft);border-color:var(--live)}
+  .pill.dead{color:var(--dead);background:var(--dead-soft);border-color:var(--dead)}
+  .pill.sniff{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-line)}
+  .dev .meta{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);
+    display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere}
+  .dev .last{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-2);
+    background:var(--surface-2);border-radius:4px;padding:5px 8px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dev .stat{display:flex;gap:14px;font-family:"IBM Plex Mono",monospace;font-size:11px;
+    color:var(--ink-3);font-variant-numeric:tabular-nums}
+
+  .detail{margin-top:26px;background:var(--surface);border:1px solid var(--line-strong);
+    border-radius:8px;overflow:hidden;box-shadow:var(--shadow)}
+  .detail .hd{display:flex;align-items:center;gap:12px;padding:12px 15px;
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .detail .hd .nm{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:600;font-size:18px}
+  .detail .hd .k{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3)}
+  .detail .hd .sp{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap}
+  button{font-family:inherit;font-size:13px;cursor:pointer;border-radius:4px;
+    padding:6px 12px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink)}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.pri{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+  button.pri:hover{color:#fff;opacity:.9}
+  button:disabled{opacity:.45;cursor:default}
+  input[type=text]{font-family:inherit;font-size:14px;color:var(--ink);background:var(--ground);
+    border:1px solid var(--line-strong);border-radius:4px;padding:8px 10px}
+  input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+  .termhost{height:380px;background:var(--term);padding:8px 10px}
+  .tabs{display:flex;gap:6px;padding:9px 14px;border-bottom:1px solid var(--line);
+    flex-wrap:wrap;align-items:center;background:var(--surface-2)}
+  .tabs button{font-family:"IBM Plex Mono",monospace;font-size:12px;padding:4px 11px;
+    border-radius:4px;border:1px solid var(--line-strong);background:var(--surface)}
+  .tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+  .tabs button.on:hover{color:#fff}
+  .tabs .x{border:0;background:none;color:var(--ink-3);padding:0 3px;font-size:14px}
+  .tabs .x:hover{color:var(--dead)}
+  .tabs .sp{margin-left:auto;display:flex;gap:6px}
+  .info{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:1px;
+    background:var(--line);border-bottom:1px solid var(--line)}
+  .info > div{background:var(--surface);padding:9px 14px;display:flex;flex-direction:column;gap:3px}
+  .info .k{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--ink-3)}
+  .info .v{font-family:"IBM Plex Mono",monospace;font-size:12.5px;overflow-wrap:anywhere}
+  .info .v.hi{color:var(--accent);font-weight:500}
+  .termhost .xterm{height:100%}
+  .termhost .xterm-viewport{background:transparent!important}
+  .chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2);white-space:nowrap}
+  .chk input{accent-color:var(--accent)}
+  .sendrow{display:flex;gap:8px;padding:11px 15px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .sendrow input{flex:1;min-width:200px}
+  .logs{padding:11px 15px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+  .logs a{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--accent);
+    text-decoration:none;margin-right:14px;white-space:nowrap}
+  .logs a:hover{text-decoration:underline}
+  .empty{color:var(--ink-3);padding:22px 4px;font-size:14px}
+  .hint{font-size:12.5px;color:var(--ink-3);padding:0 15px 12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <h1>seriald</h1>
+    <span class="mono" style="color:var(--ink-3);font-size:12px">串口设备管理</span>
+    <span class="conn"><span class="dot" id="conn-dot"></span><span id="conn-txt">连接中…</span></span>
+  </div>
+  <p class="sub">
+    按 <span class="mono">USB 物理路径</span>识别设备——插拔顺序乱了、<span class="mono">ttyUSB</span> 号变了也不影响。
+    每台设备自动记录日志并嗅探主机名，可改名成你自己的编号。点设备卡片查看实时输出与历史日志。
+  </p>
+
+  <div class="grid" id="grid"><p class="empty">正在扫描串口…</p></div>
+
+  <div class="detail" id="detail" hidden>
+    <div class="hd">
+      <span class="nm" id="d-name">—</span>
+      <span class="k" id="d-dev">—</span>
+      <span class="k" id="d-key">—</span>
+      <span class="sp">
+        <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd">识别设备</button>
+        <button id="b-rescue" type="button" title="关 autosuspend 并软拔插(unbind/bind)，修打不开的口">自愈串口</button>
+        <button id="b-rename" type="button">改编号</button>
+        <button id="b-close" type="button">收起</button>
+      </span>
+    </div>
+    <div class="tabs" id="d-tabs"></div>
+    <div class="info" id="d-info" hidden></div>
+    <div class="termhost" id="d-term"></div>
+    <div class="sendrow">
+      <label class="chk"><input type="checkbox" id="d-kbd" checked> 键盘直通</label>
+      <input type="text" id="d-in" placeholder="或在此整行输入后回车" autocomplete="off" spellcheck="false">
+      <button class="pri" id="b-send" type="button">发送</button>
+      <button id="b-cr" type="button" title="只发一个回车（唤醒板子 / 看是否还活着）">↵</button>
+      <button id="b-ctrlc" type="button" title="发送 Ctrl-C">Ctrl-C</button>
+      <button id="b-paste" type="button" title="粘贴剪贴板内容到会话">粘贴</button>
+    </div>
+    <div class="hint">
+      终端由本地托管的 xterm.js 渲染，<b>全屏程序（vim / htop / menuconfig）可正常显示与操作</b>；
+      勾选「键盘直通」后焦点在终端里即可直接敲键。<br>
+      <b>复制</b>：鼠标拖选<b>即自动复制</b>（松手后 200ms）；
+      <b>粘贴</b>：<span class="mono">Ctrl+V</span> 或点「粘贴」（<span class="mono">Ctrl+C</span> 是发给板子的中断信号，不是复制）。<br>
+      写入走独立通路，与后台采集器零竞争；采集器始终是该串口的唯一读者。<span id="d-status"></span>
+    </div>
+    <div class="hint" id="d-hint" hidden></div>
+    <div class="logs" id="d-logs"></div>
+  </div>
+
+</div>
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var selKey = null, off = 0, first = true, lastDevices = [], loopGen = 0, loopCtrl = null, lastInfoTs = 0;
+  var curSid = 'serial';              // 当前会话:serial=串口,sshN=SSH 会话
+  var sessions = [{ sid: 'serial', kind: 'serial' }];
+
+  /* ---------- 终端模拟器 ---------- */
+  var term = new Terminal({
+    convertEol: false,          // 串口/ptd 发的是真 \r\n,不需要转换
+    scrollback: 8000,
+    cursorBlink: true,
+    fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+    fontSize: 12.5,
+    theme: { background: '#0A0D0F', foreground: '#C8D0D6', cursor: '#7FE0D4',
+             selectionBackground: '#2C5B57' }
+  });
+  var fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open($('d-term'));
+
+  function resizeTerm() {
+    try { fit.fit(); } catch (e) {}
+    pushSize();
+  }
+  // 把浏览器终端尺寸推给后端,后端 ioctl 到 pty —— 否则远端以为自己是 80x24,
+  // 宽度用不满,vi/htop 也按错误列数画。串口那条没法协商(线路上没有 window-change)。
+  var pushSizeTimer = null;
+  function pushSize() {
+    if (!selKey || curSid === 'serial') return;
+    if (pushSizeTimer) clearTimeout(pushSizeTimer);
+    pushSizeTimer = setTimeout(function () {
+      fetch('/api/session-resize', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: selKey, sid: curSid, cols: term.cols, rows: term.rows })
+      }).catch(function () {});
+    }, 250);
+  }
+  window.addEventListener('resize', resizeTerm);
+  // 后台标签页里 rAF 被暂停,xterm 渲染器停摆;切回来要重算尺寸 + 强制重绘,
+  // 否则表现为"切走再切回来终端就不渲染了,得刷新"(踩过)
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      resizeTerm();
+      try { term.refresh(0, term.rows - 1); } catch (e) {}
+    }
+  });
+
+  // 键盘直通:焦点在终端里时逐键发送 —— vim 的 hjkl/ESC/方向键才有效
+  term.onData(function (data) {
+    if (!$('d-kbd').checked || !selKey) return;
+    send(data);
+  });
+
+  /* ---------- 复制 / 粘贴 ----------
+     注意:页面是 http://内网IP,不是安全上下文,所以 navigator.clipboard 用不了。
+     复制走 execCommand('copy') + 临时 textarea(用户手势内有效);
+     粘贴走原生 paste 事件(非安全上下文里也能拿到 clipboardData)。
+     另外终端惯例:Ctrl+C 是发给板子的中断信号,复制用 Ctrl+Shift+C。 */
+  function copyText(s, silent) {
+    // 页面是 http://内网IP,非安全上下文拿不到 navigator.clipboard,
+    // 退回 execCommand + 临时 textarea(在用户手势内有效)
+    var ta = document.createElement('textarea');
+    ta.value = s;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    if (!silent) {
+      $('d-status').textContent = ok ? (' 已复制 ' + s.length + ' 字符') : ' 复制失败（浏览器限制）';
+    }
+    return ok;
+  }
+  function copySel() {
+    var s = term.getSelection();
+    if (!s) { $('d-status').textContent = ' 没有选中内容（鼠标拖选后重试）'; return; }
+    copyText(s, false);
+    term.clearSelection();
+  }
+  // 选中即复制(终端惯例,像 PuTTY)。拖动过程中 selectionchange 会连发,
+  // 所以防抖 200ms —— 松手后再把最终选区送进剪贴板。
+  var selTimer = null, lastSel = '';
+  term.onSelectionChange(function () {
+    var s = term.getSelection();
+    if (!s) { lastSel = ''; return; }
+    if (s === lastSel) return;
+    if (selTimer) clearTimeout(selTimer);
+    selTimer = setTimeout(function () { lastSel = s; copyText(s, true); }, 200);
+  });
+  function pasteInto(text) {
+    if (!selKey || !text) return;
+    send(text);
+    $('d-status').textContent = ' 已粘贴 ' + text.length + ' 字符';
+  }
+  term.attachCustomKeyEventHandler(function (e) {
+    if (e.type !== 'keydown') return true;
+    if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') { copySel(); return false; }
+    if (e.ctrlKey && e.shiftKey && e.code === 'KeyV') { $('b-paste').click(); return false; }
+    return true;                 // 其余按键交给 xterm,Ctrl+V 也走它的原生粘贴
+  });
+  // 原生粘贴(Ctrl+V / 中键)在终端里也要能送到板子 —— 不受"键盘直通"开关影响
+  $('d-term').addEventListener('paste', function (e) {
+    var t = (e.clipboardData || window.clipboardData || {}).getData
+            ? (e.clipboardData || window.clipboardData).getData('text') : '';
+    if (!t || !selKey) return;
+    e.preventDefault(); e.stopPropagation();
+    pasteInto(t);
+  }, true);
+  // 「粘贴」按钮:借一个临时输入框接住 Ctrl+V —— 非安全上下文下拿剪贴板的可靠办法
+  $('b-paste').addEventListener('click', function () {
+    if (!selKey) return;
+    var ta = document.createElement('textarea');
+    ta.placeholder = '在此按 Ctrl+V,内容会直接送到串口';
+    ta.style.cssText = 'position:fixed;left:50%;top:22%;transform:translateX(-50%);'
+      + 'z-index:99;width:min(520px,80vw);height:74px;padding:9px;font-size:14px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.addEventListener('paste', function (ev) {
+      var t = (ev.clipboardData || {}).getData ? ev.clipboardData.getData('text') : '';
+      ev.preventDefault(); ta.remove(); pasteInto(t);
+    });
+    ta.addEventListener('blur', function () { setTimeout(function () { ta.remove(); }, 200); });
+  });
+
+  function fmt(n) {
+    if (n == null) return '—';
+    var u = ['B', 'KB', 'MB', 'GB'], i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(1)) + ' ' + u[i];
+  }
+  function ago(ts) {
+    if (!ts) return '从未';
+    var s = Math.max(0, Date.now() / 1000 - ts);
+    if (s < 60) return Math.floor(s) + ' 秒前';
+    if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+    return Math.floor(s / 3600) + ' 小时前';
+  }
+
+  /* ---------- 设备列表 ---------- */
+  function renderDevices(list) {
+    var g = $('grid');
+    if (!list.length) { g.innerHTML = '<p class="empty">没有发现串口设备（' + '检查 /dev/serial/by-path/）</p>'; return; }
+    g.textContent = '';
+    list.forEach(function (d) {
+      var card = document.createElement('div');
+      card.className = 'dev' + (d.key === selKey ? ' sel' : '');
+      card.dataset.key = d.key;          // 供 markSelected() 就地改高亮用
+      card.tabIndex = 0;
+      card.addEventListener('click', function () { select(d.key); });
+
+      var r1 = document.createElement('div'); r1.className = 'r1';
+      var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.label;
+      var st = document.createElement('span');
+      st.className = 'pill ' + (d.alive ? 'live' : 'dead');
+      st.textContent = d.alive ? '在线' : '断开';
+      r1.appendChild(nm); r1.appendChild(st);
+      if (d.hostname) {
+        var sn = document.createElement('span'); sn.className = 'pill sniff';
+        sn.textContent = '嗅探:' + d.hostname; r1.appendChild(sn);
+      }
+      card.appendChild(r1);
+
+      var meta = document.createElement('div'); meta.className = 'meta';
+      var a = document.createElement('span'); a.textContent = d.dev;
+      var b = document.createElement('span'); b.textContent = d.key;
+      meta.appendChild(a); meta.appendChild(b);
+      card.appendChild(meta);
+
+      var last = document.createElement('div'); last.className = 'last';
+      last.textContent = d.last_line || '（暂无输出）';
+      card.appendChild(last);
+
+      var stat = document.createElement('div'); stat.className = 'stat';
+      var s1 = document.createElement('span'); s1.textContent = fmt(d.bytes) + ' 记录';
+      var s2 = document.createElement('span'); s2.textContent = '末次 ' + ago(d.last_rx);
+      var s3 = document.createElement('span'); s3.textContent = '探测 ' + d.probes;
+      stat.appendChild(s1); stat.appendChild(s2); stat.appendChild(s3);
+      card.appendChild(stat);
+
+      if (d.rescue_note) {                       // 自愈结果挂到卡片上,别让人去翻日志
+        var rn = document.createElement('div'); rn.className = 'last';
+        rn.style.color = 'var(--dead)';
+        rn.textContent = d.rescue_note;
+        card.appendChild(rn);
+      }
+      // 板子序列号(device-tree)比 hostname 可靠:hostname 可能是出厂默认名、还会重复
+      var inf = d.info || {};
+      if (inf.serial || (inf.ips && inf.ips.length)) {
+        var idl = document.createElement('div'); idl.className = 'stat';
+        if (inf.serial) {
+          var s4 = document.createElement('span');
+          s4.textContent = 'ID ' + inf.serial; s4.style.color = 'var(--accent)';
+          idl.appendChild(s4);
+        }
+        if (inf.ips && inf.ips.length) {
+          var s5 = document.createElement('span');
+          s5.textContent = inf.ips.map(function (x) { return x.split(' ')[1].split('/')[0]; }).join(' ');
+          idl.appendChild(s5);
+        }
+        card.appendChild(idl);
+      }
+
+      g.appendChild(card);
+    });
+  }
+
+  function pollDevices() {
+    fetch('/api/devices', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        $('conn-dot').className = 'dot';
+        $('conn-txt').textContent = '已连接 · ' + (d.devices || []).length + ' 台设备 · '
+          + new Date().toLocaleTimeString('zh-CN');
+        lastDevices = d.devices || [];
+        renderDevices(lastDevices);
+        // 轮询里同步选中设备的识别结果,但只在**结果真的变了**时重绘 ——
+        // 否则每 3 秒重建一次 DOM 会打断用户选中文本
+        if (selKey) {
+          var cur = lastDevices.filter(function (x) { return x.key === selKey; })[0];
+          var ts = cur && cur.info ? cur.info.ts : 0;
+          if (ts !== lastInfoTs) { lastInfoTs = ts; renderInfo(cur && cur.info); }
+        }
+        loadSessions();          // 别的窗口新开的 SSH 会话也能同步出现
+      })
+      .catch(function () {
+        $('conn-dot').className = 'dot bad';
+        $('conn-txt').textContent = '服务不可达';
+      });
+  }
+
+  /* ---------- 详情 / 串口实时 ---------- */
+  // 选中高亮就地更新 —— 不能等下一次 pollDevices()(3 秒一轮),
+  // 否则会出现"终端已经切过去了,卡片高亮还停在上一台"的迟滞感
+  function markSelected() {
+    var cards = $('grid').children;
+    for (var i = 0; i < cards.length; i++) {
+      var c = cards[i];
+      if (c.dataset && c.dataset.key) {
+        c.classList.toggle('sel', c.dataset.key === selKey);
+      }
+    }
+  }
+
+  function select(key) {
+    selKey = key; off = 0; first = true;
+    var d = (lastDevices || []).filter(function (x) { return x.key === key; })[0];
+    $('detail').hidden = false;
+    term.reset();                      // 切设备要清掉上一台的画面与回滚缓冲
+    $('d-name').textContent = d ? d.label : key;
+    $('d-dev').textContent = d ? d.dev : '';
+    $('d-key').textContent = key;
+    resizeTerm();
+    loadLogs();
+    renderInfo(d && d.info);
+    markSelected();                    // 高亮立刻跟上,不等轮询
+    curSid = 'serial'; off = 0;        // 换设备先回到串口会话
+    loadSessions();
+    // 关键:作废在途请求并立刻开新轮询。否则旧请求还挂在上一台设备上长轮询(最多 15s),
+    // 切过去就得干等它返回 —— 这正是"切设备很慢"的原因。
+    loopGen++;
+    if (loopCtrl) { try { loopCtrl.abort(); } catch (e) {} }
+    loop();
+  }
+  function loop() {
+    if (!selKey) return;
+    var myGen = loopGen;
+    loopCtrl = new AbortController();
+    fetch('/api/session?key=' + encodeURIComponent(selKey) + '&sid=' + encodeURIComponent(curSid)
+          + '&off=' + off, { cache: 'no-store', signal: loopCtrl.signal })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (myGen !== loopGen) return;          // 切换后到达的旧响应,丢弃
+        if (!d || d.error) throw new Error(d && d.error || 'error');
+        off = d.off;
+        $('d-dev').textContent = d.dev || d.ip || '';
+        // 原始字节直接交给 xterm —— 光标定位、颜色、备用屏幕缓冲都由它处理,
+        // vim/htop 这类全屏程序才能正确重画(剥 ANSI 再追加会糊成一团)
+        if (d.data) term.write(d.data);
+      })
+      .catch(function (e) {
+        if (e && e.name === 'AbortError') return;   // 主动取消,不是错误
+        $('d-status').textContent = ' 读取失败：' + e.message;
+      })
+      .finally(function () {
+        if (myGen !== loopGen) return;              // 已被新轮询取代
+        setTimeout(loop, 300);
+      });
+  }
+
+  function switchSession(sid) {
+    curSid = sid; off = 0; first = true;
+    term.reset();
+    resizeTerm();
+    renderTabs();
+    pushSize();
+    loopGen++;
+    if (loopCtrl) { try { loopCtrl.abort(); } catch (e) {} }
+    loop();
+  }
+  function renderTabs() {
+    var bar = $('d-tabs');
+    bar.textContent = '';
+    sessions.forEach(function (s) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = (s.sid === curSid ? 'on' : '');
+      b.textContent = (s.kind === 'serial' ? '串口' : ('SSH ' + (s.ip || s.sid)));
+      b.title = s.kind === 'serial' ? '板子控制台(单读者采集,带历史日志)'
+                                    : 'SSH 会话,独立记录到 ssh-*.log';
+      b.addEventListener('click', function () { switchSession(s.sid); });
+      bar.appendChild(b);
+      if (s.kind === 'ssh') {
+        var x = document.createElement('button');
+        x.type = 'button'; x.className = 'x'; x.textContent = '×'; x.title = '关闭这条 SSH 会话';
+        x.addEventListener('click', function (e) {
+          e.stopPropagation();
+          fetch('/api/session-close', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: selKey, sid: s.sid }) })
+            .then(function () {
+              sessions = sessions.filter(function (y) { return y.sid !== s.sid; });
+              if (curSid === s.sid) switchSession('serial'); else renderTabs();
+            });
+        });
+        bar.appendChild(x);
+      }
+    });
+    var sp = document.createElement('span'); sp.className = 'sp';
+    var add = document.createElement('button');
+    add.type = 'button'; add.textContent = '+ SSH 会话';
+    add.title = '用识别到的 IP 起一条 root/bianbu 的 SSH 会话(没有 IP 会先自动识别)';
+    add.addEventListener('click', function () {
+      if (!selKey) return;
+      add.disabled = true;
+      $('d-status').textContent = ' 正在建立 SSH 会话…（没识别过 IP 的话会先跑一次识别）';
+      fetch('/api/ssh-connect', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: selKey }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          add.disabled = false;
+          if (!d.ok) { $('d-status').textContent = ' 失败：' + (d.error || ''); return; }
+          sessions.push({ sid: d.sid, kind: 'ssh', ip: d.ip });
+          switchSession(d.sid);
+          $('d-status').textContent = ' 已连接 ' + d.ip;
+          pollDevices();
+        })
+        .catch(function (e) { add.disabled = false; $('d-status').textContent = ' 失败：' + e.message; });
+    });
+    sp.appendChild(add);
+    bar.appendChild(sp);
+  }
+  function loadSessions() {
+    if (!selKey) return;
+    fetch('/api/sessions?key=' + encodeURIComponent(selKey), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.sessions) return;
+        sessions = d.sessions;
+        // 当前会话若已不存在(比如被别的窗口关了),退回串口
+        if (!sessions.some(function (s) { return s.sid === curSid; })) curSid = 'serial';
+        renderTabs();
+      })
+      .catch(function () {});
+  }
+
+  function send(text) {
+    fetch('/api/session-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: selKey, sid: curSid, data: text }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) $('d-status').textContent = ' 写入失败：' + (d.error || '');
+      })
+      .catch(function (e) { $('d-status').textContent = ' 写入失败：' + e.message; });
+  }
+
+  function loadLogs() {
+    fetch('/api/logs?key=' + encodeURIComponent(selKey), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var box = $('d-logs');
+        box.textContent = '';
+        if (!d.files || !d.files.length) {
+          box.textContent = '（还没有日志文件）'; return;
+        }
+        var t = document.createElement('span');
+        t.textContent = '历史日志（' + d.label + '/）： ';
+        box.appendChild(t);
+        d.files.slice(0, 8).forEach(function (f) {
+          var a = document.createElement('a');
+          a.href = '/' + f.path; a.target = '_blank'; a.rel = 'noopener';
+          a.textContent = f.name + ' (' + fmt(f.size) + ')';
+          box.appendChild(a);
+        });
+      });
+  }
+
+  /* ---------- 动作 ---------- */
+  $('b-send').addEventListener('click', function () {
+    var v = $('d-in').value; if (!v || !selKey) return;
+    send(v + '\r'); $('d-in').value = '';
+  });
+  $('d-in').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); $('b-send').click(); }
+  });
+  $('b-cr').addEventListener('click', function () { if (selKey) send('\r'); });
+  $('b-ctrlc').addEventListener('click', function () { if (selKey) send('\x03'); });
+  $('b-rename').addEventListener('click', function () {
+    if (!selKey) return;
+    var cur = $('d-name').textContent;
+    var v = window.prompt('给这台设备起个编号（会成为日志目录名）', cur);
+    if (!v) return;
+    fetch('/api/label', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: selKey, label: v }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.ok) { $('d-name').textContent = d.label; pollDevices(); }
+        else $('d-status').textContent = ' 改名失败：' + (d.error || '');
+      });
+  });
+  // 一个按钮做完两步:先关 autosuspend(最轻),不行自动升级到软拔插。
+  // 实测"只关 autosuspend"基本无效(设备已 active 但口仍 EIO),通常靠软拔插恢复。
+  $('b-rescue').addEventListener('click', function () { doRescue('soft'); });
+
+  /* ---------- 识别设备 / 一键开 SSH ---------- */
+  function renderInfo(info) {
+    var box = $('d-info');
+    if (!info || (!info.serial && !info.hostname && !(info.ips || []).length)) {
+      box.hidden = true; return;
+    }
+    box.hidden = false;
+    box.textContent = '';
+    [['板子序列号', info.serial, true], ['主机名', info.hostname, false],
+     ['IP', (info.ips || []).join('   '), false], ['sshd', info.sshd, false],
+     ['识别时间', info.ts ? new Date(info.ts * 1000).toLocaleString('zh-CN') : '', false]
+    ].forEach(function (r) {
+      if (!r[1]) return;
+      var d = document.createElement('div');
+      var k = document.createElement('span'); k.className = 'k'; k.textContent = r[0];
+      var v = document.createElement('span'); v.className = 'v' + (r[2] ? ' hi' : '');
+      v.textContent = r[1];
+      d.appendChild(k); d.appendChild(v);
+      box.appendChild(d);
+    });
+  }
+  function postAction(path, label) {
+    if (!selKey) return;
+    $('d-status').textContent = ' ' + label + '…（要往板子控制台打字，最多可能等一两分钟）';
+    fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: selKey }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { $('d-status').textContent = ' 失败：' + (d.error || ''); return; }
+        if (d.serial !== undefined || d.ips !== undefined) {
+          renderInfo(d); $('d-status').textContent = ' 识别完成';
+        } else {
+          $('d-status').textContent = ' 完成：ssh d=' + (d.sshd || '?');
+        }
+        pollDevices();
+      })
+      .catch(function (e) { $('d-status').textContent = ' 请求失败：' + e.message; });
+  }
+  $('b-identify').addEventListener('click', function () { postAction('/api/identify', '识别设备'); });
+  function doRescue(mode) {
+    if (!selKey) return;
+    $('d-status').textContent = ' 正在自愈(' + (mode === 'soft' ? '关挂起' : '软拔插') + ')…';
+    fetch('/api/rescue', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: selKey, mode: mode }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        $('d-status').textContent = ' ' + (d.note || '');
+        if (d.hint) { $('d-hint').hidden = false; $('d-hint').textContent = d.hint; }
+        else $('d-hint').hidden = true;
+        // 第一步没成,自动做第二步 —— 实测"只关 autosuspend"基本无效
+        if (mode === 'soft' && !d.ok && !d.hint) { doRescue('rebind'); return; }
+        pollDevices();
+      })
+      .catch(function (e) { $('d-status').textContent = ' 自愈请求失败：' + e.message; });
+  }
+  $('d-term').addEventListener('click', function () { term.focus(); });
+  $('b-close').addEventListener('click', function () {
+    selKey = null; $('detail').hidden = true; pollDevices();
+  });
+
+  pollDevices();
+  setInterval(pollDevices, 3000);
+})();
+</script>
+</body>
+</html>
