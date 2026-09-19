@@ -42,13 +42,16 @@ import threading
 import time
 from urllib.parse import urlparse, parse_qs
 
-BASE = '/data/seriald'
+BASE = os.environ.get('SERIALD_BASE', '/data/seriald')      # 运行数据:日志、编号映射
+# 静态根(页面/前端库)与数据根分开 —— 打成 deb 后代码在 /usr/lib/seriald,
+# 数据仍在 /data/seriald。默认取脚本自身所在目录,所以直接跑源码时行为不变。
+STATIC = os.environ.get('SERIALD_STATIC') or os.path.dirname(os.path.abspath(__file__))
 LOG_ROOT = os.path.join(BASE, 'logs')
 LABELS = os.path.join(BASE, 'labels.json')
 BY_PATH = '/dev/serial/by-path'
-# 自愈脚本的安装位置。必须由 root 拥有且调用者不可写,否则 sudoers 白名单等于通用提权。
-# 源文件在 /data/seriald/rescue.sh,安装命令见 /api/rescue 返回的 hint。
-RESCUE_BIN = '/usr/local/sbin/seriald-rescue.sh'
+# 自愈脚本的位置。必须由 root 拥有且调用者不可写,否则 sudoers 白名单等于通用提权。
+# 打包后由 dpkg 装到 /usr/libexec/seriald/rescue.sh(天然满足这个前提)。
+RESCUE_BIN = os.environ.get('SERIALD_RESCUE_BIN', '/usr/local/sbin/seriald-rescue.sh')
 
 BAUD = 115200
 SCROLLBACK = 256 * 1024          # 每设备内存缓冲上限(页面实时视图用)
@@ -1489,7 +1492,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
     def _page(self):
-        path = os.path.join(BASE, 'index.html')
+        path = os.path.join(STATIC, 'index.html')
         try:
             with open(path, 'rb') as f:
                 body = f.read()
@@ -1535,9 +1538,9 @@ class BoundedThreadingServer(socketserver.ThreadingTCPServer):
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8898
-    bind = sys.argv[2] if len(sys.argv) > 2 else '10.0.90.177'
+    bind = sys.argv[2] if len(sys.argv) > 2 else os.environ.get('SERIALD_BIND', '10.0.90.177')
     os.makedirs(LOG_ROOT, exist_ok=True)
-    handler = functools.partial(Handler, directory=BASE)
+    handler = functools.partial(Handler, directory=STATIC)
     with BoundedThreadingServer((bind, port), handler) as httpd:
         # 先占用监听端口再启动采集,否则重复启动失败前就可能多开一组读者。
         threading.Thread(target=MGR.loop, daemon=True).start()
