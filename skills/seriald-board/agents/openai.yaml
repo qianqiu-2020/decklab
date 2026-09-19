@@ -1,0 +1,3 @@
+interface:
+  display_name: "seriald 开发板访问"
+  short_description: "通过共享串口服务读取开发板日志，使用独立 SSH 会话执行排查命令"

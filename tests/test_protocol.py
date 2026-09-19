@@ -8,9 +8,8 @@ from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location('_seriald_protocol_test', ROOT / 'seriald.py')
-sd = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(sd)
+from seriald_core import device as sd
+from seriald_core.protocol import SSH_STATE_CMD
 
 NONCE = '0123456789abcdef01234567'
 BEGIN = '__SD_B_' + NONCE + '__'
@@ -260,7 +259,7 @@ systemctl() {
 }
 ''' % (0 if installed else 1, ssh_status, sshd_status)
                 result = subprocess.run(['/bin/bash', '--noprofile', '--norc', '-s'],
-                                        input=prelude + sd.SSH_STATE_CMD + '\n',
+                                        input=prelude + SSH_STATE_CMD + '\n',
                                         text=True, capture_output=True, timeout=2, cwd=ROOT,
                                         env={'PATH': '', 'BASH_ENV': '/dev/null'})
                 self.assertEqual(result.returncode, 0, result.stderr)

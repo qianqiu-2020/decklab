@@ -1,0 +1,24 @@
+[Unit]
+Description=Serial board web and agent control plane
+After=network.target seriald-collector.service
+Requires=seriald-collector.service
+
+[Service]
+Type=simple
+User=seriald
+Group=seriald
+EnvironmentFile=/etc/seriald/seriald.env
+Environment=HOME=/data/seriald-data
+WorkingDirectory=/usr/lib/seriald
+ExecStart=/usr/bin/seriald-control
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0007
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

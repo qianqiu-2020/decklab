@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload
+fi
+if [ "$1" = purge ]; then
+  deb-systemd-helper purge seriald.service >/dev/null || true
+  deb-systemd-helper purge seriald-collector.service >/dev/null || true
+fi
+# Registry and logs deliberately survive remove/purge for operator-controlled retention.

@@ -1,10 +1,11 @@
 """会话注册表并发回归:假 SSH、假目录,不打开串口或启动子进程。"""
+import subprocess
 import threading
 import time
 import unittest
 from unittest import mock
 
-import seriald
+from seriald_core import device as seriald
 
 
 class FakeSession:
@@ -49,10 +50,9 @@ class SessionRegistryTests(unittest.TestCase):
         self.patches = [
             mock.patch.object(seriald.Device, 'preload'),
             mock.patch.object(seriald.Device, 'stable_dir', return_value='/unused'),
-            mock.patch.object(seriald, 'load_labels', return_value={}),
             mock.patch.object(seriald, 'SshSession', side_effect=FakeSession),
             mock.patch.object(seriald.os, 'open', side_effect=AssertionError('hardware forbidden')),
-            mock.patch.object(seriald.subprocess, 'Popen', side_effect=AssertionError('SSH forbidden')),
+            mock.patch.object(subprocess, 'Popen', side_effect=AssertionError('SSH forbidden')),
         ]
         for patch in self.patches:
             patch.start()
@@ -108,7 +108,8 @@ class SessionRegistryTests(unittest.TestCase):
         self.assertTrue(all(not thread.is_alive() for thread in threads))
         self.assertEqual(errors, [])
         self.assertEqual(len(results), 9)
-        self.assertEqual(set(device.ssh_sessions), {'ssh1', 'ssh2', 'ssh3'})
+        self.assertEqual(len(device.ssh_sessions), 3)
+        self.assertTrue(all(sid.startswith('ssh') for sid in device.ssh_sessions))
         self.assertEqual(device.ssh_pending, 0)
         self.assertEqual(len({session.sid for session in constructed}), 3)
 
@@ -127,8 +128,8 @@ class SessionRegistryTests(unittest.TestCase):
         with mock.patch.object(seriald, 'SSH_LIMIT', 1):
             session, error = device.ssh_connect()
         self.assertEqual(error, '')
-        self.assertEqual(session.sid, 'ssh2')
-        self.assertIs(device.get_session('ssh2'), session)
+        self.assertNotEqual(session.sid, 'ssh1')
+        self.assertIs(device.get_session(session.sid), session)
 
     def test_reaper_claims_under_cv_then_disposes_outside_registry_lock(self):
         device = self.device

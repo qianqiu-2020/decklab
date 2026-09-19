@@ -7,8 +7,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { TextDecoder } = require('node:util');
 
-const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+const script = ['ui-common.js', 'terminal-policy.js', 'app.js'].map(name =>
+  fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
 
 class Element {
   constructor(tag = 'div') {
@@ -43,6 +43,11 @@ function harness() {
     constructor() {
       this.cols = 80; this.rows = 24; this.queued = []; this.parsed = '';
       this.decoder = new TextDecoder(); terminals.push(this);
+      this.csi = new Map();
+      this.parser = {
+        registerCsiHandler: (id, fn) => this.csi.set((id.prefix || '') + id.final, fn),
+        registerOscHandler() {}, registerDcsHandler() {},
+      };
     }
     loadAddon() {}
     open() {}
@@ -54,13 +59,14 @@ function harness() {
     clearSelection() {}
     focus() {}
     refresh() {}
-    write(data) { this.queued.push(data); }
+    write(data, callback) { this.queued.push({ data, callback }); }
     flush() {
       // 故意允许 dispose 后仍执行旧解析器，验证回调自身也能拦住 CSI 6n 应答。
-      for (const data of this.queued.splice(0)) {
+      for (const { data, callback } of this.queued.splice(0)) {
         const text = typeof data === 'string' ? data : this.decoder.decode(data, { stream: true });
         this.parsed += text;
-        if (text.includes('\x1b[6n')) this.data('\x1b[1;1R');
+        if (text.includes('\x1b[6n') && !this.csi.get('n')?.([6])) this.data('\x1b[1;184R');
+        if (callback) callback();
       }
     }
   }
@@ -72,9 +78,8 @@ function harness() {
     visibilityState: 'visible',
     execCommand: () => true,
   };
-  const window = { addEventListener() {}, prompt: () => '新编号' };
   const sandbox = {
-    document, window, Terminal, FitAddon: { FitAddon: class { fit() {} } },
+    document, Terminal, FitAddon: { FitAddon: class { fit() {} } },
     Uint8Array, AbortController, console,
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     setTimeout: (fn, delay) => { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
@@ -84,6 +89,11 @@ function harness() {
         resolve: data => resolve({ json: () => Promise.resolve(data) }), reject, taken: false });
     }),
   };
+  // Browser globals live on window.  Mirror that relationship so separately loaded
+  // modules expose the same globals here as they do in a real page.
+  sandbox.window = sandbox;
+  sandbox.addEventListener = function () {};
+  sandbox.prompt = () => '新编号';
   vm.runInNewContext(script, sandbox, { filename: 'index.html' });
   const take = (route, predicate = () => true) => {
     const request = requests.find(r => !r.taken && r.url.split('?')[0] === route && predicate(r));
@@ -136,7 +146,7 @@ test('queued old xterm output and CSI 6n cannot reach the new device', async () 
   assert.equal(h.sends().length, 0);
   h.take('/api/session').resolve(readResponse('B', 'B live\x1b[6n'));
   await drain(); current.flush(); await drain();
-  assert.deepEqual(h.sends().map(r => r.body), [{ key: 'B', sid: 'serial', data: '\x1b[1;1R' }]);
+  assert.equal(h.sends().length, 0, 'current serial view is also a passive renderer');
 });
 
 test('typing is ordered; unsent input and late send errors are discarded on switch', async () => {
@@ -167,6 +177,19 @@ test('late session, log and identify responses stay with their original device',
   assert.equal(identify.body.key, 'A');
 });
 
+test('provisional identity is labeled as a candidate and warns about archive promotion', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({ devices: [{ key: 'milkv2', label: 'milkv2', serial: '0059D968E583C49A',
+    alive: true, dev: '/mock/ttyUSB1', info: { serial: '0059D968E583C49A',
+      serial_source: 'soc-sysfs', identity_status: 'provisional' } }] });
+  await drain(); h.select('milkv2');
+  const rows = h.get('d-info').children.map(row => row.children.map(x => x.textContent).join('='));
+  assert.ok(rows.includes('候选身份编号=0059D968E583C49A'));
+  assert.ok(rows.includes('身份状态=待确认（使用临时档案目录）'));
+  const cardText = h.get('grid').children[0].children.map(x => x.textContent).join(' ');
+  assert.ok(cardText.includes('尚未正式确认'));
+});
+
 test('late SSH connect response cannot switch the newly selected device', async () => {
   const h = await setup(); h.select('A');
   h.get('d-tabs').children.at(-1).children[0].click();
@@ -176,7 +199,24 @@ test('late SSH connect response cannot switch the newly selected device', async 
   assert.equal(h.terminals.at(-1), current);
   assert.equal(h.get('d-key').textContent, 'B');
   assert.equal(h.get('d-status').textContent, '');
-  assert.deepEqual(connect.body, { key: 'A' });
+  assert.deepEqual(connect.body, { key: 'A', actor: 'web' });
+});
+
+test('SSH identification adopts the canonical label before reading or sending', async () => {
+  const h = await setup(); h.select('A');
+  h.get('d-tabs').children.at(-1).children[0].click();
+  h.take('/api/ssh-connect').resolve({ ok: true, sid: 'ssh123', ip: '192.0.2.1',
+    device_key: 'musepi2', serial: 'SN001' });
+  await drain();
+  const currentRead = h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1);
+  const query = new URL(currentRead.url, 'http://fixture').searchParams;
+  assert.equal(query.get('key'), 'musepi2');
+  assert.equal(query.get('serial'), 'SN001');
+  assert.equal(query.get('sid'), 'ssh123');
+  h.terminals.at(-1).data('uname -a\r'); await drain();
+  assert.deepEqual(h.sends().at(-1).body, {
+    key: 'musepi2', serial: 'SN001', sid: 'ssh123', data: 'uname -a\r',
+  });
 });
 
 test('late rename and SSH close responses cannot mutate another device', async () => {
@@ -241,7 +281,7 @@ test('split CJK bytes use one streaming xterm decoder per view', async () => {
   const h = await setup(); const term = h.select('A');
   const bytes = Buffer.from('中文');
   h.take('/api/session').resolve(readResponse('A', bytes.subarray(0, 2), 2));
-  await drain(); assert.ok(term.queued[0] instanceof Uint8Array); term.flush();
+  await drain(); assert.ok(term.queued[0].data instanceof Uint8Array); term.flush();
   assert.equal(term.parsed, '');
   h.fire(h.timer(300)[0]);
   h.take('/api/session').resolve(readResponse('A', bytes.subarray(2), bytes.length));
@@ -318,6 +358,58 @@ test('an empty clipboard says so instead of looking dead', async () => {
   await drain();
   assert.equal(h.sends().length, 0);
   assert.ok(h.get('d-status').textContent.includes('剪贴板'));
+});
+
+test('selecting and replaying the third board never writes cursor position replies', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({ devices: [{ key: 'musepi2', label: 'musepi2',
+    serial: '0123456789ABCDEF', alive: true, dev: '/fake/ttyUSB2' }] });
+  await drain();
+  const terminal = h.select('musepi2');
+  h.take('/api/session').resolve(readResponse('musepi2', 'root@bianbu:~# \x1b[6n'.repeat(20)));
+  await drain(); terminal.flush(); await drain();
+  assert.equal(h.sends().length, 0, 'opening a console must not type CPR responses');
+  // Live serial output is shared as well; a browser must never become a second responder.
+  terminal.write('\x1b[6n'); terminal.flush(); await drain();
+  assert.equal(h.sends().length, 0);
+  terminal.data('uname -a\r'); await drain();
+  assert.equal(h.sends()[0].body.data, 'uname -a\r', 'explicit keyboard input still works');
+});
+
+test('log content is viewed inline and late log responses cannot replace a new device', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [{ name: 'serial-test.log', size: 20 }] });
+  await drain();
+  const button = h.get('d-logs').children.at(-1);
+  assert.equal(button.tagName, 'button'); button.click();
+  const log = h.take('/api/log');
+  h.select('B');
+  log.resolve({ data: '<script>not HTML</script>', start_off: 0, off: 20, size: 20 });
+  await drain();
+  assert.equal(h.get('log-viewer').hidden, true);
+  assert.notEqual(h.get('log-content').textContent, '<script>not HTML</script>');
+});
+
+test('agent SSH activity opens read-only without input or resize writes', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/activity').resolve({ next_offset: 1, sessions: [{ sid: 'sshabc', actor: 'claude-code',
+    status: 'active', title: 'uname -a', started: 1, exit_code: null }] });
+  await drain();
+  h.get('d-activity').children[0].children.at(-1).click();
+  const terminal = h.terminals.at(-1);
+  terminal.data('must not be sent');
+  h.take('/api/session', r => r.url.includes('sid=sshabc')).resolve(readResponse('A', '\x1b[6n', 4, 'sshabc'));
+  await drain(); terminal.flush(); await drain();
+  assert.equal(h.sends().length, 0);
+  assert.equal(h.requests.filter(r => r.url === '/api/session-resize').length, 0);
+  assert.equal(h.get('b-takeover').hidden, false);
+  h.get('b-takeover').click();
+  const takeover = h.take('/api/session-takeover');
+  assert.deepEqual(takeover.body, { key: 'A', sid: 'sshabc', actor: 'web' });
+  takeover.resolve({ ok: true, sid: 'sshabc' }); await drain();
+  assert.equal(h.get('b-takeover').hidden, true);
+  terminal.data('human intervention\r'); await drain();
+  assert.equal(h.sends().at(-1).body.data, 'human intervention\r');
 });
 
 (async () => {

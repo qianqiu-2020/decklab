@@ -1,0 +1,153 @@
+"""Extract the deb and run it against an empty fake serial directory, never install it."""
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import subprocess
+import tempfile
+import time
+import unittest
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
+
+from seriald_core.storage import Store
+from seriald_core import __version__
+from tools.build_deb import build
+
+
+@unittest.skipUnless(shutil.which('dpkg-deb'), 'requires dpkg-deb')
+class PackageTests(unittest.TestCase):
+    def test_extracted_package_runs_and_preserves_offline_registry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = build(root / 'dist', __version__)
+            extracted = root / 'extract'
+            subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True,
+                           stdout=subprocess.DEVNULL)
+            subprocess.run(['dpkg-deb', '--control', str(package), str(root / 'control')], check=True)
+            for script in ('postinst', 'prerm', 'postrm'):
+                subprocess.run(['sh', '-n', str(root / 'control' / script)], check=True)
+            postinst = (root / 'control/postinst').read_text()
+            self.assertIn('dpkg --compare-versions "$2" lt 1.3.2', postinst)
+            self.assertIn('chmod 0660', postinst)
+            code = extracted / 'usr/lib/seriald'
+            self.assertTrue((extracted / 'usr/share/doc/seriald/DEVICE_IDENTITY_MATRIX.md').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/seriald/REFACTOR_PLAN.md').is_file())
+            package_env = (extracted / 'etc/seriald/seriald.env').read_text()
+            self.assertIn('SERIALD_BASE=/data/seriald-data', package_env)
+            self.assertIn('SERIALD_BIND=0.0.0.0', package_env)
+            collector_unit = (extracted / 'lib/systemd/system/seriald-collector.service').read_text()
+            control_unit = (extracted / 'lib/systemd/system/seriald.service').read_text()
+            self.assertIn('RuntimeDirectory=seriald', collector_unit)
+            self.assertNotIn('RuntimeDirectory=seriald', control_unit)
+            self.assertIn('UMask=0007', collector_unit)
+            self.assertIn('UMask=0007', control_unit)
+            state, ports = root / 'state', root / 'empty-ports'
+            ports.mkdir()
+            store = Store(str(state / 'registry.sqlite3'))
+            store.bind({'serial': 'TEST-SERIAL', 'hostname': 'test-board', 'ips': []}, 'usb-old', '/dev/old')
+            store.close()
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', 0))
+                port = sock.getsockname()[1]
+            collector_socket = state / 'collector.sock'
+            env = dict(os.environ, PYTHONPATH=str(code), SERIALD_BASE=str(state),
+                       SERIALD_STATIC=str(code), SERIALD_SOCKET=str(collector_socket),
+                       SERIALD_BY_PATH=str(ports), SERIALD_PORT=str(port), SERIALD_BIND='127.0.0.1')
+            collector = subprocess.Popen(['python3', '-m', 'seriald_core.collector_server'], env=env,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            control = None
+
+            def start_control():
+                return subprocess.Popen(['python3', '-m', 'seriald_core.control_server'], env=env,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            def stop(process):
+                if process is None:
+                    return
+                process.terminate()
+                try:
+                    process.wait(timeout=8)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+
+            try:
+                for _ in range(50):
+                    if collector_socket.exists():
+                        break
+                    if collector.poll() is not None:
+                        self.fail(collector.stdout.read().decode())
+                    time.sleep(.05)
+                else:
+                    self.fail('collector socket did not start')
+                collector_pid = collector.pid
+                duplicate = subprocess.run(
+                    ['python3', '-m', 'seriald_core.collector_server'], env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=5)
+                self.assertNotEqual(duplicate.returncode, 0)
+                self.assertIn('already active', duplicate.stdout)
+                self.assertIsNone(collector.poll(), 'duplicate launch must not disturb the live collector')
+                control = start_control()
+                url = 'http://127.0.0.1:%d' % port
+                for _ in range(50):
+                    try:
+                        with urlopen(url + '/api/devices', timeout=.5) as response:
+                            devices = json.load(response)['devices']
+                        break
+                    except (URLError, TimeoutError):
+                        if control.poll() is not None:
+                            self.fail(control.stdout.read().decode())
+                        time.sleep(.05)
+                else:
+                    self.fail('isolated service did not start')
+                self.assertEqual([(d['key'], d['serial'], d['state']) for d in devices],
+                                 [('test-board', 'TEST-SERIAL', 'offline')])
+                with urlopen(url + '/api/health') as response:
+                    first_health = json.load(response)
+                self.assertEqual(first_health['role'], 'collector')
+                self.assertEqual(first_health['version'], __version__)
+                self.assertEqual(first_health['pid'], collector_pid)
+                with urlopen(url + '/static/app.js') as response:
+                    self.assertIn('no-cache', response.headers['Cache-Control'])
+                    self.assertIn(b'SerialdTerminalPolicy.install', response.read())
+                with urlopen(url + '/static/terminal-policy.js') as response:
+                    self.assertIn('no-cache', response.headers['Cache-Control'])
+                    self.assertIn(b'registerCsiHandler', response.read())
+                for route in ('/registry.sqlite3', '/vendor/%2e%2e/seriald.py'):
+                    with self.assertRaises(HTTPError) as error:
+                        urlopen(url + route)
+                    self.assertEqual(error.exception.code, 404)
+                cli = subprocess.run(['python3', str(code / 'serialctl.py'), '--url', url, 'devices'],
+                                     capture_output=True, text=True, timeout=5)
+                self.assertEqual(cli.returncode, 0, cli.stdout + cli.stderr)
+                self.assertEqual(json.loads(cli.stdout)['devices'][0]['key'], 'test-board')
+                stop(control)
+                control.stdout.close()
+                control = start_control()
+                for _ in range(50):
+                    try:
+                        with urlopen(url + '/api/devices', timeout=.5) as response:
+                            restarted = json.load(response)['devices']
+                        break
+                    except (URLError, TimeoutError):
+                        time.sleep(.05)
+                else:
+                    self.fail('control plane did not restart')
+                self.assertIsNone(collector.poll(), 'collector must survive control restart')
+                self.assertEqual(collector.pid, collector_pid)
+                self.assertEqual(restarted[0]['key'], 'test-board')
+                with urlopen(url + '/api/health') as response:
+                    second_health = json.load(response)
+                self.assertEqual(second_health['pid'], first_health['pid'])
+                self.assertEqual(second_health['started'], first_health['started'])
+            finally:
+                stop(control)
+                stop(collector)
+                if control and control.stdout:
+                    control.stdout.close()
+                collector.stdout.close()
+            restored = Store(str(state / 'registry.sqlite3'))
+            self.assertEqual(restored.get('TEST-SERIAL')['label'], 'test-board')
+            restored.close()

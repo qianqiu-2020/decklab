@@ -1,10 +1,11 @@
 """SSH 生命周期只用内存和假 fd 验证,绝不接触真实串口或 SSH。"""
+import errno
 import io
 import threading
 import unittest
 from unittest import mock
 
-import seriald
+from seriald_core import sessions as seriald
 
 REAL_OPEN_LOG = seriald.SshSession._open_log
 
@@ -62,6 +63,12 @@ class SshSessionTests(unittest.TestCase):
         self.mocks[3].assert_not_called()
         self.mocks[4].assert_not_called()
 
+    def test_reflashed_board_host_key_does_not_use_persistent_known_hosts(self):
+        session = self.session()
+        self.assertIn('StrictHostKeyChecking=no', session.argv)
+        self.assertIn('UserKnownHostsFile=/dev/null', session.argv)
+        self.assertIn('GlobalKnownHostsFile=/dev/null', session.argv)
+
     def test_long_session_rotates_log_at_date_boundary(self):
         session = self.session()
         old_log = session.logf
@@ -76,7 +83,7 @@ class SshSessionTests(unittest.TestCase):
         self.assertTrue(old_log.closed)
         self.assertTrue(new_log.closed)
         self.assertIn('新一天', new_log.saved)
-        self.assertEqual(opened.call_args.args[0], '/unused/ssh-20260102.log')
+        self.assertEqual(opened.call_args.args[0], '/unused/ssh-ssh1-20260102.log')
 
     def test_spawn_failure_closes_both_fds_and_log_once(self):
         session = self.session()
@@ -185,7 +192,7 @@ class SshSessionTests(unittest.TestCase):
         def blocked_write(fd, data, cancel=None):
             entered.set()
             self.assertTrue(cancel.wait(2))
-            raise OSError(seriald.errno.ECANCELED, 'closed')
+            raise OSError(errno.ECANCELED, 'closed')
 
         def idle_select(*args):
             session._stop.wait(0.01)

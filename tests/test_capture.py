@@ -3,6 +3,7 @@ import errno
 import importlib.util
 import os
 import pathlib
+import socketserver
 import stat
 import tempfile
 import threading
@@ -12,32 +13,33 @@ from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location('_seriald_capture_test', ROOT / 'seriald.py')
-sd = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(sd)
+from seriald_core import devices as sd
+from seriald_core import device as device_module
+from seriald_core import transport as tr
+from seriald_core.web import BoundedThreadingServer
 
 
 class SerialIoTests(unittest.TestCase):
     def test_failed_configuration_closes_opened_fd(self):
         identity = types.SimpleNamespace(st_dev=1, st_ino=2, st_rdev=3)
-        with mock.patch.object(sd.os, 'open', return_value=98765), \
-                mock.patch.object(sd.os, 'fstat', return_value=identity), \
-                mock.patch.object(sd.os, 'close') as close, \
-                mock.patch.object(sd.termios, 'tcgetattr', side_effect=OSError('gone')), \
-                mock.patch.object(sd.termios, 'tcsetattr') as configure:
+        with mock.patch.object(tr.os, 'open', return_value=98765), \
+                mock.patch.object(tr.os, 'fstat', return_value=identity), \
+                mock.patch.object(tr.os, 'close') as close, \
+                mock.patch.object(tr.termios, 'tcgetattr', side_effect=OSError('gone')), \
+                mock.patch.object(tr.termios, 'tcsetattr') as configure:
             with self.assertRaises(OSError):
-                sd.open_serial('/fake/ttyUSB0')
+                tr.open_serial('/fake/ttyUSB0')
         close.assert_called_once_with(98765)
         configure.assert_not_called()
 
     def test_replaced_inode_is_rejected_before_configuration(self):
         identity = types.SimpleNamespace(st_dev=1, st_ino=22, st_rdev=3)
-        with mock.patch.object(sd.os, 'open', return_value=98765), \
-                mock.patch.object(sd.os, 'fstat', return_value=identity), \
-                mock.patch.object(sd.os, 'close') as close, \
-                mock.patch.object(sd.termios, 'tcgetattr') as getattrs:
+        with mock.patch.object(tr.os, 'open', return_value=98765), \
+                mock.patch.object(tr.os, 'fstat', return_value=identity), \
+                mock.patch.object(tr.os, 'close') as close, \
+                mock.patch.object(tr.termios, 'tcgetattr') as getattrs:
             with self.assertRaises(OSError) as raised:
-                sd.open_serial('/fake/ttyUSB0', identity=(1, 2, 3))
+                tr.open_serial('/fake/ttyUSB0', identity=(1, 2, 3))
         self.assertEqual(raised.exception.errno, errno.ENODEV)
         close.assert_called_once_with(98765)
         getattrs.assert_not_called()
@@ -54,9 +56,9 @@ class SerialIoTests(unittest.TestCase):
             received.extend(bytes(data[:reply]))
             return reply
 
-        with mock.patch.object(sd.os, 'write', side_effect=write), \
-                mock.patch.object(sd.select, 'select', return_value=([], [98765], [])):
-            sd.write_all(98765, b'abcdef')
+        with mock.patch.object(tr.os, 'write', side_effect=write), \
+                mock.patch.object(tr.select, 'select', return_value=([], [98765], [])):
+            tr.write_all(98765, b'abcdef')
         self.assertEqual(received, b'abcdef')
 
     def test_cancel_prevents_remaining_bytes(self):
@@ -66,33 +68,33 @@ class SerialIoTests(unittest.TestCase):
             cancel.set()
             return 2
 
-        with mock.patch.object(sd.os, 'write', side_effect=write) as write_mock:
+        with mock.patch.object(tr.os, 'write', side_effect=write) as write_mock:
             with self.assertRaises(OSError) as raised:
-                sd.write_all(98765, b'abcdef', cancel=cancel)
+                tr.write_all(98765, b'abcdef', cancel=cancel)
         self.assertEqual(raised.exception.errno, errno.ECANCELED)
         self.assertEqual(write_mock.call_count, 1)
 
     def test_no_progress_and_deadline_fail(self):
-        with mock.patch.object(sd.os, 'write', return_value=0):
+        with mock.patch.object(tr.os, 'write', return_value=0):
             with self.assertRaises(OSError) as raised:
-                sd.write_all(98765, b'abc')
+                tr.write_all(98765, b'abc')
         self.assertEqual(raised.exception.errno, errno.EIO)
-        with mock.patch.object(sd.os, 'write', side_effect=BlockingIOError()), \
-                mock.patch.object(sd.select, 'select', return_value=([], [], [])), \
-                mock.patch.object(sd.time, 'monotonic', side_effect=[0, 0, 6]):
+        with mock.patch.object(tr.os, 'write', side_effect=BlockingIOError()), \
+                mock.patch.object(tr.select, 'select', return_value=([], [], [])), \
+                mock.patch.object(tr.time, 'monotonic', side_effect=[0, 0, 6]):
             with self.assertRaises(OSError) as raised:
-                sd.write_all(98765, b'abc', timeout=5)
+                tr.write_all(98765, b'abc', timeout=5)
         self.assertEqual(raised.exception.errno, errno.ETIMEDOUT)
 
     def test_write_side_opens_only_write_fd_and_never_configures(self):
         identity = types.SimpleNamespace(st_dev=1, st_ino=2, st_rdev=3)
-        with mock.patch.object(sd.os, 'open', return_value=98765) as open_fd, \
-                mock.patch.object(sd.os, 'fstat', return_value=identity), \
-                mock.patch.object(sd.os, 'close') as close, \
-                mock.patch.object(sd, 'write_all') as write_all, \
-                mock.patch.object(sd.termios, 'tcgetattr') as getattrs, \
-                mock.patch.object(sd.termios, 'tcsetattr') as configure:
-            ok, error = sd.write_serial('/fake/ttyUSB0', '中文', identity=(1, 2, 3))
+        with mock.patch.object(tr.os, 'open', return_value=98765) as open_fd, \
+                mock.patch.object(tr.os, 'fstat', return_value=identity), \
+                mock.patch.object(tr.os, 'close') as close, \
+                mock.patch.object(tr, 'write_all') as write_all, \
+                mock.patch.object(tr.termios, 'tcgetattr') as getattrs, \
+                mock.patch.object(tr.termios, 'tcsetattr') as configure:
+            ok, error = tr.write_serial('/fake/ttyUSB0', '中文', identity=(1, 2, 3))
         self.assertTrue(ok, error)
         self.assertEqual(open_fd.call_args.args[1] & os.O_ACCMODE, os.O_WRONLY)
         self.assertEqual(write_all.call_args.args, (98765, '中文'.encode()))
@@ -107,7 +109,7 @@ class DeviceFixture(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.logs = os.path.join(self.temp.name, 'logs')
         self.patchers = [mock.patch.object(sd, 'LOG_ROOT', self.logs),
-                         mock.patch.object(sd, 'LABELS', os.path.join(self.temp.name, 'labels.json'))]
+                         mock.patch.object(device_module, 'LOG_ROOT', self.logs)]
         for patcher in self.patchers:
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -144,8 +146,6 @@ class DeviceTests(DeviceFixture):
         self.assertEqual(len(set(paths)), len(keys))
         for path in paths:
             self.assertEqual(os.path.commonpath([path, self.logs]), self.logs)
-        self.assertEqual(sd.safe_name('.', 'fallback'), 'fallback')
-        self.assertEqual(sd.safe_name('..', 'fallback'), 'fallback')
 
     def test_log_open_failure_preserves_live_buffer(self):
         device = self.device()
@@ -194,7 +194,8 @@ class DeviceTests(DeviceFixture):
         path = pathlib.Path(device.stable_dir()) / 'serial-20260919.log'
         path.write_text('2026-09-19 00:00:00  root@old-board:~# \n')
         replacement = self.device()
-        self.assertIn(b'root@old-board', replacement.buf)
+        # Unidentified connections must not inherit any previous board's output.
+        self.assertNotIn(b'root@old-board', replacement.buf)
         with mock.patch.object(replacement, '_write', return_value=(True, '')) as write, \
                 mock.patch.object(replacement, '_wait', return_value=None):
             ok, _ = replacement.ensure_shell(replacement.now_off())
@@ -228,7 +229,7 @@ class DeviceTests(DeviceFixture):
         holder.start()
         try:
             self.assertTrue(entered.wait(1))
-            with mock.patch.object(sd, 'write_serial') as write:
+            with mock.patch.object(device_module, 'write_serial') as write:
                 ok, _ = device.send('must not interleave')
             self.assertFalse(ok)
             write.assert_not_called()
@@ -267,7 +268,7 @@ class ManagerTests(DeviceFixture):
         old.present, old.identity = True, (1, 2, 3)
         old.thread = mock.Mock()
         old.thread.is_alive.return_value = True
-        manager.devices[old.key] = old
+        manager.devices[old.by_path] = old
         identity = types.SimpleNamespace(st_dev=1, st_ino=22, st_rdev=3,
                                          st_mode=stat.S_IFCHR | 0o600)
         listdir = os.listdir
@@ -297,7 +298,7 @@ class ManagerTests(DeviceFixture):
         old.thread = mock.Mock()
         old.thread.is_alive.return_value = True
         old_thread = old.thread
-        manager.devices[old.key] = old
+        manager.devices[old.by_path] = old
         identity = types.SimpleNamespace(st_dev=1, st_ino=22, st_rdev=33,
                                          st_mode=stat.S_IFCHR | 0o600)
         listdir = os.listdir
@@ -315,9 +316,11 @@ class ManagerTests(DeviceFixture):
             old_thread.is_alive.return_value = False
             manager.scan()
             self.assertEqual(thread.call_count, 1)
-        self.assertEqual(old.dev, '/fake/ttyUSB1')
-        self.assertEqual(old.identity, (1, 22, 33))
-        self.assertFalse(old.stop.is_set())
+        replacement = manager.devices['usb-anchor']
+        self.assertIsNot(replacement, old)
+        self.assertEqual(replacement.dev, '/fake/ttyUSB1')
+        self.assertEqual(replacement.identity, (1, 22, 33))
+        self.assertTrue(old.stop.is_set())
 
     def test_eof_closes_reader_and_backs_off(self):
         manager = sd.Manager()
@@ -347,7 +350,7 @@ class ManagerTests(DeviceFixture):
         device.thread = mock.Mock()
         device.thread.is_alive.return_value = False
         old_stop = device.stop
-        manager.devices[device.key] = device
+        manager.devices[device.by_path] = device
         identity = types.SimpleNamespace(st_dev=1, st_ino=22, st_rdev=33,
                                          st_mode=stat.S_IFCHR | 0o600)
         listdir = os.listdir
@@ -371,22 +374,23 @@ class ManagerTests(DeviceFixture):
                 device.operation_lock.release()
             manager.scan()
         self.assertEqual(thread.call_count, 1)
-        self.assertIsNot(device.stop, old_stop)
-        self.assertFalse(device.stop.is_set())
-        self.assertEqual(device.identity, (1, 22, 33))
-        self.assertEqual(device.hostname, '')
-        self.assertEqual(device.probe_info, {})
+        replacement = manager.devices['usb-anchor']
+        self.assertIsNot(replacement, device)
+        self.assertFalse(replacement.stop.is_set())
+        self.assertEqual(replacement.identity, (1, 22, 33))
+        self.assertEqual(replacement.hostname, '')
+        self.assertEqual(replacement.probe_info, {})
 
 
 class BoundedServerTests(unittest.TestCase):
     def server(self):
-        with mock.patch.object(sd.socketserver.ThreadingTCPServer, '__init__', return_value=None):
-            return sd.BoundedThreadingServer(('unused', 0), object)
+        with mock.patch.object(socketserver.ThreadingTCPServer, '__init__', return_value=None):
+            return BoundedThreadingServer(('unused', 0), object)
 
     def test_connection_capacity_precedes_thread_creation(self):
         server = self.server()
         sockets = [mock.Mock() for _ in range(server.max_workers + 1)]
-        with mock.patch.object(sd.socketserver.ThreadingTCPServer, 'process_request') as spawn, \
+        with mock.patch.object(socketserver.ThreadingTCPServer, 'process_request') as spawn, \
                 mock.patch.object(server, 'shutdown_request') as shutdown:
             for request in sockets:
                 server.process_request(request, ('unused', 0))
@@ -399,7 +403,7 @@ class BoundedServerTests(unittest.TestCase):
         server = self.server()
         for _ in range(server.max_workers):
             self.assertTrue(server._workers.acquire(blocking=False))
-        with mock.patch.object(sd.socketserver.ThreadingTCPServer, 'process_request_thread',
+        with mock.patch.object(socketserver.ThreadingTCPServer, 'process_request_thread',
                                side_effect=RuntimeError('handler failed')):
             with self.assertRaises(RuntimeError):
                 server.process_request_thread(mock.Mock(), ('unused', 0))
@@ -409,7 +413,7 @@ class BoundedServerTests(unittest.TestCase):
     def test_thread_creation_failure_returns_slot_and_closes_socket(self):
         server = self.server()
         request = mock.Mock()
-        with mock.patch.object(sd.socketserver.ThreadingTCPServer, 'process_request',
+        with mock.patch.object(socketserver.ThreadingTCPServer, 'process_request',
                                side_effect=RuntimeError('thread failed')), \
                 mock.patch.object(server, 'shutdown_request') as shutdown:
             with self.assertRaises(RuntimeError):

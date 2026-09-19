@@ -13,3 +13,7 @@ labels.json
 
 __pycache__/
 *.pyc
+
+# Persistent registry and local build output
+registry.sqlite3*
+dist/

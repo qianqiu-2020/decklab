@@ -1,0 +1,26 @@
+[Unit]
+Description=Serial board collector and SSH session owner
+After=local-fs.target
+
+[Service]
+Type=simple
+User=seriald
+Group=seriald
+SupplementaryGroups=dialout
+EnvironmentFile=/etc/seriald/seriald.env
+Environment=HOME=/data/seriald-data
+WorkingDirectory=/usr/lib/seriald
+ExecStart=/usr/bin/seriald-collector
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillMode=control-group
+RuntimeDirectory=seriald
+RuntimeDirectoryMode=0750
+UMask=0007
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

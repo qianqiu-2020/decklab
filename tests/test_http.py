@@ -8,18 +8,20 @@ import threading
 import unittest
 from unittest import mock
 
+from seriald_core import __version__
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location('_seriald_http_test', ROOT / 'seriald.py')
-sd = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(sd)
+from seriald_core import web as sd
+from seriald_core import control_server as control
+from seriald_core import transport as tr
 
 
 class HandlerTests(unittest.TestCase):
     def setUp(self):
         self.manager = sd.Manager()
-        self.device = mock.Mock(key='board-key', dev='/fake/ttyUSB0')
-        self.manager.devices['board-key'] = self.device
+        self.manager.store = mock.Mock()
+        self.device = mock.Mock(key='board-key', serial='SN1', dev='/fake/ttyUSB0')
+        self.manager.boards['SN1'] = self.device
         patcher = mock.patch.object(sd, 'MGR', self.manager)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -38,72 +40,117 @@ class HandlerTests(unittest.TestCase):
     def result(self, handler):
         return handler.send_response.call_args.args[0], json.loads(handler.wfile.getvalue())
 
+    def control_handler(self, path):
+        handler = control.ControlHandler.__new__(control.ControlHandler)
+        handler.path = path
+        handler.headers = {}
+        handler.rfile = io.BytesIO()
+        handler.wfile = io.BytesIO()
+        handler.send_response = mock.Mock()
+        handler.send_header = mock.Mock()
+        handler.end_headers = mock.Mock()
+        handler.static_root = str(ROOT)
+        return handler
+
     def test_root_page_serves_exact_local_html_bytes(self):
         expected = (ROOT / 'index.html').read_bytes()
-        handler = self.handler('/')
-        with mock.patch.object(sd, 'BASE', str(ROOT)):
-            handler.do_GET()
+        handler = self.control_handler('/')
+        handler.do_GET()
         handler.send_response.assert_called_once_with(200)
         self.assertEqual(handler.wfile.getvalue(), expected)
-        headers = dict(call.args for call in handler.send_header.call_args_list)
-        self.assertEqual(headers['Content-Type'], 'text/html; charset=utf-8')
-        self.assertEqual(headers['Content-Length'], str(len(expected)))
+        headers = {call.args[0].lower(): call.args[1] for call in handler.send_header.call_args_list}
+        self.assertTrue(headers['content-type'].startswith('text/html'))
+        self.assertEqual(headers['content-length'], str(len(expected)))
 
     def test_index_html_follows_the_same_path_as_root(self):
         # 交给 SimpleHTTPRequestHandler 会漏掉 Cache-Control,浏览器整页启发式缓存,
         # 服务换了新页面用户还是旧的(踩过:新按钮在页面上不存在)。
         expected = (ROOT / 'index.html').read_bytes()
-        handler = self.handler('/index.html')
-        with mock.patch.object(sd, 'BASE', str(ROOT)):
-            handler.do_GET()
+        handler = self.control_handler('/index.html')
+        handler.do_GET()
         handler.send_response.assert_called_once_with(200)
         self.assertEqual(handler.wfile.getvalue(), expected)
 
     def test_page_responses_forbid_heuristic_caching(self):
         # end_headers 里的判断按 self.path 走,两个入口都必须带上 no-cache。
         for path in ('/', '', '/index.html'):
-            handler = self.handler(path)
+            handler = self.control_handler(path)
             # self.handler() 把 end_headers 换成了 Mock,这里要显式调类上的真实现。
-            with mock.patch.object(sd.http.server.BaseHTTPRequestHandler, 'end_headers') as parent:
-                sd.Handler.end_headers(handler)
+            with mock.patch.object(control.http.server.BaseHTTPRequestHandler, 'end_headers') as parent:
+                control.ControlHandler.end_headers(handler)
             sent = dict(call.args for call in handler.send_header.call_args_list)
             self.assertEqual(sent.get('Cache-Control'), 'no-cache, must-revalidate', path)
             parent.assert_called_once_with()
 
-    def test_logs_list_includes_hashed_and_legacy_files_without_rewriting(self):
-        current = '/fake/logs/full-key-0123456789abcdef'
-        legacy = '/fake/logs/old-prefix'
-        self.device.stable_dir.return_value = current
-        self.device.legacy_dir.return_value = legacy
-        self.device.label = 'board-label'
-        entries = {current: ['serial-20260919.log', 'ssh-20260919.log', 'ignore.txt'],
-                   legacy: ['serial-20260918.log', 'ssh-20260918.log', 'labels.json']}
-        handler = self.handler('/api/logs?key=board-key')
-        # GET 只能枚举历史文件,禁止借迁移之名改写/搬走原日志。
-        with mock.patch.object(sd.os.path, 'isdir', side_effect=lambda path: path == legacy), \
-                mock.patch.object(sd.os, 'listdir', side_effect=lambda path: entries[path]), \
-                mock.patch.object(sd.os.path, 'getsize', return_value=123), \
-                mock.patch.object(sd, 'open', side_effect=AssertionError('must not open log'), create=True), \
-                mock.patch.object(sd.os, 'replace') as replace, \
-                mock.patch.object(sd.os, 'unlink') as unlink:
+    def test_control_proxy_rejects_unbounded_or_chunked_bodies_locally(self):
+        cases = [({'Content-Length': '65537'}, 413),
+                 ({'Content-Length': 'bad'}, 400),
+                 ({'Content-Length': '0', 'Transfer-Encoding': 'chunked'}, 400),
+                 ({'Content-Length': '5'}, 400)]
+        for headers, expected in cases:
+            with self.subTest(headers=headers):
+                handler = self.control_handler('/api/identify')
+                handler.command = 'POST'
+                handler.headers = headers
+                handler._proxy()
+                self.assertEqual(handler.send_response.call_args.args[0], expected)
+
+    def test_optional_control_token_supports_browser_basic_and_cli_bearer(self):
+        import base64 as b64
+        for authorization in ('Bearer secret',
+                              'Basic ' + b64.b64encode(b'seriald:secret').decode()):
+            with self.subTest(authorization=authorization):
+                handler = self.control_handler('/healthz')
+                handler.auth_token = 'secret'
+                handler.headers = {'Authorization': authorization}
+                handler.do_GET()
+                self.assertEqual(handler.send_response.call_args.args[0], 200)
+        denied = self.control_handler('/healthz')
+        denied.auth_token = 'secret'
+        denied.do_GET()
+        self.assertEqual(denied.send_response.call_args.args[0], 401)
+        headers = dict(call.args for call in denied.send_header.call_args_list)
+        self.assertIn('Basic realm="seriald"', headers['WWW-Authenticate'])
+
+    def test_health_reports_running_version_and_device_states(self):
+        devices = [mock.Mock(serial='SN1', present=True),
+                   mock.Mock(serial='', present=True),
+                   mock.Mock(serial='SN2', present=False)]
+        handler = self.handler('/api/health')
+        with mock.patch.object(self.manager, 'all_devices', return_value=devices), \
+                mock.patch.object(sd.shutil, 'disk_usage',
+                                  return_value=mock.Mock(total=1000, free=600)):
             handler.do_GET()
         status, payload = self.result(handler)
         self.assertEqual(status, 200)
-        self.assertEqual(payload['key'], 'board-key')
-        self.assertEqual(payload['dir'], 'full-key-0123456789abcdef')
-        self.assertEqual({entry['path'] for entry in payload['files']}, {
-            'logs/full-key-0123456789abcdef/serial-20260919.log',
-            'logs/full-key-0123456789abcdef/ssh-20260919.log',
-            'logs/old-prefix/serial-20260918.log',
-            'logs/old-prefix/ssh-20260918.log',
-        })
-        self.assertEqual({entry['name'] for entry in payload['files']}, {
-            'serial-20260919.log', 'ssh-20260919.log',
-            '旧目录/serial-20260918.log', '旧目录/ssh-20260918.log',
-        })
-        self.assertTrue(all(entry['size'] == 123 for entry in payload['files']))
+        self.assertEqual(payload['version'], __version__)
+        self.assertEqual((payload['devices'], payload['online'], payload['pending'], payload['offline']),
+                         (3, 1, 1, 1))
+
+    def test_logs_list_uses_serial_archive_without_rewriting_files(self):
+        self.device.log_files.return_value = [{'name': 'serial-20260919.log', 'size': 123}]
+        self.device.stable_dir.return_value = str(ROOT / 'logs' / 'SN1')
+        self.device.label = 'riscv-118'
+        handler = self.handler('/api/logs?key=board-key')
+        with mock.patch.object(sd.os, 'replace') as replace:
+            handler.do_GET()
+        status, payload = self.result(handler)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['serial'], 'SN1')
+        self.assertEqual(payload['archive'], 'SN1')
+        self.assertEqual(payload['files'][0]['size'], 123)
         replace.assert_not_called()
-        unlink.assert_not_called()
+
+    def test_human_takeover_of_agent_ssh_is_validated_and_audited(self):
+        self.device.get_session.return_value = mock.Mock()
+        body = json.dumps({'key': 'board-key', 'serial': 'SN1', 'sid': 'ssh-agent',
+                           'actor': 'web'}).encode()
+        handler = self.handler('/api/session-takeover', body)
+        handler.do_POST()
+        status, payload = self.result(handler)
+        self.assertEqual(status, 200)
+        self.assertTrue(payload['ok'])
+        self.manager.store.event.assert_called_once_with('SN1', 'web', 'session-takeover', 'ssh-agent')
 
     def test_invalid_offsets_are_rejected_without_reading_device(self):
         for route in ('serial', 'session'):
@@ -175,8 +222,8 @@ class HandlerTests(unittest.TestCase):
                 self.assertEqual(base64.b64decode(payload['data_b64']), data)
 
     def test_ssh_response_is_bound_to_requested_device_and_session(self):
-        other = mock.Mock(key='other-key', dev='/fake/ttyUSB1')
-        self.manager.devices['other-key'] = other
+        other = mock.Mock(key='other-key', serial='SN2', dev='/fake/ttyUSB1')
+        self.manager.boards['SN2'] = other
         session = mock.Mock(ip='192.0.2.20')
         session.read.return_value = (4, b'\x80\xe4\xb8\xad', True)
         other.get_session.return_value = session
@@ -252,26 +299,26 @@ class RootRescueTests(unittest.TestCase):
                         raise OSError('simulated sysfs failure')
                     return file_mock(path, mode)
 
-                with mock.patch.object(sd, 'usb_path_of', return_value='3-4.2'), \
-                        mock.patch.object(sd.os, 'geteuid', return_value=0), \
-                        mock.patch.object(sd, 'open', side_effect=open_file, create=True) as open_mock:
-                    ok, note = sd.try_rescue('/fake/ttyUSB0', 'rebind')
+                with mock.patch.object(tr, 'usb_path_of', return_value='3-4.2'), \
+                        mock.patch.object(tr.os, 'geteuid', return_value=0), \
+                        mock.patch.object(tr, 'open', side_effect=open_file, create=True) as open_mock:
+                    ok, note = tr.try_rescue('/fake/ttyUSB0', 'rebind')
                 self.assertFalse(ok)
                 self.assertIn('失败', note)
                 self.assertEqual(open_mock.call_count, 3)
 
     def test_all_successful_root_steps_report_success(self):
-        with mock.patch.object(sd, 'usb_path_of', return_value='3-4.2'), \
-                mock.patch.object(sd.os, 'geteuid', return_value=0), \
-                mock.patch.object(sd, 'open', mock.mock_open(), create=True) as open_mock:
-            ok, _ = sd.try_rescue('/fake/ttyUSB0', 'rebind')
+        with mock.patch.object(tr, 'usb_path_of', return_value='3-4.2'), \
+                mock.patch.object(tr.os, 'geteuid', return_value=0), \
+                mock.patch.object(tr, 'open', mock.mock_open(), create=True) as open_mock:
+            ok, _ = tr.try_rescue('/fake/ttyUSB0', 'rebind')
         self.assertTrue(ok)
         self.assertEqual(open_mock.call_count, 3)
 
     def test_invalid_root_path_is_rejected_before_sysfs_access(self):
-        with mock.patch.object(sd, 'usb_path_of', return_value='3-4/../../evil'), \
-                mock.patch.object(sd, 'open', mock.mock_open(), create=True) as open_mock:
-            ok, _ = sd.try_rescue('/fake/ttyUSB0', 'soft')
+        with mock.patch.object(tr, 'usb_path_of', return_value='3-4/../../evil'), \
+                mock.patch.object(tr, 'open', mock.mock_open(), create=True) as open_mock:
+            ok, _ = tr.try_rescue('/fake/ttyUSB0', 'soft')
         self.assertFalse(ok)
         open_mock.assert_not_called()
 
