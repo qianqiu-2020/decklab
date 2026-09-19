@@ -1339,7 +1339,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._json(200, {'label': d.label, 'dir': os.path.basename(real),
                                     'alias': d.label, 'files': out})
 
-        if route == '/':
+        # /index.html 也要走 _page():交给 SimpleHTTPRequestHandler 会漏掉 Cache-Control,
+        # 浏览器按启发式规则缓存整页 —— 服务重启换了新页面,用户那边还是旧的(踩过:
+        # 新加的按钮在页面上根本不存在)。
+        if route in ('/', '/index.html'):
             return self._page()
         return super().do_GET()
 
@@ -1484,7 +1487,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return self._json(404, {'error': 'not found'})
 
     def end_headers(self):
-        if self.path in ('/', ''):
+        if self.path in ('/', '', '/index.html'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()
 

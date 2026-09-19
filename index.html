@@ -254,9 +254,13 @@
     ctx.term.attachCustomKeyEventHandler(function (e) {
       if (!isCurrent(ctx)) return false;
       if (e.type !== 'keydown') return true;
+      // Ctrl+V 不能留给 xterm：它把 V 编成 0x16 发给板子，还会 preventDefault 掉浏览器的
+      // 原生粘贴（表现就是终端只回显 ^V）。返回 false 后 xterm 入口即 return，既不编码也
+      // 不 preventDefault，浏览器才会执行粘贴。Ctrl+Shift+V 同样交给浏览器（纯文本粘贴）。
+      // Cmd+V 不必管：xterm 本就放行带 meta 的快捷键。
+      if (e.ctrlKey && e.code === 'KeyV') return false;
       if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') { copySel(ctx); return false; }
-      if (e.ctrlKey && e.shiftKey && e.code === 'KeyV') { $('b-paste').click(); return false; }
-      return true;                 // 其余按键交给 xterm,Ctrl+V 也走它的原生粘贴
+      return true;                 // 其余按键交给 xterm
     });
     return ctx;
   }
@@ -318,15 +322,22 @@
     ctx.term.clearSelection();
   }
   function pasteInto(text, ctx) {
-    if (!isCurrent(ctx) || !text) return;
+    if (!isCurrent(ctx)) return;
+    if (!text) { $('d-status').textContent = ' 剪贴板里没有文本（终端里 Ctrl+C 是中断信号，复制请用 Ctrl+Shift+C 或拖选）'; return; }
     send(text, ctx);
     $('d-status').textContent = ' 已粘贴 ' + text.length + ' 字符';
   }
-  // 原生粘贴(Ctrl+V / 中键)在终端里也要能送到板子 —— 不受"键盘直通"开关影响
-  $('d-term').addEventListener('paste', function (e) {
-    var t = (e.clipboardData || window.clipboardData || {}).getData
-            ? (e.clipboardData || window.clipboardData).getData('text') : '';
-    if (!t || !selKey) return;
+  // 原生粘贴(Ctrl+V / 中键)在终端里也要能送到板子 —— 不受"键盘直通"开关影响。
+  // 挂在 document 上而不是 d-term 上：焦点不在终端里时(例如从别处复制完切回浏览器、
+  // 没先点一下终端就按 Ctrl+V)，paste 事件的目标是 body，挂在 d-term 上的监听器
+  // 根本收不到,表现就是"按了完全没反应"。但同时要给页面自己的输入框让路。
+  document.addEventListener('paste', function (e) {
+    if (!selKey) return;
+    var ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')
+        && String(ae.className).indexOf('xterm-helper-textarea') < 0) return;   // 发送命令框等,照常粘贴
+    var cb = e.clipboardData || window.clipboardData;
+    var t = cb && cb.getData ? cb.getData('text') : '';
     e.preventDefault(); e.stopPropagation();
     pasteInto(t, view);
   }, true);

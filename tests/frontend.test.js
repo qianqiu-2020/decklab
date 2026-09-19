@@ -66,7 +66,10 @@ function harness() {
   }
   const document = {
     getElementById: get, createElement: tag => new Element(tag),
-    body: new Element('body'), addEventListener() {}, visibilityState: 'visible',
+    body: new Element('body'), events: {}, activeElement: null,
+    addEventListener(name, fn) { (this.events[name] ||= []).push(fn); },
+    emit(name, event = {}) { for (const fn of this.events[name] || []) fn(event); },
+    visibilityState: 'visible',
     execCommand: () => true,
   };
   const window = { addEventListener() {}, prompt: () => '新编号' };
@@ -271,6 +274,50 @@ test('rescue distinguishes helper success and requires an explicit rebind click'
   rebind.resolve({ ok: true, recovered: true, note: 'capture alive' }); await drain();
   assert.equal(h.get('b-rebind').hidden, true);
   assert.ok(h.get('d-status').textContent.includes('采集已恢复'));
+});
+
+test('Ctrl+V is handed back to the browser so native paste can reach the terminal', async () => {
+  const h = await setup(); const term = h.select('A');
+  const key = e => term.key(Object.assign({ type: 'keydown' }, e));
+  // 交给 xterm 时它会编成 0x16 并 preventDefault,粘贴被一起吃掉 —— 必须返回 false
+  assert.equal(key({ ctrlKey: true, code: 'KeyV', key: 'v' }), false);
+  assert.equal(key({ ctrlKey: true, shiftKey: true, code: 'KeyV', key: 'V' }), false);
+  // Cmd+V 交给 xterm:xterm 对带 meta 的快捷键跑完 evaluateKeyboardEvent 后 key 为
+  // undefined、cancel 为 false,既不发字节也不 preventDefault,浏览器默认粘贴照常
+  assert.equal(key({ metaKey: true, code: 'KeyV', key: 'v' }), true);
+  // 其余控制键照旧发给板子
+  assert.equal(key({ ctrlKey: true, code: 'KeyC', key: 'c' }), true);
+  assert.equal(key({ ctrlKey: true, code: 'KeyD', key: 'd' }), true);
+  // 原生 paste 挂在 document 上:焦点不在终端里时 paste 的目标是 body,
+  // 挂在 d-term 上的监听器收不到,表现就是"按了完全没反应"
+  h.document.activeElement = null;
+  h.document.emit('paste', { clipboardData: { getData: () => 'ls\n' },
+    preventDefault() {}, stopPropagation() {} });
+  await drain();
+  assert.deepEqual(h.sends().map(r => r.body.data), ['ls\n']);
+  assert.ok(h.get('d-status').textContent.includes('已粘贴'));
+});
+
+test('paste is left to the browser while the command box has focus', async () => {
+  const h = await setup(); h.select('A');
+  const box = h.get('d-in'); box.tagName = 'INPUT';
+  h.document.activeElement = box;
+  let prevented = false;
+  h.document.emit('paste', { clipboardData: { getData: () => 'typed by hand' },
+    preventDefault() { prevented = true; }, stopPropagation() {} });
+  await drain();
+  assert.equal(h.sends().length, 0);
+  assert.equal(prevented, false, '不能抢走发送命令框的粘贴');
+});
+
+test('an empty clipboard says so instead of looking dead', async () => {
+  const h = await setup(); h.select('A');
+  h.document.activeElement = null;
+  h.document.emit('paste', { clipboardData: { getData: () => '' },
+    preventDefault() {}, stopPropagation() {} });
+  await drain();
+  assert.equal(h.sends().length, 0);
+  assert.ok(h.get('d-status').textContent.includes('剪贴板'));
 });
 
 (async () => {

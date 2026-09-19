@@ -49,6 +49,27 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(headers['Content-Type'], 'text/html; charset=utf-8')
         self.assertEqual(headers['Content-Length'], str(len(expected)))
 
+    def test_index_html_follows_the_same_path_as_root(self):
+        # 交给 SimpleHTTPRequestHandler 会漏掉 Cache-Control,浏览器整页启发式缓存,
+        # 服务换了新页面用户还是旧的(踩过:新按钮在页面上不存在)。
+        expected = (ROOT / 'index.html').read_bytes()
+        handler = self.handler('/index.html')
+        with mock.patch.object(sd, 'BASE', str(ROOT)):
+            handler.do_GET()
+        handler.send_response.assert_called_once_with(200)
+        self.assertEqual(handler.wfile.getvalue(), expected)
+
+    def test_page_responses_forbid_heuristic_caching(self):
+        # end_headers 里的判断按 self.path 走,两个入口都必须带上 no-cache。
+        for path in ('/', '', '/index.html'):
+            handler = self.handler(path)
+            # self.handler() 把 end_headers 换成了 Mock,这里要显式调类上的真实现。
+            with mock.patch.object(sd.http.server.BaseHTTPRequestHandler, 'end_headers') as parent:
+                sd.Handler.end_headers(handler)
+            sent = dict(call.args for call in handler.send_header.call_args_list)
+            self.assertEqual(sent.get('Cache-Control'), 'no-cache, must-revalidate', path)
+            parent.assert_called_once_with()
+
     def test_logs_list_includes_hashed_and_legacy_files_without_rewriting(self):
         current = '/fake/logs/full-key-0123456789abcdef'
         legacy = '/fake/logs/old-prefix'
