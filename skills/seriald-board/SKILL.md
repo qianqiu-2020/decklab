@@ -31,8 +31,9 @@ python3 /data/seriald/serialctl.py --device riscv-118 read
 已知序列号保留其标签；改名用 `rename --label musepi2`。历史设备保持可见，重连后要重新识别。
 优先读取 EEPROM ONIE `0x23`：upstream 使用 `cells/serial-number@*`，无 cell 的 vendor 内核则
 校验并解析原始 at24 NVMEM；U-Boot 注入的相同 DT serial 也可识别。之后才尝试 SoC/eFuse。
-以返回的 `serial` 为身份，`reported_serial` 是固件原值，`serial_source` 说明来源。DT、SoC/eFuse 和
-`/boot` 身份在正式核实前标为 `provisional`；确认后由管理员迁移目录。硬件身份不可用时会读取已有的
+以返回的 `serial` 为身份，`reported_serial` 是固件原值，`serial_source` 说明来源。直接读取的 ONIE
+编号和已登记厂商契约的 U-Boot EEPROM 注入编号会自动确认为正式身份；未知 DT、SoC/eFuse 和
+`/boot` 身份在正式核实前标为 `provisional`。硬件身份不可用时会读取已有的
 `/boot/seriald-id`（来源 `boot-marker`）。用户选择文件标记兜底后，可运行
 `identify --init-boot-marker` 创建一次；已有文件不覆盖，普通识别不创建文件。
 保留文件才能延续档案，克隆到另一块板前移除它。初始化超时先读现场，不盲目换号。

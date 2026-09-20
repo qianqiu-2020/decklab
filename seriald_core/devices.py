@@ -68,6 +68,13 @@ class Manager:
                 soc_conflicted=self.store.has_conflict(hardware_serial(info)),
                 eeprom_conflicted=self.store.has_conflict(provisioned))
             serial = selected['serial']
+            established = self.store.get(serial)
+            if (selected.get('identity_status') == 'provisional' and established
+                    and established['info'].get('identity_status') == 'confirmed'):
+                # A weaker kernel interface must not revoke identity proof recorded
+                # earlier through EEPROM or explicit operator verification.
+                selected['serial_source'] = established['info'].get('serial_source')
+                selected['identity_status'] = 'confirmed'
             promotion_record = None
             if provisioned:
                 aliases = (str(info.get('serial') or '').strip(), hardware_serial(info), marker_serial(info))

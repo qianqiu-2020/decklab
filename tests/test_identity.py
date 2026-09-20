@@ -58,6 +58,24 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(result['serial'], 'MVJ-K1-000003')
         self.assertEqual(result['serial_source'], 'eeprom-onie')
 
+    def test_jupiter_vendor_firmware_serial_is_confirmed_eeprom_identity(self):
+        fields = info('MJM10004000001', '0059D968E583CA22')
+        fields['model'] = 'Milk-V Jupiter'
+        result = select_identity(fields)
+        self.assertEqual(result['serial'], 'MJM10004000001')
+        self.assertEqual(result['serial_source'], 'eeprom-firmware')
+        self.assertEqual(result['identity_status'], 'confirmed')
+        conflicted = select_identity(fields, conflicted=True)
+        self.assertEqual(conflicted['serial_source'], 'soc-sysfs')
+        self.assertEqual(conflicted['identity_status'], 'provisional')
+
+    def test_unrecognized_jupiter_firmware_serial_remains_provisional(self):
+        fields = info('MJM-invalid', '0059D968E583CA22')
+        fields['model'] = 'Milk-V Jupiter'
+        result = select_identity(fields)
+        self.assertEqual(result['serial_source'], 'device-tree')
+        self.assertEqual(result['identity_status'], 'provisional')
+
     def test_valid_board_serial_is_preserved(self):
         result = select_identity(info('5b9d4a0a6f5e25a8'))
         self.assertEqual(result['serial'], '5b9d4a0a6f5e25a8')

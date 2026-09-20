@@ -41,7 +41,8 @@ function harness() {
   const requests = [], terminals = [], timers = new Map(), intervals = [];
   let nextTimer = 0;
   class Terminal {
-    constructor() {
+    constructor(options = {}) {
+      this.options = options;
       this.cols = 80; this.rows = 24; this.queued = []; this.parsed = '';
       this.decoder = new TextDecoder(); terminals.push(this);
       this.csi = new Map();
@@ -187,7 +188,7 @@ test('provisional identity is labeled as a candidate and warns about archive pro
   await drain(); h.select('milkv2');
   const rows = h.get('d-info').children.map(row => row.children.map(x => x.textContent).join('='));
   assert.ok(rows.includes('候选身份编号=0059D968E583C49A'));
-  assert.ok(rows.includes('身份状态=待确认（使用临时档案目录）'));
+  assert.ok(rows.some(row => row.startsWith('身份状态=待确认（直接读取 EEPROM')));
   const cardText = h.get('grid').children[0].children.map(x => x.textContent).join(' ');
   assert.ok(cardText.includes('尚未正式确认'));
 });
@@ -441,6 +442,7 @@ test('multiple archived logs open as cached read-only terminal tabs', async () =
   await drain();
   h.get('d-logs').children[0].children[1].click();
   const newest = h.terminals.at(-1);
+  assert.equal(newest.options.convertEol, true);
   h.take('/api/log').resolve({ data_b64: Buffer.from('new log').toString('base64'),
     data: 'new log', start_off: 0, off: 7, size: 7, more: false });
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files });

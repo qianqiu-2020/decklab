@@ -52,7 +52,9 @@
     view = ctx;
     setInputMode(ctx);
     term = ctx.term = new Terminal({
-      convertEol: false,          // 串口/pty 发的是真 \r\n,不需要转换
+      // 归档文件常用单独 LF；xterm 的 LF 默认不回到第 1 列，会呈现阶梯状。
+      // 实时串口/pty 保留原始 CR/LF，避免改变全屏终端协议。
+      convertEol: ctx.kind === 'log',
       scrollback: 8000,
       cursorBlink: !ctx.readonly,
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
@@ -747,12 +749,14 @@
     box.hidden = false;
     box.textContent = '';
     var sources = { 'eeprom-onie': '板载 EEPROM（ONIE TLV 0x23）',
+      'eeprom-firmware': '板载 EEPROM（由开发板固件注入）',
       'soc-sysfs': 'SoC / eFuse（内核只读接口）', 'device-tree': '开发板固件',
       'boot-marker': '/boot 软件标记（随系统文件保留）',
       'verified-correction': '管理员核实并更正', 'verified-manual': '管理员核实' };
     [[info.identity_status === 'confirmed' ? '板卡序列号' : '候选身份编号', info.serial, true],
      ['身份来源', sources[info.serial_source] || '', false],
-     ['身份状态', info.identity_status === 'confirmed' ? '已确认' : '待确认（使用临时档案目录）', false],
+     ['身份状态', info.identity_status === 'confirmed' ? '已确认'
+       : '待确认（直接读取 EEPROM 或匹配厂商固件约定后自动确认）', false],
      ['固件原始编号', info.reported_serial && info.reported_serial !== info.serial ? info.reported_serial : '', false],
      ['主机名', info.hostname, false],
      ['IP', (info.ips || []).join('   '), false], ['sshd', info.sshd, false],

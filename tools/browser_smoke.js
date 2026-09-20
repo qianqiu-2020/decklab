@@ -87,8 +87,10 @@ let chrome, ws;
   await evaluate('document.querySelector("#d-logs button").click()');
   await delay(300);
   assert.ok(await evaluate('Array.from({length:testTerm.buffer.active.length},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString(true)||"").join("\\n").includes("Linux bianbu 6.6.63 riscv64")'));
+  assert.ok(await evaluate('Array.from({length:testTerm.buffer.active.length},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString(true)||"").some(line=>line.startsWith("Linux bianbu 6.6.63 riscv64"))'), 'archived LF must return to column zero');
   assert.ok(await evaluate('document.querySelector("#d-tabs").textContent.includes("串口日志")'));
   assert.equal(await evaluate('document.querySelector("#b-send").disabled'),true);
+  assert.equal(await evaluate('testTerm.options.convertEol'),true);
   assert.equal(await evaluate('globalThis.injected === undefined'),true);
   assert.deepEqual(posts,[], 'viewing an archived terminal must remain read-only');
 

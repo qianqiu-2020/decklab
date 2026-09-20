@@ -86,6 +86,29 @@ class PersistenceTests(unittest.TestCase):
         matching = [p for p in canonical.glob('*.log') if 'provisional history' in p.read_text()]
         self.assertEqual(len(matching), 1)
 
+    def test_vendor_firmware_eeprom_contract_promotes_same_serial(self):
+        d = self.connection()
+        self.identify(d, serial='MJM10004000001', host='k1')
+        d.append(b'provisional vendor history\n')
+        provisional = Path(d.stable_dir())
+        self.manager.identify(d, {
+            'serial': 'MJM10004000001', 'model': 'Milk-V Jupiter',
+            'soc_serial': '0059D968E583CA22', 'soc_family': 'spacemit socs',
+            'soc_id': 'K1-6370', 'hostname': 'k1', 'ips': []})
+        self.assertEqual(Path(d.stable_dir()), self.root / 'logs' / 'MJM10004000001')
+        self.assertFalse(provisional.exists())
+        self.assertEqual(d.record['info']['serial_source'], 'eeprom-firmware')
+        self.assertEqual(d.record['info']['identity_status'], 'confirmed')
+
+    def test_weaker_kernel_probe_does_not_downgrade_confirmed_identity(self):
+        d = self.connection()
+        self.manager.identify(d, {
+            'serial': 'SN001', 'eeprom_serial': 'SN001', 'hostname': 'board', 'ips': []})
+        self.manager.identify(d, {'serial': 'SN001', 'hostname': 'board', 'ips': []})
+        self.assertEqual(d.record['info']['serial_source'], 'eeprom-onie')
+        self.assertEqual(d.record['info']['identity_status'], 'confirmed')
+        self.assertEqual(Path(d.stable_dir()), self.root / 'logs' / 'SN001')
+
     def test_eeprom_promotion_after_reconnect_migrates_previous_archive(self):
         old = self.connection('usb-1')
         self.identify(old)

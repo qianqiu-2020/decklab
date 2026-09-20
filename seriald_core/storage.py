@@ -24,7 +24,8 @@ def serial_component(serial):
     return value.replace('.', '%2E') if value in ('.', '..') else value
 
 
-CONFIRMED_IDENTITY_SOURCES = frozenset(('eeprom-onie', 'verified-correction', 'verified-manual'))
+CONFIRMED_IDENTITY_SOURCES = frozenset(
+    ('eeprom-onie', 'eeprom-firmware', 'verified-correction', 'verified-manual'))
 
 
 def archive_component(serial, source=''):
