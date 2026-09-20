@@ -10,8 +10,8 @@
 | 3. 控制面 | 静态页面、网络 API、collector 代理 | control 可独立重启；collector PID、tty fd 和会话保持不变 | 已完成 |
 | 4. SSH 网关 | 会话建立、刷机后 host key、命令审计、日志 | 独立会话管理、临时 known-host 策略、在线旁观与介入 | 已完成 |
 | 5. API 与 Agent | HTTP 路由、CLI、skill、访问控制 | CLI 错误码、可选 token、health、agent 能力文档 | 已完成 |
-| 6. Web UI | 设备列表、终端、操作记录、日志查看 | 公共 UI/终端策略模块、候选身份提示、历史筛选、agent 会话人工介入 | 已完成 |
-| 7. 部署升级 | Ubuntu 包、开发/生产配置、升级切换 | collector 与控制面独立 systemd unit；升级只重启控制面 | 已完成 |
+| 6. Web UI | 设备列表、终端、操作记录、日志查看 | 公共 UI/终端策略、历史筛选、只读归档标签、agent 会话人工介入 | 已完成 |
+| 7. 部署升级 | Ubuntu 包、开发/生产配置、升级切换 | 独立 systemd unit；按 collector 指纹决定是否重启 | 已完成 |
 | 8. 运维清理 | 日志容量、健康状态、备份、废弃代码 | 磁盘水位、health 命令、删除旧单体入口；日志保留由运维控制 | 已完成 |
 
 ## 模块目标

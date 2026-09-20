@@ -8,7 +8,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.3.7_all.deb
+sudo apt install ./dist/seriald_1.3.8_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
@@ -30,7 +30,8 @@ serialctl --device riscv-118 activity
 ```
 
 源码环境用 `python3 serialctl.py` 替代 `serialctl`。远程访问设置 `SERIALD_URL`。
-`exec` 使用独立 SSH 会话，返回 JSON 输出、退出码和清理状态；网页可实时旁观或查看已关闭会话的日志。
+`exec` 使用独立 SSH 会话，返回 JSON 输出、退出码和清理状态；网页可实时旁观，串口归档和已关闭
+SSH 会话会作为只读终端标签打开。
 
 [Agent 接入指南](docs/AGENT_ACCESS.md) · [seriald-board skill](skills/seriald-board/SKILL.md)
 

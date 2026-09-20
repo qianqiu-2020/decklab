@@ -59,7 +59,7 @@
       <button id="b-takeover" type="button" hidden title="允许从网页向当前 agent SSH shell 输入，并记录介入事件">介入此会话</button>
     </div>
     <div class="hint">
-      勾选「键盘直通」后，点击终端即可输入。agent 会话以只读方式查看。<br>
+      勾选「键盘直通」后，点击终端即可输入。agent 会话和归档日志以只读方式查看。<br>
       <b>复制</b>：鼠标拖选后自动复制；<b>粘贴</b>：<span class="mono">Ctrl+V</span> 或点「粘贴」。
       <span class="mono">Ctrl+C</span> 会中断板子上的当前命令。<span id="d-status"></span>
     </div>
@@ -73,13 +73,6 @@
       <div class="pager"><button id="event-prev" type="button">较新</button><span id="event-page"></span><button id="event-next" type="button">更早</button></div>
       <div class="section-head"><h2>串口日志归档</h2><span id="log-location"></span></div>
       <div class="logs" id="d-logs"></div>
-      <div id="log-viewer" hidden>
-        <div class="tabs log-tabs" id="log-tabs"></div>
-        <div class="log-tools"><strong id="log-title"></strong><span id="log-range"></span>
-          <button id="log-refresh" type="button">最新内容</button><button id="log-more" type="button">继续读取</button>
-          <button id="log-close" type="button">关闭日志</button></div>
-        <pre id="log-content" tabindex="0"></pre>
-      </div>
     </section>
   </div>
 

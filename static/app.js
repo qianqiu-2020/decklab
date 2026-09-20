@@ -2,10 +2,10 @@
   'use strict';
   var UI = window.SerialdUI, $ = UI.byId, fmt = UI.formatBytes, ago = UI.age, copyText = UI.copyText;
   var selKey = null, lastDevices = [], loopGen = 0, lastInfoTs = 0;
-  var curSid = 'serial';              // 当前会话:serial=串口,sshN=SSH 会话
+  var curSid = 'serial';              // serial、sshN 或本地只读 log:* 标签
   var sessions = [{ sid: 'serial', kind: 'serial' }];
   var view = null, term = null;
-  var activeLog = null, logTabs = [], sessionPage = 0, eventPage = 0;
+  var sessionPage = 0, eventPage = 0;
   var ACTIVITY_PAGE_SIZE = 10;
   var takenOver = {};
 
@@ -13,7 +13,7 @@
     ['d-in', 'd-kbd', 'b-send', 'b-cr', 'b-ctrlc', 'b-paste'].forEach(function (id) {
       $(id).disabled = ctx.readonly;
     });
-    $('b-takeover').hidden = !ctx.readonly;
+    $('b-takeover').hidden = !ctx.canTakeover;
   }
 
   function isCurrent(ctx) {
@@ -41,9 +41,12 @@
     $('b-rebind').hidden = true;
     var board = lastDevices.filter(function (d) { return d.key === key; })[0] || {};
     var selectedSession = sessions.filter(function (s) { return s.sid === sid; })[0] || {};
+    var isAgentSession = selectedSession.kind === 'ssh' && !!selectedSession.actor
+      && selectedSession.actor !== 'web' && !takenOver[sid];
     var ctx = { key: key, serial: board.serial, connectionId: board.connection_id,
                 byPath: board.by_path || board.last_path,
-                readonly: sid !== 'serial' && !!selectedSession.actor && selectedSession.actor !== 'web' && !takenOver[sid],
+                readonly: selectedSession.kind === 'log' || isAgentSession,
+                canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, sessionsSeq: 0, activitySeq: 0,
                 sendTail: Promise.resolve(), lastSel: '' };
     view = ctx;
@@ -51,7 +54,7 @@
     term = ctx.term = new Terminal({
       convertEol: false,          // 串口/pty 发的是真 \r\n,不需要转换
       scrollback: 8000,
-      cursorBlink: true,
+      cursorBlink: !ctx.readonly,
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
       fontSize: 12.5,
       theme: { background: '#0A0D0F', foreground: '#C8D0D6', cursor: '#7FE0D4',
@@ -118,6 +121,10 @@
   }
   function pasteInto(text, ctx) {
     if (!isCurrent(ctx)) return;
+    if (ctx.readonly) {
+      $('d-status').textContent = ctx.kind === 'log' ? ' 当前是只读归档日志' : ' 当前正在只读查看 agent 会话';
+      return;
+    }
     if (!text) { $('d-status').textContent = ' 剪贴板里没有文本（终端里 Ctrl+C 是中断信号，复制请用 Ctrl+Shift+C 或拖选）'; return; }
     send(text, ctx);
     $('d-status').textContent = ' 已粘贴 ' + text.length + ' 字符';
@@ -299,7 +306,7 @@
     $('d-hint').hidden = true;
     $('d-in').value = '';
     $('d-logs').textContent = '';
-    $('log-viewer').hidden = true; activeLog = null; logTabs = []; sessionPage = 0; eventPage = 0;
+    sessionPage = 0; eventPage = 0;
     $('d-activity').textContent = '';
     $('d-events').textContent = '';
     loadActivity();
@@ -314,6 +321,20 @@
     // 切过去就得干等它返回 —— 这正是"切设备很慢"的原因。
     loop(ctx);
   }
+
+  function writeTerminalPayload(ctx, payload) {
+    if (!isCurrent(ctx)) return;
+    if (typeof payload.data_b64 === 'string') {
+      var raw = atob(payload.data_b64);
+      if (raw.length) {
+        ctx.term.write(Uint8Array.from(raw, function (c) { return c.charCodeAt(0); }),
+          function () { ctx.initialRendered = true; });
+      } else ctx.initialRendered = true;
+    } else if (payload.data) {
+      ctx.term.write(payload.data, function () { ctx.initialRendered = true; });
+    } else ctx.initialRendered = true;
+  }
+
   function loop(ctx) {
     if (!isCurrent(ctx)) return;
     ctx.ctrl = new AbortController();
@@ -332,11 +353,7 @@
         // vim/htop 这类全屏程序才能正确重画(剥 ANSI 再追加会糊成一团)
         // JSON 每块先转字符串会截断跨块 UTF-8（中文尤其明显）。传原始字节，
         // 由此会话自己的 xterm 解码器保留半个字符；切会话时解码器也一起销毁。
-        if (typeof d.data_b64 === 'string') {
-          var raw = atob(d.data_b64);
-          if (raw.length) ctx.term.write(Uint8Array.from(raw, function (c) { return c.charCodeAt(0); }), function () { ctx.initialRendered = true; });
-          else ctx.initialRendered = true;
-        } else if (d.data) ctx.term.write(d.data, function () { ctx.initialRendered = true; });   // 兼容仍在运行的旧服务
+        writeTerminalPayload(ctx, d);   // data 字段兼容仍在运行的旧服务
       })
       .catch(function (e) {
         if (!isCurrent(ctx) || (e && e.name === 'AbortError')) return;
@@ -350,7 +367,11 @@
   }
 
   function switchSession(sid) {
-    if (!selKey || sid === curSid) return;
+    if (!selKey) return;
+    if (sid === curSid) {
+      if ($('d-term').scrollIntoView) $('d-term').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     var ctx = createView(selKey, sid);
     $('d-status').textContent = '';
     $('d-in').value = '';
@@ -358,7 +379,10 @@
     renderTabs();
     loadSessions();
     loadLogs();
-    loop(ctx);
+    var selected = sessions.filter(function (s) { return s.sid === sid; })[0];
+    if (selected && selected.kind === 'log') loadArchivedLog(ctx, selected);
+    else loop(ctx);
+    if ($('d-term').scrollIntoView) $('d-term').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function renderTabs() {
     var ctx = view;
@@ -369,18 +393,25 @@
       var b = document.createElement('button');
       b.type = 'button';
       b.className = (s.sid === curSid ? 'on' : '');
-      b.textContent = (s.kind === 'serial' ? '串口' : ('SSH ' + (s.actor ? s.actor + ' · ' : '') + (s.ip || s.sid)));
-      if (s.actor && s.actor !== 'web') b.textContent += ' · 只读';
-      b.title = s.kind === 'serial' ? '板子控制台(单读者采集,带历史日志)'
-                                    : 'SSH 会话,独立记录到 ssh-*.log';
+      b.textContent = s.kind === 'serial' ? '串口'
+        : (s.kind === 'log' ? s.label : ('SSH ' + (s.actor ? s.actor + ' · ' : '') + (s.ip || s.sid)));
+      if (s.kind === 'log' || (s.actor && s.actor !== 'web' && !takenOver[s.sid])) b.textContent += ' · 只读';
+      b.title = s.kind === 'serial' ? '板子控制台（实时输出）'
+        : (s.kind === 'log' ? '归档日志快照，只读显示在终端中' : 'SSH 会话，独立记录到 ssh-*.log');
       b.addEventListener('click', function () { if (isCurrent(ctx)) switchSession(s.sid); });
       bar.appendChild(b);
-      if (s.kind === 'ssh' && (!s.actor || s.actor === 'web')) {
+      if (s.kind === 'log' || (s.kind === 'ssh' && (!s.actor || s.actor === 'web'))) {
         var x = document.createElement('button');
-        x.type = 'button'; x.className = 'x'; x.textContent = '×'; x.title = '关闭这条 SSH 会话';
+        x.type = 'button'; x.className = 'x'; x.textContent = '×';
+        x.title = s.kind === 'log' ? '关闭这个归档标签' : '关闭这条 SSH 会话';
         x.addEventListener('click', function (e) {
           e.stopPropagation();
           if (!isCurrent(ctx)) return;
+          if (s.kind === 'log') {
+            sessions = sessions.filter(function (y) { return y.sid !== s.sid; });
+            if (curSid === s.sid) switchSession('serial'); else renderTabs();
+            return;
+          }
           ctx.sessionsSeq++;
           fetch('/api/session-close', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: ctx.key, serial: ctx.serial, sid: s.sid }) })
@@ -440,7 +471,8 @@
       .then(function (d) {
         if (!isCurrent(ctx) || seq !== ctx.sessionsSeq || !d.sessions
             || (d.key && d.key !== ctx.key)) return;
-        sessions = d.sessions;
+        var archived = sessions.filter(function (s) { return s.kind === 'log'; });
+        sessions = d.sessions.concat(archived);
         // 当前会话若已不存在(比如被别的窗口关了),退回串口
         if (!sessions.some(function (s) { return s.sid === curSid; })) {
           switchSession('serial'); return;
@@ -453,7 +485,10 @@
   function send(text, ctx) {
     ctx = ctx || view;
     if (!isCurrent(ctx)) return;
-    if (ctx.readonly) { $('d-status').textContent = ' 当前正在只读查看 agent 会话'; return; }
+    if (ctx.readonly) {
+      $('d-status').textContent = ctx.kind === 'log' ? ' 当前是只读归档日志' : ' 当前正在只读查看 agent 会话';
+      return;
+    }
     // 连续按键若并发发 HTTP，后发请求可能先写入。按视图串行发送，切换后
     // 丢弃尚未发出的输入；已在途请求始终保留原 key/sid，绝不改投新设备。
     ctx.sendTail = ctx.sendTail.then(function () {
@@ -486,14 +521,17 @@
         if (!files.length) {
           box.textContent = '（还没有串口日志文件）'; return;
         }
-        $('log-location').textContent = d.archive ? 'logs/' + d.archive + '/' : '待识别连接的临时日志';
+        $('log-location').textContent = '点击后在终端标签打开 · '
+          + (d.archive ? 'logs/' + d.archive + '/' : '待识别连接的临时日志');
         files.forEach(function (f) {
           var row = document.createElement('div'); row.className = 'log-row';
           var date = document.createElement('span'); date.className = 'log-date';
           date.textContent = f.date || '日期未知';
           var a = document.createElement('button');
           a.type = 'button';
-          a.addEventListener('click', function () { if (isCurrent(ctx)) showLog(ctx, f.name); });
+          a.addEventListener('click', function () {
+            if (isCurrent(ctx)) openArchivedLog(ctx, f.name, '串口日志 · ' + (f.date || f.name));
+          });
           a.textContent = f.name;
           var size = document.createElement('span'); size.className = 'log-size'; size.textContent = fmt(f.size);
           row.appendChild(date); row.appendChild(a); row.appendChild(size); box.appendChild(row);
@@ -515,67 +553,39 @@
     select(key);
   }
 
-  function renderLogTabs() {
-    var bar = $('log-tabs'); bar.textContent = '';
-    logTabs.forEach(function (tab) {
-      var button = document.createElement('button'); button.type = 'button';
-      button.className = tab === activeLog ? 'on' : '';
-      button.textContent = tab.name;
-      button.addEventListener('click', function () {
-        if (!isCurrent(tab.ctx)) return;
-        activeLog = tab; renderLogTabs(); renderLogTab(tab, true);
-      });
-      bar.appendChild(button);
-      var close = document.createElement('button'); close.type = 'button'; close.className = 'x';
-      close.textContent = '×'; close.title = '关闭这个日志标签';
-      close.addEventListener('click', function () { closeLogTab(tab); });
-      bar.appendChild(close);
-    });
-  }
-
-  function renderLogTab(tab, scroll) {
-    if (!tab || !isCurrent(tab.ctx)) return;
-    $('log-viewer').hidden = false;
-    $('log-title').textContent = tab.name;
-    $('log-content').textContent = tab.error || (tab.loaded ? tab.data : '读取中…');
-    $('log-range').textContent = tab.loaded && !tab.error
-      ? '字节 ' + tab.startOff + '–' + tab.off + ' / ' + tab.size : '';
-    $('log-more').disabled = !tab.more;
-    if (scroll && $('log-viewer').scrollIntoView) {
-      $('log-viewer').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }
-
-  function closeLogTab(tab) {
-    var index = logTabs.indexOf(tab);
-    if (index < 0) return;
-    logTabs.splice(index, 1);
-    if (activeLog === tab) activeLog = logTabs[Math.min(index, logTabs.length - 1)] || null;
-    renderLogTabs();
-    if (activeLog) renderLogTab(activeLog, false); else $('log-viewer').hidden = true;
-  }
-
-  function showLog(ctx, name, off, append, force) {
+  function openArchivedLog(ctx, name, label) {
     if (!isCurrent(ctx)) return;
-    var tab = logTabs.filter(function (item) { return item.name === name; })[0];
-    if (!tab) { tab = { ctx: ctx, name: name, seq: 0, loaded: false, data: '' }; logTabs.push(tab); }
-    activeLog = tab; renderLogTabs(); renderLogTab(tab, true);
-    if (tab.loaded && off === undefined && !append && !force) return;
-    var seq = ++tab.seq;
-    if (!append) { tab.error = ''; tab.loaded = false; renderLogTab(tab, false); }
+    var sid = 'log:' + name;
+    var archived = sessions.filter(function (s) { return s.sid === sid; })[0];
+    if (!archived) {
+      archived = { sid: sid, kind: 'log', name: name, label: label || name,
+                   loaded: false, payload: null };
+      sessions.push(archived);
+    }
+    switchSession(sid);
+  }
+
+  function loadArchivedLog(ctx, archived) {
+    if (!isCurrent(ctx) || !archived || archived.kind !== 'log') return;
+    if (archived.loaded && archived.payload) {
+      writeTerminalPayload(ctx, archived.payload);
+      $('d-status').textContent = archived.status;
+      return;
+    }
+    $('d-status').textContent = ' 正在读取只读归档 ' + archived.name + '…';
     fetch('/api/log?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
-      + '&file=' + encodeURIComponent(name) + (off === undefined ? '' : '&off=' + off))
+      + '&file=' + encodeURIComponent(archived.name))
       .then(function (r) { return r.json(); }).then(function (d) {
-        if (!isCurrent(ctx) || seq !== tab.seq) return;
+        if (!isCurrent(ctx) || curSid !== archived.sid) return;
         if (d.error) throw new Error(d.error);
-        tab.data = (append ? tab.data : '') + d.data;
-        tab.startOff = append ? tab.startOff : d.start_off;
-        tab.off = d.off; tab.size = d.size; tab.more = d.more; tab.loaded = true; tab.error = '';
-        if (activeLog === tab) renderLogTab(tab, false);
+        archived.loaded = true;
+        archived.payload = { data_b64: d.data_b64, data: d.data };
+        archived.status = ' 只读归档 · 字节 ' + d.start_off + '–' + d.off + ' / ' + d.size
+          + (d.start_off > 0 ? '（显示末尾 64 KiB）' : '');
+        writeTerminalPayload(ctx, archived.payload);
+        $('d-status').textContent = archived.status;
       }).catch(function (e) {
-        if (!isCurrent(ctx) || seq !== tab.seq) return;
-        tab.error = e.message; tab.loaded = true; tab.more = false;
-        if (activeLog === tab) renderLogTab(tab, false);
+        if (isCurrent(ctx) && curSid === archived.sid) $('d-status').textContent = ' 读取归档失败：' + e.message;
       });
   }
 
@@ -622,7 +632,8 @@
               .then(function (r) { return r.json(); }).then(function (logs) {
                 if (!isCurrent(ctx)) return;
                 var file = (logs.files || []).filter(function (f) { return f.name.indexOf('ssh-' + entry.sid + '-') === 0; })[0];
-                if (file) showLog(ctx, file.name); else $('d-status').textContent = ' 该会话没有可用日志';
+                if (file) openArchivedLog(ctx, file.name, 'SSH 记录 · ' + (entry.actor || entry.sid));
+                else $('d-status').textContent = ' 该会话没有可用日志';
               }).catch(function (e) { if (isCurrent(ctx)) $('d-status').textContent = e.message; });
           });
           row.appendChild(button); box.appendChild(row);
@@ -660,10 +671,6 @@
   $('activity-next').addEventListener('click', function () { sessionPage++; loadActivity(); });
   $('event-prev').addEventListener('click', function () { if (eventPage) { eventPage--; loadActivity(); } });
   $('event-next').addEventListener('click', function () { eventPage++; loadActivity(); });
-  $('log-close').addEventListener('click', function () { if (activeLog) closeLogTab(activeLog); });
-  $('log-refresh').addEventListener('click', function () { if (activeLog) showLog(activeLog.ctx, activeLog.name, undefined, false, true); });
-  $('log-more').addEventListener('click', function () { if (activeLog) showLog(activeLog.ctx, activeLog.name, activeLog.off, true); });
-
   /* ---------- 动作 ---------- */
   $('b-send').addEventListener('click', function () {
     var v = $('d-in').value; if (!v || !selKey) return;
@@ -676,7 +683,7 @@
   $('b-ctrlc').addEventListener('click', function () { if (selKey) send('\x03'); });
   $('b-takeover').addEventListener('click', function () {
     var ctx = view;
-    if (!isCurrent(ctx) || !ctx.readonly || ctx.sid === 'serial') return;
+    if (!isCurrent(ctx) || !ctx.canTakeover) return;
     fetch('/api/session-takeover', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: ctx.key, serial: ctx.serial, sid: ctx.sid, actor: 'web' }) })
       .then(function (response) { return response.json(); })
@@ -684,8 +691,9 @@
         if (!isCurrent(ctx)) return;
         if (!result.ok) throw new Error(result.error || '介入失败');
         takenOver[ctx.sid] = true;
-        ctx.readonly = false;
+        ctx.readonly = false; ctx.canTakeover = false;
         setInputMode(ctx);
+        renderTabs();
         $('d-status').textContent = ' 已介入 agent SSH，会话输入和输出继续记录';
       }).catch(function (error) {
         if (isCurrent(ctx)) $('d-status').textContent = ' 介入失败：' + error.message;

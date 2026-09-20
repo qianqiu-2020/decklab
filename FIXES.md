@@ -3,6 +3,9 @@
 旧版单文件实现的修复与线上验收已归档至 [2026-09-19 历史记录](docs/archive/FIXES-2026-09-19.md)。
 当前设备模型、日志归属与模块边界见 [架构说明](docs/ARCHITECTURE.md)，安装及数据迁移见 [安装说明](docs/INSTALL.md)。
 
+1.3.8 移除独立日志查看器和含义重复的“最新内容”按钮。串口归档及已结束的 SSH transcript 直接
+作为可关闭的只读 xterm 标签打开，支持多日志切换并阻止输入、resize 和终端自动应答写入后端。
+
 1.3.7 为 collector 代码和 systemd 单元生成独立指纹。安装升级仅在指纹变化时重启 collector；页面、
 control 或文档更新只重启 control，保持串口 fd 与 SSH 会话。
 

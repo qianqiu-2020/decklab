@@ -414,38 +414,55 @@ test('selecting and replaying the third board never writes cursor position repli
   assert.equal(h.sends()[0].body.data, 'uname -a\r', 'explicit keyboard input still works');
 });
 
-test('log content is viewed inline and late log responses cannot replace a new device', async () => {
+test('archived log terminal is isolated from late responses after switching devices', async () => {
   const h = await setup(); h.select('A');
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [{ name: 'serial-test.log', size: 20 }] });
   await drain();
   const button = h.get('d-logs').children.at(-1).children[1];
   assert.equal(button.tagName, 'button'); button.click();
+  const archived = h.terminals.at(-1);
+  assert.ok(h.get('d-term').scrolled);
+  assert.equal(h.get('b-send').disabled, true);
   const log = h.take('/api/log');
   h.select('B');
   log.resolve({ data: '<script>not HTML</script>', start_off: 0, off: 20, size: 20 });
-  await drain();
-  assert.equal(h.get('log-viewer').hidden, true);
-  assert.notEqual(h.get('log-content').textContent, '<script>not HTML</script>');
+  await drain(); archived.flush();
+  assert.equal(archived.disposed, true);
+  assert.equal(archived.parsed, '');
 });
 
-test('multiple archived logs open as tabs and jump to the viewer', async () => {
+test('multiple archived logs open as cached read-only terminal tabs', async () => {
   const h = await setup(); h.select('A');
-  h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [
+  const files = [
     { name: 'serial-20260920.log', kind: 'serial', date: '2026-09-20', size: 20 },
     { name: 'serial-20260919.log', kind: 'serial', date: '2026-09-19', size: 10 },
-  ] });
+  ];
+  h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files });
   await drain();
   h.get('d-logs').children[0].children[1].click();
-  assert.ok(h.get('log-viewer').scrolled);
-  h.take('/api/log').resolve({ data: 'new log', start_off: 0, off: 7, size: 7, more: false });
+  const newest = h.terminals.at(-1);
+  h.take('/api/log').resolve({ data_b64: Buffer.from('new log').toString('base64'),
+    data: 'new log', start_off: 0, off: 7, size: 7, more: false });
+  h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files });
   await drain();
+  newest.flush();
+  assert.equal(newest.parsed, 'new log');
   h.get('d-logs').children[1].children[1].click();
-  h.take('/api/log').resolve({ data: 'old log', start_off: 0, off: 7, size: 7, more: false });
+  const oldest = h.terminals.at(-1);
+  h.take('/api/log').resolve({ data_b64: Buffer.from('old log').toString('base64'),
+    data: 'old log', start_off: 0, off: 7, size: 7, more: false });
   await drain();
-  assert.equal(h.get('log-tabs').children.length, 4);
-  assert.equal(h.get('log-content').textContent, 'old log');
-  h.get('log-tabs').children[0].click();
-  assert.equal(h.get('log-content').textContent, 'new log');
+  oldest.flush(); oldest.data('must not be sent'); await drain();
+  assert.equal(oldest.parsed, 'old log');
+  assert.equal(h.sends().length, 0);
+  assert.equal(h.requests.filter(r => r.url === '/api/session-resize').length, 0);
+  const archiveButtons = h.get('d-tabs').children.filter(child => child.textContent.includes('串口日志'));
+  assert.equal(archiveButtons.length, 2);
+  archiveButtons[0].click();
+  const cached = h.terminals.at(-1); cached.flush();
+  assert.equal(cached.parsed, 'new log');
+  assert.equal(h.requests.filter(r => r.url.startsWith('/api/log?')).length, 2,
+    'switching back must use the cached archive snapshot');
 });
 
 test('SSH sessions and key events have independent bounded pages', async () => {
@@ -477,6 +494,27 @@ test('SSH sessions and key events have independent bounded pages', async () => {
     events: events.slice(0, 2), event_total: 12 });
   await drain();
   assert.equal(h.get('d-events').children.length, 2);
+});
+
+test('completed SSH transcript opens in a read-only terminal tab', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [] });
+  h.take('/api/activity').resolve({ sessions: [{ sid: 'ssh-done', actor: 'claude-code',
+    status: 'completed', title: 'uname -a', started: 1, exit_code: 0 }], events: [] });
+  await drain();
+  h.get('d-activity').children[0].children.at(-1).click();
+  h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [
+    { name: 'ssh-ssh-done-20260920.log', kind: 'ssh', size: 10 },
+  ] });
+  await drain();
+  const terminal = h.terminals.at(-1);
+  h.take('/api/log').resolve({ data_b64: Buffer.from('ssh output').toString('base64'),
+    data: 'ssh output', start_off: 0, off: 10, size: 10, more: false });
+  await drain(); terminal.flush(); terminal.data('must not be sent'); await drain();
+  assert.equal(terminal.parsed, 'ssh output');
+  assert.equal(h.sends().length, 0);
+  assert.ok(h.get('d-tabs').children.some(child => child.textContent.includes('SSH 记录 · claude-code')));
+  assert.equal(h.get('b-takeover').hidden, true);
 });
 
 test('agent SSH activity opens read-only without input or resize writes', async () => {

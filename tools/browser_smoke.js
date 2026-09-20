@@ -86,9 +86,11 @@ let chrome, ws;
   assert.equal(await evaluate('document.querySelector("#b-send").disabled'), true);
   await evaluate('document.querySelector("#d-logs button").click()');
   await delay(300);
-  assert.equal(await evaluate('document.querySelector("#log-content").textContent'),log);
+  assert.ok(await evaluate('Array.from({length:testTerm.buffer.active.length},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString(true)||"").join("\\n").includes("Linux bianbu 6.6.63 riscv64")'));
+  assert.ok(await evaluate('document.querySelector("#d-tabs").textContent.includes("串口日志")'));
+  assert.equal(await evaluate('document.querySelector("#b-send").disabled'),true);
   assert.equal(await evaluate('globalThis.injected === undefined'),true);
-  assert.equal(await evaluate('document.querySelector("#log-viewer").hidden'),false);
+  assert.deepEqual(posts,[], 'viewing an archived terminal must remain read-only');
 
 
   const out=path.join(root,'dist');fs.mkdirSync(out,{recursive:true});
@@ -100,7 +102,7 @@ let chrome, ws;
   const mobile=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-mobile.png'),Buffer.from(mobile.data,'base64'));
   assert.deepEqual(errors,[]);
-  console.log('Browser smoke passed: real xterm query suppression, agent read-only view, inline logs, desktop/mobile layout.');
+  console.log('Browser smoke passed: real xterm query suppression, read-only agent/archive tabs, desktop/mobile layout.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(ws)ws.close(); if(chrome){chrome.kill('SIGTERM');await delay(500);}server.close();
   fs.rmSync(profile,{recursive:true,force:true});
