@@ -202,6 +202,18 @@ class DeviceTests(DeviceFixture):
         self.assertFalse(ok)
         self.assertEqual(write.call_args_list, [mock.call('\r'), mock.call('\n')])
 
+    def test_preloaded_history_uses_terminal_line_boundaries(self):
+        record = {'serial': 'SN-HISTORY', 'label': 'history-board',
+                  'info': {'serial': 'SN-HISTORY'}, 'last_path': 'old',
+                  'last_dev': '/fake/ttyUSB0'}
+        device = sd.Device('pci-history', '/fake/ttyUSB0', record=record)
+        self.devices.append(device)
+        path = pathlib.Path(device.stable_dir()) / 'serial-20260919.log'
+        path.write_bytes(b'2026-09-19 00:00:00  first\n2026-09-19 00:00:01  second\n')
+        device.preload()
+        self.assertIn(b'first\r\n2026-09-19', bytes(device.buf))
+        self.assertNotIn(b'first\n2026-09-19', bytes(device.buf))
+
     def test_log_rotates_when_date_changes(self):
         device = self.device()
         with mock.patch.object(sd.time, 'strftime', return_value='20260919'):

@@ -82,6 +82,12 @@ class Device:
                 f.seek(0, os.SEEK_END)
                 f.seek(max(0, f.tell() - SCROLLBACK // 4))
                 tail = f.read()
+            # Archived lines are written as text with LF-only separators.  The
+            # live serial terminal deliberately keeps raw line endings, so
+            # normalize only this historical snapshot before mixing it into
+            # the same byte buffer; otherwise xterm renders every line after
+            # the first one with an increasing horizontal offset.
+            tail = tail.replace(b'\r\n', b'\n').replace(b'\r', b'\n').replace(b'\n', b'\r\n')
             self.buf += ('\r\n--- 以下为历史串口日志(%s) ---\r\n' % files[-1]).encode()
             self.buf += tail
             self.buf += '\r\n--- 历史结束 ---\r\n'.encode()
