@@ -6,7 +6,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.3.5_all.deb
+sudo apt install ./dist/seriald_1.3.6_all.deb
 systemctl status seriald
 serialctl devices
 ```
@@ -52,9 +52,9 @@ root 拥有的固定 helper，helper 验证叶子设备名和模式。
 读写 `/data/seriald-data`。目录使用 setgid，服务以 `UMask=0007` 创建组可写文件，不依赖 ACL。
 服务升级以及卸载不删除 `/data/seriald-data`，历史数据由操作者决定保留期限。
 
-## 不打断采集地更新控制面
+## 控制面热更新与 collector 升级
 
-包升级只重启 `seriald.service`；已经运行的 collector 不会被 postinst 重启。可用以下命令验证：
+只修改页面或 control 配置时可单独重启 `seriald.service`，collector 的 PID、串口 fd 和 SSH 会话保持不变：
 
 ```sh
 serialctl health
@@ -62,8 +62,10 @@ sudo systemctl restart seriald
 serialctl health
 ```
 
-两次输出的 collector `pid` 和 `started` 应相同。修改 collector、串口协议或身份实现后，仍需安排窗口执行
-`sudo systemctl restart seriald-collector`，这会短暂关闭串口 fd 和 SSH 会话。内部 socket
+两次输出的 collector `pid` 和 `started` 应相同。完整 deb 升级会依次重启 collector 和 control，确保两个
+进程加载同一版本。collector 会短暂关闭串口 fd 和 SSH 会话；1.3.6 起，干净重启在同一 host boot、
+两分钟内且 tty 内核身份不变时通过一次性 handoff 恢复板卡绑定。异常退出、主机重启或 USB 重新枚举
+仍进入待识别。首次从旧版本升级没有 handoff，需重新点击“识别设备”一次。内部 socket
 `/run/seriald/collector.sock` 不应暴露到网络。
 `serialctl health` 同时返回数据盘总量和剩余字节；服务不会自动删除审计日志，磁盘保留策略由运维方决定。
 

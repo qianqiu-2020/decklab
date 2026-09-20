@@ -5,8 +5,9 @@ import signal
 import socket
 import threading
 
-from .config import BASE, LOG_ROOT, SOCKET
+from .config import BASE, HANDOFF, LOG_ROOT, SOCKET
 from .devices import Manager
+from .handoff import consume as consume_handoff, write as write_handoff
 from .httpd import BoundedThreadingUnixServer
 from .storage import Store
 from . import web
@@ -34,7 +35,7 @@ def main():
     with BoundedThreadingUnixServer(args.socket, web.Handler) as httpd:
         store = Store(os.path.join(BASE, 'registry.sqlite3'))
         store.recover_sessions()
-        web.MGR = Manager(store)
+        web.MGR = Manager(store, consume_handoff(HANDOFF))
         scanner = threading.Thread(target=web.MGR.loop, daemon=True)
         scanner.start()
         signal.signal(signal.SIGTERM,
@@ -45,7 +46,11 @@ def main():
         except KeyboardInterrupt:
             pass
         finally:
-            web.MGR.close()
+            connections = web.MGR.close()
+            try:
+                write_handoff(HANDOFF, connections)
+            except OSError as error:
+                print('seriald handoff: %s' % error, flush=True)
             scanner.join(timeout=6)
             store.close()
     try:

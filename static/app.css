@@ -137,6 +137,8 @@
   .pager{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:-10px 0 22px}
   .pager span{min-width:92px;text-align:center;color:var(--ink-3);font-size:12px}
   .log-tools{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:12px;background:var(--surface-2)}
+  .log-tabs{border:1px solid var(--line);border-bottom:0;border-radius:7px 7px 0 0}
+  .log-tabs button{max-width:300px;overflow:hidden;text-overflow:ellipsis}
   #log-range{font-size:12px;color:var(--ink-3)}
   #log-content{margin:0;padding:18px;max-height:520px;overflow:auto;background:#0e141a;color:#d2dee8;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.65 ui-monospace,monospace}
   .logs{padding:0;display:grid;gap:7px;margin-bottom:12px}

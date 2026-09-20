@@ -3,7 +3,10 @@ import io
 import json
 import os
 from pathlib import Path
+import stat
 import tempfile
+import threading
+import types
 import unittest
 from unittest import mock
 
@@ -285,6 +288,60 @@ class PersistenceTests(unittest.TestCase):
         history.read(0)
         self.assertIn(b'previous boot', history.buf)
         self.assertEqual(history.console_tail, '')
+
+    def test_clean_handoff_restores_only_the_same_kernel_tty(self):
+        d = self.connection('usb-1')
+        self.identify(d)
+        d.identity = (1, 2, 3)
+        handoff = self.manager.close()
+        self.assertEqual(handoff[0]['serial'], 'SN001')
+
+        def scan(manager, identity):
+            stat_result = types.SimpleNamespace(st_dev=identity[0], st_ino=identity[1],
+                                                st_rdev=identity[2],
+                                                st_mode=stat.S_IFCHR | 0o600)
+            listdir = os.listdir
+            with mock.patch.object(devices.os, 'listdir',
+                    side_effect=lambda path: ['usb-1'] if path == devices.BY_PATH else listdir(path)), \
+                    mock.patch.object(devices.os.path, 'realpath', return_value='/fake/ttyUSB0'), \
+                    mock.patch.object(devices.os, 'stat', return_value=stat_result), \
+                    mock.patch.object(devices.threading, 'Thread'):
+                manager.scan()
+            return manager.devices['usb-1']
+
+        restored = devices.Manager(self.store, handoff)
+        same = scan(restored, (1, 2, 3))
+        self.assertEqual(same.serial, 'SN001')
+        changed = devices.Manager(self.store, handoff)
+        replacement = scan(changed, (1, 22, 3))
+        self.assertEqual(replacement.serial, '')
+        self.assertEqual(replacement.snapshot()['state'], 'pending')
+
+    def test_prepare_switch_detaches_old_board_and_arms_one_probe(self):
+        d = self.connection('usb-1')
+        self.identify(d)
+        old_connection = d.connection_id
+        old_dir = Path(d.stable_dir())
+        d.append(b'old board\n')
+        key = self.manager.prepare_switch(d, 'operator')
+        self.assertTrue(key.startswith('unprovisioned-'))
+        self.assertEqual(d.serial, '')
+        self.assertNotEqual(d.connection_id, old_connection)
+        self.assertEqual(self.manager.resolve('riscv-118').snapshot()['state'], 'offline')
+        self.assertTrue(d.auto_identify)
+        d.append(b'new board booting\n')
+        self.assertNotEqual(Path(d.stable_dir()), old_dir)
+        self.assertIn('/_unprovisioned/', d.stable_dir())
+        self.assertEqual(self.store.events('SN001')[0]['action'], 'switch-armed')
+
+        finished = threading.Event()
+        with mock.patch.object(d, 'run_probe', side_effect=lambda: (finished.set() or {'ok': True})) as probe:
+            d._maybe_auto_identify('k1 login:')
+            self.assertTrue(finished.wait(2))
+            d._maybe_auto_identify('root@k1:~#')
+        probe.assert_called_once_with()
+        self.assertFalse(d.auto_identify)
+        self.assertNotIn('usb-1', self.manager.armed_paths)
 
     def test_marker_survives_restart_port_and_hardware_interface_changes(self):
         marker = 'boot-0e9badc5-706a-4421-93a7-50e76cc240a6'

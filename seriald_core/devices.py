@@ -19,16 +19,26 @@ from .boot_marker import marker_serial
 class Manager:
     """设备发现 + 每个实际 tty 一个采集线程;旧线程退出后才转移所有权。"""
 
-    def __init__(self, store=None):
+    def __init__(self, store=None, handoff=None):
         self.store = store
         self.devices = {}                 # physical by-path -> current connection
         self.boards = {}                  # immutable serial -> known board / last connection
         self.lock = threading.RLock()
         self.scan_lock = threading.Lock()
         self.stopping = threading.Event()
+        self.handoff = {}
+        self.armed_paths = {}
         if store:
             for record in store.boards():
                 self.boards[record['serial']] = Device('', '', self, record)
+        for entry in handoff or []:
+            if (isinstance(entry, dict) and isinstance(entry.get('by_path'), str)
+                    and isinstance(entry.get('dev'), str)
+                    and isinstance(entry.get('serial'), str)
+                    and isinstance(entry.get('identity'), list)
+                    and len(entry['identity']) == 3
+                    and all(type(value) is int for value in entry['identity'])):
+                self.handoff[entry['by_path']] = entry
 
     def all_devices(self):
         with self.lock:
@@ -129,6 +139,8 @@ class Manager:
                     device.ssh_sessions.update(promoted.ssh_sessions)
                     promoted.ssh_sessions.clear()
             self.boards[serial] = device
+            self.armed_paths.pop(device.by_path, None)
+            device.auto_identify = False
             info.update(selected)
             self.store.event(serial, 'service', 'identified', device.by_path)
 
@@ -138,6 +150,36 @@ class Manager:
         with self.lock:
             device.record = self.store.rename(device.serial, label)
             return device.key
+
+    def prepare_switch(self, device, actor='web'):
+        """Detach a board from a still-live UART and arm one automatic identification."""
+        if not device.operation_lock.acquire(blocking=False):
+            raise IdentityError('已有控制台操作在进行中，稍后再进入换板模式')
+        try:
+            with self.lock:
+                if not device.serial or not device.present:
+                    raise IdentityError('只有已识别且在线的设备可以进入换板识别模式')
+                old_serial, old_record = device.serial, device.record
+                for sid in list(device.ssh_sessions):
+                    device.close_session(sid)
+                with device.log_lock:
+                    device.close_log()
+                    old_record['last_seen'] = self.store.touch(old_serial)
+                    history = Device('', '', self, old_record)
+                    self.boards[old_serial] = history
+                    self.store.event(old_serial, actor, 'switch-armed', device.by_path)
+                    device.detach_identity()
+                deadline = time.monotonic() + 15 * 60
+                self.armed_paths[device.by_path] = deadline
+                device.auto_identify = True
+                device.auto_identify_until = deadline
+                return device.key
+        finally:
+            device.operation_lock.release()
+
+    def disarm(self, by_path):
+        with self.lock:
+            self.armed_paths.pop(by_path, None)
 
     @staticmethod
     def _matches(d):
@@ -196,7 +238,19 @@ class Manager:
                     d.present = False
                     d = None
                 if d is None:
-                    d = Device(key, dev, self if self.store else None)
+                    record = None
+                    entry = self.handoff.pop(key, None)
+                    if (entry and tuple(entry['identity']) == identity and entry['dev'] == dev
+                            and self.store):
+                        record = self.store.get(entry['serial'])
+                    d = Device(key, dev, self if self.store else None, record)
+                    if record:
+                        self.boards[record['serial']] = d
+                    if self.armed_paths.get(key, 0) >= time.monotonic():
+                        d.auto_identify = True
+                        d.auto_identify_until = self.armed_paths[key]
+                    else:
+                        self.armed_paths.pop(key, None)
                     with self.lock:
                         self.devices[key] = d
                 if d.thread and d.thread.is_alive():
@@ -288,6 +342,10 @@ class Manager:
         # Wait for an in-flight scan before taking the final set of collectors.
         with self.scan_lock, self.lock:
             devices = list({id(d): d for d in list(self.devices.values()) + list(self.boards.values())}.values())
+            handoff = [{'by_path': d.by_path, 'dev': d.dev, 'serial': d.serial,
+                        'identity': list(d.identity)}
+                       for d in self.devices.values()
+                       if d.present and d.serial and d.identity]
         for d in devices:
             d.stop.set()
         for d in devices:
@@ -296,6 +354,7 @@ class Manager:
             for s in list(d.ssh_sessions):
                 d.close_session(s)
             d.close_log()
+        return handoff
 
     def loop(self):
         while not self.stopping.is_set():

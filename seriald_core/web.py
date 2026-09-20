@@ -201,6 +201,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except IdentityError as error:
                 return self._json(400, {'ok': False, 'error': str(error)})
 
+        if route == '/api/switch-mode':
+            try:
+                old_serial = d.serial
+                key = MGR.prepare_switch(d, actor)
+                return self._json(200, {'ok': True, 'device_key': key, 'serial': '',
+                                        'old_serial': old_serial})
+            except IdentityError as error:
+                return self._json(409, {'ok': False, 'error': str(error)})
+
         if d.serial and route in ('/api/send', '/api/session-send', '/api/rescue', '/api/identify', '/api/ssh-enable'):
             MGR.store.event(d.serial, actor, route.rsplit('/', 1)[-1],
                             'request: sid=' + str(payload.get('sid') or 'serial'))

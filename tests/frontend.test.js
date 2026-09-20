@@ -27,6 +27,7 @@ class Element {
   }
   click() { if (!this.disabled) this.emit('click', { stopPropagation() {} }); }
   focus() {}
+  scrollIntoView(options) { this.scrolled = options || true; }
   select() {}
   remove() { this.removed = true; }
 }
@@ -209,6 +210,22 @@ test('pending view follows its promoted board after collector restart', async ()
   assert.equal(h.get('d-name').textContent, 'milkv');
   assert.equal(h.get('d-key').textContent, 'SN MJM10004000001');
   assert.ok(h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1).url.includes('key=milkv'));
+});
+
+test('preparing a board swap moves the live UART to an unprovisioned view', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({ devices: [{ key: 'milkv', label: 'milkv', serial: 'SN001',
+    state: 'online', connection_id: 'connection-1', by_path: 'usb-1', alive: true,
+    dev: '/mock/ttyUSB1' }] });
+  await drain(); h.select('milkv');
+  assert.equal(h.get('b-switch').hidden, false);
+  h.get('b-switch').click();
+  const request = h.take('/api/switch-mode');
+  assert.deepEqual(request.body, { key: 'milkv', serial: 'SN001', actor: 'web' });
+  request.resolve({ ok: true, device_key: 'unprovisioned-path', serial: '', old_serial: 'SN001' });
+  await drain();
+  assert.equal(h.get('d-key').textContent, 'unprovisioned-path');
+  assert.ok(h.get('d-status').textContent.includes('换板识别模式'));
 });
 
 test('late SSH connect response cannot switch the newly selected device', async () => {
@@ -409,6 +426,26 @@ test('log content is viewed inline and late log responses cannot replace a new d
   await drain();
   assert.equal(h.get('log-viewer').hidden, true);
   assert.notEqual(h.get('log-content').textContent, '<script>not HTML</script>');
+});
+
+test('multiple archived logs open as tabs and jump to the viewer', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [
+    { name: 'serial-20260920.log', kind: 'serial', date: '2026-09-20', size: 20 },
+    { name: 'serial-20260919.log', kind: 'serial', date: '2026-09-19', size: 10 },
+  ] });
+  await drain();
+  h.get('d-logs').children[0].children[1].click();
+  assert.ok(h.get('log-viewer').scrolled);
+  h.take('/api/log').resolve({ data: 'new log', start_off: 0, off: 7, size: 7, more: false });
+  await drain();
+  h.get('d-logs').children[1].children[1].click();
+  h.take('/api/log').resolve({ data: 'old log', start_off: 0, off: 7, size: 7, more: false });
+  await drain();
+  assert.equal(h.get('log-tabs').children.length, 4);
+  assert.equal(h.get('log-content').textContent, 'old log');
+  h.get('log-tabs').children[0].click();
+  assert.equal(h.get('log-content').textContent, 'new log');
 });
 
 test('SSH sessions and key events have independent bounded pages', async () => {

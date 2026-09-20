@@ -5,7 +5,7 @@
   var curSid = 'serial';              // 当前会话:serial=串口,sshN=SSH 会话
   var sessions = [{ sid: 'serial', kind: 'serial' }];
   var view = null, term = null;
-  var activeLog = null, sessionPage = 0, eventPage = 0;
+  var activeLog = null, logTabs = [], sessionPage = 0, eventPage = 0;
   var ACTIVITY_PAGE_SIZE = 10;
   var takenOver = {};
 
@@ -294,11 +294,12 @@
     $('d-name').textContent = d ? d.label : key;
     $('d-dev').textContent = d ? d.dev : '';
     $('d-key').textContent = d && d.serial ? 'SN ' + d.serial : key;
+    $('b-switch').hidden = !(d && d.serial && d.alive);
     $('d-status').textContent = '';
     $('d-hint').hidden = true;
     $('d-in').value = '';
     $('d-logs').textContent = '';
-    $('log-viewer').hidden = true; activeLog = null; sessionPage = 0; eventPage = 0;
+    $('log-viewer').hidden = true; activeLog = null; logTabs = []; sessionPage = 0; eventPage = 0;
     $('d-activity').textContent = '';
     $('d-events').textContent = '';
     loadActivity();
@@ -514,23 +515,68 @@
     select(key);
   }
 
-  function showLog(ctx, name, off, append) {
-    if (!isCurrent(ctx)) return;
-    var token = { ctx: ctx, name: name };
-    activeLog = token;
+  function renderLogTabs() {
+    var bar = $('log-tabs'); bar.textContent = '';
+    logTabs.forEach(function (tab) {
+      var button = document.createElement('button'); button.type = 'button';
+      button.className = tab === activeLog ? 'on' : '';
+      button.textContent = tab.name;
+      button.addEventListener('click', function () {
+        if (!isCurrent(tab.ctx)) return;
+        activeLog = tab; renderLogTabs(); renderLogTab(tab, true);
+      });
+      bar.appendChild(button);
+      var close = document.createElement('button'); close.type = 'button'; close.className = 'x';
+      close.textContent = '×'; close.title = '关闭这个日志标签';
+      close.addEventListener('click', function () { closeLogTab(tab); });
+      bar.appendChild(close);
+    });
+  }
+
+  function renderLogTab(tab, scroll) {
+    if (!tab || !isCurrent(tab.ctx)) return;
     $('log-viewer').hidden = false;
-    $('log-title').textContent = name;
-    if (!append) $('log-content').textContent = '读取中…';
+    $('log-title').textContent = tab.name;
+    $('log-content').textContent = tab.error || (tab.loaded ? tab.data : '读取中…');
+    $('log-range').textContent = tab.loaded && !tab.error
+      ? '字节 ' + tab.startOff + '–' + tab.off + ' / ' + tab.size : '';
+    $('log-more').disabled = !tab.more;
+    if (scroll && $('log-viewer').scrollIntoView) {
+      $('log-viewer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function closeLogTab(tab) {
+    var index = logTabs.indexOf(tab);
+    if (index < 0) return;
+    logTabs.splice(index, 1);
+    if (activeLog === tab) activeLog = logTabs[Math.min(index, logTabs.length - 1)] || null;
+    renderLogTabs();
+    if (activeLog) renderLogTab(activeLog, false); else $('log-viewer').hidden = true;
+  }
+
+  function showLog(ctx, name, off, append, force) {
+    if (!isCurrent(ctx)) return;
+    var tab = logTabs.filter(function (item) { return item.name === name; })[0];
+    if (!tab) { tab = { ctx: ctx, name: name, seq: 0, loaded: false, data: '' }; logTabs.push(tab); }
+    activeLog = tab; renderLogTabs(); renderLogTab(tab, true);
+    if (tab.loaded && off === undefined && !append && !force) return;
+    var seq = ++tab.seq;
+    if (!append) { tab.error = ''; tab.loaded = false; renderLogTab(tab, false); }
     fetch('/api/log?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
       + '&file=' + encodeURIComponent(name) + (off === undefined ? '' : '&off=' + off))
       .then(function (r) { return r.json(); }).then(function (d) {
-        if (!isCurrent(ctx) || activeLog !== token) return;
+        if (!isCurrent(ctx) || seq !== tab.seq) return;
         if (d.error) throw new Error(d.error);
-        $('log-content').textContent = (append ? $('log-content').textContent : '') + d.data;
-        token.off = d.off;
-        $('log-range').textContent = '字节 ' + d.start_off + '–' + d.off + ' / ' + d.size;
-        $('log-more').disabled = !d.more;
-      }).catch(function (e) { if (isCurrent(ctx) && activeLog === token) $('log-content').textContent = e.message; });
+        tab.data = (append ? tab.data : '') + d.data;
+        tab.startOff = append ? tab.startOff : d.start_off;
+        tab.off = d.off; tab.size = d.size; tab.more = d.more; tab.loaded = true; tab.error = '';
+        if (activeLog === tab) renderLogTab(tab, false);
+      }).catch(function (e) {
+        if (!isCurrent(ctx) || seq !== tab.seq) return;
+        tab.error = e.message; tab.loaded = true; tab.more = false;
+        if (activeLog === tab) renderLogTab(tab, false);
+      });
   }
 
   function setPager(prefix, page, total, count) {
@@ -589,7 +635,8 @@
         var actionNames = { identified: '识别完成', identify: '识别请求',
           'identity-promoted': '身份升级', 'identity-corrected': '身份更正',
           'identity-confirmed': '身份确认', 'boot-marker-initialized': '初始化 /boot 标记',
-          rescue: '串口自愈', 'ssh-enable': '启用 SSH', 'session-takeover': '人工介入 SSH' };
+          rescue: '串口自愈', 'ssh-enable': '启用 SSH', 'session-takeover': '人工介入 SSH',
+          'switch-armed': '准备更换设备' };
         (d.events || []).forEach(function (entry) {
           var row = document.createElement('div'); row.className = 'activity-row';
           var main = document.createElement('div'); main.className = 'activity-main';
@@ -613,8 +660,8 @@
   $('activity-next').addEventListener('click', function () { sessionPage++; loadActivity(); });
   $('event-prev').addEventListener('click', function () { if (eventPage) { eventPage--; loadActivity(); } });
   $('event-next').addEventListener('click', function () { eventPage++; loadActivity(); });
-  $('log-close').addEventListener('click', function () { activeLog = null; $('log-viewer').hidden = true; });
-  $('log-refresh').addEventListener('click', function () { if (activeLog) showLog(activeLog.ctx, activeLog.name); });
+  $('log-close').addEventListener('click', function () { if (activeLog) closeLogTab(activeLog); });
+  $('log-refresh').addEventListener('click', function () { if (activeLog) showLog(activeLog.ctx, activeLog.name, undefined, false, true); });
   $('log-more').addEventListener('click', function () { if (activeLog) showLog(activeLog.ctx, activeLog.name, activeLog.off, true); });
 
   /* ---------- 动作 ---------- */
@@ -659,6 +706,23 @@
         else $('d-status').textContent = ' 改名失败：' + (d.error || '');
       }).catch(function (e) {
         if (isCurrent(ctx)) $('d-status').textContent = ' 改名失败：' + e.message;
+      });
+  });
+  $('b-switch').addEventListener('click', function () {
+    var ctx = view;
+    if (!isCurrent(ctx) || !ctx.serial) return;
+    $('d-status').textContent = ' 正在将当前串口转为待识别…';
+    fetch('/api/switch-mode', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: ctx.key, serial: ctx.serial, actor: 'web' }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!isCurrent(ctx)) return;
+        if (!d.ok) { $('d-status').textContent = ' 进入换板模式失败：' + (d.error || ''); return; }
+        adoptKey(ctx, d.device_key, '');
+        if (view) $('d-status').textContent = ' 已进入换板识别模式；现在可切换开发板，启动到登录提示后将自动识别一次';
+        pollDevices();
+      }).catch(function (e) {
+        if (isCurrent(ctx)) $('d-status').textContent = ' 进入换板模式失败：' + e.message;
       });
   });
   // helper 完成设置不等于采集已经恢复；不能因响应里缺少 hint 就自动软拔插。

@@ -8,12 +8,13 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.3.5_all.deb
+sudo apt install ./dist/seriald_1.3.6_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
 生产数据保存在 `/data/seriald-data`。
 更新或重启 control 不会关闭 collector 持有的串口和 SSH 会话；`serialctl health` 可核对 collector PID。
+在同一 USB-UART 后更换板子前，先在网页点击“准备换板”；新板日志会先隔离，出现登录提示后自动识别一次。
 [安装、配置和旧数据迁移](docs/INSTALL.md) · [架构与模块边界](docs/ARCHITECTURE.md)
 · [硬件身份、/boot 兜底标记与重复编号处理](docs/HARDWARE_ID.md)
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)

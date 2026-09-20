@@ -17,7 +17,13 @@
 记录 `serial_source` 和固件的 `reported_serial`。普通探测只读标记；创建逻辑封装在 `boot_marker.py`。
 读取规则、K1 驱动依据和旧编号更正步骤见 [硬件身份说明](HARDWARE_ID.md)。
 
-服务重启及串口重连后，已注册设备以历史设备保留；新采集连接需要重新识别才能确认属于哪块板。启动不主动向板子发送回车、密码或命令。
+collector 干净重启时写入一次性短期 handoff；仅在同一 host boot、两分钟内且 by-path、tty 节点和
+内核设备身份完全一致时接续已有绑定，不向板子发送回车、密码或命令。异常退出、主机重启、USB
+重新枚举或校验不符时，已注册设备只作为历史设备保留，新采集连接进入待识别。
+
+同一个 USB-UART 后面更换开发板但 tty 不重新枚举时，内核无法感知板卡已变化。操作者必须先点击
+“准备换板”：服务立即把旧身份置为离线、关闭其 SSH 会话并让该串口进入待识别目录；新板输出登录提示
+或 shell prompt 后只自动识别一次。失败后保持待识别，可人工重试。未进入此模式时不会凭串口内容猜测换板。
 
 ## 模块边界
 
@@ -35,6 +41,7 @@ collector 只监听 `SERIALD_SOCKET`，不暴露网络端口。
 | `seriald_core/transport.py` | 串口描述符、短写补齐、USB recovery |
 | `seriald_core/protocol.py` | 识别命令及字段解析 |
 | `seriald_core/identity.py` | EEPROM、固件、SoC/eFuse 与旧软件身份的选择 |
+| `seriald_core/handoff.py` | 干净重启时同 boot、短时、一次性的连接接续 |
 | `seriald_core/archive.py` | 候选/正式日志的无覆盖暂存和提交后迁移 |
 | `seriald_core/device.py` | 单块板的控制台流、识别事务和 SSH 会话编排 |
 | `seriald_core/devices.py` | 串口发现、单读者采集生命周期、身份绑定与在线设备 |

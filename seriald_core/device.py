@@ -40,6 +40,9 @@ class Device:
         self.rescue_note = ''             # 自愈结果(页面显示用)
         self.identity_error = ''
         self.reported_serial = ''         # unbound probe result, never a persistence key
+        self.auto_identify = False
+        self.auto_identify_started = False
+        self.auto_identify_until = 0.0
         self.probing = False
         self.operation_lock = threading.Lock()  # 整个控制台事务互斥,包含手动输入/探测/自愈
         self.write_lock = threading.Lock()      # fd 退役与写入串行,绝不占用输出 cv
@@ -107,6 +110,26 @@ class Device:
         path = os.path.join(LOG_ROOT, directory)
         os.makedirs(path, exist_ok=True)
         return path
+
+    def detach_identity(self):
+        """Start a new logical connection on the same UART before a physical board swap."""
+        self.record = None
+        self.connection_id = secrets.token_hex(12)
+        self.hostname = ''
+        self.probe_info = {}
+        self.reported_serial = ''
+        self.identity_error = '已进入换板识别模式；新板出现登录提示后自动识别一次'
+        self.auto_identify_started = False
+        self.started = time.time()
+        self.bytes = 0
+        self.last_rx = 0.0
+        self.console_tail = ''
+        self.history_loaded = True
+        self.logpath = None
+        with self.cv:
+            self.base += len(self.buf)
+            self.buf.clear()
+            self.cv.notify_all()
 
     def log_files(self):
         root = self.stable_dir()
@@ -183,6 +206,7 @@ class Device:
                     self.last_rx = time.time()
                     self.console_tail = (self.console_tail + text)[-4096:]
                     self.sniff(self.console_tail)
+                    self._maybe_auto_identify(self.console_tail)
                 self.cv.notify_all()
 
     def close_log(self):
@@ -230,6 +254,31 @@ class Device:
                     if h and h != self.hostname and not h.startswith('localhost'):
                         self.hostname = h
                         return
+
+    def _maybe_auto_identify(self, text):
+        """Run one armed probe after the replacement board reaches login or a shell."""
+        if (not self.auto_identify or self.auto_identify_started or self.serial
+                or not self.manager or self.stop.is_set()):
+            return
+        if time.monotonic() > self.auto_identify_until:
+            self.auto_identify = False
+            self.manager.disarm(self.by_path)
+            return
+        clean = ANSI.sub('', text)
+        if not (re.search(RE_PROMPT, clean, re.M) or re.search(RE_LOGIN, clean, re.I)):
+            return
+        self.auto_identify_started = True
+
+        def identify_once():
+            try:
+                result = self.run_probe()
+                if not result.get('ok') and not self.stop.is_set():
+                    self.identity_error = '自动识别失败：' + str(result.get('error') or '未知错误')
+            finally:
+                self.auto_identify = False
+                self.manager.disarm(self.by_path)
+
+        threading.Thread(target=identify_once, daemon=True).start()
 
     def read(self, off, wait=15.0):
         if not self.history_loaded:

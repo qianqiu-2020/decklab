@@ -7,6 +7,7 @@ BASE = os.environ.get('SERIALD_BASE', '/data/seriald')      # 运行数据:注�
 STATIC = os.environ.get('SERIALD_STATIC') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_ROOT = os.path.join(BASE, 'logs')
 SOCKET = os.environ.get('SERIALD_SOCKET', os.path.join(BASE, 'seriald.sock'))
+HANDOFF = os.environ.get('SERIALD_HANDOFF', os.path.join(BASE, 'collector-handoff.json'))
 AUTH_TOKEN = os.environ.get('SERIALD_AUTH_TOKEN', '')
 BY_PATH = os.environ.get('SERIALD_BY_PATH', '/dev/serial/by-path')
 # 自愈脚本的位置。必须由 root 拥有且调用者不可写,否则 sudoers 白名单等于通用提权。

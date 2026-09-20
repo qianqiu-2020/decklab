@@ -41,6 +41,7 @@
         <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd">识别设备</button>
         <button id="b-rescue" type="button" title="关闭 autosuspend，并检查采集是否恢复">自愈串口</button>
         <button id="b-rebind" type="button" title="重新绑定 USB 串口，会暂时中断该设备连接" hidden>重新绑定串口</button>
+        <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录">准备换板</button>
         <button id="b-rename" type="button">改标签</button>
         <button id="b-close" type="button">收起</button>
       </span>
@@ -73,6 +74,7 @@
       <div class="section-head"><h2>串口日志归档</h2><span id="log-location"></span></div>
       <div class="logs" id="d-logs"></div>
       <div id="log-viewer" hidden>
+        <div class="tabs log-tabs" id="log-tabs"></div>
         <div class="log-tools"><strong id="log-title"></strong><span id="log-range"></span>
           <button id="log-refresh" type="button">最新内容</button><button id="log-more" type="button">继续读取</button>
           <button id="log-close" type="button">关闭日志</button></div>
