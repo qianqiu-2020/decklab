@@ -266,8 +266,11 @@ class Manager:
                     continue                    # 旧识别事务退出前不能把新连接交给同一对象
                 try:
                     if d.identity != identity:
-                        d.probe_info = {}
-                        d.hostname = ''
+                        # A known board is created with its durable record. Keep that
+                        # identity/source visible across tty re-enumeration until a
+                        # fresh probe replaces it; only unbound connections reset.
+                        d.probe_info = dict(d.record['info']) if d.record else {}
+                        d.hostname = d.probe_info.get('hostname', '')
                     d.dev, d.identity = dev, identity
                     d.present = True
                     d.dead = False

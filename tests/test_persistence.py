@@ -336,6 +336,7 @@ class PersistenceTests(unittest.TestCase):
         restored = devices.Manager(self.store, handoff)
         same = scan(restored, (1, 2, 3))
         self.assertEqual(same.serial, 'SN001')
+        self.assertEqual(same.probe_info['serial_source'], 'device-tree')
         changed = devices.Manager(self.store, handoff)
         replacement = scan(changed, (1, 22, 3))
         self.assertEqual(replacement.serial, '')

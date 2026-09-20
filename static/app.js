@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   var UI = window.SerialdUI, $ = UI.byId, fmt = UI.formatBytes, ago = UI.age, copyText = UI.copyText;
-  var selKey = null, lastDevices = [], loopGen = 0, lastInfoTs = 0;
+  var selKey = null, lastDevices = [], loopGen = 0, lastInfoTs = 0, lastInfoIdentity = '';
   var curSid = 'serial';              // serial、sshN 或本地只读 log:* 标签
   var sessions = [{ sid: 'serial', kind: 'serial' }];
   var view = null, term = null;
@@ -268,8 +268,14 @@
             if (samePath.length === 1) cur = samePath[0];
           }
           if (cur && cur.key !== selKey) adoptKey(view, cur.key, cur.serial);
-          var ts = cur && cur.info ? cur.info.ts : 0;
-          if (ts !== lastInfoTs) { lastInfoTs = ts; renderInfo(cur && cur.info); }
+          var info = cur && cur.info;
+          var infoIdentity = cur ? [cur.key, cur.connection_id, info && info.ts || 0,
+            info && info.serial_source || '', info && info.identity_status || ''].join('|') : '';
+          if (infoIdentity !== lastInfoIdentity) {
+            lastInfoIdentity = infoIdentity;
+            lastInfoTs = info && info.ts || 0;
+            renderInfo(info);
+          }
         }
         loadSessions();
         loadActivity();
@@ -313,6 +319,8 @@
     $('d-events').textContent = '';
     loadActivity();
     lastInfoTs = d && d.info ? d.info.ts : 0;
+    lastInfoIdentity = d ? [d.key, d.connection_id, lastInfoTs,
+      d.info && d.info.serial_source || '', d.info && d.info.identity_status || ''].join('|') : '';
     resizeTerm();
     loadLogs();
     renderInfo(d && d.info);

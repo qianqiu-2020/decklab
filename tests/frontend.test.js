@@ -193,6 +193,25 @@ test('provisional identity is labeled as a candidate and warns about archive pro
   assert.ok(cardText.includes('尚未正式确认'));
 });
 
+test('switching pending and confirmed devices never reuses identity details', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({ devices: [
+    { key: 'known', label: 'known', serial: 'SN-KNOWN', connection_id: 'known-1', alive: true,
+      info: { serial: 'SN-KNOWN', hostname: 'known', serial_source: 'eeprom-onie',
+        identity_status: 'confirmed', ts: 11 } },
+    { key: 'pending', label: 'pending', serial: '', connection_id: 'pending-1', alive: true,
+      info: {} },
+  ] });
+  await drain();
+  h.select('known');
+  assert.ok(h.get('d-info').children.some(row => row.children[0].textContent === '身份来源'));
+  h.select('pending');
+  assert.equal(h.get('d-info').hidden, true);
+  h.select('known');
+  assert.equal(h.get('d-info').hidden, false);
+  assert.ok(h.get('d-info').children.some(row => row.children[1].textContent.includes('ONIE')));
+});
+
 test('pending view follows its promoted board after collector restart', async () => {
   const h = harness();
   h.take('/api/devices').resolve({ devices: [{
