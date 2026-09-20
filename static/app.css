@@ -107,6 +107,7 @@
   .info .v.hi{color:var(--accent);font-weight:500}
   .termhost .xterm{height:100%}
   .termhost .xterm-viewport{background:transparent!important}
+  .termhost .xterm-screen{overflow:hidden}
   .chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2);white-space:nowrap}
   .chk input{accent-color:var(--accent)}
   .sendrow{display:flex;gap:8px;padding:11px 15px;border-top:1px solid var(--line);flex-wrap:wrap}

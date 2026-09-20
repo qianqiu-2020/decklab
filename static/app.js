@@ -96,13 +96,24 @@
   function resizeTerm() {
     var ctx = view;
     if (!isCurrent(ctx)) return;
-    try { ctx.fit.fit(); } catch (e) {}
+    try { ctx.fit.fit(); syncTerminalLayers(ctx); } catch (e) {}
     if (window.requestAnimationFrame) window.requestAnimationFrame(function () {
       if (!isCurrent(ctx)) return;
-      try { ctx.fit.fit(); ctx.term.refresh(0, ctx.term.rows - 1); } catch (e) {}
+      try { ctx.fit.fit(); syncTerminalLayers(ctx); ctx.term.refresh(0, ctx.term.rows - 1); } catch (e) {}
       pushSize(ctx);
     });
     pushSize(ctx);
+  }
+  function syncTerminalLayers(ctx) {
+    if (!ctx || !ctx.term || !ctx.term.element || !ctx.term.element.querySelector) return;
+    var viewport = ctx.term.element.querySelector('.xterm-viewport');
+    var screen = ctx.term.element.querySelector('.xterm-screen');
+    if (!viewport || !screen || !viewport.clientWidth) return;
+    // FitAddon can round a fractional cell width up by a few pixels.  That
+    // lets the screen/selection layer extend over the native scrollbar.
+    screen.style.width = viewport.clientWidth + 'px';
+    screen.style.maxWidth = viewport.clientWidth + 'px';
+    screen.style.overflow = 'hidden';
   }
   // 把浏览器终端尺寸推给后端,后端 ioctl 到 pty —— 否则远端以为自己是 80x24,
   // 宽度用不满,vi/htop 也按错误列数画。串口那条没法协商(线路上没有 window-change)。
