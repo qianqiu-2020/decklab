@@ -55,9 +55,7 @@
       // 归档文件常用单独 LF；xterm 的 LF 默认不回到第 1 列，会呈现阶梯状。
       // 实时串口/pty 保留原始 CR/LF，避免改变全屏终端协议。
       convertEol: ctx.kind === 'log',
-      // Archived tabs load the complete daily file; keep enough history for
-      // long logs while leaving live terminals at a bounded interactive size.
-      scrollback: ctx.kind === 'log' ? 100000 : 8000,
+      scrollback: 8000,
       cursorBlink: !ctx.readonly,
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
       fontSize: 12.5,
@@ -336,6 +334,13 @@
 
   function writeTerminalPayload(ctx, payload) {
     if (!isCurrent(ctx)) return;
+    // The archive endpoint returns the complete file.  Expand xterm's buffer
+    // to the payload's line count before writing so the UI does not silently
+    // evict the beginning of a large daily log.
+    if (ctx.kind === 'log' && typeof payload.data === 'string') {
+      var lines = payload.data.split('\n').length + 10;
+      if (lines > ctx.term.options.scrollback) ctx.term.options.scrollback = lines;
+    }
     if (typeof payload.data_b64 === 'string') {
       var raw = atob(payload.data_b64);
       if (raw.length) {
