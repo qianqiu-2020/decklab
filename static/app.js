@@ -25,6 +25,9 @@
     var old = view;
     view = null; term = null; loopGen++;
     if (!old) return;
+    if (old.scrollHandler && $('d-term').removeEventListener) {
+      $('d-term').removeEventListener('click', old.scrollHandler, true);
+    }
     if (old.ctrl) old.ctrl.abort();
     clearTimeout(old.loopTimer);
     clearTimeout(old.sizeTimer);
@@ -66,6 +69,20 @@
     ctx.term.loadAddon(ctx.fit);
     $('d-term').textContent = '';
     ctx.term.open($('d-term'));
+    // Some Chromium/Linux themes expose an overlay scrollbar whose track
+    // accepts wheel input but ignores a track click.  Keep native dragging,
+    // and provide the expected page jump when the click lands on xterm's
+    // viewport edge.
+    ctx.scrollHandler = function (event) {
+      if (!isCurrent(ctx) || !event || !event.target || !event.target.classList
+          || !event.target.classList.contains('xterm-viewport')) return;
+      var viewport = event.target;
+      var rect = viewport.getBoundingClientRect && viewport.getBoundingClientRect();
+      if (!rect || event.clientX < rect.right - 24 || !viewport.scrollHeight) return;
+      var ratio = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+      viewport.scrollTop = Math.max(0, ratio * viewport.scrollHeight - viewport.clientHeight / 2);
+    };
+    $('d-term').addEventListener('click', ctx.scrollHandler, true);
     SerialdTerminalPolicy.install(ctx, {
       isCurrent: isCurrent,
       keyboardEnabled: function () { return $('d-kbd').checked; },
