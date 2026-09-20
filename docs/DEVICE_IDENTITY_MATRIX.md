@@ -11,6 +11,7 @@
 | Milk-V Jupiter K1（`milkv`） | Upstream 7.2.2+ | `MJM10004000001`，写入 EEPROM 后由固件注入 | `atmel,24c04`，512 B；ONIE `0x23`/`cells/serial-number@*` 返回 `MJM10004000001` | 当前内核未暴露；限定只读返回 `EFAULT` | `MJM10004000001`，`eeprom-onie` | 已写入稳定板卡身份；原 `/boot` 候选档案由 seriald 1.3.4 在同一 USB 路径自动迁移。 | 2026-09-20 |
 | Milk-V Jupiter K1（`milkv`） | Vendor 6.6.63 | `MJM10004000001`，U-Boot 从生产 EEPROM 注入 | 当前内核未枚举 I²C EEPROM NVMEM，仅有 eFuse 和 SPI MTD NVMEM；`/chosen/u-boot,version` 可见 | `0059D968E583CA22`；`soc0/serial_number` | `MJM10004000001`，`uboot-injected` | 由 U-Boot provenance 确认注入，不依赖编号格式；seriald 1.4.0 起自动迁移。 | 2026-09-20 |
 | SpacemiT K3 Deb1（`deb1`） | Vendor 6.18.3-generic | `5b9d4a0a6f5e25a8` | `atmel,24c02`，256 B；ONIE `0x23` 有效，内核未启用 ONIE layout cell | `soc0/serial_number` 为全零，无效 | `5b9d4a0a6f5e25a8`，`eeprom-onie` | 已有稳定板卡身份。seriald 从原始 NVMEM 校验并解析 ONIE TLV。 | 2026-09-19 |
+| SpacemiT K3 Pico ITX | Ubuntu upstream | `HW3MPK3321280183`，内核将 ONIE 值直接放入 DT | `EEPROM_SERIAL`/NVMEM cell 未暴露 | `soc0/serial_number` 全零，`soc_id=unknown` | `HW3MPK3321280183`，`eeprom-dt` | 该版型约定 DT `serial-number` 就是 ONIE EEPROM 编号，自动作为正式身份。 | 2026-09-20 |
 | MUSE-Pi K1-X（SSH `musepi2`） | Vendor 6.6.63 | `78ad7410ec82` | DT 有 `atmel,24c02@50`，但 `status=disabled`；推断由 U-Boot 读取并注入 DT | `soc_chip_id` 原始 8 B 全零；`soc0/serial_number` 全零 | `78ad7410ec82`，`device-tree`（接入时） | 当前可用。再用第二块同版板或 U-Boot 源码确认 EEPROM 编号唯一；更换 Bootloader 后需复测。 | 2026-09-19 |
 
 ## 判定规则

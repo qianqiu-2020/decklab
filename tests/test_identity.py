@@ -80,6 +80,15 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(result['serial_source'], 'device-tree')
         self.assertEqual(result['identity_status'], 'provisional')
 
+    def test_k3_pico_dt_serial_is_the_onie_identity(self):
+        result = select_identity({'serial': 'HW3MPK3321280183',
+                                  'model': 'SpacemiT K3 Pico ITX',
+                                  'soc_serial': '0000000000000000',
+                                  'soc_family': 'spacemit socs', 'soc_id': 'unknown'})
+        self.assertEqual(result['serial'], 'HW3MPK3321280183')
+        self.assertEqual(result['serial_source'], 'eeprom-dt')
+        self.assertEqual(result['identity_status'], 'confirmed')
+
     def test_valid_board_serial_is_preserved(self):
         result = select_identity(info('5b9d4a0a6f5e25a8'))
         self.assertEqual(result['serial'], '5b9d4a0a6f5e25a8')
