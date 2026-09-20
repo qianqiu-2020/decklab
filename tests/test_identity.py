@@ -45,10 +45,11 @@ class IdentityTests(unittest.TestCase):
     def test_probe_uses_raw_onie_fallback_and_redacts_dump(self):
         raw = self.onie('MVJ-K1-000002')
         body = ('HOST=board\nSERIAL=0123456789ABCDEF\nEEPROM_SERIAL=\nEEPROM_HEX=%s\n'
-                'MODEL=Jupiter\nSSHD=active\n') % raw
+                'MODEL=Jupiter\nUBOOT_VERSION=U-Boot 2024.10\nSSHD=active\n') % raw
         result = parse_probe(body)
         self.assertEqual(result['eeprom_serial'], 'MVJ-K1-000002')
         self.assertTrue(result['eeprom_present'])
+        self.assertEqual(result['uboot_version'], 'U-Boot 2024.10')
         self.assertNotIn(raw, result['raw'])
 
     def test_eeprom_serial_precedes_a_different_soc_id(self):
@@ -58,19 +59,22 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(result['serial'], 'MVJ-K1-000003')
         self.assertEqual(result['serial_source'], 'eeprom-onie')
 
-    def test_jupiter_vendor_firmware_serial_is_confirmed_eeprom_identity(self):
+    def test_uboot_provenance_confirms_dt_serial_without_format_matching(self):
         fields = info('MJM10004000001', '0059D968E583CA22')
         fields['model'] = 'Milk-V Jupiter'
+        fields['uboot_version'] = 'U-Boot 2024.10'
         result = select_identity(fields)
         self.assertEqual(result['serial'], 'MJM10004000001')
-        self.assertEqual(result['serial_source'], 'eeprom-firmware')
+        self.assertEqual(result['serial_source'], 'uboot-injected')
         self.assertEqual(result['identity_status'], 'confirmed')
+        arbitrary = dict(fields, serial='board-production-serial-42')
+        self.assertEqual(select_identity(arbitrary)['serial_source'], 'uboot-injected')
         conflicted = select_identity(fields, conflicted=True)
         self.assertEqual(conflicted['serial_source'], 'soc-sysfs')
         self.assertEqual(conflicted['identity_status'], 'provisional')
 
-    def test_unrecognized_jupiter_firmware_serial_remains_provisional(self):
-        fields = info('MJM-invalid', '0059D968E583CA22')
+    def test_dt_serial_without_uboot_provenance_remains_provisional(self):
+        fields = info('MJM10004000001', '0059D968E583CA22')
         fields['model'] = 'Milk-V Jupiter'
         result = select_identity(fields)
         self.assertEqual(result['serial_source'], 'device-tree')

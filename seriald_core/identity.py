@@ -5,22 +5,12 @@ from .storage import IdentityError, serial_component
 from .boot_marker import marker_serial
 
 K1_SOC_IDS = {'M1-8571', 'K1-6370', 'K1-6350', 'K1-6371', 'M103-6370', 'M103-6371'}
-FIRMWARE_EEPROM_RULES = (
-    (re.compile(r'^Milk-V Jupiter(?:\s|$)'), re.compile(r'^MJM[0-9]{11}$')),
-)
 
 
-def firmware_eeprom_serial(info):
-    """Recognize vendor contracts where U-Boot injects an EEPROM serial into DT."""
-    model = str(info.get('model') or '').strip()
+def uboot_injected_serial(info):
+    """Trust a usable DT serial only when the booted DT records U-Boot provenance."""
     serial = str(info.get('serial') or '').strip()
-    # Milk-V Jupiter production serials are stored in board EEPROM.  Its vendor
-    # kernel does not expose that I2C EEPROM through NVMEM, but U-Boot publishes
-    # the value as the root serial-number property.
-    for model_pattern, serial_pattern in FIRMWARE_EEPROM_RULES:
-        if model_pattern.search(model) and serial_pattern.fullmatch(serial):
-            return serial
-    return ''
+    return serial if info.get('uboot_version') and usable_serial(serial) else ''
 
 def usable_serial(value):
     if not isinstance(value, str):
@@ -65,10 +55,10 @@ def select_identity(info, conflicted=False, known_soc=False, known_marker=False,
     if provisioned and not eeprom_conflicted:
         return dict(info, serial=provisioned, reported_serial=reported,
                     serial_source='eeprom-onie', identity_status='confirmed')
-    firmware_eeprom = firmware_eeprom_serial(info)
-    if firmware_eeprom and not conflicted:
-        return dict(info, serial=firmware_eeprom, reported_serial=reported,
-                    serial_source='eeprom-firmware', identity_status='confirmed')
+    uboot_serial = uboot_injected_serial(info)
+    if uboot_serial and not conflicted:
+        return dict(info, serial=uboot_serial, reported_serial=reported,
+                    serial_source='uboot-injected', identity_status='confirmed')
     if marker and known_marker:
         return dict(info, serial=marker, reported_serial=reported, serial_source='boot-marker',
                     identity_status='provisional')

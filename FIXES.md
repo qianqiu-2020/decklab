@@ -3,8 +3,10 @@
 旧版单文件实现的修复与线上验收已归档至 [2026-09-19 历史记录](docs/archive/FIXES-2026-09-19.md)。
 当前设备模型、日志归属与模块边界见 [架构说明](docs/ARCHITECTURE.md)，安装及数据迁移见 [安装说明](docs/INSTALL.md)。
 
-1.3.9 将已核实的 Milk-V Jupiter `MJM` 生产编号识别为 U-Boot 从 EEPROM 注入的正式身份，vendor
-内核未暴露 EEPROM NVMEM 时也可自动迁移候选档案；较弱内核接口不再降级已确认身份。归档 xterm
+1.4.0 不再根据 `MJM` 等序列号格式猜测身份；识别结果带有 `/chosen/u-boot,version` 时，
+将有效 DT serial 标记为 `uboot-injected` 正式身份。该证据适用于不同编号格式，重复编号仍受冲突保护。
+
+1.3.9 增加 vendor 内核未暴露 EEPROM NVMEM 时的候选档案迁移和已确认身份保持。归档 xterm
 单独启用 LF 到 CRLF 转换，修复纯 `\n` 日志逐行向右错位。
 
 1.3.8 移除独立日志查看器和含义重复的“最新内容”按钮。串口归档及已结束的 SSH transcript 直接

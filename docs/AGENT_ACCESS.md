@@ -34,7 +34,7 @@ serialctl --device 设备当前标签 rename --label riscv-118
 
 识别可能自动登录并在串口执行识别命令。已知序列号恢复原标签；标签变更不移动日志。
 服务优先读取 EEPROM ONIE `0x23`：支持 upstream 的 `cells/serial-number@*`，也能校验解析
-vendor 内核暴露的原始 at24 NVMEM。已登记厂商契约的 U-Boot EEPROM 注入编号也可自动确认；
+vendor 内核暴露的原始 at24 NVMEM。带 `/chosen/u-boot,version` provenance 的 U-Boot EEPROM 注入编号也可自动确认；
 没有 EEPROM 编号时才尝试未知 DT、SoC/eFuse 或旧 `/boot` 标记；
 检查 `serial_source`、`identity_status` 和 `reported_serial`。候选身份日志位于
 `logs/_provisional/<serial_source>/<serial>/`，正式确认后由管理员迁入 `logs/<serial>/`。

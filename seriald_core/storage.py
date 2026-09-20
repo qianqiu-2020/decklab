@@ -25,7 +25,7 @@ def serial_component(serial):
 
 
 CONFIRMED_IDENTITY_SOURCES = frozenset(
-    ('eeprom-onie', 'eeprom-firmware', 'verified-correction', 'verified-manual'))
+    ('eeprom-onie', 'uboot-injected', 'verified-correction', 'verified-manual'))
 
 
 def archive_component(serial, source=''):

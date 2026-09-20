@@ -28,6 +28,7 @@ PROBE_CMD = (
     "done; fi; printf 'EEPROM_HEX=%s\\n' \"$eh\"; "
     "printf 'BOOT_MARKER=%s\\n' \"$(" + read_command() + ")\"; "
     "printf 'MODEL=%s\\n' \"$(cat /proc/device-tree/model 2>/dev/null | tr -d '\\0' | tr '\\r\\n' '  ')\"; "
+    "printf 'UBOOT_VERSION=%s\\n' \"$(cat /proc/device-tree/chosen/u-boot,version 2>/dev/null | tr -d '\\0' | tr '\\r\\n' '  ')\"; "
     "ip -4 -o addr show 2>/dev/null | awk '{print \"IP=\"$2\" \"$4}'; "
     + SSH_STATE_CMD
 )
@@ -109,7 +110,8 @@ def parse_probe(raw):
 
     out['hostname'] = last('HOST', r'^HOST=(.*)$')
     out['serial'] = last('SERIAL', r'^SERIAL=(.*)$')
-    for field in ('SOC_SERIAL', 'SOC_FAMILY', 'SOC_ID', 'EEPROM_SERIAL', 'EEPROM_HEX', 'BOOT_MARKER'):
+    for field in ('SOC_SERIAL', 'SOC_FAMILY', 'SOC_ID', 'EEPROM_SERIAL', 'EEPROM_HEX',
+                  'BOOT_MARKER', 'UBOOT_VERSION'):
         if len(re.findall(r'^' + field + r'=', body, re.M)) > 1:
             raise ValueError('识别结果重复字段: ' + field)
         out[field.lower()] = last(field, r'^' + field + r'=(.*)$')
@@ -118,6 +120,7 @@ def parse_probe(raw):
         out['eeprom_serial'] = raw_serial
     out['eeprom_present'] = eeprom_present or bool(out.get('eeprom_serial'))
     out['model'] = last('MODEL', r'^MODEL=(.*)$')
+    out['uboot_version'] = last('UBOOT_VERSION', r'^UBOOT_VERSION=(.*)$')
     out['sshd'] = last('SSHD', r'^SSHD=(.*)$')
     seen = set()
     for m in re.finditer(r'^IP=(\S+)\s+(\d+\.\d+\.\d+\.\d+/\d+)', body, re.M):

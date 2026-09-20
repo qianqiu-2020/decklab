@@ -11,14 +11,15 @@
 已经建立的 SoC 身份会优先匹配，避免固件随后修改上报编号而新建另一份档案。
 
 API 的 `serial` 是当前身份编号；`reported_serial` 保留固件原值，`serial_source` 表示
-`eeprom-onie`、`eeprom-firmware`、`device-tree`、`soc-sysfs` 或 `boot-marker`，`identity_status` 区分 `confirmed` 与
+`eeprom-onie`、`uboot-injected`、`device-tree`、`soc-sysfs` 或 `boot-marker`，`identity_status` 区分 `confirmed` 与
 `provisional`。网页详情展示来源和状态。重复保护作用于所有身份来源。
 
 普通识别只读取内核属性和已有标记，不创建文件、不访问物理内存，也不调整时钟、复位、内核或 eFuse 内容。
 ONIE `0x23` 是跨内核的规范板卡身份。upstream 内核优先从
 `/sys/bus/nvmem/devices/*/cells/serial-number@*` 读取；旧 vendor 内核没有 cell 时，服务从
 `at24` NVMEM 原始内容解析 TLV，并校验 header、长度与 CRC。已核实生产写入规则的版型可把 U-Boot
-注入 DT 的 EEPROM 编号作为兼容入口；当前登记规则见 `identity.py` 和版型矩阵，未知格式仍为候选身份。
+注入 DT 的 EEPROM 编号作为兼容入口；seriald 以 `/chosen/u-boot,version` 作为注入证据，不根据序列号
+格式猜测。未知固件来源仍为候选身份。
 没有永久编号时按 USB by-path 摘要显示 `unprovisioned-…`，日志分连接暂存到
 `logs/_unprovisioned/<path-hash>/<connection-id>/`，避免同一插口先后接板时静默合并。
 

@@ -94,10 +94,11 @@ class PersistenceTests(unittest.TestCase):
         self.manager.identify(d, {
             'serial': 'MJM10004000001', 'model': 'Milk-V Jupiter',
             'soc_serial': '0059D968E583CA22', 'soc_family': 'spacemit socs',
-            'soc_id': 'K1-6370', 'hostname': 'k1', 'ips': []})
+            'soc_id': 'K1-6370', 'uboot_version': 'U-Boot 2024.10',
+            'hostname': 'k1', 'ips': []})
         self.assertEqual(Path(d.stable_dir()), self.root / 'logs' / 'MJM10004000001')
         self.assertFalse(provisional.exists())
-        self.assertEqual(d.record['info']['serial_source'], 'eeprom-firmware')
+        self.assertEqual(d.record['info']['serial_source'], 'uboot-injected')
         self.assertEqual(d.record['info']['identity_status'], 'confirmed')
 
     def test_weaker_kernel_probe_does_not_downgrade_confirmed_identity(self):
