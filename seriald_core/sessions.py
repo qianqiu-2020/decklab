@@ -25,6 +25,10 @@ class SshSession:
         self.sid = sid
         self.actor = 'web'
         self.title = ''
+        # Agent sessions are deliberately kept alive and reused by actor.  The
+        # Device owns the policy; this flag is exposed in snapshots so clients
+        # can explain why the tab remains present.
+        self.persistent = False
         self.store = None
         self.ip = ip
         self.label = label
@@ -297,5 +301,6 @@ class SshSession:
         with self.cv:
             return {'sid': self.sid, 'kind': 'ssh', 'ip': self.ip,
                     'actor': self.actor, 'title': self.title,
+                    'persistent': self.persistent,
                     'alive': self.fd is not None and not self.closed,
                     'started': self.started, 'bytes': len(self.buf)}

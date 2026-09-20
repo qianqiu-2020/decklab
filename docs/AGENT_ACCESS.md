@@ -68,13 +68,16 @@ serialctl --device riscv-118 log --file serial-20260919.log
 人在网页中旁观 agent SSH 时默认只读；点击“介入此会话”后可以向同一 shell 输入，系统会记录
 `session-takeover` 事件。agent 应把这种输入视为人工接管，不要继续并发发送破坏性命令。
 
-每次 `exec` 创建独立 SSH 会话，在 POSIX `sh` 子进程中执行，最后关闭自己的会话。
+`exec` 按 `--actor` 和设备复用持久 SSH 会话，在同一个 shell 中执行多条命令，因此会保留当前目录、
+环境变量等状态。会话会在网页中持续显示并可被人旁观；需要结束时显式运行 `ssh-close --sid <sid>`。
+网页创建的 `web` 会话仍是一次一条的独立会话。
 工作目录和环境不跨调用保持；将 `cd` 和依赖的命令放在一次 `--command` 内。
 stdin 为 EOF，stdout/stderr 合并，返回文本去除 ANSI；命令限 2048 UTF-8 字节，输出限 1 MiB，
 高吞吐输出也可能超出服务缓存。使用过滤和取尾限制日志量，不通过它运行交互程序或常驻后台任务。
 
 响应 `completed: true` 表示收到了完整结束标记，`exit_code` 为远端退出码；
-`session_closed` 表示会话清理成功。CLI 成功退出 0，访问/命令失败退出 1，参数错误退出 2。
+`session_persistent` 表示服务是否保留了这个 actor 的 SSH 会话；持久会话不会返回
+`session_closed: true`，应使用 `ssh-close` 关闭。CLI 成功退出 0，访问/命令失败退出 1，参数错误退出 2。
 非零退出码、输出缺失、超时不能报告为成功。
 
 `--timeout` 默认 60 秒，从会话创建完成后计时，包含登录和执行；创建请求单独受

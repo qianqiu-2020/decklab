@@ -407,13 +407,17 @@
         : (s.kind === 'log' ? s.label : ('SSH ' + (s.actor ? s.actor + ' · ' : '') + (s.ip || s.sid)));
       if (s.kind === 'log' || (s.actor && s.actor !== 'web' && !takenOver[s.sid])) b.textContent += ' · 只读';
       b.title = s.kind === 'serial' ? '板子控制台（实时输出）'
-        : (s.kind === 'log' ? '归档日志快照，只读显示在终端中' : 'SSH 会话，独立记录到 ssh-*.log');
+        : (s.kind === 'log' ? '归档日志快照，只读显示在终端中'
+          : (s.persistent ? 'agent 持久 SSH 会话；同一 agent 后续命令复用此标签，直到手动关闭'
+                           : 'SSH 会话，独立记录到 ssh-*.log'));
       b.addEventListener('click', function () { if (isCurrent(ctx)) switchSession(s.sid); });
       bar.appendChild(b);
-      if (s.kind === 'log' || (s.kind === 'ssh' && (!s.actor || s.actor === 'web'))) {
+      if (s.kind === 'log' || (s.kind === 'ssh' &&
+          (!s.actor || s.actor === 'web' || s.persistent))) {
         var x = document.createElement('button');
         x.type = 'button'; x.className = 'x'; x.textContent = '×';
-        x.title = s.kind === 'log' ? '关闭这个归档标签' : '关闭这条 SSH 会话';
+        x.title = s.kind === 'log' ? '关闭这个归档标签'
+          : (s.persistent ? '关闭这个 agent 持久 SSH 会话' : '关闭这条 SSH 会话');
         x.addEventListener('click', function (e) {
           e.stopPropagation();
           if (!isCurrent(ctx)) return;

@@ -52,7 +52,8 @@ python3 /data/seriald/serialctl.py --actor claude-code/diagnosis --device riscv-
 ```
 
 用 `--actor` 标记本会话/操作者，方便人从网页旁观或回看。actor 是自报名称，不是认证。
-`exec` 使用独立 SSH 会话，完成后关闭；不要借用其他 agent 或网页的会话。
+同一设备和 actor 的 `exec` 会复用持久 SSH 会话，网页会一直显示该标签，直到 agent 执行
+`ssh-close --sid <sid>` 或人在网页中关闭。不要借用其他 agent 或网页的会话。
 每次环境独立，把相关 `cd`、变量设置和命令放在同一次调用，正确引用本机 shell 参数。
 远端用 POSIX `sh`，stdin 为 EOF，stdout/stderr 合并；不用于交互程序、二进制或常驻任务。
 命令限 2048 UTF-8 字节，累计输出限 1 MiB，服务缓存也有限；大日志先过滤或取尾。
@@ -69,7 +70,7 @@ python3 /data/seriald/serialctl.py --actor claude-code/diagnosis --device riscv-
 
 ## 串口及交互式 SSH
 
-SSH 多步交互用 `ssh-open` 得到自己的 sid，随后 `read --sid`、`send --sid`，结束 `ssh-close --sid`。
+SSH 多步交互用 `ssh-open` 得到（或复用）自己的持久 sid，随后 `read --sid`、`send --sid`，结束 `ssh-close --sid`。
 串口是共享控制台，写入前协调唯一操作者；已有独占安排无需重复确认。
 先确认现场是 shell、登录提示符还是 U-Boot，再选择输入。`send --text '命令' --enter`
 追加 CR；其他换行或控制字符用 `--file` / `--file -`。写入成功不代表命令已完成。

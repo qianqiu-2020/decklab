@@ -131,6 +131,28 @@ class SessionRegistryTests(unittest.TestCase):
         self.assertNotEqual(session.sid, 'ssh1')
         self.assertIs(device.get_session(session.sid), session)
 
+    def test_named_agent_reuses_live_persistent_session(self):
+        device = self.device
+        first, error = device.ssh_connect(actor='claude-code/debug', title='pwd')
+        self.assertEqual(error, '')
+        first.fd = 101  # FakeSession does not spawn a PTY itself.
+        self.assertTrue(first.persistent)
+        second, error = device.ssh_connect(actor='claude-code/debug', title='uname -a')
+        self.assertEqual(error, '')
+        self.assertIs(second, first)
+        self.assertEqual(first.title, 'uname -a')
+        self.assertEqual(len(device.ssh_sessions), 1)
+
+    def test_persistent_agent_session_is_not_reaped_for_idle(self):
+        device = self.device
+        session, error = device.ssh_connect(actor='agent', title='long-lived')
+        self.assertEqual(error, '')
+        session.fd = 101
+        session.last_touch = 0
+        device.reap_sessions()
+        self.assertIs(device.get_session(session.sid), session)
+        self.assertEqual(session.close_count, 0)
+
     def test_reaper_claims_under_cv_then_disposes_outside_registry_lock(self):
         device = self.device
         fresh = FakeSession('ssh-fresh')

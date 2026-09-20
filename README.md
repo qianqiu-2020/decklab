@@ -30,8 +30,9 @@ serialctl --device riscv-118 activity
 ```
 
 源码环境用 `python3 serialctl.py` 替代 `serialctl`。远程访问设置 `SERIALD_URL`。
-`exec` 使用独立 SSH 会话，返回 JSON 输出、退出码和清理状态；网页可实时旁观，串口归档和已关闭
-SSH 会话会作为只读终端标签打开。
+`exec` 使用当前 `--actor` 在每块板上的持久 SSH 会话：同一 agent 的后续命令复用同一个 shell，
+返回 JSON 输出和退出码，网页会一直显示可旁观的标签。会话只在显式 `ssh-close` 或网页关闭时结束；
+网页自己创建的 `web` 会话仍按独立会话处理。
 
 [Agent 接入指南](docs/AGENT_ACCESS.md) · [seriald-board skill](skills/seriald-board/SKILL.md)
 

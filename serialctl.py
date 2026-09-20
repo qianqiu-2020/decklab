@@ -140,7 +140,9 @@ def execute(client, command, timeout):
     sid = None
     captured = bytearray()
     try:
-        # One new session per command: never borrow a person's or another agent's shell.
+        # Non-web actors reuse one persistent shell.  The service still records
+        # this command's result, while the PTY remains available for the next
+        # invocation and visible in the human UI until ssh-close.
         opened = client.post('/api/ssh-connect', title=command)
         client.key = opened.get('device_key') or client.key
         client.serial = opened.get('serial') or client.serial
@@ -150,6 +152,10 @@ def execute(client, command, timeout):
             sid = None
             raise ClientError('Service did not return a valid SSH session ID')
         result['sid'] = sid
+        # The server advertises the policy explicitly.  Keeping the default
+        # false lets this client continue to clean up correctly against an
+        # older collector during an upgrade.
+        result['session_persistent'] = bool(opened.get('persistent', False))
         deadline = time.monotonic() + timeout
         off = 0
         ready = False
@@ -199,12 +205,13 @@ def execute(client, command, timeout):
             except ClientError as error:
                 result['recording_error'] = str(error)
                 result['ok'] = False
-            try:
-                client.post('/api/session-close', sid=sid)
-                result['session_closed'] = True
-            except (ClientError, KeyboardInterrupt) as error:
-                result['cleanup_error'] = str(error) or 'Cleanup interrupted'
-                result['ok'] = False
+            if not result.get('session_persistent'):
+                try:
+                    client.post('/api/session-close', sid=sid)
+                    result['session_closed'] = True
+                except (ClientError, KeyboardInterrupt) as error:
+                    result['cleanup_error'] = str(error) or 'Cleanup interrupted'
+                    result['ok'] = False
         result['may_still_be_running'] = result['sent'] and not result['completed']
     return result
 
@@ -245,7 +252,7 @@ def parser():
     source.add_argument('--text')
     source.add_argument('--file', help='UTF-8 input file, or - for stdin')
     send.add_argument('--enter', action='store_true', help='append CR (otherwise input is literal)')
-    run = commands.add_parser('exec', help='run noninteractive shell command in a new SSH session')
+    run = commands.add_parser('exec', help='run a command in your persistent SSH session')
     run.add_argument('--command', required=True, help='quote for the LOCAL shell')
     run.add_argument('--timeout', type=positive_timeout, default=60,
                      help='SSH login + command timeout, after session creation')
@@ -253,7 +260,7 @@ def parser():
     identify.add_argument('--init-boot-marker', action='store_true',
                           help='explicitly create /boot/seriald-id once as a software identity fallback')
     commands.add_parser('sessions', help='list serial and SSH sessions')
-    commands.add_parser('ssh-open', help='create an independent interactive SSH session')
+    commands.add_parser('ssh-open', help='open or reuse your persistent interactive SSH session')
     close = commands.add_parser('ssh-close', help='close only your own SSH session')
     close.add_argument('--sid', required=True)
     commands.add_parser('logs', help='list stored log files')

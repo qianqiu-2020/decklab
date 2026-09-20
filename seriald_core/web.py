@@ -266,7 +266,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             s, err = d.ssh_connect(actor=actor, title=str(payload.get('title') or '')[:2048])
             if not s:
                 return self._json(502, {'ok': False, 'error': err})
-            return self._json(200, {'ok': True, 'sid': s.sid, 'ip': s.ip, 'device_key': d.key, 'serial': d.serial})
+            return self._json(200, {'ok': True, 'sid': s.sid, 'ip': s.ip,
+                                    'persistent': bool(getattr(s, 'persistent', False)),
+                                    'device_key': d.key, 'serial': d.serial})
 
         if route == '/api/session-send':
             sid = str(payload.get('sid') or 'serial')

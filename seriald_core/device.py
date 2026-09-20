@@ -462,6 +462,20 @@ class Device:
         if not ip:
             return None, '没找到可用 IP(只看到 docker0 之类的内部地址)'
         self.reap_sessions()
+        # A named agent gets one long-lived shell per board.  Reusing the PTY
+        # preserves shell state (cwd, exported variables, tmux, etc.) and lets
+        # the human UI keep one visible tab for that agent.  The web UI uses
+        # actor=web and therefore continues to create an independent session.
+        persistent = bool(actor and actor != 'web')
+        if persistent:
+            with self.sessions_lock:
+                for existing in self.ssh_sessions.values():
+                    if (getattr(existing, 'actor', '') == actor
+                            and not getattr(existing, 'closed', True)
+                            and getattr(existing, 'fd', None) is not None):
+                        if title:
+                            existing.title = title
+                        return existing, ''
         with self.sessions_lock:
             if len(self.ssh_sessions) + self.ssh_pending >= SSH_LIMIT:
                 return None, 'SSH 会话已达上限(%d),请先关闭闲置会话' % SSH_LIMIT
@@ -473,6 +487,7 @@ class Device:
                 return None, '设备已重新枚举,请重新识别 IP'
             session = SshSession(sid, ip, self.label, self.stable_dir())
             session.actor, session.title = actor, title
+            session.persistent = persistent
             if self.manager and self.serial:
                 session.store = self.manager.store
                 session.store.open_session(sid, self.serial, actor, title, ip)
@@ -516,7 +531,11 @@ class Device:
         with self.sessions_lock:
             for sid, session in list(self.ssh_sessions.items()):
                 with session.cv:
-                    if not session.is_idle(now, SSH_IDLE):
+                    # Persistent agent PTYs stay until an explicit close.  A
+                    # dead persistent session is still removed immediately so
+                    # the next agent call can establish a fresh one.
+                    if not session.closed and (getattr(session, 'persistent', False)
+                                               or not session.is_idle(now, SSH_IDLE)):
                         continue
                     # 判闲置和标记关闭必须原子;不能把刚被用户续用的会话关掉。
                     session.closed = True
