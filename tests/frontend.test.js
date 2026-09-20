@@ -236,7 +236,9 @@ test('preparing a board swap moves the live UART to an unprovisioned view', asyn
   const h = harness();
   h.take('/api/devices').resolve({ devices: [{ key: 'milkv', label: 'milkv', serial: 'SN001',
     state: 'online', connection_id: 'connection-1', by_path: 'usb-1', alive: true,
-    dev: '/mock/ttyUSB1' }] });
+    dev: '/mock/ttyUSB1', hostname: 'riscv-118',
+    info: { serial: 'SN001', hostname: 'riscv-118', serial_source: 'device-tree',
+      identity_status: 'provisional', ts: 12 } }] });
   await drain(); h.select('milkv');
   assert.equal(h.get('b-switch').hidden, false);
   h.get('b-switch').click();
@@ -245,6 +247,8 @@ test('preparing a board swap moves the live UART to an unprovisioned view', asyn
   request.resolve({ ok: true, device_key: 'unprovisioned-path', serial: '', old_serial: 'SN001' });
   await drain();
   assert.equal(h.get('d-key').textContent, 'unprovisioned-path');
+  assert.equal(h.get('d-info').hidden, true);
+  assert.equal(h.get('d-name').textContent, 'unprovisioned-path');
   assert.ok(h.get('d-status').textContent.includes('换板识别模式'));
 });
 

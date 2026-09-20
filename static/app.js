@@ -598,7 +598,21 @@
 
   function adoptKey(ctx, key, serial) {
     if (!isCurrent(ctx) || !key || key === ctx.key) return;
-    lastDevices.forEach(function (d) { if (d.key === ctx.key) { d.key = key; d.label = key; d.serial = serial; } });
+    lastDevices.forEach(function (d) {
+      if (d.key !== ctx.key) return;
+      d.key = key; d.label = key; d.serial = serial;
+      if (!serial) {
+        // /api/switch-mode detaches the old board immediately.  Clear the
+        // optimistic local copy too; otherwise the old board's candidate
+        // serial/hostname remains visible until the next device poll.
+        d.info = {};
+        d.hostname = '';
+        d.reported_serial = '';
+        d.identity_error = '';
+        d.needs_provisioning = true;
+        d.state = 'pending';
+      }
+    });
     select(key);
   }
 
