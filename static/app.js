@@ -55,7 +55,9 @@
       // 归档文件常用单独 LF；xterm 的 LF 默认不回到第 1 列，会呈现阶梯状。
       // 实时串口/pty 保留原始 CR/LF，避免改变全屏终端协议。
       convertEol: ctx.kind === 'log',
-      scrollback: 8000,
+      // Archived tabs load the complete daily file; keep enough history for
+      // long logs while leaving live terminals at a bounded interactive size.
+      scrollback: ctx.kind === 'log' ? 100000 : 8000,
       cursorBlink: !ctx.readonly,
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
       fontSize: 12.5,
@@ -588,14 +590,14 @@
     }
     $('d-status').textContent = ' 正在读取只读归档 ' + archived.name + '…';
     fetch('/api/log?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
-      + '&file=' + encodeURIComponent(archived.name))
+      + '&file=' + encodeURIComponent(archived.name) + '&full=1')
       .then(function (r) { return r.json(); }).then(function (d) {
         if (!isCurrent(ctx) || curSid !== archived.sid) return;
         if (d.error) throw new Error(d.error);
         archived.loaded = true;
         archived.payload = { data_b64: d.data_b64, data: d.data };
         archived.status = ' 只读归档 · 字节 ' + d.start_off + '–' + d.off + ' / ' + d.size
-          + (d.start_off > 0 ? '（显示末尾 64 KiB）' : '');
+          + (d.more ? '（内容未读完）' : '（完整文件）');
         writeTerminalPayload(ctx, archived.payload);
         $('d-status').textContent = archived.status;
       }).catch(function (e) {

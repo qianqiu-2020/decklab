@@ -461,6 +461,11 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(len(result['data']), 65536)
         self.assertEqual(result['start_off'], 100000 - 65536)
+        status, result = self.handler('/api/log?key=riscv-118&file=serial-test.log&full=1')
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result['data']), 100000)
+        self.assertEqual(result['start_off'], 0)
+        self.assertFalse(result['more'])
         status, result = self.handler('/api/log?key=riscv-118&file=serial-test.log&off=0')
         self.assertTrue(result['more'])
         for name in ('../registry.sqlite3', 'escape.log'):

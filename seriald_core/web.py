@@ -146,14 +146,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 offset = int((q.get('off') or ['-1'])[0])
                 if offset < -1:
                     raise ValueError
+                full = (q.get('full') or ['0'])[0] == '1'
                 # Open only regular files inside the selected board's directory, no symlink traversal.
                 path = os.path.join(d.stable_dir(), name)
                 fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
                 with os.fdopen(fd, 'rb') as source:
                     size = os.fstat(source.fileno()).st_size
-                    start = max(0, size - 65536) if offset == -1 else min(offset, size)
+                    start = (0 if full else max(0, size - 65536)) if offset == -1 else min(offset, size)
                     source.seek(start)
-                    data = source.read(65536)
+                    data = source.read() if full else source.read(65536)
                 return self._json(200, {'file': name, 'data': data.decode('utf-8', 'replace'),
                     'data_b64': base64.b64encode(data).decode('ascii'), 'start_off': start,
                     'off': start + len(data), 'size': size, 'more': start + len(data) < size})
