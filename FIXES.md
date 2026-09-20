@@ -3,6 +3,9 @@
 旧版单文件实现的修复与线上验收已归档至 [2026-09-19 历史记录](docs/archive/FIXES-2026-09-19.md)。
 当前设备模型、日志归属与模块边界见 [架构说明](docs/ARCHITECTURE.md)，安装及数据迁移见 [安装说明](docs/INSTALL.md)。
 
+1.4.1 保留已识别设备的持久化来源信息，避免 collector 重连时清空 `info.serial_source`；前端详情
+按设备连接代次刷新，切换待识别设备后不会残留上一块板的来源文案。
+
 1.4.0 不再根据 `MJM` 等序列号格式猜测身份；识别结果带有 `/chosen/u-boot,version` 时，
 将有效 DT serial 标记为 `uboot-injected` 正式身份。该证据适用于不同编号格式，重复编号仍受冲突保护。
 
