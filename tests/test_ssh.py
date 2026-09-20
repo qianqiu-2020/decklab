@@ -69,6 +69,17 @@ class SshSessionTests(unittest.TestCase):
         self.assertIn('UserKnownHostsFile=/dev/null', session.argv)
         self.assertIn('GlobalKnownHostsFile=/dev/null', session.argv)
 
+    def test_request_credentials_select_normal_ubuntu_user(self):
+        session = seriald.SshSession('ssh1', '192.0.2.1', 'test', '/unused',
+                                     user='ubuntu', password='board-secret')
+        self.sessions.append(session)
+        self.assertEqual(session.argv[-1], 'ubuntu@192.0.2.1')
+        with mock.patch.object(seriald.pty, 'openpty', return_value=(101, 102)), \
+                mock.patch.object(seriald.subprocess, 'Popen', return_value=mock.Mock(pid=123)) as spawn:
+            spawn.return_value.wait.return_value = 0
+            self.assertTrue(session.ensure())
+            self.assertEqual(spawn.call_args.kwargs['env']['SSHPASS'], 'board-secret')
+
     def test_long_session_rotates_log_at_date_boundary(self):
         session = self.session()
         old_log = session.logf

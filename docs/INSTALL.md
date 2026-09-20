@@ -27,6 +27,9 @@ SERIALD_AUTH_TOKEN=一段足够长的随机值
 ```
 
 配置文件是 root/seriald 可读的 conffile，升级保留用户修改。远程客户端设置 `SERIALD_URL=http://上位机:8898`。
+如果不同板子的 SSH 账户不同，agent 可在单次请求中传入 `serialctl --ssh-user ubuntu
+--ssh-password "$BOARD_PASSWORD" ...` 覆盖服务默认值；密码不要写进命令历史，优先使用环境变量
+`SERIALD_SSH_PASSWORD_OVERRIDE`。网页创建的 SSH 仍使用服务默认账户。
 `SERIALD_AUTH_TOKEN` 为空时不启用认证，仅适合可信开发网络。设置后，浏览器使用用户名 `seriald`、
 密码为该 token 的 HTTP Basic 登录；agent 设置 `SERIALD_TOKEN` 或传 `serialctl --token`。
 终端访问等同于使用开发板登录账户，即使启用 token 也应限制防火墙访问范围。

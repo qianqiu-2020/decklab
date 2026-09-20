@@ -5,19 +5,12 @@ from .storage import IdentityError, serial_component
 from .boot_marker import marker_serial
 
 K1_SOC_IDS = {'M1-8571', 'K1-6370', 'K1-6350', 'K1-6371', 'M103-6370', 'M103-6371'}
-DT_EEPROM_MODELS = {'SpacemiT K3 Pico ITX'}
 
 
 def uboot_injected_serial(info):
     """Trust a usable DT serial only when the booted DT records U-Boot provenance."""
     serial = str(info.get('serial') or '').strip()
     return serial if info.get('uboot_version') and usable_serial(serial) else ''
-
-def dt_eeprom_serial(info):
-    """K3 Pico ITX upstream images expose the ONIE value only as DT serial."""
-    model = str(info.get('model') or '').strip()
-    serial = str(info.get('serial') or '').strip()
-    return serial if model in DT_EEPROM_MODELS and usable_serial(serial) else ''
 
 def usable_serial(value):
     if not isinstance(value, str):
@@ -66,16 +59,12 @@ def select_identity(info, conflicted=False, known_soc=False, known_marker=False,
     if uboot_serial and not conflicted:
         return dict(info, serial=uboot_serial, reported_serial=reported,
                     serial_source='uboot-injected', identity_status='confirmed')
-    dt_eeprom = dt_eeprom_serial(info)
-    if dt_eeprom and not conflicted:
-        return dict(info, serial=dt_eeprom, reported_serial=reported,
-                    serial_source='eeprom-dt', identity_status='confirmed')
     if marker and known_marker:
         return dict(info, serial=marker, reported_serial=reported, serial_source='boot-marker',
                     identity_status='provisional')
-    if usable_serial(reported) and not conflicted and not known_soc:
+    if usable_serial(reported) and not conflicted:
         return dict(info, serial=reported, reported_serial=reported, serial_source='device-tree',
-                    identity_status='provisional')
+                    identity_status='confirmed')
     soc_serial = hardware_serial(info)
     if known_soc and soc_serial and not conflicted and not soc_conflicted:
         return dict(info, serial=soc_serial, reported_serial=reported, serial_source='soc-sysfs',

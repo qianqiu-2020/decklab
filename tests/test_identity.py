@@ -33,6 +33,7 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(upstream['serial'], vendor['serial'])
         self.assertEqual(upstream['serial_source'], 'eeprom-onie')
         self.assertEqual(vendor['serial_source'], 'device-tree')
+        self.assertEqual(vendor['identity_status'], 'confirmed')
 
     def test_valid_raw_onie_extracts_serial_and_bad_crc_does_not(self):
         serial = 'MVJ-K1-000001'
@@ -73,20 +74,17 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(conflicted['serial_source'], 'soc-sysfs')
         self.assertEqual(conflicted['identity_status'], 'provisional')
 
-    def test_dt_serial_without_uboot_provenance_remains_provisional(self):
+    def test_dt_serial_without_uboot_provenance_is_confirmed(self):
         fields = info('MJM10004000001', '0059D968E583CA22')
         fields['model'] = 'Milk-V Jupiter'
         result = select_identity(fields)
         self.assertEqual(result['serial_source'], 'device-tree')
-        self.assertEqual(result['identity_status'], 'provisional')
+        self.assertEqual(result['identity_status'], 'confirmed')
 
     def test_k3_pico_dt_serial_is_the_onie_identity(self):
-        result = select_identity({'serial': 'HW3MPK3321280183',
-                                  'model': 'SpacemiT K3 Pico ITX',
-                                  'soc_serial': '0000000000000000',
-                                  'soc_family': 'spacemit socs', 'soc_id': 'unknown'})
+        result = select_identity({'serial': 'HW3MPK3321280183', 'model': 'SpacemiT K3 Pico ITX'})
         self.assertEqual(result['serial'], 'HW3MPK3321280183')
-        self.assertEqual(result['serial_source'], 'eeprom-dt')
+        self.assertEqual(result['serial_source'], 'device-tree')
         self.assertEqual(result['identity_status'], 'confirmed')
 
     def test_valid_board_serial_is_preserved(self):
@@ -110,9 +108,9 @@ class IdentityTests(unittest.TestCase):
 
     def test_established_hardware_identity_survives_firmware_serial_changes(self):
         result = select_identity(info('new-firmware-serial'), known_soc=True)
-        self.assertEqual(result['serial'], '0059D968E583C49A')
+        self.assertEqual(result['serial'], 'new-firmware-serial')
         self.assertEqual(result['reported_serial'], 'new-firmware-serial')
-        self.assertEqual(select_identity(info('0059D968E583C49A'), known_soc=True)['serial'], result['serial'])
+        self.assertEqual(select_identity(info('0059D968E583C49A'), known_soc=True)['serial'], '0059D968E583C49A')
 
     def test_invalid_efuse_values_never_become_directory_keys(self):
         for value in ('', '0' * 16, 'F' * 16, '007FFFFFFFFFFFFF', '0080000000000000',
@@ -169,8 +167,8 @@ class IdentityCorrectionTests(unittest.TestCase):
 
     def test_manual_confirmation_promotes_provisional_archive_without_changing_serial(self):
         serial = 'DT-VERIFIED-001'
-        self.store.bind({'serial': serial, 'serial_source': 'device-tree'}, '', '', 'musepi2')
-        source = self.base / 'logs' / '_provisional' / 'device-tree' / serial / 'serial-test.log'
+        self.store.bind({'serial': serial, 'serial_source': 'soc-sysfs'}, '', '', 'musepi2')
+        source = self.base / 'logs' / '_provisional' / 'soc-sysfs' / serial / 'serial-test.log'
         source.parent.mkdir(parents=True)
         source.write_text('board output\n')
         plan = confirm_serial(self.base, serial)

@@ -445,7 +445,7 @@ class Device:
                          ','.join(info.get('ips') or []) or '-', info.get('sshd') or '-'))
         return info
 
-    def ssh_connect(self, actor='web', title=''):
+    def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None):
         """一键 SSH:用识别到的 IP 起一条**独立会话**(默认 root/bianbu)。
 
         没有 IP 就先识别一次 —— 这正是"识别设备"存在的意义:串口负责拿到
@@ -491,7 +491,12 @@ class Device:
         try:
             if self.stop is not origin or origin.is_set():
                 return None, '设备已重新枚举,请重新识别 IP'
-            session = SshSession(sid, ip, self.label, self.stable_dir())
+            session_args = {}
+            if ssh_user is not None:
+                session_args['user'] = ssh_user
+            if ssh_password is not None:
+                session_args['password'] = ssh_password
+            session = SshSession(sid, ip, self.label, self.stable_dir(), **session_args)
             session.actor, session.title = actor, title
             session.persistent = persistent
             if self.manager and self.serial:

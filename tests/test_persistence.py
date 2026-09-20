@@ -61,8 +61,7 @@ class PersistenceTests(unittest.TestCase):
         self.identify(d)
         directory = Path(d.stable_dir())
         self.assertEqual(directory.name, 'SN001')
-        self.assertEqual(directory.parent.name, 'device-tree')
-        self.assertEqual(directory.parent.parent.name, '_provisional')
+        self.assertEqual(directory.parent.name, 'logs')
         self.assertFalse(pending.exists())
         self.assertTrue(any('before identification' in p.read_text() for p in directory.glob('*.log')))
         self.manager.rename(d, 'musepi2')
@@ -81,7 +80,7 @@ class PersistenceTests(unittest.TestCase):
             'serial': 'SN001', 'eeprom_serial': 'SN001', 'hostname': 'riscv-118', 'ips': []})
         canonical = Path(d.stable_dir())
         self.assertEqual(canonical, self.root / 'logs' / 'SN001')
-        self.assertFalse(provisional.exists())
+        self.assertTrue(provisional.exists())
         self.assertEqual(d.record['info']['serial_source'], 'eeprom-onie')
         matching = [p for p in canonical.glob('*.log') if 'provisional history' in p.read_text()]
         self.assertEqual(len(matching), 1)
@@ -97,7 +96,7 @@ class PersistenceTests(unittest.TestCase):
             'soc_id': 'K1-6370', 'uboot_version': 'U-Boot 2024.10',
             'hostname': 'k1', 'ips': []})
         self.assertEqual(Path(d.stable_dir()), self.root / 'logs' / 'MJM10004000001')
-        self.assertFalse(provisional.exists())
+        self.assertTrue(provisional.exists())
         self.assertEqual(d.record['info']['serial_source'], 'uboot-injected')
         self.assertEqual(d.record['info']['identity_status'], 'confirmed')
 
@@ -122,7 +121,7 @@ class PersistenceTests(unittest.TestCase):
             'serial': 'SN001', 'eeprom_serial': 'SN001', 'hostname': 'riscv-118', 'ips': []})
         canonical = Path(new.stable_dir())
         self.assertEqual(canonical, self.root / 'logs' / 'SN001')
-        self.assertFalse(provisional.exists())
+        self.assertTrue(provisional.exists())
         self.assertTrue(any('history before provisioning' in p.read_text()
                             for p in canonical.glob('*.log')))
         self.assertEqual(len(self.store.boards()), 1)
@@ -251,8 +250,7 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(archive_component('SN001', 'verified-manual'), 'SN001')
         self.assertEqual(archive_component('SN001', 'soc-sysfs'),
                          '_provisional/soc-sysfs/SN001')
-        self.assertEqual(archive_component('SN001', 'device-tree'),
-                         '_provisional/device-tree/SN001')
+        self.assertEqual(archive_component('SN001', 'device-tree'), 'SN001')
 
     def test_failed_identity_is_visible_without_binding_or_merging_logs(self):
         one, two = self.connection('usb-1'), self.connection('usb-2')

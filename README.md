@@ -2,7 +2,7 @@
 
 供人和 agent 共用的 Linux 开发板工作台：持续采集串口、独立 SSH 会话、在线日志、历史设备和操作记录。
 
-设备身份优先使用 EEPROM ONIE 序列号，并兼容 vendor/upstream 内核的不同暴露方式；`key` 是用户标签（如 `riscv-118`、`musepi2`）。待确认的 DT、SoC/eFuse 与 `/boot` 身份保存在 `logs/_provisional/`，正式确认后迁入 `logs/<序列号>/`；没有编号时按 USB 连接隔离。标签、USB 插口和 tty 节点可改变。
+设备身份优先使用 EEPROM ONIE 序列号，并兼容 vendor/upstream 内核的不同暴露方式；有效 DT `serial-number` 也直接作为正式编号；`key` 是用户标签（如 `riscv-118`、`musepi2`）。待确认的 SoC/eFuse 与 `/boot` 身份保存在 `logs/_provisional/`；没有编号时按 USB 连接隔离。标签、USB 插口和 tty 节点可改变。
 
 ## 安装到 Ubuntu 上位机
 

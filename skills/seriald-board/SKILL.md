@@ -58,6 +58,8 @@ python3 /data/seriald/serialctl.py --actor claude-code/diagnosis --device riscv-
 远端用 POSIX `sh`，stdin 为 EOF，stdout/stderr 合并；不用于交互程序、二进制或常驻任务。
 命令限 2048 UTF-8 字节，累计输出限 1 MiB，服务缓存也有限；大日志先过滤或取尾。
 缺少 IP 时创建 SSH 可能先在串口识别；不要因 SSH 不通擅自安装服务或修改凭据。
+Ubuntu 等禁用 root SSH 的板子可按请求指定账户：设置 `SERIALD_SSH_PASSWORD_OVERRIDE`，并在命令中加入
+`--ssh-user ubuntu --ssh-password "$SERIALD_SSH_PASSWORD_OVERRIDE"`。网页默认使用上位机配置的账户。
 
 检查 JSON 中的 `completed`、`exit_code`、`output` 和 `session_closed`。
 只有完整结束标记才证明完成；非零退出码是失败。

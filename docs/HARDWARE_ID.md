@@ -97,5 +97,5 @@ sudo chown -R seriald:seriald /data/seriald-data
 sudo systemctl start seriald
 ```
 
-该操作把 `device-tree`、`soc-sysfs` 或 `boot-marker` 候选目录迁入 `logs/<serial>/`，并记录
+该操作把 `soc-sysfs` 或 `boot-marker` 候选目录迁入 `logs/<serial>/`，并记录
 `identity-confirmed` 事件。预览不修改文件或数据库。

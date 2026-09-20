@@ -21,7 +21,7 @@ class SshSession:
     维护调试板子的核心诉求就是"操作过程要有记录"。
     """
 
-    def __init__(self, sid, ip, label, logdir):
+    def __init__(self, sid, ip, label, logdir, user=None, password=None):
         self.sid = sid
         self.actor = 'web'
         self.title = ''
@@ -31,6 +31,8 @@ class SshSession:
         self.persistent = False
         self.store = None
         self.ip = ip
+        self.user = user or os.environ.get('SERIALD_SSH_USER', 'root')
+        self.password = password if password is not None else os.environ.get('SERIALD_SSH_PASSWORD', 'bianbu')
         self.label = label
         self.buf = bytearray()
         self.base = 0
@@ -61,7 +63,7 @@ class SshSession:
                      '-o', 'UserKnownHostsFile=/dev/null',
                      '-o', 'GlobalKnownHostsFile=/dev/null',
                      '-o', 'ConnectTimeout=10',
-                     '-o', 'ServerAliveInterval=30', os.environ.get('SERIALD_SSH_USER', 'root') + '@' + ip]
+                     '-o', 'ServerAliveInterval=30', self.user + '@' + ip]
         self._open_log(logdir)
 
     def _open_log(self, logdir):
@@ -129,13 +131,13 @@ class SshSession:
                     self.argv, stdin=slave, stdout=slave, stderr=slave,
                     # 多线程进程里 preexec_fn 可能继承已锁住的锁,导致子进程死锁。
                     start_new_session=True, env=dict(os.environ, TERM='xterm-256color',
-                                             SSHPASS=os.environ.get('SERIALD_SSH_PASSWORD', 'bianbu')),
+                                             SSHPASS=self.password),
                     close_fds=True)
                 with self.cv:
                     self.fd, self.proc = master, proc
                     self.last_touch = time.monotonic()
                 self._append('\r\n*** 已建立 SSH 会话 %s@%s (%dx%d) ***\r\n'
-                             % (os.environ.get('SERIALD_SSH_USER', 'root'), self.ip, self.cols, self.rows))
+                             % (self.user, self.ip, self.cols, self.rows))
                 self._thread = threading.Thread(target=self._reader, args=(master, proc),
                                                 daemon=True)
                 self._thread.start()

@@ -37,6 +37,8 @@ class Client:
         self.key = None
         self.serial = None
         self.actor = os.environ.get('SERIALD_ACTOR', 'agent')
+        self.ssh_user = None
+        self.ssh_password = None
         self.token = token
 
     def request(self, route, payload=None, query=None, timeout=None):
@@ -143,7 +145,12 @@ def execute(client, command, timeout):
         # Non-web actors reuse one persistent shell.  The service still records
         # this command's result, while the PTY remains available for the next
         # invocation and visible in the human UI until ssh-close.
-        opened = client.post('/api/ssh-connect', title=command)
+        credentials = {}
+        if isinstance(getattr(client, 'ssh_user', None), str):
+            credentials['ssh_user'] = client.ssh_user
+        if isinstance(getattr(client, 'ssh_password', None), str):
+            credentials['ssh_password'] = client.ssh_password
+        opened = client.post('/api/ssh-connect', title=command, **credentials)
         client.key = opened.get('device_key') or client.key
         client.serial = opened.get('serial') or client.serial
         result['key'] = client.key
@@ -239,6 +246,10 @@ def parser():
     p.add_argument('--device', help='device label (key) or immutable board serial')
     p.add_argument('--actor', default=os.environ.get('SERIALD_ACTOR', 'agent'),
                    help='operator name shown in history, e.g. claude-code/session-name')
+    p.add_argument('--ssh-user', default=os.environ.get('SERIALD_SSH_USER_OVERRIDE'),
+                   help='SSH login user for this request; otherwise server configuration')
+    p.add_argument('--ssh-password', default=os.environ.get('SERIALD_SSH_PASSWORD_OVERRIDE'),
+                   help='SSH password for this request; prefer the environment variable')
     commands = p.add_subparsers(dest='action', required=True)
     commands.add_parser('health', help='show collector process health and uptime')
     commands.add_parser('devices', help='list devices without probing them')
@@ -279,6 +290,7 @@ def main(argv=None):
     try:
         client = Client(args.url, args.http_timeout, args.token)
         client.actor = args.actor
+        client.ssh_user, client.ssh_password = args.ssh_user, args.ssh_password
         if args.action in ('devices', 'health'):
             result = client.request('/api/' + args.action)
         else:
@@ -314,6 +326,9 @@ def main(argv=None):
             elif args.action in ('identify', 'ssh-open'):
                 route = '/api/identify' if args.action == 'identify' else '/api/ssh-connect'
                 payload = {'init_boot_marker': True} if args.action == 'identify' and args.init_boot_marker else {}
+                if args.action == 'ssh-open':
+                    if client.ssh_user is not None: payload['ssh_user'] = client.ssh_user
+                    if client.ssh_password is not None: payload['ssh_password'] = client.ssh_password
                 result = client.post(route, **payload)
             else:
                 result = client.get('/api/' + args.action)

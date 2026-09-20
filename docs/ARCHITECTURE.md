@@ -2,7 +2,7 @@
 
 ## 身份与连接
 
-- **serial**：当前候选或正式身份编号，也是 SQLite 主键。EEPROM ONIE `0x23`、人工核实更正的编号是正式身份；DT、SoC/eFuse 和 `/boot` 标记在核实前是候选身份。
+- **serial**：当前正式身份编号，也是 SQLite 主键。EEPROM ONIE `0x23`、有效 DT `serial-number`、U-Boot 注入编号和人工核实更正均可作为正式身份；SoC/eFuse 和 `/boot` 标记仍是候选身份。
 - **label / key**：当前唯一标签，例如 `riscv-118`、`musepi2`，用户操作入口。改名不改序列号或日志目录。
 - **by_path / dev**：本次已确认连接的 USB 物理路径和 tty 节点。离线时当前字段为空；`last_path`、`last_dev` 保留历史。
 - **未 provision 连接**：使用基于 USB by-path 的 `unprovisioned-…` 临时 key；每次连接单独写入

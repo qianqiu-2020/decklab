@@ -69,10 +69,10 @@ class Manager:
                 eeprom_conflicted=self.store.has_conflict(provisioned))
             serial = selected['serial']
             established = self.store.get(serial)
-            if (selected.get('identity_status') == 'provisional' and established
-                    and established['info'].get('identity_status') == 'confirmed'):
+            if (established and established['info'].get('identity_status') == 'confirmed'
+                    and selected.get('serial_source') in ('device-tree', 'soc-sysfs', 'boot-marker')):
                 # A weaker kernel interface must not revoke identity proof recorded
-                # earlier through EEPROM or explicit operator verification.
+                # earlier through EEPROM, U-Boot provenance or explicit verification.
                 selected['serial_source'] = established['info'].get('serial_source')
                 selected['identity_status'] = 'confirmed'
             promotion_record = None

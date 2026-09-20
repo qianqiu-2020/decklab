@@ -264,7 +264,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if route == '/api/ssh-connect':
             # 一键 SSH:起一条与串口并存的独立会话,输出单独落盘
-            s, err = d.ssh_connect(actor=actor, title=str(payload.get('title') or '')[:2048])
+            ssh_user = payload.get('ssh_user')
+            ssh_password = payload.get('ssh_password')
+            if ssh_user is not None and (not isinstance(ssh_user, str) or not ssh_user.strip()):
+                return self._json(400, {'ok': False, 'error': 'ssh_user must be a non-empty string'})
+            if ssh_password is not None and not isinstance(ssh_password, str):
+                return self._json(400, {'ok': False, 'error': 'ssh_password must be a string'})
+            s, err = d.ssh_connect(actor=actor, title=str(payload.get('title') or '')[:2048],
+                                    ssh_user=ssh_user.strip() if isinstance(ssh_user, str) else None,
+                                    ssh_password=ssh_password)
             if not s:
                 return self._json(502, {'ok': False, 'error': err})
             return self._json(200, {'ok': True, 'sid': s.sid, 'ip': s.ip,
