@@ -1,3 +1,5 @@
 """Serial board service: hardware, persistence, and HTTP boundaries."""
 
-__version__ = '1.3.6'
+from .version import __version__
+
+__all__ = ['__version__']

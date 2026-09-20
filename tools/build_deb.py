@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build an architecture-independent Ubuntu package without root or network access."""
 import argparse
+import hashlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,6 +11,19 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from seriald_core import __version__
+
+
+def collector_build_id(root=ROOT):
+    """Hash code and service policy that require replacing the live collector."""
+    excluded = {'admin.py', 'control_server.py', 'version.py'}
+    sources = [path for path in (root / 'seriald_core').glob('*.py')
+               if path.name not in excluded]
+    sources.append(root / 'packaging/seriald-collector.service')
+    digest = hashlib.sha256()
+    for path in sorted(sources):
+        relative = path.relative_to(root).as_posix().encode('utf-8')
+        digest.update(relative + b'\0' + path.read_bytes() + b'\0')
+    return digest.hexdigest()
 
 
 def build(output, version):
@@ -27,8 +41,10 @@ def build(output, version):
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(text)
             destination.chmod(mode)
+        build_id = collector_build_id()
         for name in ('seriald.py', 'serialctl.py', 'index.html'):
             put(name, 'usr/lib/seriald/' + name)
+        write('usr/lib/seriald/.collector-build-id', build_id + '\n')
         for name in ('seriald_core', 'static', 'vendor'):
             for path in (ROOT / name).rglob('*'):
                 if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':
@@ -51,6 +67,8 @@ def build(output, version):
                      'docs/HARDWARE_ID.md', 'docs/DEVICE_IDENTITY_MATRIX.md',
                      'docs/REFACTOR_PLAN.md'):
             put(name, 'usr/share/doc/seriald/' + Path(name).name)
+        preinst = (ROOT / 'packaging/preinst').read_text().replace('@COLLECTOR_BUILD_ID@', build_id)
+        write('DEBIAN/preinst', preinst, 0o755)
         for name in ('postinst', 'prerm', 'postrm'):
             put('packaging/' + name, 'DEBIAN/' + name, 0o755)
         write('DEBIAN/conffiles', '/etc/seriald/seriald.env\n/etc/sudoers.d/seriald-rescue\n')

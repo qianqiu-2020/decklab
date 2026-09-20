@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+# This script is generated into the package with the new collector fingerprint.
+# It runs before dpkg replaces the previous package files, so both fingerprints
+# are available without stopping the running process.
+if [ "$1" = upgrade ]; then
+  installed_id_file=${SERIALD_INSTALLED_BUILD_ID_FILE:-/usr/lib/seriald/.collector-build-id}
+  restart_marker=${SERIALD_RESTART_MARKER:-/run/seriald-collector-restart-required}
+  old_id=$(cat "$installed_id_file" 2>/dev/null || true)
+  if [ "$old_id" = "@COLLECTOR_BUILD_ID@" ]; then
+    rm -f "$restart_marker"
+  else
+    : > "$restart_marker"
+  fi
+fi

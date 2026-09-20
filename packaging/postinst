@@ -14,19 +14,21 @@ case "$1" in
     chown root:seriald /etc/seriald/seriald.env
     chmod 0640 /etc/seriald/seriald.env
     if [ -d /run/systemd/system ]; then
+      restart_marker=/run/seriald-collector-restart-required
       systemctl daemon-reload
       deb-systemd-helper enable seriald-collector.service >/dev/null
       deb-systemd-helper enable seriald.service >/dev/null
       if systemctl is-active --quiet seriald-collector.service; then
-        # The collector owns long-lived Python state, so an upgrade must load the
-        # newly installed identity and persistence code instead of only refreshing UI.
-        if [ -n "${2:-}" ]; then
+        # preinst compares the previous and incoming collector fingerprints before
+        # dpkg overwrites either copy. UI/control-only upgrades preserve tty and SSH.
+        if [ -n "${2:-}" ] && [ -e "$restart_marker" ]; then
           deb-systemd-invoke restart seriald-collector.service || true
         fi
       else
         deb-systemd-invoke start seriald-collector.service || true
       fi
       deb-systemd-invoke restart seriald.service || true
+      rm -f "$restart_marker"
     fi
     ;;
 esac

@@ -3,6 +3,9 @@
 旧版单文件实现的修复与线上验收已归档至 [2026-09-19 历史记录](docs/archive/FIXES-2026-09-19.md)。
 当前设备模型、日志归属与模块边界见 [架构说明](docs/ARCHITECTURE.md)，安装及数据迁移见 [安装说明](docs/INSTALL.md)。
 
+1.3.7 为 collector 代码和 systemd 单元生成独立指纹。安装升级仅在指纹变化时重启 collector；页面、
+control 或文档更新只重启 control，保持串口 fd 与 SSH 会话。
+
 1.3.6 增加同一 USB-UART 换板前的显式识别模式；collector 干净重启通过短期、同 boot、相同 tty
 handoff 接续身份，异常重启或重新枚举仍保持待识别。日志查看器支持多标签并自动滚动到打开内容。
 

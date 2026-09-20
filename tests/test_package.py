@@ -13,11 +13,31 @@ from urllib.request import urlopen
 
 from seriald_core.storage import Store
 from seriald_core import __version__
-from tools.build_deb import build
+from tools.build_deb import build, collector_build_id
 
 
 @unittest.skipUnless(shutil.which('dpkg-deb'), 'requires dpkg-deb')
 class PackageTests(unittest.TestCase):
+    def test_collector_build_id_ignores_control_but_tracks_collector(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'seriald_core').mkdir()
+            (root / 'packaging').mkdir()
+            for name in ('__init__.py', 'admin.py', 'control_server.py', 'version.py',
+                         'collector_server.py'):
+                (root / 'seriald_core' / name).write_text(name)
+            unit = root / 'packaging/seriald-collector.service'
+            unit.write_text('collector unit')
+            original = collector_build_id(root)
+            (root / 'seriald_core/control_server.py').write_text('new control')
+            (root / 'seriald_core/version.py').write_text("__version__ = 'next'")
+            self.assertEqual(collector_build_id(root), original)
+            (root / 'seriald_core/collector_server.py').write_text('new collector')
+            self.assertNotEqual(collector_build_id(root), original)
+            changed_collector = collector_build_id(root)
+            unit.write_text('new collector unit')
+            self.assertNotEqual(collector_build_id(root), changed_collector)
+
     def test_extracted_package_runs_and_preserves_offline_registry(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -26,12 +46,28 @@ class PackageTests(unittest.TestCase):
             subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True,
                            stdout=subprocess.DEVNULL)
             subprocess.run(['dpkg-deb', '--control', str(package), str(root / 'control')], check=True)
-            for script in ('postinst', 'prerm', 'postrm'):
+            for script in ('preinst', 'postinst', 'prerm', 'postrm'):
                 subprocess.run(['sh', '-n', str(root / 'control' / script)], check=True)
+            preinst = (root / 'control/preinst').read_text()
             postinst = (root / 'control/postinst').read_text()
             self.assertIn('dpkg --compare-versions "$2" lt 1.3.2', postinst)
             self.assertIn('chmod 0660', postinst)
+            self.assertIn('[ -e "$restart_marker" ]', postinst)
             self.assertIn('restart seriald-collector.service', postinst)
+            installed_build_id = (extracted / 'usr/lib/seriald/.collector-build-id').read_text().strip()
+            self.assertEqual(installed_build_id, collector_build_id())
+            self.assertIn(installed_build_id, preinst)
+            old_id, marker = root / 'old-build-id', root / 'restart-required'
+            old_id.write_text(installed_build_id + '\n')
+            preinst_env = dict(os.environ, SERIALD_INSTALLED_BUILD_ID_FILE=str(old_id),
+                               SERIALD_RESTART_MARKER=str(marker))
+            subprocess.run(['sh', str(root / 'control/preinst'), 'upgrade', '1.3.6'],
+                           check=True, env=preinst_env)
+            self.assertFalse(marker.exists(), 'unchanged collector must keep running')
+            old_id.write_text('different-build\n')
+            subprocess.run(['sh', str(root / 'control/preinst'), 'upgrade', '1.3.6'],
+                           check=True, env=preinst_env)
+            self.assertTrue(marker.exists(), 'changed collector must restart')
             code = extracted / 'usr/lib/seriald'
             self.assertTrue((extracted / 'usr/share/doc/seriald/DEVICE_IDENTITY_MATRIX.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/REFACTOR_PLAN.md').is_file())
