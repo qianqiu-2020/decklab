@@ -22,10 +22,20 @@ case "$1" in
         # preinst compares the previous and incoming collector fingerprints before
         # dpkg overwrites either copy. UI/control-only upgrades preserve tty and SSH.
         if [ -n "${2:-}" ] && [ -e "$restart_marker" ]; then
-          deb-systemd-invoke restart seriald-collector.service || true
+          if deb-systemd-invoke restart seriald-collector.service; then
+            echo "seriald: collector restarted (collector code changed)"
+          else
+            echo "seriald: collector restart failed" >&2
+          fi
+        else
+          echo "seriald: collector kept running (collector code unchanged)"
         fi
       else
-        deb-systemd-invoke start seriald-collector.service || true
+        if deb-systemd-invoke start seriald-collector.service; then
+          echo "seriald: collector started (was not running)"
+        else
+          echo "seriald: collector start failed" >&2
+        fi
       fi
       deb-systemd-invoke restart seriald.service || true
       rm -f "$restart_marker"
