@@ -242,11 +242,16 @@ class SshStateTests(unittest.TestCase):
             with self.subTest(installed=installed, ssh=ssh_status, sshd=sshd_status):
                 prelude = '''
 command() {
-  if [ "$#" -ne 2 ] || [ "$1" != -v ] || [ "$2" != systemctl ]; then
+  if [ "$#" -ne 2 ] || [ "$1" != -v ]; then
     builtin echo unexpected-command >&2; return 99
   fi
-  return %d
+  case "$2" in
+    systemctl) return %d ;;
+    timeout) return 0 ;;
+    *) builtin echo unexpected-command >&2; return 99 ;;
+  esac
 }
+timeout() { shift; "$@"; }
 systemctl() {
   if [ "$#" -ne 3 ] || [ "$1" != is-active ] || [ "$2" != --quiet ]; then
     builtin echo unexpected-systemctl >&2; return 99

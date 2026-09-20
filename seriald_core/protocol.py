@@ -7,8 +7,10 @@ from .boot_marker import read_command
 # 每次命令由 _run_cmd 加独立 nonce 帧;命令回显不含完整 marker,迟到结果不会串单。
 SSH_STATE_CMD = (
     "if ! command -v systemctl >/dev/null 2>&1; then echo SSHD=unsupported-systemd; "
-    "elif systemctl is-active --quiet ssh; then echo SSHD=active; "
-    "elif systemctl is-active --quiet sshd; then echo SSHD=active; "
+    "elif command -v timeout >/dev/null 2>&1 && timeout 5 systemctl is-active --quiet ssh 2>/dev/null; then echo SSHD=active; "
+    "elif command -v timeout >/dev/null 2>&1 && timeout 5 systemctl is-active --quiet sshd 2>/dev/null; then echo SSHD=active; "
+    "elif ! command -v timeout >/dev/null 2>&1 && systemctl is-active --quiet ssh 2>/dev/null; then echo SSHD=active; "
+    "elif ! command -v timeout >/dev/null 2>&1 && systemctl is-active --quiet sshd 2>/dev/null; then echo SSHD=active; "
     "else echo SSHD=inactive; fi"
 )
 PROBE_CMD = (
@@ -24,7 +26,7 @@ PROBE_CMD = (
     "[ -r \"$ed/nvmem\" ] && [ -r \"$ed/of_node/compatible\" ] || continue; "
     "ec=$(tr -d '\\0' < \"$ed/of_node/compatible\" 2>/dev/null); "
     "case \"$ec\" in *24c*) [ \"$(head -c 7 \"$ed/nvmem\" 2>/dev/null)\" = TlvInfo ] || continue; "
-    "eh=$(head -c 2048 \"$ed/nvmem\" 2>/dev/null | od -An -v -tx1 | tr -d ' \\n'); break;; esac; "
+    "eh=$(head -c 256 \"$ed/nvmem\" 2>/dev/null | od -An -v -tx1 | tr -d ' \\n'); break;; esac; "
     "done; fi; printf 'EEPROM_HEX=%s\\n' \"$eh\"; "
     "printf 'BOOT_MARKER=%s\\n' \"$(" + read_command() + ")\"; "
     "printf 'MODEL=%s\\n' \"$(cat /proc/device-tree/model 2>/dev/null | tr -d '\\0' | tr '\\r\\n' '  ')\"; "
