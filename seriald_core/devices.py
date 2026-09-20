@@ -58,14 +58,25 @@ class Manager:
                 soc_conflicted=self.store.has_conflict(hardware_serial(info)),
                 eeprom_conflicted=self.store.has_conflict(provisioned))
             serial = selected['serial']
+            promotion_record = None
             if provisioned:
                 aliases = (str(info.get('serial') or '').strip(), hardware_serial(info), marker_serial(info))
                 for alias in aliases:
                     alias_record = self.store.get(alias) if alias and alias != serial else None
                     if (alias_record and alias_record['info'].get('identity_status') == 'provisional'
                             and not self.store.get(serial)):
-                        raise IdentityError('已发现正式 EEPROM 编号 %s，但该板仍有候选档案 %s；'
-                                            '请停服务后用 correct-serial 迁移' % (serial, alias))
+                        # A matching software marker on the same physical attachment is enough
+                        # to promote the archive written before EEPROM provisioning.  Other
+                        # aliases remain manual: firmware/SoC values can be duplicated or change.
+                        safe_marker = (alias == marker_serial(info)
+                            and alias_record['info'].get('serial_source') == 'boot-marker'
+                            and alias_record.get('last_path') == device.by_path)
+                        if safe_marker and (promotion_record is None
+                                            or promotion_record['serial'] == alias):
+                            promotion_record = alias_record
+                        else:
+                            raise IdentityError('已发现正式 EEPROM 编号 %s，但该板仍有候选档案 %s；'
+                                                '请停服务后用 correct-serial 迁移' % (serial, alias))
             previous = self.boards.get(serial)
             if previous is not None and previous is not device and previous.present:
                 self.store.mark_conflict(serial)
@@ -82,25 +93,41 @@ class Manager:
                 previous_dir = (os.path.join(LOG_ROOT, archive_component(
                     serial, previous_record['info'].get('serial_source', '')))
                     if previous_record else '')
-                sources = list(dict.fromkeys(path for path in (previous_dir, pending_dir)
+                promotion_dir = (os.path.join(LOG_ROOT, archive_component(
+                    promotion_record['serial'], promotion_record['info'].get('serial_source', '')))
+                    if promotion_record else '')
+                sources = list(dict.fromkeys(path for path in (
+                    previous_dir, promotion_dir, pending_dir)
                                              if path and path != target))
                 staged = []
                 try:
                     if previous_dir and previous_dir != target:
                         staged += stage_logs(previous_dir, target)
-                    if pending_dir != target and pending_dir != previous_dir:
+                    if promotion_dir and promotion_dir not in (target, previous_dir):
+                        staged += stage_logs(promotion_dir, target)
+                    if pending_dir not in (target, previous_dir, promotion_dir):
                         staged += stage_logs(pending_dir, target,
                                              'serial-' + device.connection_id + '-')
-                    record = self.store.bind(selected, device.by_path, device.dev)
+                    if promotion_record:
+                        record = self.store.promote_eeprom_identity(
+                            promotion_record['serial'], selected, device.by_path, device.dev)
+                    else:
+                        record = self.store.bind(selected, device.by_path, device.dev)
                 except Exception:
                     # Staged copies are safe to reuse on retry; source files remain authoritative.
                     raise
                 device.record = record
                 finish_staged(staged, sources)
+            promoted = (self.boards.pop(promotion_record['serial'], None)
+                        if promotion_record else None)
             if previous is not None and previous is not device:
                 with previous.sessions_lock, device.sessions_lock:
                     device.ssh_sessions.update(previous.ssh_sessions)
                     previous.ssh_sessions.clear()
+            if promoted is not None and promoted is not device and promoted is not previous:
+                with promoted.sessions_lock, device.sessions_lock:
+                    device.ssh_sessions.update(promoted.ssh_sessions)
+                    promoted.ssh_sessions.clear()
             self.boards[serial] = device
             info.update(selected)
             self.store.event(serial, 'service', 'identified', device.by_path)

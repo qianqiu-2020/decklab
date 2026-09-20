@@ -117,14 +117,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(404, {'error': 'no such device'})
             if route == '/api/activity':
                 try:
-                    offset = int((q.get('offset') or ['0'])[0])
-                    if offset < 0:
+                    legacy_offset = (q.get('offset') or ['0'])[0]
+                    session_offset = int((q.get('session_offset') or [legacy_offset])[0])
+                    event_offset = int((q.get('event_offset') or ['0'])[0])
+                    limit = int((q.get('limit') or ['50'])[0])
+                    if session_offset < 0 or event_offset < 0 or not 1 <= limit <= 50:
                         raise ValueError
                 except ValueError:
                     return self._json(400, {'error': 'bad offset'})
-                history = MGR.store.sessions(d.serial, offset, 50) if d.serial else []
-                return self._json(200, {'sessions': history, 'next_offset': offset + len(history),
-                    'events': MGR.store.events(d.serial) if d.serial else []})
+                history = MGR.store.sessions(d.serial, session_offset, limit) if d.serial else []
+                events = MGR.store.visible_events(d.serial, event_offset, limit) if d.serial else []
+                return self._json(200, {
+                    'sessions': history, 'session_offset': session_offset,
+                    'session_total': MGR.store.session_count(d.serial) if d.serial else 0,
+                    'events': events, 'event_offset': event_offset,
+                    'event_total': MGR.store.visible_event_count(d.serial) if d.serial else 0,
+                    # Keep old clients useful while they migrate to independent pagers.
+                    'next_offset': session_offset + len(history)})
             files = d.log_files()
             if route == '/api/logs':
                 archive = os.path.relpath(d.stable_dir(), LOG_ROOT)

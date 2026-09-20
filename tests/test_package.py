@@ -31,6 +31,7 @@ class PackageTests(unittest.TestCase):
             postinst = (root / 'control/postinst').read_text()
             self.assertIn('dpkg --compare-versions "$2" lt 1.3.2', postinst)
             self.assertIn('chmod 0660', postinst)
+            self.assertIn('restart seriald-collector.service', postinst)
             code = extracted / 'usr/lib/seriald'
             self.assertTrue((extracted / 'usr/share/doc/seriald/DEVICE_IDENTITY_MATRIX.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/REFACTOR_PLAN.md').is_file())

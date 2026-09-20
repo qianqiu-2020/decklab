@@ -5,7 +5,8 @@
   var curSid = 'serial';              // 当前会话:serial=串口,sshN=SSH 会话
   var sessions = [{ sid: 'serial', kind: 'serial' }];
   var view = null, term = null;
-  var activeLog = null, activityOffset = 0;
+  var activeLog = null, sessionPage = 0, eventPage = 0;
+  var ACTIVITY_PAGE_SIZE = 10;
   var takenOver = {};
 
   function setInputMode(ctx) {
@@ -41,8 +42,9 @@
     var board = lastDevices.filter(function (d) { return d.key === key; })[0] || {};
     var selectedSession = sessions.filter(function (s) { return s.sid === sid; })[0] || {};
     var ctx = { key: key, serial: board.serial, connectionId: board.connection_id,
+                byPath: board.by_path || board.last_path,
                 readonly: sid !== 'serial' && !!selectedSession.actor && selectedSession.actor !== 'web' && !takenOver[sid],
-                sid: sid, gen: loopGen, off: 0, sessionsSeq: 0,
+                sid: sid, gen: loopGen, off: 0, sessionsSeq: 0, activitySeq: 0,
                 sendTail: Promise.resolve(), lastSel: '' };
     view = ctx;
     setInputMode(ctx);
@@ -247,12 +249,21 @@
         // 否则每 3 秒重建一次 DOM 会打断用户选中文本
         if (selKey) {
           var cur = lastDevices.filter(function (x) { return view && view.serial ? x.serial === view.serial : (view && view.connectionId ? x.connection_id === view.connectionId : x.key === selKey); })[0];
+          // A collector restart changes connection_id.  If a pending connection was
+          // promoted meanwhile, follow the same live physical attachment to its
+          // canonical key instead of leaving an unusable stale detail panel open.
+          if (!cur && view && !view.serial && view.byPath) {
+            var samePath = lastDevices.filter(function (x) {
+              return x.alive && x.by_path === view.byPath;
+            });
+            if (samePath.length === 1) cur = samePath[0];
+          }
           if (cur && cur.key !== selKey) adoptKey(view, cur.key, cur.serial);
           var ts = cur && cur.info ? cur.info.ts : 0;
           if (ts !== lastInfoTs) { lastInfoTs = ts; renderInfo(cur && cur.info); }
         }
         loadSessions();
-        loadActivity(false);
+        loadActivity();
       })
       .catch(function () {
         $('conn-dot').className = 'dot bad';
@@ -287,9 +298,10 @@
     $('d-hint').hidden = true;
     $('d-in').value = '';
     $('d-logs').textContent = '';
-    $('log-viewer').hidden = true; activeLog = null; activityOffset = 0;
+    $('log-viewer').hidden = true; activeLog = null; sessionPage = 0; eventPage = 0;
     $('d-activity').textContent = '';
-    loadActivity(false);
+    $('d-events').textContent = '';
+    loadActivity();
     lastInfoTs = d && d.info ? d.info.ts : 0;
     resizeTerm();
     loadLogs();
@@ -466,20 +478,31 @@
         if (!isCurrent(ctx) || (d.key && d.key !== ctx.key)) return;
         var box = $('d-logs');
         box.textContent = '';
-        if (!d.files || !d.files.length) {
-          box.textContent = '（还没有日志文件）'; return;
+        var allFiles = d.files || [];
+        var files = allFiles.filter(function (file) {
+          return (file.kind || (file.name.indexOf('ssh-') === 0 ? 'ssh' : 'serial')) === 'serial';
+        });
+        if (!files.length) {
+          box.textContent = '（还没有串口日志文件）'; return;
         }
-        var t = document.createElement('span');
-        t.textContent = '日志文件： ';
-        box.appendChild(t);
         $('log-location').textContent = d.archive ? 'logs/' + d.archive + '/' : '待识别连接的临时日志';
-        d.files.forEach(function (f) {
+        files.forEach(function (f) {
+          var row = document.createElement('div'); row.className = 'log-row';
+          var date = document.createElement('span'); date.className = 'log-date';
+          date.textContent = f.date || '日期未知';
           var a = document.createElement('button');
           a.type = 'button';
           a.addEventListener('click', function () { if (isCurrent(ctx)) showLog(ctx, f.name); });
-          a.textContent = f.name + ' (' + fmt(f.size) + ')';
-          box.appendChild(a);
+          a.textContent = f.name;
+          var size = document.createElement('span'); size.className = 'log-size'; size.textContent = fmt(f.size);
+          row.appendChild(date); row.appendChild(a); row.appendChild(size); box.appendChild(row);
         });
+        var sshCount = allFiles.length - files.length;
+        if (sshCount) {
+          var note = document.createElement('div'); note.className = 'log-note';
+          note.textContent = sshCount + ' 份 SSH transcript 请从上方对应会话的“查看记录”打开。';
+          box.appendChild(note);
+        }
       }).catch(function (e) {
         if (isCurrent(ctx)) $('d-logs').textContent = '读取日志列表失败：' + e.message;
       });
@@ -510,18 +533,28 @@
       }).catch(function (e) { if (isCurrent(ctx) && activeLog === token) $('log-content').textContent = e.message; });
   }
 
-  function loadActivity(more) {
+  function setPager(prefix, page, total, count) {
+    var pages = Math.max(1, Math.ceil(total / ACTIVITY_PAGE_SIZE));
+    $(prefix + '-page').textContent = '第 ' + (page + 1) + ' / ' + pages + ' 页 · ' + total + ' 条';
+    $(prefix + '-prev').disabled = page === 0;
+    $(prefix + '-next').disabled = (page * ACTIVITY_PAGE_SIZE + count) >= total;
+  }
+
+  function loadActivity() {
     var ctx = view;
     if (!isCurrent(ctx)) return;
-    var offset = more ? activityOffset : 0;
-    fetch('/api/activity?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '') + '&offset=' + offset)
+    var seq = ++ctx.activitySeq;
+    ['activity-prev', 'activity-next', 'event-prev', 'event-next'].forEach(function (id) {
+      $(id).disabled = true;
+    });
+    var sessionOffset = sessionPage * ACTIVITY_PAGE_SIZE;
+    var eventOffset = eventPage * ACTIVITY_PAGE_SIZE;
+    fetch('/api/activity?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
+      + '&session_offset=' + sessionOffset + '&event_offset=' + eventOffset + '&limit=' + ACTIVITY_PAGE_SIZE)
       .then(function (r) { return r.json(); }).then(function (d) {
-        if (!isCurrent(ctx) || !d.sessions) return;
+        if (!isCurrent(ctx) || seq !== ctx.activitySeq || !d.sessions) return;
         var box = $('d-activity');
-        if (!more && activityOffset > 50) return; // preserve an explicitly expanded history
-        if (!more) box.textContent = '';
-        activityOffset = d.next_offset;
-        $('activity-more').hidden = d.sessions.length < 50;
+        box.textContent = '';
         d.sessions.forEach(function (entry) {
           var row = document.createElement('div'); row.className = 'activity-row';
           var main = document.createElement('div'); main.className = 'activity-main';
@@ -548,23 +581,38 @@
           });
           row.appendChild(button); box.appendChild(row);
         });
-        if (!more) (d.events || []).forEach(function (entry) {
+        if (!box.children.length) box.textContent = '尚无 SSH 会话记录';
+        var sessionTotal = d.session_total === undefined ? d.sessions.length : d.session_total;
+        setPager('activity', sessionPage, sessionTotal, d.sessions.length);
+
+        var eventBox = $('d-events'); eventBox.textContent = '';
+        var actionNames = { identified: '识别完成', identify: '识别请求',
+          'identity-promoted': '身份升级', 'identity-corrected': '身份更正',
+          'identity-confirmed': '身份确认', 'boot-marker-initialized': '初始化 /boot 标记',
+          rescue: '串口自愈', 'ssh-enable': '启用 SSH', 'session-takeover': '人工介入 SSH' };
+        (d.events || []).forEach(function (entry) {
           var row = document.createElement('div'); row.className = 'activity-row';
           var main = document.createElement('div'); main.className = 'activity-main';
           var actor = document.createElement('span'); actor.className = 'actor';
           actor.textContent = entry.actor || 'service';
           var meta = document.createElement('span'); meta.className = 'activity-meta';
-          meta.textContent = ' · ' + new Date(entry.ts * 1000).toLocaleString('zh-CN') + ' · ' + entry.action;
+          meta.textContent = ' · ' + new Date(entry.ts * 1000).toLocaleString('zh-CN') + ' · '
+            + (actionNames[entry.action] || entry.action);
           var detail = document.createElement('code'); detail.textContent = entry.detail || '';
           main.appendChild(actor); main.appendChild(meta); main.appendChild(detail);
-          row.appendChild(main); box.appendChild(row);
+          row.appendChild(main); eventBox.appendChild(row);
         });
-        if (!box.children.length) box.textContent = '尚无 SSH 操作记录';
+        if (!eventBox.children.length) eventBox.textContent = '尚无关键操作记录';
+        var eventTotal = d.event_total === undefined ? (d.events || []).length : d.event_total;
+        setPager('event', eventPage, eventTotal, (d.events || []).length);
       }).catch(function () {});
   }
   $('device-search').addEventListener('input', function () { renderDevices(lastDevices); });
   $('device-filter').addEventListener('change', function () { renderDevices(lastDevices); });
-  $('activity-more').addEventListener('click', function () { loadActivity(true); });
+  $('activity-prev').addEventListener('click', function () { if (sessionPage) { sessionPage--; loadActivity(); } });
+  $('activity-next').addEventListener('click', function () { sessionPage++; loadActivity(); });
+  $('event-prev').addEventListener('click', function () { if (eventPage) { eventPage--; loadActivity(); } });
+  $('event-next').addEventListener('click', function () { eventPage++; loadActivity(); });
   $('log-close').addEventListener('click', function () { activeLog = null; $('log-viewer').hidden = true; });
   $('log-refresh').addEventListener('click', function () { if (activeLog) showLog(activeLog.ctx, activeLog.name); });
   $('log-more').addEventListener('click', function () { if (activeLog) showLog(activeLog.ctx, activeLog.name, activeLog.off, true); });

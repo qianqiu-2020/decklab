@@ -134,10 +134,17 @@
   .activity-row{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:7px;padding:12px;background:var(--surface)}
   .activity-row .activity-main{flex:1;min-width:0}.activity-row code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin-top:5px}
   .activity-meta{color:var(--ink-3);font-size:12px}.actor{color:var(--accent);font-weight:600}
+  .pager{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:-10px 0 22px}
+  .pager span{min-width:92px;text-align:center;color:var(--ink-3);font-size:12px}
   .log-tools{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:12px;background:var(--surface-2)}
   #log-range{font-size:12px;color:var(--ink-3)}
   #log-content{margin:0;padding:18px;max-height:520px;overflow:auto;background:#0e141a;color:#d2dee8;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.65 ui-monospace,monospace}
-  .logs{padding:0;display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .logs{padding:0;display:grid;gap:7px;margin-bottom:12px}
+  .log-row{display:grid;grid-template-columns:100px minmax(0,1fr) auto;gap:10px;align-items:center;
+    border:1px solid var(--line);border-radius:7px;padding:8px 11px;background:var(--surface)}
+  .log-row .log-date,.log-row .log-size{color:var(--ink-3);font:12px ui-monospace,monospace}
+  .log-row button{text-align:left;overflow-wrap:anywhere}
+  .log-note{color:var(--ink-3);font-size:12px;padding:3px 1px}
   @media(max-width:600px){.overview{gap:8px}.overview>div{padding:12px;display:block}.overview span{display:block}.activity-row{flex-wrap:wrap}.section-head{display:block}}
 
   .workspace.selected{display:grid;grid-template-columns:300px minmax(0,1fr);gap:20px;align-items:start}

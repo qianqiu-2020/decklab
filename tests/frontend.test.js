@@ -37,7 +37,7 @@ function harness() {
     if (!elements.has(id)) elements.set(id, new Element());
     return elements.get(id);
   };
-  const requests = [], terminals = [], timers = new Map();
+  const requests = [], terminals = [], timers = new Map(), intervals = [];
   let nextTimer = 0;
   class Terminal {
     constructor() {
@@ -83,7 +83,8 @@ function harness() {
     Uint8Array, AbortController, console,
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     setTimeout: (fn, delay) => { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
-    clearTimeout: id => timers.delete(id), setInterval() {},
+    clearTimeout: id => timers.delete(id),
+    setInterval: (fn, delay) => { intervals.push({ fn, delay }); return intervals.length; },
     fetch: (url, options = {}) => new Promise((resolve, reject) => {
       requests.push({ url, options, body: options.body ? JSON.parse(options.body) : null,
         resolve: data => resolve({ json: () => Promise.resolve(data) }), reject, taken: false });
@@ -109,7 +110,7 @@ function harness() {
   };
   const timer = delay => [...timers.entries()].find(([, t]) => t.delay === delay);
   const fire = id => { const t = timers.get(id); timers.delete(id); assert.ok(t); t.fn(); };
-  return { get, document, requests, terminals, timers, take, sends, select, timer, fire };
+  return { get, document, requests, terminals, timers, intervals, take, sends, select, timer, fire };
 }
 
 async function drain() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
@@ -188,6 +189,26 @@ test('provisional identity is labeled as a candidate and warns about archive pro
   assert.ok(rows.includes('身份状态=待确认（使用临时档案目录）'));
   const cardText = h.get('grid').children[0].children.map(x => x.textContent).join(' ');
   assert.ok(cardText.includes('尚未正式确认'));
+});
+
+test('pending view follows its promoted board after collector restart', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({ devices: [{
+    key: 'unprovisioned-path', label: 'unprovisioned-path', serial: '', state: 'pending',
+    connection_id: 'old-connection', by_path: 'usb-port-1', alive: true, dev: '/mock/ttyUSB2',
+  }] });
+  await drain(); const old = h.select('unprovisioned-path');
+  h.intervals[0].fn();
+  h.take('/api/devices').resolve({ devices: [{
+    key: 'milkv', label: 'milkv', serial: 'MJM10004000001', state: 'online',
+    connection_id: 'new-connection', by_path: 'usb-port-1', alive: true, dev: '/mock/ttyUSB2',
+    info: { serial: 'MJM10004000001', serial_source: 'eeprom-onie', identity_status: 'confirmed' },
+  }] });
+  await drain();
+  assert.equal(old.disposed, true);
+  assert.equal(h.get('d-name').textContent, 'milkv');
+  assert.equal(h.get('d-key').textContent, 'SN MJM10004000001');
+  assert.ok(h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1).url.includes('key=milkv'));
 });
 
 test('late SSH connect response cannot switch the newly selected device', async () => {
@@ -380,7 +401,7 @@ test('log content is viewed inline and late log responses cannot replace a new d
   const h = await setup(); h.select('A');
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [{ name: 'serial-test.log', size: 20 }] });
   await drain();
-  const button = h.get('d-logs').children.at(-1);
+  const button = h.get('d-logs').children.at(-1).children[1];
   assert.equal(button.tagName, 'button'); button.click();
   const log = h.take('/api/log');
   h.select('B');
@@ -388,6 +409,37 @@ test('log content is viewed inline and late log responses cannot replace a new d
   await drain();
   assert.equal(h.get('log-viewer').hidden, true);
   assert.notEqual(h.get('log-content').textContent, '<script>not HTML</script>');
+});
+
+test('SSH sessions and key events have independent bounded pages', async () => {
+  const h = await setup(); h.select('A');
+  const sessions = Array.from({ length: 10 }, (_, i) => ({ sid: 'ssh' + i, actor: 'agent',
+    status: 'completed', title: 'command ' + i, started: i + 1, exit_code: 0 }));
+  const events = Array.from({ length: 10 }, (_, i) => ({ id: i, actor: 'service',
+    action: 'identified', detail: 'usb-' + i, ts: i + 1 }));
+  h.take('/api/activity').resolve({ sessions, session_total: 25, events, event_total: 12 });
+  await drain();
+  assert.equal(h.get('d-activity').children.length, 10);
+  assert.equal(h.get('d-events').children.length, 10);
+  assert.ok(h.get('activity-page').textContent.includes('25 条'));
+  assert.ok(h.get('event-page').textContent.includes('12 条'));
+
+  h.get('activity-next').click();
+  const sessionPage = h.take('/api/activity');
+  assert.ok(sessionPage.url.includes('session_offset=10'));
+  assert.ok(sessionPage.url.includes('event_offset=0'));
+  sessionPage.resolve({ sessions: sessions.slice(0, 3), session_total: 13,
+    events, event_total: 12 });
+  await drain();
+
+  h.get('event-next').click();
+  const eventPage = h.take('/api/activity');
+  assert.ok(eventPage.url.includes('session_offset=10'));
+  assert.ok(eventPage.url.includes('event_offset=10'));
+  eventPage.resolve({ sessions: sessions.slice(0, 3), session_total: 13,
+    events: events.slice(0, 2), event_total: 12 });
+  await drain();
+  assert.equal(h.get('d-events').children.length, 2);
 });
 
 test('agent SSH activity opens read-only without input or resize writes', async () => {

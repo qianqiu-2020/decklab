@@ -1,6 +1,7 @@
 """Identity, durable history, migration and online log access without hardware."""
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -111,6 +112,48 @@ class PersistenceTests(unittest.TestCase):
         self.assertIsNone(self.store.get('MVJ-K1-000001'))
         self.assertIsNotNone(self.store.get('0059D968E583C49A'))
         self.assertIn('/_unprovisioned/', new.stable_dir())
+
+    def test_eeprom_provisioning_promotes_boot_marker_on_same_usb_path(self):
+        marker = 'boot-4e75e47e-c41f-4e9b-8f61-ccc2d2e2c1e9'
+        old = self.connection('usb-1')
+        self.manager.identify(old, {
+            'serial': '0123456789ABCDEF', 'boot_marker': marker,
+            'hostname': 'k1', 'ips': []})
+        self.manager.rename(old, 'milkv')
+        old.append(b'history before eeprom\n')
+        provisional = Path(old.stable_dir())
+        old.close_log()
+        old.present, old.fd = False, None
+
+        new = self.connection('usb-1')
+        self.manager.identify(new, {
+            'serial': 'MJM10004000001', 'eeprom_serial': 'MJM10004000001',
+            'boot_marker': marker, 'hostname': 'k1', 'ips': []})
+
+        self.assertEqual(new.serial, 'MJM10004000001')
+        self.assertEqual(new.key, 'milkv')
+        self.assertEqual(new.record['info']['identity_status'], 'confirmed')
+        self.assertEqual(new.stable_dir(), str(self.root / 'logs' / 'MJM10004000001'))
+        self.assertFalse(provisional.exists())
+        self.assertIsNone(self.store.get(marker))
+        self.assertTrue(any('history before eeprom' in path.read_text()
+                            for path in Path(new.stable_dir()).glob('*.log')))
+        self.assertIn('identity-promoted',
+                      [event['action'] for event in self.store.events('MJM10004000001')])
+
+    def test_eeprom_does_not_claim_boot_marker_archive_after_usb_move(self):
+        marker = 'boot-4e75e47e-c41f-4e9b-8f61-ccc2d2e2c1e9'
+        old = self.connection('usb-1')
+        self.manager.identify(old, {
+            'serial': '0123456789ABCDEF', 'boot_marker': marker,
+            'hostname': 'k1', 'ips': []})
+        old.present, old.fd = False, None
+        new = self.connection('usb-9')
+        with self.assertRaisesRegex(IdentityError, 'correct-serial'):
+            self.manager.identify(new, {
+                'serial': 'MJM10004000001', 'eeprom_serial': 'MJM10004000001',
+                'boot_marker': marker, 'hostname': 'k1', 'ips': []})
+        self.assertIsNone(self.store.get('MJM10004000001'))
 
     def test_moving_board_preserves_label_and_old_logs_after_fresh_identification(self):
         old = self.connection('usb-1')
@@ -362,6 +405,45 @@ class PersistenceTests(unittest.TestCase):
         for completed, code in ((True, None), (False, 0), (True, -1)):
             with self.assertRaises(IdentityError):
                 self.store.session_result(d.serial, 'ssh1', completed, code)
+
+    def test_activity_pages_sessions_and_filters_per_keystroke_events(self):
+        d = self.connection()
+        self.identify(d)
+        for index in range(13):
+            sid = 'ssh%02d' % index
+            self.store.open_session(sid, d.serial, 'agent', 'command %d' % index, '192.0.2.1')
+            self.store.close_session(sid)
+        for index in range(12):
+            self.store.event(d.serial, 'web', 'identified', 'usb-%d' % index)
+            self.store.event(d.serial, 'web', 'session-send', 'request: sid=serial')
+
+        status, page = self.handler(
+            '/api/activity?key=riscv-118&session_offset=10&event_offset=10&limit=10')
+        self.assertEqual(status, 200)
+        self.assertEqual(page['session_total'], 13)
+        self.assertEqual(len(page['sessions']), 3)
+        self.assertEqual(page['event_total'], 13)  # 12 explicit events + initial identification
+        self.assertEqual(len(page['events']), 3)
+        self.assertNotIn('session-send', {event['action'] for event in page['events']})
+
+    def test_log_files_are_newest_first_across_serial_and_ssh_names(self):
+        d = self.connection()
+        self.identify(d)
+        root = Path(d.stable_dir())
+        files = [
+            ('ssh-ssh001-20260918.log', 30),
+            ('serial-20260920.log', 10),
+            ('serial-old-serial-20260919.log', 20),
+        ]
+        for name, mtime in files:
+            path = root / name
+            path.write_text(name)
+            path.touch()
+            os.utime(path, (mtime, mtime))
+        listed = d.log_files()
+        self.assertEqual([entry['date'] for entry in listed],
+                         ['2026-09-20', '2026-09-19', '2026-09-18'])
+        self.assertEqual([entry['kind'] for entry in listed], ['serial', 'serial', 'ssh'])
 
     def test_import_is_explicit_dry_run_repeatable_and_preserves_sources(self):
         old = self.root / 'legacy' / 'logs' / 'usb-path'

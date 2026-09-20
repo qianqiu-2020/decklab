@@ -110,10 +110,21 @@ class Device:
 
     def log_files(self):
         root = self.stable_dir()
-        return [{'name': name, 'size': os.path.getsize(os.path.join(root, name))}
-                for name in sorted(os.listdir(root), reverse=True)
-                if name.endswith('.log') and os.path.isfile(os.path.join(root, name))
-                and not os.path.islink(os.path.join(root, name))]
+        files = []
+        for name in os.listdir(root):
+            path = os.path.join(root, name)
+            if not name.endswith('.log') or not os.path.isfile(path) or os.path.islink(path):
+                continue
+            stamp = re.search(r'(\d{8})\.log$', name)
+            date = stamp.group(1) if stamp else ''
+            stat_result = os.stat(path)
+            files.append({'name': name, 'size': stat_result.st_size,
+                          'mtime': stat_result.st_mtime,
+                          'date': ('%s-%s-%s' % (date[:4], date[4:6], date[6:]) if date else ''),
+                          'kind': 'ssh' if name.startswith('ssh-') else 'serial'})
+        # Filename prefixes mix serial/SSH logs, so lexicographic order is not time order.
+        files.sort(key=lambda item: (item['date'], item['mtime'], item['name']), reverse=True)
+        return files
 
     def open_log(self):
         path = os.path.join(self.stable_dir(), 'serial-%s.log' % time.strftime(DATE_FMT))

@@ -64,10 +64,13 @@
     </div>
     <div class="hint" id="d-hint" hidden></div>
     <section class="records">
-      <div class="section-head"><h2>操作与 SSH 记录</h2><span>在线会话可实时查看，关闭后记录仍保留</span></div>
+      <div class="section-head"><h2>SSH 会话记录</h2><span>在线会话可实时查看，关闭后 transcript 仍保留</span></div>
       <div id="d-activity" class="activity"></div>
-      <button id="activity-more" type="button" hidden>更早的会话</button>
-      <div class="section-head"><h2>日志档案</h2><span id="log-location"></span></div>
+      <div class="pager"><button id="activity-prev" type="button">较新</button><span id="activity-page"></span><button id="activity-next" type="button">更早</button></div>
+      <div class="section-head"><h2>关键操作记录</h2><span>逐按键写入保留在审计库中，此处不重复显示</span></div>
+      <div id="d-events" class="activity"></div>
+      <div class="pager"><button id="event-prev" type="button">较新</button><span id="event-page"></span><button id="event-next" type="button">更早</button></div>
+      <div class="section-head"><h2>串口日志归档</h2><span id="log-location"></span></div>
       <div class="logs" id="d-logs"></div>
       <div id="log-viewer" hidden>
         <div class="log-tools"><strong id="log-title"></strong><span id="log-range"></span>

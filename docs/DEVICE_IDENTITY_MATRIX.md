@@ -3,12 +3,12 @@
 本表记录已实测的**版型与内核组合**。同一块板切换内核后应新增一行，不覆盖旧结论。
 `DT` 表示根设备树的 `serial-number`；“未暴露”只说明当前内核没有可读接口，不代表硬件不存在。
 
-最后更新：2026-09-19
+最后更新：2026-09-20
 
 | 版型（现场标签） | 内核 | DT `serial-number` | EEPROM / Linux 接口 | SoC / eFuse | 身份选择 | 结论与待办 | 实测日期 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Milk-V Jupiter K1（`milkv2`） | Vendor 6.6.63 | `0123456789ABCDEF`，重复占位值 | 当前未暴露 | `0059D968E583C49A`；`soc0/serial_number`，K1 bank 7 芯片 ID | `0059D968E583C49A`，`soc-sysfs` | 可作临时硬件指纹；建议将同值写入 EEPROM，完成后改用 EEPROM 身份。 | 2026-09-19 |
-| Milk-V Jupiter K1（`milkv`） | Upstream 7.2.2+ | `0123456789ABCDEF`，重复占位值 | `atmel,24c04`，512 B；ONIE cells 可见，但没有 `0x23` 序列号 | 当前内核未暴露；限定只读返回 `EFAULT` | `/boot` 标记 `boot-4e75e47e-c41f-4e9b-8f61-ccc2d2e2c1e9` | 待 Vendor 写入唯一 ONIE `0x23`；不要使用占位 DT 值或 MAC。 | 2026-09-19 |
+| Milk-V Jupiter K1（`milkv`） | Upstream 7.2.2+ | `MJM10004000001`，写入 EEPROM 后由固件注入 | `atmel,24c04`，512 B；ONIE `0x23`/`cells/serial-number@*` 返回 `MJM10004000001` | 当前内核未暴露；限定只读返回 `EFAULT` | `MJM10004000001`，`eeprom-onie` | 已写入稳定板卡身份；原 `/boot` 候选档案由 seriald 1.3.4 在同一 USB 路径自动迁移。 | 2026-09-20 |
 | SpacemiT K3 Deb1（`deb1`） | Vendor 6.18.3-generic | `5b9d4a0a6f5e25a8` | `atmel,24c02`，256 B；ONIE `0x23` 有效，内核未启用 ONIE layout cell | `soc0/serial_number` 为全零，无效 | `5b9d4a0a6f5e25a8`，`eeprom-onie` | 已有稳定板卡身份。seriald 从原始 NVMEM 校验并解析 ONIE TLV。 | 2026-09-19 |
 | MUSE-Pi K1-X（SSH `musepi2`） | Vendor 6.6.63 | `78ad7410ec82` | DT 有 `atmel,24c02@50`，但 `status=disabled`；推断由 U-Boot 读取并注入 DT | `soc_chip_id` 原始 8 B 全零；`soc0/serial_number` 全零 | `78ad7410ec82`，`device-tree`（接入时） | 当前可用。再用第二块同版板或 U-Boot 源码确认 EEPROM 编号唯一；更换 Bootloader 后需复测。 | 2026-09-19 |
 
@@ -38,6 +38,6 @@
 | 现场标签 | 当前状态 | 当前/规划目录 | 正式确认后的动作 |
 | --- | --- | --- | --- |
 | `milkv2` | SoC/eFuse 候选身份 | `logs/_provisional/soc-sysfs/0059D968E583C49A/` | EEPROM 写入同值后自动迁到 `logs/0059D968E583C49A/`。 |
-| `milkv` | `/boot` 候选身份 | `logs/_provisional/boot-marker/boot-4e75e47e-c41f-4e9b-8f61-ccc2d2e2c1e9/` | 写入新的 EEPROM 编号后，用 `correct-serial` 迁到 `logs/<新编号>/`。 |
+| `milkv` | EEPROM 正式身份 | `logs/MJM10004000001/` | 1.3.4 识别时从原 `/boot` 候选档案自动迁移。 |
 | `deb1` | EEPROM 正式身份 | `logs/5b9d4a0a6f5e25a8/` | 无需迁移。 |
 | SSH `musepi2` | 尚未接入；DT 值待生产侧确认 | 接入后先用 `logs/_provisional/device-tree/78ad7410ec82/` | 确认 EEPROM 来源且编号不变后，用 `confirm-serial` 迁到 `logs/78ad7410ec82/`。 |

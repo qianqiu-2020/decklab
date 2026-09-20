@@ -168,6 +168,30 @@ class Store:
                             (new_serial, time.time(), 'admin', 'identity-corrected', old_serial))
         return self.get(new_serial)
 
+    def promote_eeprom_identity(self, old_serial, info, path, dev):
+        """Replace a provisional identity with the EEPROM identity, preserving history."""
+        new_serial = str(info.get('serial') or '').strip()
+        serial_component(new_serial)
+        with self.lock, self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            old = self.get(old_serial)
+            if (old is None or self.get(new_serial) or self.has_conflict(new_serial)
+                    or old['info'].get('identity_status') != 'provisional'
+                    or info.get('serial_source') != 'eeprom-onie'
+                    or info.get('identity_status') != 'confirmed'):
+                raise IdentityError('候选档案或 EEPROM 正式身份不满足自动迁移条件')
+            self.db.execute('PRAGMA defer_foreign_keys=ON')
+            self.db.execute('''UPDATE boards SET serial=?, info=?, last_seen=?,
+                last_path=?, last_dev=? WHERE serial=?''',
+                (new_serial, json.dumps(info, ensure_ascii=False), time.time(), path, dev,
+                 old_serial))
+            for table in ('sessions', 'events'):
+                self.db.execute('UPDATE ' + table + ' SET serial=? WHERE serial=?',
+                                (new_serial, old_serial))
+            self.db.execute('INSERT INTO events(serial,ts,actor,action,detail) VALUES(?,?,?,?,?)',
+                            (new_serial, time.time(), 'service', 'identity-promoted', old_serial))
+        return self.get(new_serial)
+
     def confirm_serial(self, serial):
         """Mark a manually verified identity as canonical without changing its value."""
         with self.lock, self.db:
@@ -226,6 +250,11 @@ class Store:
                 'SELECT * FROM sessions WHERE serial=? ORDER BY started DESC, sid LIMIT ? OFFSET ?',
                 (serial, limit, offset))]
 
+    def session_count(self, serial):
+        with self.lock:
+            return self.db.execute(
+                'SELECT COUNT(*) FROM sessions WHERE serial=?', (serial,)).fetchone()[0]
+
     def event(self, serial, actor, action, detail=''):
         with self.lock, self.db:
             self.db.execute('INSERT INTO events(serial,ts,actor,action,detail) VALUES(?,?,?,?,?)',
@@ -235,3 +264,15 @@ class Store:
         with self.lock:
             return [dict(r) for r in self.db.execute(
                 'SELECT * FROM events WHERE serial=? ORDER BY id DESC LIMIT ?', (serial, limit))]
+
+    def visible_events(self, serial, offset=0, limit=50):
+        """Page human-level operations; per-keystroke writes remain in the audit database."""
+        with self.lock:
+            return [dict(r) for r in self.db.execute('''
+                SELECT * FROM events WHERE serial=? AND action<>'session-send'
+                ORDER BY id DESC LIMIT ? OFFSET ?''', (serial, limit, offset))]
+
+    def visible_event_count(self, serial):
+        with self.lock:
+            return self.db.execute('''SELECT COUNT(*) FROM events
+                WHERE serial=? AND action<>'session-send' ''', (serial,)).fetchone()[0]

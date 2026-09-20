@@ -17,7 +17,13 @@ case "$1" in
       systemctl daemon-reload
       deb-systemd-helper enable seriald-collector.service >/dev/null
       deb-systemd-helper enable seriald.service >/dev/null
-      if ! systemctl is-active --quiet seriald-collector.service; then
+      if systemctl is-active --quiet seriald-collector.service; then
+        # The collector owns long-lived Python state, so an upgrade must load the
+        # newly installed identity and persistence code instead of only refreshing UI.
+        if [ -n "${2:-}" ]; then
+          deb-systemd-invoke restart seriald-collector.service || true
+        fi
+      else
         deb-systemd-invoke start seriald-collector.service || true
       fi
       deb-systemd-invoke restart seriald.service || true
