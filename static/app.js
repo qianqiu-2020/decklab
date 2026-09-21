@@ -77,6 +77,9 @@
     ctx.term.loadAddon(ctx.fit);
     $('d-term').textContent = '';
     ctx.term.open($('d-term'));
+    if (ctx.sid !== 'serial' && ctx.term.element && ctx.term.element.classList) {
+      ctx.term.element.classList.add('fit-gutter');
+    }
     // Some Chromium/Linux themes expose an overlay scrollbar whose track
     // accepts wheel input but ignores a track click.  Keep native dragging,
     // and provide the expected page jump when the click lands on xterm's

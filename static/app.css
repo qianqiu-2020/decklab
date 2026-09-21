@@ -122,6 +122,7 @@
   .info .v{font-family:"IBM Plex Mono",monospace;font-size:12.5px;overflow-wrap:anywhere}
   .info .v.hi{color:var(--accent);font-weight:500}
   .termhost .xterm{height:100%}
+  .termhost .xterm.fit-gutter{padding-right:24px}
   .termhost .xterm,.termhost .xterm-viewport{overscroll-behavior:contain}
   .termhost .xterm-viewport{background:transparent!important}
   .termhost .xterm-screen{overflow:hidden}
