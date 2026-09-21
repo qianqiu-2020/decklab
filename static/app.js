@@ -248,6 +248,11 @@
     }, 250);
   }
   window.addEventListener('resize', resizeTerm);
+  // Device metadata and tab controls can change height without a window resize.
+  // Refit after the terminal host itself changes so its last row stays visible.
+  if (window.ResizeObserver) {
+    new window.ResizeObserver(resizeTerm).observe($('d-term'));
+  }
   // 后台标签页里 rAF 被暂停,xterm 渲染器停摆;切回来要重算尺寸 + 强制重绘,
   // 否则表现为"切走再切回来终端就不渲染了,得刷新"(踩过)
   document.addEventListener('visibilitychange', function () {

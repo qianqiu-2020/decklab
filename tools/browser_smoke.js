@@ -93,6 +93,15 @@ let chrome, ws;
   assert.equal(await evaluate('testTerm.options.convertEol'),true);
   assert.equal(await evaluate('globalThis.injected === undefined'),true);
   assert.deepEqual(posts,[], 'viewing an archived terminal must remain read-only');
+  const viewportFits = `(() => {
+    const host = document.querySelector('#d-term').getBoundingClientRect();
+    const viewport = document.querySelector('#d-term .xterm-viewport').getBoundingClientRect();
+    const controls = document.querySelector('.sendrow').getBoundingClientRect();
+    return document.scrollingElement.scrollHeight <= window.innerHeight + 1 &&
+      viewport.bottom <= host.bottom - 8 && host.bottom <= controls.top + 1 &&
+      host.height >= 200;
+  })()`;
+  assert.ok(await evaluate(viewportFits), 'desktop page and terminal must fit the viewport with bottom clearance');
 
 
   const out=path.join(root,'dist');fs.mkdirSync(out,{recursive:true});
@@ -101,6 +110,13 @@ let chrome, ws;
   await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   await delay(300);
   assert.ok(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'),'mobile layout must not overflow');
+  assert.ok(await evaluate(viewportFits), 'mobile page and terminal must fit the viewport with bottom clearance');
+  await evaluate('document.querySelector("#b-records").click()');
+  await delay(200);
+  assert.ok(await evaluate('document.scrollingElement.scrollHeight <= window.innerHeight + 1'),
+    'opening records must not make the page scroll');
+  assert.ok(await evaluate('document.querySelector("#d-term").getBoundingClientRect().height >= 120'),
+    'terminal must remain usable with records open');
   const mobile=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-mobile.png'),Buffer.from(mobile.data,'base64'));
   assert.deepEqual(errors,[]);

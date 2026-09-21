@@ -34,10 +34,12 @@
     --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 20px -12px rgba(0,0,0,.6);
   }
   *{box-sizing:border-box}
+  html,body{height:100%;overflow:hidden}
   body{margin:0;background:var(--ground);color:var(--ink);
     font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
     font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:1680px;margin:0 auto;padding-inline:20px;padding-block:26px 64px}
+  .wrap{width:100%;height:100vh;height:100dvh;max-width:1680px;margin:0 auto;
+    padding:20px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
   @media (max-width:520px){.wrap{padding-inline:14px}}
 
   .top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
@@ -96,11 +98,11 @@
   .terminal-tools #terminal-search-status{font:11.5px "IBM Plex Mono",monospace;color:var(--ink-3);white-space:nowrap}
   .terminal-tools #b-records{margin-left:auto}
   .terminal-tools #b-records[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent)}
-  .console-layout{display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
+  .console-layout{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;min-height:0;flex:1;overflow:hidden}
   .console-layout.records-open{grid-template-columns:minmax(0,1fr) minmax(300px,360px)}
-  .console-main{min-width:0}
-  .termhost{height:clamp(500px,calc(100vh - 300px),900px);background:var(--term);padding:8px 10px;
-    overscroll-behavior:contain}
+  .console-main{min-width:0;min-height:0;display:flex;flex-direction:column}
+  .termhost{min-height:0;flex:1;background:var(--term);padding:8px 10px 16px;
+    overflow:hidden;overscroll-behavior:contain}
   .tabs{display:flex;gap:6px;padding:9px 14px;border-bottom:1px solid var(--line);
     flex-wrap:wrap;align-items:center;background:var(--surface-2)}
   .tabs button{font-family:"IBM Plex Mono",monospace;font-size:12px;padding:4px 11px;
@@ -143,7 +145,7 @@
   .dev.offline{opacity:.78}.dev:focus-visible{outline:2px solid var(--accent)}
   .identity-error{color:var(--dead);font-size:12px;overflow-wrap:anywhere}
   .records{padding:14px;border-left:1px solid var(--line);background:var(--ground);
-    max-height:calc(clamp(500px,calc(100vh - 300px),900px) + 104px);overflow:auto;overscroll-behavior:contain}
+    min-height:0;overflow:auto;overscroll-behavior:contain}
   .records-title{display:flex;align-items:center;justify-content:space-between;position:sticky;top:-14px;
     z-index:2;background:var(--ground);padding:10px 0;border-bottom:1px solid var(--line)}
   .section-head{display:flex;gap:15px;align-items:baseline;margin:12px 0}
@@ -166,14 +168,17 @@
     font-family:"IBM Plex Mono",monospace;text-align:left}
   @media(max-width:600px){.overview{gap:8px}.overview>div{padding:12px;display:block}.overview span{display:block}.activity-row{flex-wrap:wrap}.section-head{display:block}}
 
-  .workspace.selected{display:grid;grid-template-columns:clamp(210px,16vw,250px) minmax(0,1fr);gap:14px;align-items:start}
-  .workspace.selected>.grid{grid-template-columns:1fr;max-height:calc(100vh - 255px);overflow-y:auto;overflow-x:hidden;padding-right:4px}
+  .workspace{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
+  .workspace.selected{display:grid;grid-template-columns:clamp(210px,16vw,250px) minmax(0,1fr);gap:14px;overflow:hidden}
+  .workspace.selected>.grid{grid-template-columns:1fr;align-content:start;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:4px}
   .workspace.selected .dev{min-width:0;padding:13px}
   .workspace.selected .dev .meta,.workspace.selected .dev .stat,.workspace.selected .dev .stat span{min-width:0;overflow-wrap:anywhere}
-  .workspace.selected>.detail{margin-top:0;min-width:0}
+  .workspace.selected>.detail{margin-top:0;min-width:0;min-height:0;display:flex;flex-direction:column}
+  .detail>.hd,.detail>.tabs,.detail>.terminal-tools{flex:none}
+  .detail>.info{flex:none;max-height:20vh;overflow:auto}
   .workspace.selected .dev .stat{flex-wrap:wrap;gap:6px}
   .workspace.selected .dev .stat span:last-child{overflow-wrap:anywhere}
-  body.detail-open .wrap{max-width:none;padding:12px 14px 24px}
+  body.detail-open .wrap{max-width:none;padding:12px 14px}
   body.detail-open .sub,body.detail-open .overview{display:none}
   body.detail-open .top{margin-bottom:8px}
   body.detail-open .toolbar{margin-bottom:12px}
@@ -181,11 +186,30 @@
     .console-layout.records-open{grid-template-columns:minmax(0,1fr) minmax(280px,32vw)}
   }
   @media(max-width:1000px){
-    .workspace.selected{display:block}.workspace.selected>.grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));max-height:210px;margin-bottom:12px}
-    .console-layout.records-open{display:block}.records{border-left:0;border-top:1px solid var(--line);max-height:520px}
-    .termhost{height:clamp(460px,calc(100vh - 330px),760px)}
+    .workspace.selected{display:flex;flex-direction:column}
+    .workspace.selected>.grid{flex:0 0 auto;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));max-height:min(180px,22vh);margin-bottom:0}
+    .workspace.selected>.detail{flex:1}
+    .console-layout.records-open{display:flex;flex-direction:column}
+    .console-layout.records-open>.console-main{flex:1}
+    .records{flex:0 0 auto;border-left:0;border-top:1px solid var(--line);max-height:min(150px,20vh)}
   }
   @media(max-width:620px){
-    .terminal-tools{flex-wrap:wrap}.terminal-tools input{flex:1;width:auto;min-width:140px}
-    .terminal-tools #b-records{margin-left:0}.termhost{height:62vh}
+    .workspace.selected>.grid{display:flex;max-height:86px;overflow-x:auto;overflow-y:hidden;padding:0 0 3px}
+    .workspace.selected .dev{flex:0 0 175px;padding:8px;gap:2px;overflow:hidden}
+    .workspace.selected .dev .nm{font-size:15px}
+    .workspace.selected .dev .meta,.workspace.selected .dev .last,
+    .workspace.selected .dev .stat,.workspace.selected .dev .identity-error{display:none}
+    .detail .hd{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;padding:7px 9px}
+    .detail .hd .sp{flex-wrap:nowrap;margin-left:0}
+    .detail .tabs{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;padding:6px 9px}
+    .detail .tabs button{flex:none}
+    .detail>.info{max-height:58px;overflow:auto}
+    .terminal-tools{overflow-x:auto;padding:5px 8px}
+    .terminal-tools input{width:130px;flex:none}
+    .terminal-tools button,.terminal-tools label{flex:none}
+    .terminal-tools #b-records{margin-left:0}
+    .sendrow{flex-wrap:nowrap;overflow-x:auto;padding:6px 8px}
+    .sendrow input[type="text"]{min-width:120px}
+    .sendrow button,.sendrow label{flex:none}
+    .hint{display:none}
   }
