@@ -40,7 +40,11 @@ class Element {
 function harness() {
   const elements = new Map();
   const get = id => {
-    if (!elements.has(id)) elements.set(id, new Element());
+    if (!elements.has(id)) {
+      const element = new Element();
+      if (id === 'd-slow-paste') element.checked = false;
+      elements.set(id, element);
+    }
     return elements.get(id);
   };
   const requests = [], terminals = [], timers = new Map(), intervals = [];
@@ -419,6 +423,38 @@ test('Ctrl+V is handed back to the browser so native paste can reach the termina
   await drain();
   assert.deepEqual(h.sends().map(r => r.body.data), ['ls\n']);
   assert.ok(h.get('d-status').textContent.includes('已粘贴'));
+});
+
+test('opt-in firmware paste sends one serial character per acknowledged write', async () => {
+  const h = await setup(); h.select('A');
+  h.get('d-slow-paste').checked = true;
+  h.document.activeElement = null;
+  h.document.emit('paste', { clipboardData: { getData: () => 'abc' },
+    preventDefault() {}, stopPropagation() {} });
+  await drain();
+  assert.deepEqual(h.sends().map(r => r.body.data), ['a']);
+  h.sends()[0].resolve({ ok: true }); await drain();
+  assert.deepEqual(h.sends().map(r => r.body.data), ['a']);
+  assert.ok(h.timer(50), 'next character waits after the write response');
+  h.fire(h.timer(50)[0]); await drain();
+  assert.deepEqual(h.sends().map(r => r.body.data), ['a', 'b']);
+  h.sends()[1].resolve({ ok: true }); await drain();
+  h.fire(h.timer(50)[0]); await drain();
+  assert.deepEqual(h.sends().map(r => r.body.data), ['a', 'b', 'c']);
+});
+
+test('leaving a serial view cancels queued firmware paste', async () => {
+  const h = await setup(); h.select('A');
+  h.get('d-slow-paste').checked = true;
+  h.document.activeElement = null;
+  h.document.emit('paste', { clipboardData: { getData: () => 'abc' },
+    preventDefault() {}, stopPropagation() {} });
+  await drain();
+  h.select('B');
+  assert.equal(h.get('d-slow-paste').checked, false);
+  h.sends()[0].resolve({ ok: true }); await drain();
+  assert.equal(h.sends().length, 1);
+  assert.equal(h.timer(50), undefined);
 });
 
 test('paste is left to the browser while the command box has focus', async () => {

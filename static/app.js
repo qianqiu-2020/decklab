@@ -10,9 +10,10 @@
   var takenOver = {};
 
   function setInputMode(ctx) {
-    ['d-in', 'd-kbd', 'b-send', 'b-cr', 'b-ctrlc', 'b-paste'].forEach(function (id) {
+    ['d-in', 'd-kbd', 'd-slow-paste', 'b-send', 'b-cr', 'b-ctrlc', 'b-paste'].forEach(function (id) {
       $(id).disabled = ctx.readonly;
     });
+    $('slow-paste-option').hidden = ctx.sid !== 'serial';
     $('b-takeover').hidden = !ctx.canTakeover;
   }
 
@@ -33,6 +34,7 @@
     }
     if (old.ctrl) old.ctrl.abort();
     clearTimeout(old.loopTimer);
+    clearTimeout(old.inputTimer);
     clearTimeout(old.sizeTimer);
     clearTimeout(old.selTimer);
     if (old.refreshFrame && window.cancelAnimationFrame) window.cancelAnimationFrame(old.refreshFrame);
@@ -55,7 +57,8 @@
                 readonly: selectedSession.kind === 'log' || isAgentSession,
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
-                pendingInput: '', inputSending: false, lastSel: '', searchQuery: '', searchMatch: -1,
+                inputQueue: [], inputSending: false, inputTimer: 0,
+                lastSel: '', searchQuery: '', searchMatch: -1,
                 serialRows: 24, bootScanTail: '' };
     view = ctx;
     setInputMode(ctx);
@@ -273,8 +276,13 @@
       return;
     }
     if (!text) { $('d-status').textContent = ' 剪贴板里没有文本（终端里 Ctrl+C 是中断信号，复制请用 Ctrl+Shift+C 或拖选）'; return; }
-    send(text, ctx);
-    $('d-status').textContent = ' 已粘贴 ' + text.length + ' 字符';
+    if (ctx.sid === 'serial' && $('d-slow-paste').checked) {
+      Array.from(text).forEach(function (char) { send(char, ctx, true); });
+      $('d-status').textContent = ' 正在逐字符粘贴 ' + Array.from(text).length + ' 字符（固件模式）';
+    } else {
+      send(text, ctx);
+      $('d-status').textContent = ' 已粘贴 ' + text.length + ' 字符';
+    }
   }
   // 原生粘贴(Ctrl+V / 中键)在终端里也要能送到板子 —— 不受"键盘直通"开关影响。
   // 挂在 document 上而不是 d-term 上：焦点不在终端里时(例如从别处复制完切回浏览器、
@@ -445,6 +453,9 @@
   }
 
   function select(key) {
+    // Slow paste is a workaround for one firmware input path, not a board-wide
+    // default.  Keep it only while staying on the same selected board.
+    if (key !== selKey) $('d-slow-paste').checked = false;
     var ctx = createView(key, 'serial');
     // 切设备时立即清掉旧会话标签；迟到的列表/动作响应不能借用新 selKey。
     sessions = [{ sid: 'serial', kind: 'serial' }];
@@ -732,37 +743,47 @@
       .catch(function () {});
   }
 
-  function send(text, ctx) {
+  function flushInput(ctx) {
+    if (!isCurrent(ctx) || ctx.inputSending || ctx.inputTimer || !ctx.inputQueue.length) return;
+    var item = ctx.inputQueue.shift();
+    ctx.inputSending = true;
+    fetch('/api/session-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: ctx.key, serial: ctx.serial, sid: ctx.sid, data: item.data }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!isCurrent(ctx)) return;
+        if (!d.ok) $('d-status').textContent = ' 写入失败：' + (d.error || '');
+        else if (/[\r\n]/.test(item.data)) loadCommands();
+      })
+      .catch(function (e) {
+        if (isCurrent(ctx)) $('d-status').textContent = ' 写入失败：' + e.message;
+      }).finally(function () {
+        ctx.inputSending = false;
+        if (!isCurrent(ctx)) return;
+        if (item.slow && ctx.inputQueue.length) {
+          // EFI Serial I/O polling in GRUB can lose a bulk write.  Spacing is
+          // opt-in and affects only pasted serial bytes, never normal typing.
+          ctx.inputTimer = setTimeout(function () {
+            ctx.inputTimer = 0;
+            flushInput(ctx);
+          }, 50);
+        } else flushInput(ctx);
+      });
+  }
+
+  function send(text, ctx, slow) {
     ctx = ctx || view;
     if (!isCurrent(ctx)) return;
     if (ctx.readonly) {
       $('d-status').textContent = ctx.kind === 'log' ? ' 当前是只读归档日志' : ' 当前正在只读查看 agent 会话';
       return;
     }
-    // Keep at most one write request in flight.  Keystrokes typed during its
-    // round trip are sent as one ordered batch instead of one TCP request each.
-    ctx.pendingInput += text;
-    function flushInput() {
-      if (!isCurrent(ctx) || ctx.inputSending || !ctx.pendingInput) return;
-      var batch = ctx.pendingInput;
-      ctx.pendingInput = '';
-      ctx.inputSending = true;
-      fetch('/api/session-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: ctx.key, serial: ctx.serial, sid: ctx.sid, data: batch }) })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (!isCurrent(ctx)) return;
-        if (!d.ok) $('d-status').textContent = ' 写入失败：' + (d.error || '');
-        else if (/[\r\n]/.test(batch)) loadCommands();
-      })
-      .catch(function (e) {
-        if (isCurrent(ctx)) $('d-status').textContent = ' 写入失败：' + e.message;
-      }).finally(function () {
-        ctx.inputSending = false;
-        if (isCurrent(ctx) && ctx.pendingInput) flushInput();
-      });
-    }
-    flushInput();
+    // Preserve order.  Ordinary keystrokes coalesce during a network round
+    // trip; firmware paste deliberately stays one character per write.
+    var last = ctx.inputQueue[ctx.inputQueue.length - 1];
+    if (!slow && last && !last.slow) last.data += text;
+    else ctx.inputQueue.push({ data: text, slow: !!slow });
+    flushInput(ctx);
   }
 
   function loadLogs() {
