@@ -493,12 +493,16 @@
       if (ctx.sid !== 'serial' || !raw) return;
       // UEFI commonly paints an 80x50 text console with absolute CUP/HVP
       // coordinates.  Clamping row 50 into a browser-fitted 40-row terminal
-      // makes later erases overwrite the whole visible menu.  Learn the
-      // firmware's logical height before xterm parses the same payload, then
-      // keep that height across browser resizes.
-      var pattern = /\x1b\[([0-9]{1,3})(?:;[0-9]{0,3})?[Hf]/g;
-      var match, rows = ctx.serialRows || 24;
+      // makes later erases overwrite the whole visible menu.  A full clear
+      // starts a new logical screen: GRUB/Linux can therefore leave EDK2's
+      // 50-row mode, while another row-50 CUP later in the same frame restores
+      // it before xterm parses the payload.
+      var dimensions = ctx.fit.proposeDimensions ? ctx.fit.proposeDimensions() : null;
+      var visibleRows = dimensions && dimensions.rows ? dimensions.rows : 24;
+      var pattern = /\x1b\[(?:([0-9]{1,3})(?:;[0-9]{0,3})?[Hf]|2J)/g;
+      var match, rows = ctx.serialRows || visibleRows;
       while ((match = pattern.exec(raw))) {
+        if (!match[1]) { rows = visibleRows; continue; }
         var row = Number(match[1] || 1);
         if (row >= 1 && row <= 200) rows = Math.max(rows, row);
       }

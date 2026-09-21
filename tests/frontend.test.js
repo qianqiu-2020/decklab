@@ -632,6 +632,22 @@ test('live serial learns an EDK2 80x50 screen before parsing its cursor position
   assert.ok(terminal.refreshes > 0);
 });
 
+test('full clear lets GRUB leave the previous EDK2 50-row screen', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  const first = h.take('/api/session');
+  first.resolve(readResponse('A', '\x1b[2J\x1b[50;27HEDK2', 18));
+  await drain();
+  assert.equal(terminal.rows, 50);
+  terminal.flush(); await drain();
+  const poll = h.timer(300); assert.ok(poll); h.fire(poll[0]);
+  h.take('/api/session').resolve(readResponse('A',
+    '\x1b[0m\x1b[37m\x1b[40m\x1b[2J\x1b[01;01H\x1b[?25l', 54));
+  await drain();
+  assert.equal(terminal.rows, 42, 'a new lower screen must discard EDK2 logical height');
+  terminal.flush(); await drain();
+  assert.ok(terminal.refreshes > 0);
+});
+
 (async () => {
   for (const [name, fn] of tests) {
     await fn(); console.log('ok - ' + name);
