@@ -60,7 +60,7 @@
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
                 inputQueue: [], inputSending: false, inputTimer: 0,
                 lastSel: '', searchQuery: '', searchMatch: -1,
-                serialRows: 24, bootScanTail: '' };
+                serialRows: 24, bootScanTail: '', phaseScanTail: '', linuxConsole: false };
     view = ctx;
     setInputMode(ctx);
     term = ctx.term = new Terminal({
@@ -580,6 +580,8 @@
       if (cut < 0) return raw;
       try { ctx.term.reset(); ctx.term.clear(); ctx.term.clearSelection(); } catch (e) {}
       ctx.serialRows = 24;
+      ctx.phaseScanTail = '';
+      ctx.linuxConsole = false;
       ctx.initialRendered = false;
       return raw.slice(cut);
     }
@@ -590,18 +592,28 @@
       // makes later erases overwrite the whole visible menu.  A full clear
       // starts a new logical screen: GRUB/Linux can therefore leave EDK2's
       // 50-row mode, while another row-50 CUP later in the same frame restores
-      // it before xterm parses the payload.
-      var pattern = /\x1b\[(?:([0-9]{1,3})(?:;[0-9]{0,3})?[Hf]|2J)/g;
+      // it before xterm parses the payload. Linux boot output ends firmware
+      // mode even if firmware never sent a final clear-screen sequence.
+      var prefix = ctx.phaseScanTail || '';
+      var joined = prefix + raw;
+      var pattern = /\x1b\[(?:([0-9]{1,3})(?:;[0-9]{0,3})?[Hf]|2J)|Linux version [0-9]/g;
       var match, rows = ctx.serialRows || 24;
-      while ((match = pattern.exec(raw))) {
+      while ((match = pattern.exec(joined))) {
+        if (match.index + match[0].length <= prefix.length) continue;
+        if (match[0].startsWith('Linux version ')) {
+          ctx.linuxConsole = true;
+          rows = 24;
+          continue;
+        }
         if (!match[1]) {
           rows = 24;
           try { ctx.term.clearSelection(); } catch (e) {}
           continue;
         }
         var row = Number(match[1] || 1);
-        if (row >= 1 && row <= 200) rows = Math.max(rows, row);
+        if (!ctx.linuxConsole && row >= 1 && row <= 200) rows = Math.max(rows, row);
       }
+      ctx.phaseScanTail = joined.slice(-32);
       if (rows !== ctx.serialRows) {
         ctx.serialRows = rows;
         fitTerminal(ctx);

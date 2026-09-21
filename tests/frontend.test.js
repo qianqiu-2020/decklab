@@ -734,6 +734,21 @@ test('full clear lets GRUB leave the previous EDK2 50-row screen', async () => {
   assert.ok(terminal.refreshes > 0);
 });
 
+test('Linux boot restores the normal serial font after an uncleared EDK2 screen', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  h.take('/api/session').resolve(readResponse('A', '\x1b[50;27HEDK2', 18));
+  await drain();
+  assert.equal(terminal.rows, 50);
+  const poll = h.timer(10); assert.ok(poll); h.fire(poll[0]);
+  h.take('/api/session').resolve(readResponse('A', '\r\n[    0.000000] Linux ver', 46));
+  await drain();
+  const next = h.timer(10); assert.ok(next); h.fire(next[0]);
+  h.take('/api/session').resolve(readResponse('A', 'sion 6.18.3+\r\n\x1b[50;01Hfedora login:', 90));
+  await drain();
+  assert.equal(terminal.rows, 42);
+  assert.equal(terminal.options.fontSize, 14.5);
+});
+
 test('a new boot epoch discards stale EDK2 screen state and older boots', async () => {
   const h = await setup(); const terminal = h.select('A');
   h.take('/api/session').resolve(readResponse('A',
