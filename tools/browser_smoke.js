@@ -70,6 +70,9 @@ let chrome, ws;
   await rpc('Emulation.setDeviceMetricsOverride',{width:1500,height:1200,deviceScaleFactor:1,mobile:false});
   for(let n=0;n<50 && !await evaluate('document.querySelectorAll(".dev").length === 5');n++)await delay(100);
   assert.equal(await evaluate('document.querySelectorAll(".dev").length'),5);
+  const out=path.join(root,'dist');fs.mkdirSync(out,{recursive:true});
+  const overviewShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-overview.png'),Buffer.from(overviewShot.data,'base64'));
   await evaluate('window.OriginalTerminal=Terminal; window.Terminal=class extends OriginalTerminal {constructor(...args){super(...args);window.testTerm=this;}}');
   await evaluate('document.querySelector(\'[data-key="milkv"]\').click()');
   await delay(300);
@@ -105,6 +108,8 @@ let chrome, ws;
   await evaluate('document.querySelector("#b-records").click()');
   await delay(200);
   assert.ok(await evaluate(columnsFit), 'SSH columns must still fit with records open');
+  const recordsShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-records.png'),Buffer.from(recordsShot.data,'base64'));
   await evaluate('document.querySelector("#b-records").click()');
   await delay(100);
   assert.ok(await evaluate(`new Promise(resolve => {
@@ -137,7 +142,6 @@ let chrome, ws;
   assert.ok(await evaluate(viewportFits), 'desktop page and terminal must fit the viewport with bottom clearance');
 
 
-  const out=path.join(root,'dist');fs.mkdirSync(out,{recursive:true});
   const screenshot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-desktop.png'),Buffer.from(screenshot.data,'base64'));
   await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
@@ -146,6 +150,17 @@ let chrome, ws;
   assert.ok(await evaluate(columnsFit), 'laptop-width terminal must wrap before clipping');
   assert.ok(await evaluate('document.querySelector("#d-term").getBoundingClientRect().height >= 480'),
     'laptop-height view must give most of the screen to the terminal');
+  const laptopShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-laptop.png'),Buffer.from(laptopShot.data,'base64'));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:850,height:800,deviceScaleFactor:1,mobile:false});
+  await delay(100);
+  assert.ok(await evaluate(viewportFits), 'tablet-height terminal must fit without page scrolling');
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
+  await rpc('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});
+  await delay(100);
+  const darkShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-dark.png'),Buffer.from(darkShot.data,'base64'));
+  await rpc('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
   await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   await delay(300);
   assert.ok(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'),'mobile layout must not overflow');

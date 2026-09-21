@@ -71,8 +71,8 @@
       cursorBlink: !ctx.readonly,
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
       fontSize: DEFAULT_TERMINAL_FONT_SIZE,
-      theme: { background: '#0A0D0F', foreground: '#C8D0D6', cursor: '#7FE0D4',
-               selectionBackground: '#2C5B57' }
+      theme: { background: '#10191F', foreground: '#D1DCDF', cursor: '#78DDD1',
+               selectionBackground: '#2E6667' }
     });
     ctx.fit = new FitAddon.FitAddon();
     ctx.term.loadAddon(ctx.fit);
@@ -1066,7 +1066,7 @@
           'identity-promoted': '身份升级', 'identity-corrected': '身份更正',
           'identity-confirmed': '身份确认', 'boot-marker-initialized': '初始化 /boot 标记',
           rescue: '串口自愈', 'ssh-enable': '启用 SSH', 'session-takeover': '人工介入 SSH',
-          'switch-armed': '准备更换设备' };
+          'ssh-auto-config': '自动配置 SSH', 'switch-armed': '准备更换设备' };
         (d.events || []).forEach(function (entry) {
           var row = document.createElement('div'); row.className = 'activity-row';
           var main = document.createElement('div'); main.className = 'activity-main';
