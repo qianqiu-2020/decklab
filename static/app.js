@@ -35,6 +35,7 @@
     clearTimeout(old.loopTimer);
     clearTimeout(old.sizeTimer);
     clearTimeout(old.selTimer);
+    if (old.refreshFrame && window.cancelAnimationFrame) window.cancelAnimationFrame(old.refreshFrame);
     // reset() 不会清空 xterm 的异步解析队列；旧 CSI 6n 还可能触发 onData，
     // 把上一台的终端应答写到新设备。销毁实例，并让所有旧回调检查所属视图。
     old.term.dispose();
@@ -53,7 +54,7 @@
                 byPath: board.by_path || board.last_path,
                 readonly: selectedSession.kind === 'log' || isAgentSession,
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
-                sid: sid, gen: loopGen, off: 0, sessionsSeq: 0, activitySeq: 0,
+                sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
                 sendTail: Promise.resolve(), lastSel: '', searchQuery: '', searchMatch: -1 };
     view = ctx;
     setInputMode(ctx);
@@ -164,22 +165,65 @@
     }
   }
 
+  function redrawTerminal() {
+    var ctx = view;
+    if (!isCurrent(ctx)) return;
+    ctx.readSeq++;
+    if (ctx.ctrl) ctx.ctrl.abort();
+    clearTimeout(ctx.loopTimer);
+    if (ctx.refreshFrame && window.cancelAnimationFrame) {
+      window.cancelAnimationFrame(ctx.refreshFrame); ctx.refreshFrame = 0;
+    }
+    clearTerminalSearch(false);
+    try { ctx.term.reset(); ctx.term.clear(); } catch (e) {}
+    ctx.off = 0; ctx.initialRendered = false;
+    $('d-status').textContent = ' 正在从采集缓冲完整重绘…';
+    if (ctx.kind === 'log') {
+      var archived = sessions.filter(function (s) { return s.sid === ctx.sid; })[0];
+      if (archived && archived.payload) {
+        writeTerminalPayload(ctx, archived.payload);
+        $('d-status').textContent = archived.status || ' 只读归档已重绘';
+      }
+      return;
+    }
+    loop(ctx);
+  }
+
   function resizeTerm() {
     var ctx = view;
     if (!isCurrent(ctx)) return;
-    try { ctx.fit.fit(); syncTerminalLayers(ctx); } catch (e) {}
+    try { fitTerminal(ctx); syncTerminalLayers(ctx); } catch (e) {}
     if (window.requestAnimationFrame) window.requestAnimationFrame(function () {
       if (!isCurrent(ctx)) return;
-      try { ctx.fit.fit(); syncTerminalLayers(ctx); ctx.term.refresh(0, ctx.term.rows - 1); } catch (e) {}
+      try { fitTerminal(ctx); syncTerminalLayers(ctx); ctx.term.refresh(0, ctx.term.rows - 1); } catch (e) {}
       pushSize(ctx);
     });
     pushSize(ctx);
+  }
+  function fitTerminal(ctx) {
+    // UART has no PTY window-size negotiation. Linux serial consoles,
+    // readline, EDK2 and GRUB normally lay out against 80 columns; fitting
+    // xterm to a wide browser makes wrapped input and cursor-left disagree
+    // about the visual row. Keep only the live serial console at 80 columns.
+    if (ctx.sid === 'serial') {
+      var dimensions = ctx.fit.proposeDimensions ? ctx.fit.proposeDimensions() : null;
+      var rows = dimensions && dimensions.rows ? dimensions.rows : ctx.term.rows;
+      if (ctx.term.cols !== 80 || ctx.term.rows !== rows) ctx.term.resize(80, rows);
+      return;
+    }
+    ctx.fit.fit();
   }
   function syncTerminalLayers(ctx) {
     if (!ctx || !ctx.term || !ctx.term.element || !ctx.term.element.querySelector) return;
     var viewport = ctx.term.element.querySelector('.xterm-viewport');
     var screen = ctx.term.element.querySelector('.xterm-screen');
     if (!viewport || !screen || !viewport.clientWidth) return;
+    if (ctx.sid === 'serial') {
+      screen.style.width = '';
+      screen.style.maxWidth = '';
+      screen.style.overflow = 'hidden';
+      return;
+    }
     // FitAddon can round a fractional cell width up by a few pixels.  That
     // lets the screen/selection layer extend over the native scrollbar.
     screen.style.width = viewport.clientWidth + 'px';
@@ -442,25 +486,47 @@
       var lines = payload.data.split('\n').length + 10;
       if (lines > ctx.term.options.scrollback) ctx.term.options.scrollback = lines;
     }
+    var redraw = false;
+    function written() {
+      ctx.initialRendered = true;
+      if (redraw) scheduleFullRefresh(ctx);
+    }
     if (typeof payload.data_b64 === 'string') {
       var raw = atob(payload.data_b64);
+      // Firmware menus paint the screen with cursor positioning and erases.
+      // xterm normally tracks dirty rows, but a large sequence split across
+      // HTTP reads can leave canvas layers visually stale until the next input.
+      redraw = /\x1b(?:\[[0-9;?]*[ABCDEFGHJKSTfhl]|[78])/.test(raw);
       if (raw.length) {
         ctx.term.write(Uint8Array.from(raw, function (c) { return c.charCodeAt(0); }),
-          function () { ctx.initialRendered = true; });
+          written);
       } else ctx.initialRendered = true;
     } else if (payload.data) {
-      ctx.term.write(payload.data, function () { ctx.initialRendered = true; });
+      redraw = /\x1b(?:\[[0-9;?]*[ABCDEFGHJKSTfhl]|[78])/.test(payload.data);
+      ctx.term.write(payload.data, written);
     } else ctx.initialRendered = true;
+  }
+
+  function scheduleFullRefresh(ctx) {
+    if (!isCurrent(ctx) || ctx.refreshFrame) return;
+    var refresh = function () {
+      ctx.refreshFrame = 0;
+      if (!isCurrent(ctx)) return;
+      try { ctx.term.refresh(0, ctx.term.rows - 1); } catch (e) {}
+    };
+    if (window.requestAnimationFrame) ctx.refreshFrame = window.requestAnimationFrame(refresh);
+    else refresh();
   }
 
   function loop(ctx) {
     if (!isCurrent(ctx)) return;
+    var readSeq = ++ctx.readSeq;
     ctx.ctrl = new AbortController();
     fetch('/api/session?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '') + '&sid=' + encodeURIComponent(ctx.sid)
           + '&off=' + ctx.off, { cache: 'no-store', signal: ctx.ctrl.signal })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (!isCurrent(ctx)) return;           // 切换后到达的旧响应,丢弃
+        if (!isCurrent(ctx) || readSeq !== ctx.readSeq) return; // 切换/重绘后的旧响应,丢弃
         if (!d || d.error) throw new Error(d && d.error || 'error');
         if ((d.key && d.key !== ctx.key) || (d.sid && d.sid !== ctx.sid)) {
           throw new Error('会话响应与请求不匹配');
@@ -474,11 +540,11 @@
         writeTerminalPayload(ctx, d);   // data 字段兼容仍在运行的旧服务
       })
       .catch(function (e) {
-        if (!isCurrent(ctx) || (e && e.name === 'AbortError')) return;
+        if (!isCurrent(ctx) || readSeq !== ctx.readSeq || (e && e.name === 'AbortError')) return;
         $('d-status').textContent = ' 读取失败：' + e.message;
       })
       .finally(function () {
-        if (!isCurrent(ctx)) return;
+        if (!isCurrent(ctx) || readSeq !== ctx.readSeq) return;
         // 定时器本身也必须绑定视图，否则旧定时器会多开一条新会话轮询。
         ctx.loopTimer = setTimeout(function () { loop(ctx); }, 300);
       });
@@ -810,6 +876,7 @@
   $('terminal-search-next').addEventListener('click', function () { searchTerminal(1); });
   $('terminal-search-prev').addEventListener('click', function () { searchTerminal(-1); });
   $('terminal-search-clear').addEventListener('click', function () { clearTerminalSearch(true); });
+  $('b-redraw').addEventListener('click', redrawTerminal);
   $('terminal-search').addEventListener('input', function () {
     if (view) { view.searchQuery = ''; view.searchMatch = -1; }
     $('terminal-search-status').textContent = '';

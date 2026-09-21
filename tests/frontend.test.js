@@ -75,7 +75,10 @@ function harness() {
     select(col, row, length) { this.selected = { col, row, length }; }
     scrollToLine(row) { this.scrolledToLine = row; }
     focus() {}
-    refresh() {}
+    refresh() { this.refreshes = (this.refreshes || 0) + 1; }
+    resize(cols, rows) { this.cols = cols; this.rows = rows; }
+    reset() { this.wasReset = true; this.parsed = ''; }
+    clear() { this.wasCleared = true; }
     write(data, callback) { this.queued.push({ data, callback }); }
     flush() {
       // 故意允许 dispose 后仍执行旧解析器，验证回调自身也能拦住 CSI 6n 应答。
@@ -96,7 +99,10 @@ function harness() {
     execCommand: () => true,
   };
   const sandbox = {
-    document, Terminal, FitAddon: { FitAddon: class { fit() {} } },
+    document, Terminal, FitAddon: { FitAddon: class {
+      fit() { this.fitted = true; }
+      proposeDimensions() { return { cols: 140, rows: 42 }; }
+    } },
     Uint8Array, AbortController, console,
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     setTimeout: (fn, delay) => { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
@@ -593,6 +599,25 @@ test('terminal search selects matches and wraps in both directions', async () =>
   assert.deepEqual(terminal.selected, { col: 6, row: 0, length: 4 });
   h.get('terminal-search-prev').click();
   assert.deepEqual(terminal.selected, { col: 0, row: 2, length: 4 });
+});
+
+test('live serial stays at firmware-compatible 80 columns and redraw replays from zero', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  assert.equal(terminal.cols, 80);
+  assert.equal(terminal.rows, 42, 'height should still follow the available terminal area');
+  const firstRead = h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1);
+  h.get('b-redraw').click();
+  assert.equal(terminal.wasReset, true);
+  assert.equal(terminal.wasCleared, true);
+  const reads = h.requests.filter(r => r.url.startsWith('/api/session?'));
+  assert.equal(reads.length, 2);
+  assert.ok(reads.at(-1).url.includes('off=0'));
+  reads.at(-1).resolve(readResponse('A', '\x1b[2J\x1b[HGRUB menu'));
+  await drain(); terminal.flush();
+  assert.ok(terminal.refreshes > 0, 'full-screen control output should force a complete repaint');
+  // A late response from the pre-redraw read must remain harmless.
+  firstRead.resolve(readResponse('A', 'stale', 5)); await drain(); terminal.flush();
+  assert.ok(!terminal.parsed.includes('stale'));
 });
 
 (async () => {
