@@ -31,7 +31,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     collector_socket = SOCKET
     static_root = STATIC
     auth_token = AUTH_TOKEN
-    allowed_static = frozenset(('/static/app.js', '/static/ui-common.js', '/static/terminal-policy.js',
+    allowed_static = frozenset(('/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/ui-common.js', '/static/terminal-policy.js',
                                 '/static/app.css', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
 
@@ -95,7 +95,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             # collector is still working, leaving the board identified but the UI
             # showing a spurious "Failed to fetch".
             slow = self.command == 'POST' and urlparse(self.path).path in (
-                '/api/identify', '/api/ssh-enable', '/api/ssh-connect')
+                '/api/identify', '/api/ssh-enable', '/api/ssh-connect',
+                '/api/file-transfer/start', '/api/file-transfer/chunk',
+                '/api/file-transfer/finish', '/api/file-transfer/abort')
             connection = UnixHTTPConnection(self.collector_socket,
                                              timeout=300 if slow else 30)
             connection.request(self.command, self.path, body=body, headers=headers)
@@ -151,7 +153,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         return os.path.join(self.static_root, *route.split('/'))
 
     def end_headers(self):
-        if urlparse(self.path).path in ('/', '', '/index.html', '/static/app.js', '/static/ui-common.js',
+        if urlparse(self.path).path in ('/', '', '/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/ui-common.js',
                                         '/static/terminal-policy.js', '/static/app.css'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()

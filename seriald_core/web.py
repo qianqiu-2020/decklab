@@ -13,6 +13,8 @@ from .devices import Manager
 from .storage import IdentityError
 from .httpd import BoundedThreadingTCPServer as BoundedThreadingServer
 from .log_archive import read_epoch
+from .boot_compare import MAX_BOOT_BYTES, compare_boots
+from .file_transfer import TransferError
 from . import __version__
 
 MGR = Manager()
@@ -83,6 +85,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
             devs.sort(key=lambda x: x['key'])
             return self._json(200, {'devices': devs, 'by_path': BY_PATH,
                                     'server_time': time.time()})
+
+        if route == '/api/boot-compare':
+            selected = []
+            for side in ('left', 'right'):
+                key = (q.get(side + '_key') or [''])[0]
+                serial = (q.get(side + '_serial') or [''])[0]
+                boot_id = (q.get(side + '_id') or [''])[0]
+                device = MGR.resolve(key) if key else None
+                if not device or not serial or device.serial != serial:
+                    return self._json(404, {'error': '%s device unavailable' % side})
+                boot = next((item for item in device.boot_epochs() if item['id'] == boot_id), None)
+                if not boot:
+                    return self._json(404, {'error': '%s boot unavailable' % side})
+                if boot['size'] > MAX_BOOT_BYTES:
+                    return self._json(413, {'error': '%s boot exceeds 4 MiB' % side})
+                selected.append((device, boot))
+            try:
+                data = [read_epoch(device.stable_dir(), boot) for device, boot in selected]
+                comparison = compare_boots(*data)
+            except OSError:
+                return self._json(404, {'error': 'boot log unavailable'})
+            except ValueError as error:
+                return self._json(413, {'error': str(error)})
+            comparison['left'] = {'key': selected[0][0].key, 'serial': selected[0][0].serial,
+                                  'boot': {k: v for k, v in selected[0][1].items() if k != 'parts'}}
+            comparison['right'] = {'key': selected[1][0].key, 'serial': selected[1][0].serial,
+                                   'boot': {k: v for k, v in selected[1][1].items() if k != 'parts'}}
+            return self._json(200, comparison)
 
         if route == '/api/serial':
             d = self._dev(q)
@@ -252,6 +282,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except IdentityError as error:
                 return self._json(409, {'ok': False, 'error': str(error)})
 
+        if route.startswith('/api/file-transfer/'):
+            action = route.rsplit('/', 1)[-1]
+            if action not in ('start', 'chunk', 'finish', 'abort'):
+                return self._json(404, {'ok': False, 'error': 'unknown transfer action'})
+            connection_id = str(payload.get('connection_id') or '')
+            try:
+                if action == 'start':
+                    result = d.file_transfer.start(
+                        payload.get('direction'), payload.get('path'), connection_id,
+                        actor=actor, size=payload.get('size'),
+                        overwrite=payload.get('overwrite') is True)
+                    if d.serial:
+                        MGR.store.event(d.serial, actor, 'file-transfer-start',
+                                        '%s %s (%s bytes)' % (result['direction'], result['path'], result['size']))
+                elif action == 'chunk':
+                    result = d.file_transfer.chunk(str(payload.get('id') or ''), connection_id,
+                                                   payload.get('offset'), payload.get('data_b64'))
+                elif action == 'finish':
+                    result = d.file_transfer.finish(str(payload.get('id') or ''), connection_id)
+                    if d.serial:
+                        MGR.store.event(d.serial, actor, 'file-transfer-finish',
+                                        '%s %s (%s bytes, sha256 %s)' % (
+                                            result['direction'], result['path'], result['size'], result['sha256']))
+                else:
+                    result = d.file_transfer.abort(str(payload.get('id') or ''), connection_id)
+                    if d.serial:
+                        MGR.store.event(d.serial, actor, 'file-transfer-abort', result['id'])
+                return self._json(200, dict(result, ok=True))
+            except TransferError as error:
+                return self._json(error.status, {'ok': False, 'error': str(error)})
+
         if d.serial and route in ('/api/send', '/api/session-send', '/api/rescue', '/api/identify', '/api/ssh-enable'):
             MGR.store.event(d.serial, actor, route.rsplit('/', 1)[-1],
                             'request: sid=' + str(payload.get('sid') or 'serial'))
@@ -272,6 +333,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(200, {'ok': ok, 'error': err})
 
         if route == '/api/rescue':
+            if d.file_transfer.active:
+                return self._json(409, {'ok': False, 'error': '串口文件传输中，请先完成或取消'})
             # 手动自愈。mode: soft=只关 autosuspend(最轻), rebind=追加软拔插。
             # 分两步是为了能区分病因,见 rescue.sh 注释。
             mode = str(payload.get('mode') or 'soft')

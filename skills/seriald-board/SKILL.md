@@ -71,6 +71,21 @@ Ubuntu 等禁用 root SSH 的板子可按请求指定账户：设置 `SERIALD_SS
 网页旁观 agent 会话默认只读，关闭后仍有记录。`--timeout` 不包含创建请求，后者受
 `--http-timeout`（默认 90 秒）控制。
 
+## 无网络文件传输
+
+用户要求传文件且板子无网络时，用 `file-put --local <本地文件> --remote <板端绝对路径>`、
+`file-get --remote <板端绝对路径> --local <本地文件>`，或从当前 `--device` 到另一台的
+`file-copy --remote <源路径> --to-device <标签> --to-path <目标路径>`。
+默认不覆盖现有文件；明确需要替换时加 `--overwrite`。先确认板子在 Linux shell，具备
+`base64`、`sha256sum`、`dd` 等工具。传输按连接 ID 固定设备并逐块校验；网页也有“文件传输”面板。
+
+## 启动差异排查
+
+`logs` 列出 `boots` 和每次启动的 ID。用 `boot-compare --baseline-id <ID> --target-id <ID>`
+比较同板启动；跨板时以 `--device` 指定目标板，再加 `--baseline-device <标签>` 指定基准板。
+先看 `clues` 中目标启动新增的错误和超时，再看带行号的 `rows`；归档时间戳与内核计时已过滤。
+网页“启动对比”同样支持历史设备。完整参数见接入指南。
+
 ## 串口及交互式 SSH
 
 SSH 多步交互用 `ssh-open` 得到（或复用）自己的持久 sid，随后 `read --sid`、`send --sid`，结束 `ssh-close --sid`。

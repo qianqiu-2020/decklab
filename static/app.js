@@ -215,8 +215,8 @@
     if (signature === ctx.commandColorSignature) return;
     clearCommandDecorations(ctx);
     ctx.commandColorSignature = signature;
-    var colors = ['#94D0C2', '#A6C3E2', '#E0BE8A', '#C5B4E0'];
-    entries.forEach(function (entry, index) {
+    var commandColor = '#94D0C2';
+    entries.forEach(function (entry) {
       if (entry.column >= ctx.term.cols) return;
       var marker = ctx.term.registerMarker(entry.row - (active.baseY + active.cursorY));
       if (!marker) return;
@@ -224,7 +224,7 @@
         width: ctx.term.cols, backgroundColor: '#1D2F35' });
       var foreground = ctx.term.registerDecoration({ marker: marker, x: entry.column,
         width: Math.min(entry.command.length, ctx.term.cols - entry.column),
-        foregroundColor: colors[index % colors.length] });
+        foregroundColor: commandColor });
       if (background) ctx.commandDecorations.push(background);
       if (foreground) ctx.commandDecorations.push(foreground);
       ctx.commandDecorations.push(marker);
@@ -1383,6 +1383,16 @@
   $('b-command-nav').addEventListener('click', function () {
     setRecordsOpen(true);
     setRecordsTab('inputs');
+  });
+  $('b-file-transfer').addEventListener('click', function () {
+    if (!selKey) return;
+    var selected = lastDevices.filter(function (device) { return device.key === selKey; })[0];
+    if (selected) SerialdFileTransfer.open(selected, lastDevices);
+  });
+  $('b-boot-compare').addEventListener('click', function () {
+    if (!selKey) return;
+    var selected = lastDevices.filter(function (device) { return device.key === selKey; })[0];
+    if (selected) SerialdBootCompare.open(selected, lastDevices);
   });
   [-1, 1].forEach(function (step) {
     $('command-nav-' + (step < 0 ? 'prev' : 'next')).addEventListener('click', function () {

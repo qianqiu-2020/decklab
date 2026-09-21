@@ -642,7 +642,7 @@ test('input navigator jumps to echoed commands without sending input', async () 
   assert.equal(h.sends().length, 0);
 });
 
-test('echoed shell commands get distinct default colors without changing output', async () => {
+test('echoed shell commands share one default color without changing output', async () => {
   const h = await setup(); const terminal = h.select('A');
   h.take('/api/session').resolve(readResponse('A',
     'root@board:~# uname -a\r\nLinux\r\nroot@board:~# dmesg\r\n'));
@@ -653,7 +653,7 @@ test('echoed shell commands get distinct default colors without changing output'
   const background = terminal.decorations.filter(item => item.options.backgroundColor);
   assert.equal(foreground.length, 2);
   assert.equal(background.length, 2);
-  assert.notEqual(foreground[0].options.foregroundColor, foreground[1].options.foregroundColor);
+  assert.equal(foreground[0].options.foregroundColor, foreground[1].options.foregroundColor);
   assert.ok(terminal.parsed.includes('root@board:~# dmesg'), 'terminal bytes are unchanged');
   assert.equal(h.sends().length, 0);
 });

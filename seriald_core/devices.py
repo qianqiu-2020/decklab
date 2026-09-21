@@ -160,6 +160,8 @@ class Manager:
 
     def prepare_switch(self, device, actor='web'):
         """Detach a board from a still-live UART and arm one automatic identification."""
+        if device.file_transfer.active:
+            raise IdentityError('串口文件传输中，请完成或取消后再换板')
         if not device.operation_lock.acquire(blocking=False):
             raise IdentityError('已有控制台操作在进行中，稍后再进入换板模式')
         try:

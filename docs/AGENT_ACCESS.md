@@ -90,6 +90,42 @@ stdin 为 EOF，stdout/stderr 合并，返回文本去除 ANSI；命令限 2048 
 `may_still_be_running: true` 时先检查现场，不盲目重复写操作，关闭 SSH 不能保证后台进程终止。
 `recording_error` 表示结果未成功写入历史，`cleanup_error` 表示关闭失败；保留 sid 以便恢复后处理。
 
+## 无网络串口文件传输
+
+串口文件传输不依赖开发板 IP/SSH。板子必须停在已登录的 Linux shell，具备 `base64`、`sha256sum`、
+`dd`、`wc`、`ln`、`mv`。用绝对路径；默认拒绝覆盖已有目标，确需替换时显式加 `--overwrite`。
+传输期间该串口的手动输入、识别和换板操作会被拒绝；SSH 会话仍可读取。
+
+```sh
+serialctl --device riscv-118 file-put --local ./firmware.bin --remote /tmp/firmware.bin
+serialctl --device riscv-118 file-get --remote /var/log/dmesg --local ./dmesg.txt
+serialctl --device riscv-118 file-copy --remote /tmp/firmware.bin \
+  --to-device musepi2 --to-path /tmp/firmware.bin
+```
+
+上传先写同目录的 `.seriald-*.part` 临时文件，板端 SHA-256 与长度均匹配后才放到目标路径。
+下载先写本机临时文件，验证完整哈希后再交付；板间复制逐块经上位机中转，两个板端都会验证。
+每次请求固定设备连接 ID，断线、换板或超时会中止传输。正常取消会清理上传临时文件；上位机
+异常退出后可在板端目标目录检查遗留的 `.seriald-*.part`。串口回显可能把上传数据的 base64 文本
+写入串口日志，传敏感文件前应考虑日志权限与保留策略。浏览器也提供“文件传输”面板；浏览器
+无法流式保存时下载限制为 128 MiB，大文件请使用 CLI。
+
+## 启动日志对比
+
+`logs` 返回每块板的 `boots` 列表和稳定的启动 ID。网页“启动对比”默认比较当前板的最近两次，
+也可将基准或目标换成另一块历史设备。CLI 可直接取得结构化差异：
+
+```sh
+serialctl --device riscv-118 logs
+serialctl --device riscv-118 boot-compare --baseline-id boot-旧ID --target-id boot-新ID
+serialctl --device musepi2 boot-compare --baseline-device riscv-118 \
+  --baseline-id boot-基准ID --target-id boot-目标ID
+```
+
+输出的 `counts` 是新增、缺少和变化行数；`clues` 仅列目标启动中新出现的错误或超时关键词，
+`rows` 给出左右行号及上下文。比对忽略归档时间戳和内核相对计时，不会改写原始日志；
+每侧上限 4 MiB / 12000 行，展示差异最多 1500 行。
+
 ## 交互式会话
 
 ```sh

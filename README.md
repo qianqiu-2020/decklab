@@ -8,7 +8,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.7_all.deb
+sudo apt install ./dist/seriald_1.4.21_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
@@ -27,6 +27,7 @@ serialctl devices
 serialctl --device riscv-118 read
 serialctl --actor claude-code/debug-session --device riscv-118 exec --command 'uname -a'
 serialctl --device riscv-118 activity
+serialctl --device riscv-118 file-get --remote /tmp/boot.log --local ./boot.log
 ```
 
 源码环境用 `python3 serialctl.py` 替代 `serialctl`。远程访问设置 `SERIALD_URL`。
@@ -35,6 +36,9 @@ serialctl --device riscv-118 activity
 网页自己创建的 `web` 会话仍按独立会话处理。
 
 [Agent 接入指南](docs/AGENT_ACCESS.md) · [seriald-board skill](skills/seriald-board/SKILL.md)
+
+网页的“启动对比”可比较同板两次或跨板的历史启动日志，突出新增异常线索；
+“文件传输”通过现有串口连接上传、下载或跨板复制，无需板子联网。
 
 ## 开发与检查
 

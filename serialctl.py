@@ -11,6 +11,9 @@ import re
 import secrets
 import shlex
 import sys
+import tempfile
+import hashlib
+from pathlib import Path
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -36,6 +39,7 @@ class Client:
         self.timeout = timeout
         self.key = None
         self.serial = None
+        self.connection_id = None
         self.actor = os.environ.get('SERIALD_ACTOR', 'agent')
         self.ssh_user = None
         self.ssh_password = None
@@ -46,6 +50,8 @@ class Client:
             payload = dict(payload, actor=self.actor)
             if self.serial and payload.get('key'):
                 payload['serial'] = self.serial
+            if route.startswith('/api/file-transfer/'):
+                payload.setdefault('connection_id', self.connection_id)
         if query and self.serial and query.get('key'):
             query = dict(query, serial=self.serial)
         url = self.url + route
@@ -82,6 +88,7 @@ class Client:
                               'run devices and use the full key')
         self.key = matches[0]['key']
         self.serial = matches[0].get('serial')
+        self.connection_id = matches[0].get('connection_id')
         return matches[0]
 
     def get(self, route, **query):
@@ -230,6 +237,117 @@ def positive_timeout(value):
     return value
 
 
+def _abort_transfer(client, transfer_id):
+    if transfer_id:
+        try:
+            client.post('/api/file-transfer/abort', id=transfer_id)
+        except ClientError:
+            pass
+
+
+def file_put(client, local, remote, overwrite=False):
+    path = Path(local).expanduser()
+    if not path.is_file():
+        raise ClientError('Local source must be a regular file')
+    size = path.stat().st_size
+    transfer_id = None
+    try:
+        started = client.post('/api/file-transfer/start', direction='upload', path=remote,
+                              size=size, overwrite=overwrite)
+        transfer_id = started['id']
+        chunk_size = started['chunk_size']
+        offset = 0
+        with path.open('rb') as source:
+            while offset < size:
+                data = source.read(min(chunk_size, size - offset))
+                if not data:
+                    raise ClientError('Local file shrank during upload')
+                response = client.post('/api/file-transfer/chunk', id=transfer_id, offset=offset,
+                                       data_b64=base64.b64encode(data).decode('ascii'))
+                offset += len(data)
+                if response.get('offset') != offset:
+                    raise ClientError('Upload offset mismatch')
+        result = client.post('/api/file-transfer/finish', id=transfer_id)
+        transfer_id = None
+        return result
+    finally:
+        _abort_transfer(client, transfer_id)
+
+
+def file_get(client, remote, local, overwrite=False):
+    target = Path(local).expanduser().absolute()
+    if not target.parent.is_dir():
+        raise ClientError('Local destination directory does not exist')
+    if not overwrite and os.path.lexists(target):
+        raise ClientError('Local destination already exists; pass --overwrite to replace it')
+    transfer_id = None
+    temp = None
+    try:
+        started = client.post('/api/file-transfer/start', direction='download', path=remote)
+        transfer_id = started['id']
+        expected_size = started['size']
+        digest = hashlib.sha256()
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix='.seriald-', delete=False) as sink:
+            temp = sink.name
+            offset = 0
+            while offset < expected_size:
+                response = client.post('/api/file-transfer/chunk', id=transfer_id, offset=offset)
+                data = base64.b64decode(response['data_b64'], validate=True)
+                if not data or response.get('offset') != offset + len(data):
+                    raise ClientError('Download offset mismatch')
+                sink.write(data)
+                digest.update(data)
+                offset += len(data)
+        result = client.post('/api/file-transfer/finish', id=transfer_id)
+        transfer_id = None
+        if offset != expected_size or digest.hexdigest() != result.get('sha256'):
+            raise ClientError('Downloaded file SHA-256 mismatch')
+        if overwrite:
+            os.replace(temp, target)
+        else:
+            os.link(temp, target)
+            os.unlink(temp)
+        temp = None
+        return dict(result, local=str(target))
+    finally:
+        _abort_transfer(client, transfer_id)
+        if temp and os.path.exists(temp):
+            os.unlink(temp)
+
+
+def file_copy(source, destination, remote, to_path, overwrite=False):
+    if source.connection_id == destination.connection_id and source.key == destination.key:
+        raise ClientError('Source and destination must be different devices')
+    source_id = destination_id = None
+    try:
+        incoming = source.post('/api/file-transfer/start', direction='download', path=remote)
+        source_id = incoming['id']
+        outgoing = destination.post('/api/file-transfer/start', direction='upload', path=to_path,
+                                    size=incoming['size'], overwrite=overwrite)
+        destination_id = outgoing['id']
+        offset = 0
+        while offset < incoming['size']:
+            chunk = source.post('/api/file-transfer/chunk', id=source_id, offset=offset)
+            data = base64.b64decode(chunk['data_b64'], validate=True)
+            sent = destination.post('/api/file-transfer/chunk', id=destination_id, offset=offset,
+                                    data_b64=chunk['data_b64'])
+            if not data or chunk.get('offset') != offset + len(data) or sent.get('offset') != offset + len(data):
+                raise ClientError('Board-to-board transfer offset mismatch')
+            offset += len(data)
+        verified = source.post('/api/file-transfer/finish', id=source_id)
+        source_id = None
+        if verified.get('sha256') != incoming['sha256']:
+            raise ClientError('Source file changed during transfer')
+        result = destination.post('/api/file-transfer/finish', id=destination_id)
+        destination_id = None
+        if result.get('sha256') != verified['sha256']:
+            raise ClientError('Destination SHA-256 mismatch')
+        return dict(result, source_device=source.key, destination_device=destination.key)
+    finally:
+        _abort_transfer(source, source_id)
+        _abort_transfer(destination, destination_id)
+
+
 def nonnegative(value):
     value = int(value)
     if value < 0:
@@ -275,12 +393,29 @@ def parser():
     close = commands.add_parser('ssh-close', help='close only your own SSH session')
     close.add_argument('--sid', required=True)
     commands.add_parser('logs', help='list stored log files')
+    compare = commands.add_parser('boot-compare', help='compare two archived boots, possibly across boards')
+    compare.add_argument('--baseline-id', required=True, help='boot ID from logs on baseline device')
+    compare.add_argument('--target-id', required=True, help='boot ID from logs on --device')
+    compare.add_argument('--baseline-device', help='different baseline board; defaults to --device')
     commands.add_parser('activity', help='show persisted SSH sessions and agent activity')
     log = commands.add_parser('log', help='read a stored log online')
     log.add_argument('--file', required=True)
     log.add_argument('--off', type=nonnegative)
     rename = commands.add_parser('rename', help='change a known board label without moving its logs')
     rename.add_argument('--label', required=True)
+    put = commands.add_parser('file-put', help='upload a local file through the serial console')
+    put.add_argument('--local', required=True)
+    put.add_argument('--remote', required=True, help='absolute path on the board')
+    put.add_argument('--overwrite', action='store_true')
+    get = commands.add_parser('file-get', help='download a board file through the serial console')
+    get.add_argument('--remote', required=True, help='absolute path on the board')
+    get.add_argument('--local', required=True)
+    get.add_argument('--overwrite', action='store_true')
+    copy = commands.add_parser('file-copy', help='copy a file to another board through this host')
+    copy.add_argument('--remote', required=True, help='absolute source path')
+    copy.add_argument('--to-device', required=True)
+    copy.add_argument('--to-path', required=True, help='absolute destination path')
+    copy.add_argument('--overwrite', action='store_true')
     return p
 
 
@@ -317,6 +452,24 @@ def main(argv=None):
                         text = source.read(65537)
                 result = client.post('/api/session-send', sid=args.sid,
                                      data=text + ('\r' if args.enter else ''))
+            elif args.action == 'file-put':
+                result = file_put(client, args.local, args.remote, args.overwrite)
+            elif args.action == 'file-get':
+                result = file_get(client, args.remote, args.local, args.overwrite)
+            elif args.action == 'file-copy':
+                destination = Client(args.url, args.http_timeout, args.token)
+                destination.actor = args.actor
+                destination.select(args.to_device)
+                result = file_copy(client, destination, args.remote, args.to_path, args.overwrite)
+            elif args.action == 'boot-compare':
+                baseline = client
+                if args.baseline_device:
+                    baseline = Client(args.url, args.http_timeout, args.token)
+                    baseline.select(args.baseline_device)
+                result = client.request('/api/boot-compare', query={
+                    'left_key': baseline.key, 'left_serial': baseline.serial,
+                    'left_id': args.baseline_id, 'right_key': client.key,
+                    'right_serial': client.serial, 'right_id': args.target_id})
             elif args.action == 'exec':
                 result = execute(client, args.command, args.timeout)
             elif args.action == 'ssh-close':

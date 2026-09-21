@@ -61,6 +61,8 @@
       <span id="terminal-search-status"></span>
       <button id="b-redraw" type="button" title="清空模拟器并从采集缓冲完整重放，修复 EDK2 / GRUB 等全屏界面">重绘</button>
       <button id="b-command-nav" type="button" title="在当前终端缓冲中按 shell 命令跳转">输入导航</button>
+      <button id="b-file-transfer" type="button" title="通过串口上传、下载或在开发板之间复制文件">文件传输</button>
+      <button id="b-boot-compare" type="button" title="比较同一块或不同开发板的两次启动日志">启动对比</button>
       <button id="b-records" type="button" aria-expanded="false">记录与归档</button>
       <span id="d-status" role="status"></span>
     </div>
@@ -122,10 +124,41 @@
 
   </div>
 </div>
+<dialog id="file-transfer-dialog" class="file-transfer-dialog" aria-labelledby="ft-title">
+  <div class="ft-head"><div><strong id="ft-title">串口文件传输</strong><small id="ft-board"></small></div><button id="ft-close" type="button">关闭</button></div>
+  <p class="ft-intro">经串口传输，无需开发板联网。板子需进入 Linux shell，并具备 base64、sha256sum、dd；传输时暂停该串口的其他输入。</p>
+  <label class="ft-field">操作
+    <select id="ft-mode"><option value="upload">本地上传到板子</option><option value="download">从板子下载到本地</option><option value="copy">复制到另一块板子</option></select>
+  </label>
+  <label class="ft-field" id="ft-local-field">本地文件<input id="ft-file" type="file"></label>
+  <label class="ft-field" id="ft-source-field" hidden>板端源路径<input id="ft-source" type="text" placeholder="/home/ubuntu/file.bin" spellcheck="false"></label>
+  <label class="ft-field" id="ft-target-device-field" hidden>目标开发板<select id="ft-target-device"></select></label>
+  <label class="ft-field" id="ft-target-field">板端目标路径<input id="ft-target" type="text" placeholder="/tmp/file.bin" spellcheck="false"></label>
+  <label class="ft-check" id="ft-overwrite-field"><input id="ft-overwrite" type="checkbox">允许覆盖已存在的目标文件</label>
+  <progress id="ft-progress" max="100" value="0"></progress>
+  <div id="ft-status" role="status">选择文件或填写绝对路径后开始。</div>
+  <div class="ft-actions"><button id="ft-cancel" type="button" disabled>取消传输</button><button class="pri" id="ft-start" type="button">开始传输</button></div>
+</dialog>
+<dialog id="boot-compare-dialog" class="boot-compare-dialog" aria-labelledby="bc-title">
+  <div class="bc-head"><div><strong id="bc-title">启动日志对比</strong><small>左侧基准 · 右侧异常或目标启动</small></div><button id="bc-close" type="button">关闭</button></div>
+  <div class="bc-pickers">
+    <div><h3>基准启动</h3><label>设备<select id="bc-left-device"></select></label><label>启动次数<select id="bc-left-boot"></select></label></div>
+    <div><h3>目标启动</h3><label>设备<select id="bc-right-device"></select></label><label>启动次数<select id="bc-right-boot"></select></label></div>
+  </div>
+  <div class="bc-actions"><span id="bc-status" role="status">选择两次启动后比较。</span><button class="pri" id="bc-run" type="button">比较差异</button></div>
+  <div id="bc-results" class="bc-results" hidden>
+    <div id="bc-summary" class="bc-summary"></div>
+    <div id="bc-clues" class="bc-clues"></div>
+    <div class="bc-diff-head"><span>基准日志</span><span>目标日志</span></div>
+    <div id="bc-diff" class="bc-diff"></div>
+  </div>
+</dialog>
 <script src="vendor/xterm.js"></script>
 <script src="vendor/addon-fit.js"></script>
 <script src="/static/ui-common.js"></script>
 <script src="/static/terminal-policy.js"></script>
+<script src="/static/file-transfer.js"></script>
+<script src="/static/boot-compare.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

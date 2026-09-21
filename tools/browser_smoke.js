@@ -15,7 +15,8 @@ const fixtures = [
   { key: 'milkv2', serial: '0059D968E583C49A', state: 'online', alive: true, dev: '/dev/ttyUSB2', hostname: 'bianbu' },
   { key: 'milkv', serial: 'boot-0e9badc5-706a-4421-93a7-50e76cc240a6', state: 'online', alive: true, dev: '/dev/ttyUSB1', hostname: 'k1' },
   { key: 'unprovisioned-demo', serial: '', state: 'pending', alive: true, dev: '/dev/ttyUSB3', by_path: 'pci-usb-0:4.2.3' },
-].map(d => ({ ...d, label: d.key, bytes: 8192, probes: 0, last_seen: Date.now() / 1000,
+].map(d => ({ ...d, label: d.key, connection_id: 'test-' + d.key,
+  bytes: 8192, probes: 0, last_seen: Date.now() / 1000,
   info: ['milkv2', 'milkv'].includes(d.key) ? { serial: d.serial, reported_serial: '0123456789ABCDEF',
     serial_source: d.key === 'milkv' ? 'boot-marker' : 'soc-sysfs', identity_status: 'provisional' } : {} }));
 const log = '<script>globalThis.injected = true</script>\n'
@@ -53,9 +54,13 @@ const server = http.createServer((req, res) => {
         dates: ['2026-09-20', '2026-09-21'], size: 6144, cross_day: true },
       { id: 'boot-one', number: 1, started: '2026-09-20 10:00:00', marker: 'U-Boot',
         dates: ['2026-09-20'], size: 1024 }] });
+  if (u.pathname === '/api/boot-compare') return json({
+    counts: { added: 1, removed: 0, changed: 0 }, clues: [{ line: 2, text: 'mmc timeout' }],
+    rows: [{ type: 'equal', left_no: 1, left: 'U-Boot', right_no: 1, right: 'U-Boot' },
+      { type: 'insert', left_no: null, left: '', right_no: 2, right: 'mmc timeout' }], truncated: false });
   if (u.pathname === '/api/log') return json({ data: log, off: log.length, start_off: 0, size: log.length, more: false });
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/app.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/app.css', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  if (!['/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/app.css', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : 'text/html');
   res.end(fs.readFileSync(path.join(root, route)));
 });
@@ -99,6 +104,26 @@ let chrome, ws;
   assert.ok(await evaluate('document.querySelector("#d-info").textContent.includes("0123456789ABCDEF")'));
   assert.equal(await evaluate('getComputedStyle(document.querySelector("#d-info")).display'),'none',
     'identity details should start collapsed to leave room for the terminal');
+  await evaluate('document.querySelector("#b-file-transfer").click()');
+  assert.equal(await evaluate('document.querySelector("#file-transfer-dialog").open'), true);
+  assert.ok(await evaluate('document.querySelectorAll("#ft-target-device option").length >= 2'));
+  await evaluate('document.querySelector("#ft-mode").value="copy"; document.querySelector("#ft-mode").dispatchEvent(new Event("change"))');
+  assert.equal(await evaluate('document.querySelector("#ft-source-field").hidden'), false);
+  assert.equal(await evaluate('document.querySelector("#ft-local-field").hidden'), true);
+  const transferShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-file-transfer.png'),Buffer.from(transferShot.data,'base64'));
+  await evaluate('document.querySelector("#ft-close").click()');
+  assert.deepEqual(posts,[], 'opening transfer controls must not write to a board');
+  await evaluate('document.querySelector("#b-boot-compare").click()');
+  for(let n=0;n<30 && !await evaluate('document.querySelectorAll("#bc-left-boot option").length > 1');n++)await delay(100);
+  assert.equal(await evaluate('document.querySelector("#bc-left-boot").value'),'boot-two');
+  assert.equal(await evaluate('document.querySelector("#bc-right-boot").value'),'boot-three');
+  await evaluate('document.querySelector("#bc-run").click()');
+  for(let n=0;n<30 && !await evaluate('document.querySelectorAll("#bc-diff .bc-row").length === 2');n++)await delay(100);
+  assert.ok(await evaluate('document.querySelector("#bc-clues").textContent.includes("mmc timeout")'));
+  const compareShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-boot-compare.png'),Buffer.from(compareShot.data,'base64'));
+  await evaluate('document.querySelector("#bc-close").click()');
   await evaluate('document.querySelector("#b-info").click()');
   assert.notEqual(await evaluate('getComputedStyle(document.querySelector("#d-info")).display'),'none');
   await evaluate('document.querySelector("#b-info").click()');

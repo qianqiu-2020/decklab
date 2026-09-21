@@ -16,6 +16,7 @@ from .storage import IdentityError, archive_component
 from .identity import eeprom_serial, usable_serial
 from .boot_marker import init_command
 from .log_archive import boot_epochs
+from .file_transfer import SerialFileTransfer
 
 
 def root_ssh_config_command():
@@ -78,6 +79,7 @@ class Device:
         self.auto_identify_until = 0.0
         self.probing = False
         self.operation_lock = threading.Lock()  # 整个控制台事务互斥,包含手动输入/探测/自愈
+        self.file_transfer = SerialFileTransfer(self)
         self.write_lock = threading.Lock()      # fd 退役与写入串行,绝不占用输出 cv
         self.sessions_lock = threading.RLock()
         self.log_lock = threading.RLock()
@@ -317,6 +319,8 @@ class Device:
 
     def send(self, text):
         # probing 布尔值的检查/赋值并不原子;所有写入口共用事务锁才不会串话。
+        if self.file_transfer.active:
+            return False, '串口文件传输中，请完成或取消后再输入'
         if not self.operation_lock.acquire(blocking=False):
             return False, '已有控制台操作在进行中,稍候'
         try:
@@ -453,6 +457,8 @@ class Device:
 
     def _run_cmd(self, cmd, timeout=30.0):
         """一个事务覆盖登录、完整发送和带 nonce 的响应,禁止其他写入口插队。"""
+        if self.file_transfer.active:
+            return False, '串口文件传输中，请完成或取消后再操作'
         if not self.operation_lock.acquire(blocking=False):
             return False, '已有一次识别/操作在进行中,稍候'
         self.probing = True
@@ -530,6 +536,8 @@ class Device:
 
     def configure_root_ssh(self):
         """Use the already collected serial stream to set root's SSH password."""
+        if self.file_transfer.active:
+            return False, '串口文件传输中，请完成或取消后再配置 SSH'
         if not self.operation_lock.acquire(blocking=False):
             return False, '串口正忙，稍后重试 SSH'
         self.probing = True

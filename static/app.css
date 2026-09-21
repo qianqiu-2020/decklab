@@ -153,6 +153,48 @@
   .logs a:hover{text-decoration:underline}
   .empty{color:var(--ink-3);padding:22px 4px;font-size:14px}
   .hint{font-size:12.5px;color:var(--ink-3);padding:0 15px 12px}
+  .file-transfer-dialog{width:min(520px,calc(100vw - 24px));max-height:min(760px,calc(100dvh - 24px));
+    padding:20px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);
+    color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.3);overflow:auto}
+  .file-transfer-dialog::backdrop{background:rgba(12,24,27,.55)}
+  .ft-head{display:flex;justify-content:space-between;align-items:start;gap:12px}
+  .ft-head strong{display:block;font-size:19px}.ft-head small{display:block;color:var(--ink-3);font:11px "IBM Plex Mono",monospace}
+  .ft-intro{color:var(--ink-2);font-size:12.5px;margin:12px 0 18px}
+  .ft-field{display:grid;gap:5px;margin:12px 0;color:var(--ink-2);font-size:12px}
+  .ft-field[hidden],.ft-check[hidden]{display:none}
+  .ft-field input,.ft-field select{min-width:0;width:100%;padding:9px 10px;border:1px solid var(--line-strong);
+    border-radius:7px;background:var(--surface);color:var(--ink);font:inherit;font-size:13px}
+  .ft-field input[type="file"]{font-size:12px}
+  .ft-check{display:flex;align-items:center;gap:7px;color:var(--ink-2);font-size:12px}
+  .file-transfer-dialog progress{width:100%;height:9px;margin:16px 0 4px;accent-color:var(--accent)}
+  #ft-status{min-height:36px;color:var(--ink-2);font-size:12px;overflow-wrap:anywhere}
+  .ft-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+  .boot-compare-dialog{width:min(1120px,calc(100vw - 24px));height:min(850px,calc(100dvh - 24px));
+    padding:0;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);
+    color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.3);overflow:hidden}
+  .boot-compare-dialog::backdrop{background:rgba(12,24,27,.65)}
+  .boot-compare-dialog[open]{display:flex;flex-direction:column}
+  .bc-head,.bc-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .bc-head strong{display:block;font-size:19px}.bc-head small{display:block;color:var(--ink-3);font-size:12px}
+  .bc-pickers{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 18px}
+  .bc-pickers>div{padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--ground)}
+  .bc-pickers h3{margin:0 0 8px;font-size:13px;color:var(--ink)}
+  .bc-pickers label{display:grid;gap:4px;margin:7px 0;color:var(--ink-3);font-size:11px}
+  .bc-pickers select{width:100%;min-width:0;padding:7px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);color:var(--ink);font:12px inherit}
+  .bc-actions{border-top:1px solid var(--line)}#bc-status{color:var(--ink-2);font-size:12px}
+  .bc-results{min-height:0;overflow:auto;padding:0 18px 18px;overscroll-behavior:contain}
+  .bc-results[hidden]{display:none}.bc-summary{padding:12px 0;color:var(--accent);font-weight:650}
+  .bc-clues{padding:12px;margin-bottom:14px;border-left:3px solid var(--dead);background:var(--ground);font-size:12px;overflow-wrap:anywhere}
+  .bc-clues strong{display:block;margin-bottom:6px}.bc-clues div{padding:3px 0;font-family:ui-monospace,monospace}
+  .bc-diff-head,.bc-row{display:grid;grid-template-columns:1fr 1fr;gap:1px}
+  .bc-diff-head{position:sticky;top:0;z-index:1;background:var(--surface);font-weight:650;font-size:12px}
+  .bc-diff-head span{padding:8px}.bc-diff{font:12px/1.5 ui-monospace,monospace}
+  .bc-row{border-top:1px solid var(--line);background:var(--line)}
+  .bc-cell{display:grid;grid-template-columns:42px minmax(0,1fr);gap:8px;padding:3px 8px;background:var(--surface);white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
+  .bc-line-no{color:var(--ink-3);text-align:right;user-select:none}
+  .bc-insert .bc-cell:last-child,.bc-replace .bc-cell:last-child{background:var(--accent-soft)}
+  .bc-delete .bc-cell:first-child,.bc-replace .bc-cell:first-child{background:var(--dead-soft)}
+  @media(max-width:620px){.bc-pickers{grid-template-columns:1fr}.bc-cell{grid-template-columns:22px minmax(0,1fr);padding:3px}.bc-line-no{font-size:10px}}
 
   .overview{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0}
   .overview>div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:17px 20px;display:flex;align-items:baseline;gap:14px;box-shadow:var(--shadow)}

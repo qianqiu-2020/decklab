@@ -22,6 +22,7 @@ class HandlerTests(unittest.TestCase):
         self.manager = sd.Manager()
         self.manager.store = mock.Mock()
         self.device = mock.Mock(key='board-key', serial='SN1', dev='/fake/ttyUSB0')
+        self.device.file_transfer.active = False
         self.manager.boards['SN1'] = self.device
         patcher = mock.patch.object(sd, 'MGR', self.manager)
         patcher.start()
@@ -52,6 +53,42 @@ class HandlerTests(unittest.TestCase):
         handler.end_headers = mock.Mock()
         handler.static_root = str(ROOT)
         return handler
+
+    def test_boot_compare_reads_two_archived_epochs(self):
+        boot = {'id': 'boot-one', 'size': 16, 'started': '2026-09-20 08:00:00',
+                'parts': [{'file': 'serial.log', 'start': 0, 'end': 16}]}
+        self.device.boot_epochs.return_value = [boot]
+        self.device.stable_dir.return_value = '/fake/archive'
+        path = ('/api/boot-compare?left_key=board-key&left_serial=SN1&left_id=boot-one'
+                '&right_key=board-key&right_serial=SN1&right_id=boot-one')
+        with mock.patch.object(sd, 'read_epoch', side_effect=[b'U-Boot\nready\n', b'U-Boot\nerror\n']) as reader:
+            handler = self.handler(path)
+            handler.do_GET()
+        code, result = self.result(handler)
+        self.assertEqual(code, 200)
+        self.assertEqual(result['counts']['changed'], 1)
+        self.assertEqual(len(result['clues']), 1)
+        self.assertEqual(reader.call_count, 2)
+
+    def test_boot_compare_rejects_stale_identity(self):
+        handler = self.handler('/api/boot-compare?left_key=board-key&left_serial=OLD&left_id=x')
+        handler.do_GET()
+        self.assertEqual(self.result(handler)[0], 404)
+
+    def test_boot_compare_can_use_an_offline_second_board(self):
+        other = mock.Mock(key='other', serial='SN2', present=False)
+        self.manager.boards['SN2'] = other
+        boot = {'id': 'boot-one', 'size': 16, 'parts': []}
+        self.device.boot_epochs.return_value = [boot]
+        other.boot_epochs.return_value = [boot]
+        with mock.patch.object(sd, 'read_epoch', side_effect=[b'U-Boot\nready\n', b'U-Boot\nfailed\n']):
+            handler = self.handler('/api/boot-compare?left_key=board-key&left_serial=SN1&left_id=boot-one'
+                                   '&right_key=other&right_serial=SN2&right_id=boot-one')
+            handler.do_GET()
+        code, result = self.result(handler)
+        self.assertEqual(code, 200)
+        self.assertEqual(result['right']['serial'], 'SN2')
+        self.assertEqual(result['clues'][0]['text'], 'failed')
 
     def test_root_page_serves_exact_local_html_bytes(self):
         expected = (ROOT / 'index.html').read_bytes()
@@ -157,6 +194,30 @@ class HandlerTests(unittest.TestCase):
             headers = dict(call.args for call in handler.send_header.call_args_list)
             self.assertIn('attachment', headers['Content-Disposition'])
             self.assertEqual(headers['Content-Length'], str(len(original)))
+
+    def test_file_transfer_routes_pin_connection_and_do_not_audit_chunk_content(self):
+        self.device.connection_id = 'attachment-1'
+        self.device.file_transfer.start.return_value = {
+            'id': 'abc', 'direction': 'upload', 'path': '/tmp/file',
+            'size': 3, 'chunk_size': 2048, 'offset': 0}
+        start = {'key': 'board-key', 'serial': 'SN1', 'connection_id': 'attachment-1',
+                 'direction': 'upload', 'path': '/tmp/file', 'size': 3}
+        handler = self.handler('/api/file-transfer/start', json.dumps(start).encode())
+        handler.do_POST()
+        self.assertEqual(self.result(handler)[0], 200)
+        self.device.file_transfer.start.assert_called_once_with(
+            'upload', '/tmp/file', 'attachment-1', actor='web', size=3, overwrite=False)
+        self.manager.store.event.assert_called_once()
+        self.manager.store.event.reset_mock()
+
+        self.device.file_transfer.chunk.return_value = {'id': 'abc', 'offset': 3, 'bytes': 3}
+        chunk = {'key': 'board-key', 'serial': 'SN1', 'connection_id': 'attachment-1',
+                 'id': 'abc', 'offset': 0, 'data_b64': base64.b64encode(b'abc').decode()}
+        handler = self.handler('/api/file-transfer/chunk', json.dumps(chunk).encode())
+        handler.do_POST()
+        self.assertEqual(self.result(handler)[0], 200)
+        self.manager.store.event.assert_not_called()
+        self.device.file_transfer.chunk.assert_called_once_with('abc', 'attachment-1', 0, 'YWJj')
 
     def test_human_takeover_of_agent_ssh_is_validated_and_audited(self):
         self.device.get_session.return_value = mock.Mock()
