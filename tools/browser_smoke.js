@@ -112,6 +112,17 @@ let chrome, ws;
   assert.equal(await evaluate('document.querySelector("#ft-local-field").hidden'), true);
   const transferShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-file-transfer.png'),Buffer.from(transferShot.data,'base64'));
+  const beforeDrag=await evaluate(`(() => { const r=document.querySelector('#file-transfer-dialog').getBoundingClientRect();
+    return {left:r.left,top:r.top,x:r.left+60,y:r.top+22}; })()`);
+  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:beforeDrag.x,y:beforeDrag.y});
+  await rpc('Input.dispatchMouseEvent',{type:'mousePressed',x:beforeDrag.x,y:beforeDrag.y,button:'left',clickCount:1});
+  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:beforeDrag.x+50,y:beforeDrag.y+30,button:'left',buttons:1});
+  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:beforeDrag.x+110,y:beforeDrag.y+65,button:'left',buttons:1});
+  await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',x:beforeDrag.x+110,y:beforeDrag.y+65,button:'left',clickCount:1});
+  const afterDrag=await evaluate(`(() => { const r=document.querySelector('#file-transfer-dialog').getBoundingClientRect();
+    return {left:r.left,top:r.top}; })()`);
+  assert.ok(afterDrag.left > beforeDrag.left+50 && afterDrag.top > beforeDrag.top+25,
+    'transfer dialog header should drag the modal');
   await evaluate('document.querySelector("#ft-close").click()');
   assert.deepEqual(posts,[], 'opening transfer controls must not write to a board');
   await evaluate('document.querySelector("#b-boot-compare").click()');
@@ -199,6 +210,55 @@ let chrome, ws;
 
   const screenshot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-desktop.png'),Buffer.from(screenshot.data,'base64'));
+  const transferMetrics=await evaluate(`(async () => {
+    const original=window.fetch.bind(window), values=[];
+    let phase='upload', sourceNextStarted=false, overlapped=false;
+    const output=document.querySelector('#ft-status');
+    const observer=new MutationObserver(()=>values.push(output.textContent));
+    observer.observe(output,{childList:true});
+    window.fetch=async (url,options) => {
+      if (!String(url).startsWith('/api/file-transfer/')) return original(url,options);
+      const action=String(url).split('/').pop(), body=JSON.parse(options.body);
+      if (phase==='copy' && action==='chunk' && body.key==='milkv2' && body.offset===2048)
+        sourceNextStarted=true;
+      if (phase==='copy' && action==='chunk' && body.key!=='milkv2' && body.offset===0)
+        overlapped=sourceNextStarted;
+      if (action==='chunk') await new Promise(resolve=>setTimeout(resolve,120));
+      const result=action==='start'
+        ? {ok:true,id:body.direction==='download'?'fake-source':'fake-upload',chunk_size:2048,size:4096,sha256:'mock-sha'}
+        : action==='chunk'
+          ? {ok:true,offset:body.offset+2048,...(body.direction==='download'||body.id==='fake-source'
+            ? {data_b64:btoa('x'.repeat(2048))}: {})}
+          : {ok:true,path:'/tmp/demo.bin',size:4096,sha256:'mock-sha'};
+      return {ok:true,json:async()=>result};
+    };
+    try {
+      document.querySelector('#b-file-transfer').click();
+      const selected=new DataTransfer(); selected.items.add(new File([new Uint8Array(4096)],'demo.bin'));
+      document.querySelector('#ft-file').files=selected.files;
+      document.querySelector('#ft-target').value='/tmp/demo.bin';
+      document.querySelector('#ft-start').click();
+      for(let n=0;n<40 && !output.textContent.includes('上传完成');n++)
+        await new Promise(resolve=>setTimeout(resolve,50));
+      const answer={values,final:output.textContent};
+      phase='copy';
+      document.querySelector('#ft-mode').value='copy';
+      document.querySelector('#ft-mode').dispatchEvent(new Event('change'));
+      document.querySelector('#ft-source').value='/tmp/source.bin';
+      document.querySelector('#ft-target').value='/tmp/target.bin';
+      document.querySelector('#ft-start').click();
+      for(let n=0;n<40 && !output.textContent.includes('板间复制完成');n++)
+        await new Promise(resolve=>setTimeout(resolve,50));
+      answer.copyFinal=output.textContent; answer.overlapped=overlapped;
+      document.querySelector('#ft-close').click();
+      return answer;
+    } finally {window.fetch=original;observer.disconnect();}
+  })()`);
+  assert.ok(transferMetrics.values.some(value=>value.includes('/s') && value.includes('预计剩余')),
+    'active transfer should show estimated rate and remaining time');
+  assert.ok(transferMetrics.final.includes('平均') && transferMetrics.final.includes('/s'));
+  assert.ok(transferMetrics.overlapped, 'copy should read the next source chunk during destination write');
+  assert.ok(transferMetrics.copyFinal.includes('板间复制完成'));
   await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
   await delay(150);
   assert.ok(await evaluate(viewportFits), 'laptop-height terminal must keep the last row visible');

@@ -157,7 +157,9 @@
     padding:20px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);
     color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.3);overflow:auto}
   .file-transfer-dialog::backdrop{background:rgba(12,24,27,.55)}
-  .ft-head{display:flex;justify-content:space-between;align-items:start;gap:12px}
+  .ft-head{display:flex;justify-content:space-between;align-items:start;gap:12px;
+    cursor:move;touch-action:none;user-select:none}
+  .ft-head button{cursor:pointer}
   .ft-head strong{display:block;font-size:19px}.ft-head small{display:block;color:var(--ink-3);font:11px "IBM Plex Mono",monospace}
   .ft-intro{color:var(--ink-2);font-size:12.5px;margin:12px 0 18px}
   .ft-field{display:grid;gap:5px;margin:12px 0;color:var(--ink-2);font-size:12px}

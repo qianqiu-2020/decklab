@@ -3,9 +3,11 @@
   var byId = function (id) { return document.getElementById(id); };
   var dialog = byId('file-transfer-dialog');
   var board = null, devices = [], busy = false, cancelled = false;
+  var meter = null, drag = null;
   var MAX_BLOB_DOWNLOAD = 128 * 1024 * 1024;
 
   function status(text) { byId('ft-status').textContent = text; }
+  function rateText(value) { return SerialdUI.formatBytes(Math.round(value)) + '/s'; }
   function basename(path) { return path.split('/').filter(Boolean).pop() || 'board-file'; }
   function bytes(raw) {
     var binary = '';
@@ -17,9 +19,35 @@
     for (var i = 0; i < binary.length; i++) raw[i] = binary.charCodeAt(i);
     return raw;
   }
+  function duration(seconds) {
+    if (!Number.isFinite(seconds)) return '计算中';
+    seconds = Math.max(0, Math.ceil(seconds));
+    if (seconds < 60) return seconds + ' 秒';
+    var minutes = Math.floor(seconds / 60);
+    return (minutes >= 60 ? Math.floor(minutes / 60) + ' 小时 ' : '')
+      + (minutes % 60) + ' 分 ' + (seconds % 60) + ' 秒';
+  }
+  function beginProgress() {
+    var now = performance.now();
+    meter = { start: now, samples: [{ time: now, offset: 0 }], shown: 0 };
+  }
+  function averageRate(size) {
+    return meter ? size / Math.max(0.001, (performance.now() - meter.start) / 1000) : 0;
+  }
   function progress(offset, size) {
     byId('ft-progress').value = size ? Math.round(offset / size * 100) : 100;
-    status(SerialdUI.formatBytes(offset) + ' / ' + SerialdUI.formatBytes(size) + ' · 串口传输中');
+    if (!meter) beginProgress();
+    var now = performance.now();
+    meter.samples.push({ time: now, offset: offset });
+    while (meter.samples.length > 2 && meter.samples[1].time < now - 5000) meter.samples.shift();
+    if (now - meter.shown < 500 && offset < size) return;
+    var first = meter.samples[0], elapsed = (now - first.time) / 1000;
+    var rate = elapsed > 0.05 ? (offset - first.offset) / elapsed : 0;
+    var remaining = rate > 0 ? (size - offset) / rate : Infinity;
+    status(SerialdUI.formatBytes(offset) + ' / ' + SerialdUI.formatBytes(size)
+      + ' · ' + (rate > 0 ? rateText(rate) : '速率计算中')
+      + ' · 预计剩余 ' + duration(remaining));
+    meter.shown = now;
   }
   async function api(device, action, payload) {
     var response = await fetch('/api/file-transfer/' + action, {
@@ -38,6 +66,7 @@
     try {
       transfer = await api(board, 'start', { direction: 'upload', path: target,
         size: file.size, overwrite: overwrite });
+      beginProgress();
       for (var offset = 0; offset < file.size;) {
         checkCancelled();
         var chunk = new Uint8Array(await file.slice(offset, offset + transfer.chunk_size).arrayBuffer());
@@ -49,7 +78,8 @@
       var done = await api(board, 'finish', { id: transfer.id });
       transfer = null;
       byId('ft-progress').value = 100;
-      status('上传完成 · ' + done.path + ' · SHA-256 ' + done.sha256);
+      status('上传完成 · 平均 ' + rateText(averageRate(done.size))
+        + ' · ' + done.path + ' · SHA-256 ' + done.sha256);
     } finally {
       if (transfer) await api(board, 'abort', { id: transfer.id }).catch(function () {});
     }
@@ -63,6 +93,7 @@
         writable = await handle.createWritable();
       }
       transfer = await api(board, 'start', { direction: 'download', path: source });
+      beginProgress();
       if (!writable && transfer.size > MAX_BLOB_DOWNLOAD) {
         throw new Error('浏览器下载超过 128 MiB，请用 serialctl file-get，或在支持文件流保存的浏览器中打开');
       }
@@ -88,7 +119,8 @@
         setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
       }
       byId('ft-progress').value = 100;
-      status('下载完成 · ' + SerialdUI.formatBytes(done.size) + ' · SHA-256 ' + done.sha256);
+      status('下载完成 · ' + SerialdUI.formatBytes(done.size) + ' · 平均 '
+        + rateText(averageRate(done.size)) + ' · SHA-256 ' + done.sha256);
     } finally {
       if (transfer) await api(board, 'abort', { id: transfer.id }).catch(function () {});
       if (writable) await writable.abort().catch(function () {});
@@ -101,14 +133,26 @@
       incoming = await api(board, 'start', { direction: 'download', path: source });
       outgoing = await api(destination, 'start', { direction: 'upload', path: target,
         size: incoming.size, overwrite: overwrite });
+      beginProgress();
+      var chunk = incoming.size ? await api(board, 'chunk', { id: incoming.id, offset: 0 }) : null;
       for (var offset = 0; offset < incoming.size;) {
         checkCancelled();
-        var chunk = await api(board, 'chunk', { id: incoming.id, offset: offset });
-        var sent = await api(destination, 'chunk', { id: outgoing.id, offset: offset,
-          data_b64: chunk.data_b64 });
-        if (sent.offset !== chunk.offset) throw new Error('板间传输偏移不匹配');
-        offset = sent.offset;
+        if (chunk.offset !== offset + decode(chunk.data_b64).length || chunk.offset > incoming.size)
+          throw new Error('源板传输偏移不匹配');
+        // Source and destination are independent serial ports. Read the next
+        // block while writing this one, then inspect both outcomes together.
+        var next = chunk.offset < incoming.size
+          ? api(board, 'chunk', { id: incoming.id, offset: chunk.offset }) : null;
+        var writes = [api(destination, 'chunk', { id: outgoing.id, offset: offset,
+          data_b64: chunk.data_b64 })];
+        if (next) writes.push(next);
+        var outcomes = await Promise.allSettled(writes);
+        var failure = outcomes.find(function (item) { return item.status === 'rejected'; });
+        if (failure) throw failure.reason;
+        if (outcomes[0].value.offset !== chunk.offset) throw new Error('目标板传输偏移不匹配');
+        offset = outcomes[0].value.offset;
         progress(offset, incoming.size);
+        chunk = next ? outcomes[1].value : null;
       }
       checkCancelled();
       var sourceDone = await api(board, 'finish', { id: incoming.id });
@@ -117,7 +161,8 @@
       outgoing = null;
       if (sourceDone.sha256 !== targetDone.sha256) throw new Error('目标板文件校验失败');
       byId('ft-progress').value = 100;
-      status('板间复制完成 · ' + destination.key + ':' + target + ' · SHA-256 ' + targetDone.sha256);
+      status('板间复制完成 · 平均 ' + rateText(averageRate(targetDone.size))
+        + ' · ' + destination.key + ':' + target + ' · SHA-256 ' + targetDone.sha256);
     } finally {
       if (incoming) await api(board, 'abort', { id: incoming.id }).catch(function () {});
       if (outgoing) await api(destination, 'abort', { id: outgoing.id }).catch(function () {});
@@ -136,6 +181,7 @@
 
   function open(selected, available) {
     if (busy) return;
+    dialog.removeAttribute('style');
     board = selected; devices = available;
     byId('ft-board').textContent = selected.key + ' · ' + (selected.dev || '串口');
     byId('ft-mode').value = 'upload';
@@ -156,6 +202,39 @@
     updateMode();
     dialog.showModal();
   }
+
+  var handle = dialog.querySelector('.ft-head');
+  handle.addEventListener('pointerdown', function (event) {
+    if (event.button !== 0 || event.target.closest('button')) return;
+    var rect = dialog.getBoundingClientRect();
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY,
+      left: rect.left, top: rect.top };
+    dialog.style.position = 'fixed';
+    dialog.style.inset = 'auto';
+    dialog.style.margin = '0';
+    dialog.style.left = rect.left + 'px';
+    dialog.style.top = rect.top + 'px';
+    handle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  handle.addEventListener('pointermove', function (event) {
+    if (!drag || drag.id !== event.pointerId) return;
+    var rect = dialog.getBoundingClientRect();
+    var left = Math.max(0, Math.min(window.innerWidth - rect.width, drag.left + event.clientX - drag.x));
+    var top = Math.max(0, Math.min(window.innerHeight - rect.height, drag.top + event.clientY - drag.y));
+    dialog.style.left = left + 'px'; dialog.style.top = top + 'px';
+  });
+  function endDrag(event) {
+    if (drag && drag.id === event.pointerId) drag = null;
+  }
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+  window.addEventListener('resize', function () {
+    if (!dialog.open || !dialog.style.left) return;
+    var rect = dialog.getBoundingClientRect();
+    dialog.style.left = Math.max(0, Math.min(rect.left, window.innerWidth - rect.width)) + 'px';
+    dialog.style.top = Math.max(0, Math.min(rect.top, window.innerHeight - rect.height)) + 'px';
+  });
 
   byId('ft-mode').addEventListener('change', updateMode);
   byId('ft-target-device').addEventListener('change', updateMode);

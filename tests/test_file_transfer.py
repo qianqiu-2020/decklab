@@ -177,6 +177,31 @@ class TransferClient:
 
 
 class CliFileTransferTests(unittest.TestCase):
+    def test_board_copy_overlaps_two_independent_serial_ports(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            data = bytes(range(256)) * 24
+            source_path, target_path = root / 'source.bin', root / 'target.bin'
+            source_path.write_bytes(data)
+            source, target = TransferClient('source'), TransferClient('target')
+            next_read_started = threading.Event()
+            original_source, original_target = source.post, target.post
+            source_chunks = 0
+            def source_post(route, **payload):
+                nonlocal source_chunks
+                if route.endswith('/chunk'):
+                    source_chunks += 1
+                    if source_chunks == 2:
+                        next_read_started.set()
+                return original_source(route, **payload)
+            def target_post(route, **payload):
+                if route.endswith('/chunk') and payload['offset'] == 0:
+                    self.assertTrue(next_read_started.wait(1), 'source prefetch did not overlap destination write')
+                return original_target(route, **payload)
+            source.post, target.post = source_post, target_post
+            file_copy(source, target, str(source_path), str(target_path))
+            self.assertEqual(target_path.read_bytes(), data)
+
     def test_local_upload_download_and_board_copy(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

@@ -3,6 +3,7 @@
 import argparse
 import base64
 import binascii
+from concurrent.futures import ThreadPoolExecutor
 import http.client
 import json
 import math
@@ -326,14 +327,25 @@ def file_copy(source, destination, remote, to_path, overwrite=False):
                                     size=incoming['size'], overwrite=overwrite)
         destination_id = outgoing['id']
         offset = 0
-        while offset < incoming['size']:
-            chunk = source.post('/api/file-transfer/chunk', id=source_id, offset=offset)
-            data = base64.b64decode(chunk['data_b64'], validate=True)
-            sent = destination.post('/api/file-transfer/chunk', id=destination_id, offset=offset,
-                                    data_b64=chunk['data_b64'])
-            if not data or chunk.get('offset') != offset + len(data) or sent.get('offset') != offset + len(data):
-                raise ClientError('Board-to-board transfer offset mismatch')
-            offset += len(data)
+        # Each board owns a different serial port. Prefetch the next source
+        # block while the current block is being written to the destination.
+        with ThreadPoolExecutor(max_workers=1) as reader:
+            pending = (reader.submit(source.post, '/api/file-transfer/chunk',
+                                     id=source_id, offset=0) if incoming['size'] else None)
+            while offset < incoming['size']:
+                chunk = pending.result()
+                data = base64.b64decode(chunk['data_b64'], validate=True)
+                next_offset = offset + len(data)
+                if not data or chunk.get('offset') != next_offset or next_offset > incoming['size']:
+                    raise ClientError('Source transfer offset mismatch')
+                pending = (reader.submit(source.post, '/api/file-transfer/chunk',
+                                         id=source_id, offset=next_offset)
+                           if next_offset < incoming['size'] else None)
+                sent = destination.post('/api/file-transfer/chunk', id=destination_id,
+                                        offset=offset, data_b64=chunk['data_b64'])
+                if sent.get('offset') != next_offset:
+                    raise ClientError('Destination transfer offset mismatch')
+                offset = next_offset
         verified = source.post('/api/file-transfer/finish', id=source_id)
         source_id = None
         if verified.get('sha256') != incoming['sha256']:
