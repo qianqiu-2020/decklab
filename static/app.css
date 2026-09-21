@@ -171,14 +171,25 @@
   .records-title{display:flex;align-items:center;justify-content:space-between;position:sticky;top:-14px;
     z-index:2;background:var(--ground);padding:10px 0;border-bottom:1px solid var(--line);
     font-size:15px;color:var(--ink)}
-  .records-tabs{position:sticky;top:38px;z-index:2;display:flex;gap:3px;padding:9px 0 8px;
-    background:var(--ground);border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
-  .records-tabs::-webkit-scrollbar{display:none}
-  .records-tabs button{flex:none;padding:6px 8px;border-color:transparent;background:transparent;
-    color:var(--ink-3);white-space:nowrap}
+  .records-tabs{position:sticky;top:38px;z-index:2;display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;padding:9px 0 8px;
+    background:var(--ground);border-bottom:1px solid var(--line)}
+  .records-tabs button{min-width:0;padding:6px 2px;border-color:transparent;background:transparent;
+    color:var(--ink-3);white-space:nowrap;font-size:11px}
   .records-tabs button.on{background:var(--surface);border-color:var(--accent-line);
     color:var(--accent);box-shadow:0 1px 3px rgba(0,0,0,.04)}
   .records-panel[hidden]{display:none}
+  .command-nav-controls{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:12px 0}
+  .command-nav-controls span{color:var(--ink-3);font:11px "IBM Plex Mono",monospace;white-space:nowrap}
+  .command-nav-list{display:grid;gap:6px;color:var(--ink-3);font-size:12px}
+  .command-nav-item{display:flex;align-items:baseline;gap:10px;width:100%;min-width:0;
+    padding:9px 10px;text-align:left;background:var(--surface);border-color:var(--line)}
+  .command-nav-item.on{background:var(--accent-soft);border-color:var(--accent-line)}
+  .command-nav-number{flex:none;color:var(--ink-3);font:11px "IBM Plex Mono",monospace}
+  .command-nav-body{display:grid;gap:2px;min-width:0}
+  .command-nav-body strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    color:var(--ink);font:12px "IBM Plex Mono",monospace}
+  .command-nav-body small{color:var(--ink-3);font:10px "IBM Plex Mono",monospace}
   .section-head{display:flex;gap:9px;align-items:baseline;margin:17px 0 9px}
   .records .section-head{display:block}
   .records .section-head>span{display:block;margin-top:2px;line-height:1.35}

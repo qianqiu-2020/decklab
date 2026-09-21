@@ -119,6 +119,14 @@ let chrome, ws;
   assert.ok(await evaluate(columnsFit), 'SSH columns must still fit with records open');
   const recordsShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-records.png'),Buffer.from(recordsShot.data,'base64'));
+  await evaluate('new Promise(resolve => testTerm.write("\\r\\nroot@bianbu:~# uname -a\\r\\nLinux riscv64\\r\\n", resolve))');
+  await evaluate('document.querySelector("#b-command-nav").click()');
+  assert.ok(await evaluate('document.querySelectorAll("#d-command-nav .command-nav-item").length >= 1'));
+  await evaluate('Array.from(document.querySelectorAll("#d-command-nav .command-nav-item")).at(-1).click()');
+  assert.ok(await evaluate('testTerm.getSelection().includes("uname -a")'));
+  const inputNavShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-input-nav.png'),Buffer.from(inputNavShot.data,'base64'));
+  await evaluate('document.querySelector("#record-tab-logs").click()');
   assert.ok(await evaluate('document.querySelectorAll("#d-logs .boot-row").length >= 2'),
     'date view lists the boots touching the selected day');
   await evaluate('document.querySelectorAll("#d-logs .boot-row")[1].querySelector("button").click()');

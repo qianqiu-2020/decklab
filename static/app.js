@@ -40,6 +40,7 @@
     clearTimeout(old.inputTimer);
     clearTimeout(old.sizeTimer);
     clearTimeout(old.selTimer);
+    clearTimeout(old.navTimer);
     if (old.refreshFrame && window.cancelAnimationFrame) window.cancelAnimationFrame(old.refreshFrame);
     // reset() 不会清空 xterm 的异步解析队列；旧 CSI 6n 还可能触发 onData，
     // 把上一台的终端应答写到新设备。销毁实例，并让所有旧回调检查所属视图。
@@ -61,6 +62,7 @@
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
                 inputQueue: [], inputSending: false, inputTimer: 0,
+                navEntries: [], navSelected: -1, navTimer: 0, navRendered: false,
                 lastSel: '', searchQuery: '', searchMatch: -1,
                 serialRows: 24, bootScanTail: '', phaseScanTail: '', linuxConsole: false };
     view = ctx;
@@ -79,6 +81,8 @@
     ctx.fit = new FitAddon.FitAddon();
     ctx.term.loadAddon(ctx.fit);
     $('d-term').textContent = '';
+    $('d-command-nav').textContent = '';
+    $('command-nav-count').textContent = '0 条';
     ctx.term.open($('d-term'));
     // Some Chromium/Linux themes expose an overlay scrollbar whose track
     // accepts wheel input but ignores a track click.  Keep native dragging,
@@ -172,6 +176,78 @@
     }
   }
 
+  // Index what the shell actually echoed, never raw keystrokes that could be
+  // passwords or input to full-screen programs.
+  function terminalCommands(ctx) {
+    var active = ctx.term && ctx.term.buffer && ctx.term.buffer.active;
+    if (!active || !active.getLine) return [];
+    var entries = [];
+    for (var row = 0; row < active.length; row++) {
+      var line = active.getLine(row);
+      if (!line || !line.translateToString) continue;
+      var shown = line.translateToString(true);
+      var match = /^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d  )?([^\s@]+@[^\s]+[#$])\s+(.+)$/.exec(shown);
+      if (match && match[2].trim() && !/^[^\s@]+@[^\s]+[#$](?:\s|$)/.test(match[2])) {
+        entries.push({ row: row, column: shown.indexOf(match[2]),
+                       prompt: match[1], command: match[2].trim() });
+      }
+    }
+    return entries;
+  }
+
+  function jumpToCommand(ctx, index) {
+    if (!isCurrent(ctx) || index < 0 || index >= ctx.navEntries.length) return;
+    ctx.navSelected = index;
+    var entry = ctx.navEntries[index];
+    ctx.term.scrollToLine(entry.row);
+    ctx.term.select(entry.column, entry.row, Math.min(entry.command.length, ctx.term.cols - entry.column));
+    Array.prototype.forEach.call($('d-command-nav').children, function (button, position) {
+      button.classList.toggle('on', position === index);
+    });
+  }
+
+  function renderCommandNav(ctx) {
+    if (!isCurrent(ctx) || recordsTab !== 'inputs' || $('d-records').hidden) return;
+    var updated = terminalCommands(ctx);
+    if (ctx.navRendered && updated.length === ctx.navEntries.length && updated.every(function (entry, index) {
+      return entry.row === ctx.navEntries[index].row && entry.command === ctx.navEntries[index].command;
+    })) return;
+    var selected = ctx.navEntries[ctx.navSelected];
+    ctx.navEntries = updated;
+    ctx.navRendered = true;
+    ctx.navSelected = selected ? ctx.navEntries.findIndex(function (entry) {
+      return entry.row === selected.row && entry.command === selected.command;
+    }) : -1;
+    var list = $('d-command-nav'); list.textContent = '';
+    $('command-nav-count').textContent = ctx.navEntries.length + ' 条';
+    if (!ctx.navEntries.length) {
+      list.textContent = '当前终端缓冲没有可识别的 shell 命令。固件菜单和全屏程序不按命令切分。';
+      return;
+    }
+    ctx.navEntries.forEach(function (entry, index) {
+      var button = document.createElement('button');
+      button.type = 'button'; button.className = 'command-nav-item';
+      button.classList.toggle('on', index === ctx.navSelected);
+      var number = document.createElement('span'); number.className = 'command-nav-number';
+      number.textContent = String(index + 1).padStart(2, '0');
+      var body = document.createElement('span'); body.className = 'command-nav-body';
+      var command = document.createElement('strong'); command.textContent = entry.command;
+      var prompt = document.createElement('small'); prompt.textContent = entry.prompt;
+      body.appendChild(command); body.appendChild(prompt);
+      button.appendChild(number); button.appendChild(body);
+      button.addEventListener('click', function () { jumpToCommand(ctx, index); });
+      list.appendChild(button);
+    });
+  }
+
+  function scheduleCommandNav(ctx) {
+    if (!isCurrent(ctx) || recordsTab !== 'inputs' || $('d-records').hidden || ctx.navTimer) return;
+    ctx.navTimer = setTimeout(function () {
+      ctx.navTimer = 0;
+      renderCommandNav(ctx);
+    }, 350);
+  }
+
   function redrawTerminal() {
     var ctx = view;
     if (!isCurrent(ctx)) return;
@@ -183,6 +259,8 @@
     }
     clearTerminalSearch(false);
     try { ctx.term.reset(); ctx.term.clear(); } catch (e) {}
+    ctx.navRendered = false;
+    renderCommandNav(ctx);
     ctx.off = 0; ctx.initialRendered = false;
     $('d-status').textContent = ' 正在从采集缓冲完整重绘…';
     if (ctx.kind === 'log') {
@@ -382,6 +460,12 @@
     list = list.filter(function (d) {
       return (filter === 'all' || d.state === filter) &&
         [d.label, d.serial, d.hostname, d.by_path, d.last_path, d.dev].join(' ').toLowerCase().includes(query);
+    });
+    list = list.slice().sort(function (a, b) {
+      var rank = function (device) {
+        return device.alive ? (device.state === 'pending' ? 1 : 0) : 2;
+      };
+      return rank(a) - rank(b);
     });
     var g = $('grid');
     if (!list.length) { g.innerHTML = '<p class="empty">没有匹配的设备。新串口连接后将显示在待识别列表。</p>'; return; }
@@ -625,6 +709,7 @@
     function written() {
       ctx.initialRendered = true;
       if (redraw) scheduleFullRefresh(ctx);
+      scheduleCommandNav(ctx);
     }
     if (typeof payload.data_b64 === 'string') {
       var raw = atob(payload.data_b64);
@@ -1226,13 +1311,14 @@
   });
   function setRecordsTab(name) {
     recordsTab = name;
-    ['logs', 'sessions', 'events', 'commands'].forEach(function (tab) {
+    ['logs', 'inputs', 'sessions', 'events', 'commands'].forEach(function (tab) {
       var selected = tab === name;
       $('record-tab-' + tab).classList.toggle('on', selected);
       $('record-tab-' + tab).setAttribute('aria-selected', selected ? 'true' : 'false');
       $('record-panel-' + tab).hidden = !selected;
     });
     $('d-records').scrollTop = 0;
+    if (name === 'inputs' && view) renderCommandNav(view);
   }
   function setRecordsOpen(open) {
     $('d-records').hidden = !open;
@@ -1241,7 +1327,7 @@
     if (open) setRecordsTab(recordsTab);
     setTimeout(resizeTerm, 0);
   }
-  var recordTabs = ['logs', 'sessions', 'events', 'commands'];
+  var recordTabs = ['logs', 'inputs', 'sessions', 'events', 'commands'];
   recordTabs.forEach(function (tab, index) {
     var button = $('record-tab-' + tab);
     button.addEventListener('click', function () { setRecordsTab(tab); });
@@ -1252,6 +1338,27 @@
       var next = recordTabs[(index + offset + recordTabs.length) % recordTabs.length];
       setRecordsTab(next);
       $('record-tab-' + next).focus();
+    });
+  });
+  $('b-command-nav').addEventListener('click', function () {
+    setRecordsOpen(true);
+    setRecordsTab('inputs');
+  });
+  [-1, 1].forEach(function (step) {
+    $('command-nav-' + (step < 0 ? 'prev' : 'next')).addEventListener('click', function () {
+      var ctx = view;
+      if (!isCurrent(ctx)) return;
+      renderCommandNav(ctx);
+      if (!ctx.navEntries.length) return;
+      var current = ctx.navSelected;
+      if (current < 0) {
+        var active = ctx.term.buffer.active;
+        var visible = (active.ydisp || 0) + ctx.term.rows / 2;
+        current = ctx.navEntries.findIndex(function (entry) { return entry.row >= visible; });
+        if (current < 0) current = ctx.navEntries.length - 1;
+        current -= step;
+      }
+      jumpToCommand(ctx, Math.max(0, Math.min(ctx.navEntries.length - 1, current + step)));
     });
   });
   ['date', 'boot'].forEach(function (mode) {

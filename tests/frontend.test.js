@@ -603,6 +603,36 @@ test('record tabs avoid scrolling through unrelated history', async () => {
   assert.equal(h.get('record-panel-commands').hidden, false);
 });
 
+test('online boards precede pending ports and historical boards', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({ devices: [
+    { key: 'old', label: 'old', serial: 'SN-OLD', state: 'offline', alive: false },
+    { key: 'pending', label: 'pending', state: 'pending', alive: true },
+    { key: 'live-a', label: 'live-a', serial: 'SN-A', state: 'online', alive: true },
+    { key: 'live-b', label: 'live-b', serial: 'SN-B', state: 'online', alive: true },
+  ] });
+  await drain();
+  assert.deepEqual(h.get('grid').children.map(card => card.dataset.key),
+    ['live-a', 'live-b', 'pending', 'old']);
+});
+
+test('input navigator jumps to echoed commands without sending input', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  terminal.parsed = 'root@bianbu:~# uname -a\nLinux riscv64\n'
+    + 'ubuntu@ubuntu:~$ sudo dmesg\noutput\nPassword: hidden\n';
+  h.get('b-command-nav').click();
+  assert.equal(h.get('record-panel-inputs').hidden, false);
+  assert.equal(h.get('command-nav-count').textContent, '2 条');
+  const entries = h.get('d-command-nav').children;
+  assert.equal(entries[0].children[1].children[0].textContent, 'uname -a');
+  assert.equal(entries[1].children[1].children[0].textContent, 'sudo dmesg');
+  entries[1].click();
+  assert.equal(terminal.scrolledToLine, 2);
+  h.get('command-nav-prev').click();
+  assert.equal(terminal.scrolledToLine, 0);
+  assert.equal(h.sends().length, 0);
+});
+
 test('dates and boot numbers navigate in both directions across midnight', async () => {
   const h = await setup(); h.select('A');
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [
