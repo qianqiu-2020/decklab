@@ -4,17 +4,49 @@ import hashlib
 import os
 import re
 import secrets
+import shlex
 import threading
 import time
 
 from .config import ANSI, BY_PATH, DATE_FMT, HOST_PATTERNS, LOG_ROOT, SCROLLBACK, SSH_IDLE, SSH_LIMIT
 from .transport import write_serial
 from .protocol import PROBE_CMD, RE_LOGIN, RE_PASSWD, RE_PROMPT, SSH_CMD, parse_probe
-from .sessions import SshSession
+from .sessions import SshSession, check_password_login
 from .storage import IdentityError, archive_component
 from .identity import eeprom_serial, usable_serial
 from .boot_marker import init_command
 from .log_archive import boot_epochs
+
+
+def root_ssh_config_command():
+    """Build a root-only, password-free command for the serial shell."""
+    script = (
+        'set -e; cfg=/etc/ssh/sshd_config; '
+        'tmp=$(mktemp /etc/ssh/.seriald-config.XXXXXX); '
+        'backup=$(mktemp /etc/ssh/.seriald-backup.XXXXXX); '
+        "trap 'rm -f \"$tmp\" \"$backup\"' EXIT; "
+        'cp -p "$cfg" "$backup"; '
+        'if [ "$(head -n 1 "$cfg")" = "PermitRootLogin yes" ] && '
+        '[ "$(sed -n 2p "$cfg")" = "PasswordAuthentication yes" ]; '
+        'then cp -p "$cfg" "$tmp"; '
+        'else { printf "PermitRootLogin yes\nPasswordAuthentication yes\n"; cat "$cfg"; } > "$tmp"; '
+        'chmod --reference="$cfg" "$tmp"; chown --reference="$cfg" "$tmp"; fi; '
+        'sshd_bin=$(command -v sshd || printf /usr/sbin/sshd); '
+        '"$sshd_bin" -t -f "$tmp" || { echo SSH_CONFIG_ERROR=invalid; exit 1; }; '
+        'mv "$tmp" "$cfg"; '
+        'if (systemctl restart ssh || systemctl restart sshd) && '
+        '"$sshd_bin" -T -C user=root,host=localhost,addr=127.0.0.1 '
+        '| grep -qx "permitrootlogin yes" && '
+        '"$sshd_bin" -T -C user=root,host=localhost,addr=127.0.0.1 '
+        '| grep -qx "passwordauthentication yes"; '
+        'then echo SSH_CONFIG_OK=1; '
+        'else mv "$backup" "$cfg"; '
+        '(systemctl restart ssh || systemctl restart sshd) >/dev/null 2>&1 || :; '
+        'echo SSH_CONFIG_ERROR=restart-or-policy; fi'
+    )
+    return 'if [ "$(id -u)" = 0 ]; then sh -c {s}; else sudo -n sh -c {s}; fi'.format(
+        s=shlex.quote(script))
+
 
 class Device:
     """One physical connection, optionally bound to a persistent board serial."""
@@ -425,32 +457,36 @@ class Device:
             return False, '已有一次识别/操作在进行中,稍候'
         self.probing = True
         try:
-            if self.fd is None or self.stop.is_set():
-                return False, '设备未打开(串口没接上或已被拔掉)'
-            ok, base = self.ensure_shell(self.now_off())
-            if not ok:
-                return False, '板子不在 shell 提示符,且自动登录失败(可能需要手动处理)'
-            nonce = secrets.token_hex(12)
-            begin, end = '__SD_B_' + nonce + '__', '__SD_E_' + nonce + '__'
-            # printf 参数拆开 marker,回显再怎么分块也不会成为完整标记行。
-            framed = ("printf '\\n%s%s\\n' '__SD_B_' '%s__'; %s; "
-                      "printf '\\n%s%s\\n' '__SD_E_' '%s__'")
-            framed = framed % ('%s', '%s', nonce, cmd, '%s', '%s', nonce)
-            base = self.now_off()
-            ok, err = self._write(framed + self.newline)
-            if not ok:
-                return False, err
-            if not self._wait(base, r'(?m)^' + re.escape(end) + r'\r?\n', timeout):
-                return False, '等待板子完整响应超时'
-            raw = ANSI.sub('', self._since(base)).replace('\r\n', '\n')
-            match = re.search(r'(?m)^' + re.escape(begin) + r'\n([\s\S]*?)^'
-                              + re.escape(end) + r'\n', raw)
-            if not match:
-                return False, '响应帧不完整(可能超出缓冲上限)'
-            return True, match.group(1)
+            return self._run_cmd_locked(cmd, timeout)
         finally:
             self.probing = False
             self.operation_lock.release()
+
+    def _run_cmd_locked(self, cmd, timeout):
+        """Run one framed console command while operation_lock is held."""
+        if self.fd is None or self.stop.is_set():
+            return False, '设备未打开(串口没接上或已被拔掉)'
+        ok, base = self.ensure_shell(self.now_off())
+        if not ok:
+            return False, '板子不在 shell 提示符,且自动登录失败(可能需要手动处理)'
+        nonce = secrets.token_hex(12)
+        begin, end = '__SD_B_' + nonce + '__', '__SD_E_' + nonce + '__'
+        # printf 参数拆开 marker,回显再怎么分块也不会成为完整标记行。
+        framed = ("printf '\\n%s%s\\n' '__SD_B_' '%s__'; %s; "
+                  "printf '\\n%s%s\\n' '__SD_E_' '%s__'")
+        framed = framed % ('%s', '%s', nonce, cmd, '%s', '%s', nonce)
+        base = self.now_off()
+        ok, err = self._write(framed + self.newline)
+        if not ok:
+            return False, err
+        if not self._wait(base, r'(?m)^' + re.escape(end) + r'\r?\n', timeout):
+            return False, '等待板子完整响应超时'
+        raw = ANSI.sub('', self._since(base)).replace('\r\n', '\n')
+        match = re.search(r'(?m)^' + re.escape(begin) + r'\n([\s\S]*?)^'
+                          + re.escape(end) + r'\n', raw)
+        if not match:
+            return False, '响应帧不完整(可能超出缓冲上限)'
+        return True, match.group(1)
 
     def run_probe(self, init_boot_marker=False):
         """Read identity metadata; create a /boot marker only on explicit request."""
@@ -492,6 +528,54 @@ class Device:
                          ','.join(info.get('ips') or []) or '-', info.get('sshd') or '-'))
         return info
 
+    def configure_root_ssh(self):
+        """Use the already collected serial stream to set root's SSH password."""
+        if not self.operation_lock.acquire(blocking=False):
+            return False, '串口正忙，稍后重试 SSH'
+        self.probing = True
+        try:
+            if self.fd is None or self.stop.is_set():
+                return False, '串口未连接，无法自动配置 SSH'
+            ok, _ = self.ensure_shell(self.now_off())
+            if not ok:
+                return False, '串口未停在已登录的 shell，无法自动提权'
+            self._say('SSH 自动配置：通过串口修改 root 密码和 sshd 配置')
+            base = self.now_off()
+            ok, error = self._write(
+                'if [ "$(id -u)" = 0 ]; then passwd root; else sudo -n passwd root; fi'
+                + self.newline)
+            if not ok:
+                return False, error
+            first = r'(?i)(?:New (?:UNIX )?password|新的密码)[:：]\s*$'
+            second = r'(?i)(?:Retype new (?:UNIX )?password|Repeat new password|再次输入新的密码)[:：]\s*$'
+            if not self._wait(base, first, 15):
+                return False, '无法通过串口运行 passwd（sudo 可能需要普通用户密码）'
+            base = self.now_off()
+            ok, error = self._write('bianbu' + self.newline)
+            if not ok:
+                return False, error
+            if not self._wait(base, second, 15):
+                return False, 'passwd 没有请求再次输入密码'
+            base = self.now_off()
+            ok, error = self._write('bianbu' + self.newline)
+            if not ok:
+                return False, error
+            success = r'(?i)(?:password updated successfully|all authentication tokens updated successfully)'
+            if not self._wait(base, success, 20):
+                return False, 'passwd 未确认 root 密码更新成功'
+            # Wait for the normal shell prompt before sending the framed config
+            # command; passwd's success line can arrive before its child exits.
+            if not self._wait(base, RE_PROMPT, 5):
+                return False, '修改密码后未返回 shell 提示符'
+            ok, raw = self._run_cmd_locked(root_ssh_config_command(), 35)
+            if not ok or 'SSH_CONFIG_OK=1' not in raw:
+                return False, '更新 sshd 配置失败: ' + (raw[-300:] if ok else raw)
+            self._say('SSH 自动配置完成：root 密码已更新，sshd 已重启')
+            return True, ''
+        finally:
+            self.probing = False
+            self.operation_lock.release()
+
     def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None):
         """一键 SSH:用识别到的 IP 起一条**独立会话**(默认 root/bianbu)。
 
@@ -499,6 +583,7 @@ class Device:
         IP/序列号/sshd 状态,SSH 会话负责后续高效操作。两者并存、各记各的日志。
         """
         origin = self.stop
+        connection_id = self.connection_id
         info = self.probe_info
         if not info.get('ips') or (self.manager and not self.serial):
             r = self.run_probe()
@@ -536,14 +621,37 @@ class Device:
             self.ssh_pending += 1
         session = None
         try:
-            if self.stop is not origin or origin.is_set():
+            if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
                 return None, '设备已重新枚举,请重新识别 IP'
+            user = ssh_user if ssh_user is not None else os.environ.get('SERIALD_SSH_USER', 'root')
+            password = (ssh_password if ssh_password is not None
+                        else os.environ.get('SERIALD_SSH_PASSWORD', 'bianbu'))
+            auto_configure = user == 'root' and password == 'bianbu'
+            if auto_configure:
+                authenticated, denied, detail = check_password_login(ip, user, password)
+                if denied:
+                    if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
+                        return None, '设备已更换，取消 SSH 自动配置'
+                    self._say('SSH root 认证失败，尝试通过串口自动配置')
+                    if self.manager and self.serial:
+                        self.manager.store.event(self.serial, actor, 'ssh-auto-config',
+                                                 'root 认证失败；开始串口配置')
+                    configured, error = self.configure_root_ssh()
+                    if self.manager and self.serial:
+                        self.manager.store.event(self.serial, actor, 'ssh-auto-config',
+                                                 '成功' if configured else '失败：' + error)
+                    if not configured:
+                        return None, error
+                    authenticated, _, detail = check_password_login(ip, user, password)
+                if not authenticated:
+                    return None, detail
             session_args = {}
             if ssh_user is not None:
                 session_args['user'] = ssh_user
             if ssh_password is not None:
                 session_args['password'] = ssh_password
             session = SshSession(sid, ip, self.label, self.stable_dir(), **session_args)
+            session.auto_configured = bool(auto_configure and denied)
             session.actor, session.title = actor, title
             session.persistent = persistent
             if self.manager and self.serial:
@@ -553,7 +661,7 @@ class Device:
                 session.close()
                 return None, '建立 SSH 会话失败'
             with self.operation_lock:
-                if self.stop is not origin or origin.is_set():
+                if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
                     session.close()
                     return None, '设备已重新枚举,SSH 会话已关闭'
                 with self.sessions_lock:

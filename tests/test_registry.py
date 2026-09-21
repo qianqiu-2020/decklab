@@ -9,7 +9,7 @@ from seriald_core import device as seriald
 
 
 class FakeSession:
-    def __init__(self, sid, ip='192.0.2.1', label='test', logdir='/unused'):
+    def __init__(self, sid, ip='192.0.2.1', label='test', logdir='/unused', **kwargs):
         self.sid = sid
         self.ip = ip
         self.cv = threading.Condition()
@@ -51,6 +51,7 @@ class SessionRegistryTests(unittest.TestCase):
             mock.patch.object(seriald.Device, 'preload'),
             mock.patch.object(seriald.Device, 'stable_dir', return_value='/unused'),
             mock.patch.object(seriald, 'SshSession', side_effect=FakeSession),
+            mock.patch.object(seriald, 'check_password_login', return_value=(True, False, '')),
             mock.patch.object(seriald.os, 'open', side_effect=AssertionError('hardware forbidden')),
             mock.patch.object(subprocess, 'Popen', side_effect=AssertionError('SSH forbidden')),
         ]
@@ -130,6 +131,38 @@ class SessionRegistryTests(unittest.TestCase):
         self.assertEqual(error, '')
         self.assertNotEqual(session.sid, 'ssh1')
         self.assertIs(device.get_session(session.sid), session)
+
+    def test_default_root_auth_failure_configures_serial_then_rechecks(self):
+        with mock.patch.object(seriald, 'check_password_login',
+                               side_effect=[(False, True, 'SSH 认证失败'), (True, False, '')]) as check, \
+                mock.patch.object(self.device, 'configure_root_ssh', return_value=(True, '')) as configure:
+            session, error = self.device.ssh_connect()
+        self.assertEqual(error, '')
+        self.assertIsNotNone(session)
+        self.assertEqual(check.call_count, 2)
+        configure.assert_called_once()
+
+    def test_serial_setup_failure_does_not_create_ssh_session(self):
+        with mock.patch.object(seriald, 'check_password_login',
+                               return_value=(False, True, 'SSH 认证失败')) as check, \
+                mock.patch.object(self.device, 'configure_root_ssh',
+                                  return_value=(False, '串口未登录')):
+            session, error = self.device.ssh_connect()
+        self.assertIsNone(session)
+        self.assertEqual(error, '串口未登录')
+        check.assert_called_once()
+        self.assertEqual(self.device.ssh_pending, 0)
+        self.assertEqual(self.device.ssh_sessions, {})
+
+    def test_network_failure_or_explicit_user_never_changes_board(self):
+        with mock.patch.object(seriald, 'check_password_login',
+                               return_value=(False, False, 'SSH 连接超时')), \
+                mock.patch.object(self.device, 'configure_root_ssh') as configure:
+            session, error = self.device.ssh_connect()
+            self.assertIsNone(session)
+            self.assertEqual(error, 'SSH 连接超时')
+            self.device.ssh_connect(ssh_user='ubuntu', ssh_password='different')
+        configure.assert_not_called()
 
     def test_named_agent_reuses_live_persistent_session(self):
         device = self.device

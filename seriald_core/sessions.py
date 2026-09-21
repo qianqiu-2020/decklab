@@ -3,6 +3,7 @@ import codecs
 import fcntl
 import os
 import pty
+import re
 import select
 import struct
 import subprocess
@@ -12,6 +13,29 @@ import time
 
 from .config import ANSI, DATE_FMT, SCROLLBACK
 from .transport import write_all
+
+
+def check_password_login(ip, user, password):
+    """Return (authenticated, denied, detail) without opening a persistent PTY."""
+    argv = ['sshpass', '-e', 'ssh', '-T', '-o', 'StrictHostKeyChecking=no',
+            '-o', 'UserKnownHostsFile=/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null',
+            '-o', 'ConnectTimeout=6', '-o', 'ConnectionAttempts=1',
+            '-o', 'NumberOfPasswordPrompts=1', '-o', 'PubkeyAuthentication=no',
+            '-o', 'PreferredAuthentications=password,keyboard-interactive',
+            user + '@' + ip, 'true']
+    try:
+        result = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, timeout=12, check=False,
+                                env=dict(os.environ, SSHPASS=password))
+    except subprocess.TimeoutExpired:
+        return False, False, 'SSH 认证探测超时'
+    except OSError as error:
+        return False, False, 'SSH 认证探测失败: %s' % error
+    if result.returncode == 0:
+        return True, False, ''
+    detail = result.stderr.decode('utf-8', 'replace')[-500:]
+    denied = result.returncode == 5 or bool(re.search(r'Permission denied|Authentication failed', detail, re.I))
+    return False, denied, 'SSH 认证失败' if denied else (detail.strip() or 'SSH 连接失败')
 
 class SshSession:
     """一条 ssh 到板子的会话(pty)。

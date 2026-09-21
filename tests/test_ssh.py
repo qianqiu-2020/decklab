@@ -80,6 +80,18 @@ class SshSessionTests(unittest.TestCase):
             self.assertTrue(session.ensure())
             self.assertEqual(spawn.call_args.kwargs['env']['SSHPASS'], 'board-secret')
 
+    def test_password_preflight_distinguishes_denial_from_network_error(self):
+        with mock.patch.object(seriald.subprocess, 'run',
+                               return_value=mock.Mock(returncode=5, stderr=b'Permission denied')) as run:
+            self.assertEqual(seriald.check_password_login('192.0.2.1', 'root', 'bianbu'),
+                             (False, True, 'SSH 认证失败'))
+        self.assertEqual(run.call_args.kwargs['env']['SSHPASS'], 'bianbu')
+        self.assertNotIn('bianbu', run.call_args.args[0])
+        with mock.patch.object(seriald.subprocess, 'run',
+                               return_value=mock.Mock(returncode=255, stderr=b'Connection refused')):
+            self.assertEqual(seriald.check_password_login('192.0.2.1', 'root', 'bianbu'),
+                             (False, False, 'Connection refused'))
+
     def test_long_session_rotates_log_at_date_boundary(self):
         session = self.session()
         old_log = session.logf

@@ -87,15 +87,15 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 return self._json(400, {'error': 'incomplete body'})
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
-            # Serial identification may spend the whole probe window waiting for a
-            # login prompt and a complete framed response (30s).  SSH enable can
-            # also install packages and deliberately has a 240s device timeout.
+            # Serial identification may wait for a complete framed response.
+            # SSH enable can install packages, while SSH connect may configure
+            # root access via the serial console after an auth failure.
             # Keep the control-plane socket open for those operations; a 30s
             # proxy timeout otherwise closes the browser request while the
             # collector is still working, leaving the board identified but the UI
             # showing a spurious "Failed to fetch".
             slow = self.command == 'POST' and urlparse(self.path).path in (
-                '/api/identify', '/api/ssh-enable')
+                '/api/identify', '/api/ssh-enable', '/api/ssh-connect')
             connection = UnixHTTPConnection(self.collector_socket,
                                              timeout=300 if slow else 30)
             connection.request(self.command, self.path, body=body, headers=headers)

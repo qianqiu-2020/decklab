@@ -6,7 +6,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.7_all.deb
+sudo apt install ./dist/seriald_1.4.16_all.deb
 systemctl status seriald
 serialctl devices
 ```
@@ -33,6 +33,11 @@ SERIALD_AUTH_TOKEN=一段足够长的随机值
 `SERIALD_AUTH_TOKEN` 为空时不启用认证，仅适合可信开发网络。设置后，浏览器使用用户名 `seriald`、
 密码为该 token 的 HTTP Basic 登录；agent 设置 `SERIALD_TOKEN` 或传 `serialctl --token`。
 终端访问等同于使用开发板登录账户，即使启用 token 也应限制防火墙访问范围。
+
+默认 root/bianbu SSH 认证被拒绝时，服务会尝试从已登录的串口 shell 执行免密码 sudo，
+交互式设置 root 密码为 bianbu，在 sshd_config 顶部启用 root 密码登录，验证配置并
+重启 sshd，然后复验 SSH。串口停在登录提示符、sudo 要求普通用户密码或 SSH 网络不通时
+不会盲目更改配置；使用自定义 SSH 账户或密码也不会触发该流程。
 
 ## 安装布局
 

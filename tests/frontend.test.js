@@ -306,8 +306,9 @@ test('SSH identification adopts the canonical label before reading or sending', 
   const h = await setup(); h.select('A');
   h.get('d-tabs').children.at(-1).children[0].click();
   h.take('/api/ssh-connect').resolve({ ok: true, sid: 'ssh123', ip: '192.0.2.1',
-    device_key: 'musepi2', serial: 'SN001' });
+    device_key: 'musepi2', serial: 'SN001', auto_configured: true });
   await drain();
+  assert.ok(h.get('d-status').textContent.includes('已通过串口配置 root SSH'));
   const currentRead = h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1);
   const query = new URL(currentRead.url, 'http://fixture').searchParams;
   assert.equal(query.get('key'), 'musepi2');

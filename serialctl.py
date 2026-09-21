@@ -27,7 +27,7 @@ class ClientError(Exception):
 
 
 class Client:
-    def __init__(self, url, timeout=90, token=''):
+    def __init__(self, url, timeout=180, token=''):
         parsed = urlsplit(url)
         if (parsed.scheme not in ('http', 'https') or not parsed.netloc
                 or parsed.query or parsed.fragment or parsed.username or parsed.password):
@@ -240,7 +240,7 @@ def nonnegative(value):
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--url', default=os.environ.get('SERIALD_URL', DEFAULT_URL))
-    p.add_argument('--http-timeout', type=positive_timeout, default=90)
+    p.add_argument('--http-timeout', type=positive_timeout, default=180)
     p.add_argument('--token', default=os.environ.get('SERIALD_TOKEN', ''),
                    help='access token; defaults to SERIALD_TOKEN')
     p.add_argument('--device', help='device label (key) or immutable board serial')

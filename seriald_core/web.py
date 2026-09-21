@@ -318,6 +318,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(502, {'ok': False, 'error': err})
             return self._json(200, {'ok': True, 'sid': s.sid, 'ip': s.ip,
                                     'persistent': bool(getattr(s, 'persistent', False)),
+                                    'auto_configured': bool(getattr(s, 'auto_configured', False)),
                                     'device_key': d.key, 'serial': d.serial})
 
         if route == '/api/session-send':

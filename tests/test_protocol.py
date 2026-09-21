@@ -230,6 +230,43 @@ class ShellLoginTests(DeviceFixture):
         self.assertEqual(match.group(0), '# ')
 
 
+class RootSshSetupTests(DeviceFixture):
+    def test_passwd_warning_still_reaches_retype_and_config(self):
+        responses = iter(['New password:',
+                          'BAD PASSWORD: The password is shorter than 8 characters\nRetype new password:',
+                          'passwd: password updated successfully', 'ubuntu@ubuntu:~$ '])
+
+        def wait(base, pattern, timeout):
+            return re.search(pattern, next(responses))
+
+        with mock.patch.object(self.device, 'ensure_shell', return_value=(True, 0)), \
+                mock.patch.object(self.device, '_write', return_value=(True, '')) as write, \
+                mock.patch.object(self.device, '_wait', side_effect=wait), \
+                mock.patch.object(self.device, '_run_cmd_locked',
+                                  return_value=(True, 'SSH_CONFIG_OK=1\n')) as config, \
+                mock.patch.object(self.device, '_say'):
+            self.assertEqual(self.device.configure_root_ssh(), (True, ''))
+        self.assertEqual([call.args[0] for call in write.call_args_list],
+                         ['if [ "$(id -u)" = 0 ]; then passwd root; else sudo -n passwd root; fi\r',
+                          'bianbu\r', 'bianbu\r'])
+        command = config.call_args.args[0]
+        self.assertNotIn('bianbu', command)
+        self.assertIn('/etc/ssh/sshd_config', command)
+        self.assertEqual(subprocess.run(['sh', '-n', '-c', command]).returncode, 0)
+        self.assertFalse(self.device.probing)
+
+    def test_sudo_password_requirement_stops_before_changing_config(self):
+        with mock.patch.object(self.device, 'ensure_shell', return_value=(True, 0)), \
+                mock.patch.object(self.device, '_write', return_value=(True, '')) as write, \
+                mock.patch.object(self.device, '_wait', return_value=None), \
+                mock.patch.object(self.device, '_run_cmd_locked') as config, \
+                mock.patch.object(self.device, '_say'):
+            ok, error = self.device.configure_root_ssh()
+        self.assertFalse(ok)
+        self.assertIn('sudo', error)
+        self.assertEqual(write.call_count, 1)
+        config.assert_not_called()
+
 class SshStateTests(unittest.TestCase):
     def test_quiet_branches_emit_exactly_one_status_using_only_shell_mocks(self):
         # 所有可能接触系统的命令都被函数替换,PATH 为空;只有 echo/test 等 builtin。

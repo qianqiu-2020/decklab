@@ -763,11 +763,11 @@
     var add = document.createElement('button');
     add.type = 'button'; add.textContent = '+ SSH 会话';
     add.disabled = !!ctx.connecting;
-    add.title = '使用上位机配置的账户创建独立 SSH 会话（没有 IP 会先识别）';
+    add.title = '创建独立 SSH 会话；默认 root 密码认证失败时尝试通过串口自动配置';
     add.addEventListener('click', function () {
       if (!isCurrent(ctx) || ctx.connecting) return;
       ctx.connecting = true; add.disabled = true;
-      $('d-status').textContent = ' 正在建立 SSH 会话…（没识别过 IP 的话会先跑一次识别）';
+      $('d-status').textContent = ' 正在建立 SSH 会话…（认证失败时可能通过串口配置 root 登录）';
       fetch('/api/ssh-connect', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: ctx.key, serial: ctx.serial, actor: 'web' }) })
         .then(function (r) { return r.json(); })
@@ -780,7 +780,7 @@
             sessions.push({ sid: d.sid, kind: 'ssh', ip: d.ip });
           }
           switchSession(d.sid);
-          $('d-status').textContent = ' 已连接 ' + d.ip;
+          $('d-status').textContent = (d.auto_configured ? ' 已通过串口配置 root SSH；连接 ' : ' 已连接 ') + d.ip;
           pollDevices();
         })
         .catch(function (e) {
