@@ -648,6 +648,33 @@ test('full clear lets GRUB leave the previous EDK2 50-row screen', async () => {
   assert.ok(terminal.refreshes > 0);
 });
 
+test('a new boot epoch discards stale EDK2 screen state and older boots', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  h.take('/api/session').resolve(readResponse('A',
+    'old boot\x1b[47m\x1b[50;01HOLD BAR\r\n' +
+    'U-Boot SPL 2022.10 (build one)\r\nfirst boot\r\n' +
+    '\x00sys: 0x10000200\r\nU-Boot SPL 2022.10 (build two)\r\nlatest boot'));
+  await drain(); terminal.flush(); await drain();
+  assert.equal(terminal.wasReset, true);
+  assert.equal(terminal.wasCleared, true);
+  assert.ok(terminal.parsed.includes('U-Boot SPL 2022.10 (build two)'));
+  assert.ok(terminal.parsed.includes('latest boot'));
+  assert.ok(!terminal.parsed.includes('OLD BAR'));
+  assert.ok(!terminal.parsed.includes('first boot'));
+});
+
+test('boot banner split across reads still resets the live terminal once', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  h.take('/api/session').resolve(readResponse('A', 'stale\x1b[47m\r\nU-Boot SP', 20));
+  await drain(); terminal.flush(); await drain();
+  const poll = h.timer(300); assert.ok(poll); h.fire(poll[0]);
+  h.take('/api/session').resolve(readResponse('A', 'L 2022.10 fresh', 35));
+  await drain(); terminal.flush(); await drain();
+  assert.equal(terminal.wasReset, true);
+  assert.ok(terminal.parsed.includes('L 2022.10 fresh'));
+  assert.ok(!terminal.parsed.includes('stale'));
+});
+
 (async () => {
   for (const [name, fn] of tests) {
     await fn(); console.log('ok - ' + name);

@@ -56,7 +56,7 @@
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
                 sendTail: Promise.resolve(), lastSel: '', searchQuery: '', searchMatch: -1,
-                serialRows: 24 };
+                serialRows: 24, bootScanTail: '' };
     view = ctx;
     setInputMode(ctx);
     term = ctx.term = new Terminal({
@@ -489,6 +489,29 @@
       if (lines > ctx.term.options.scrollback) ctx.term.options.scrollback = lines;
     }
     var redraw = false;
+    function newestBootCycle(raw) {
+      if (ctx.sid !== 'serial' || !raw) return raw;
+      // The collector buffer can contain several resets.  Replaying an old
+      // EDK2 screen followed by a new boot's plain text preserves highlighted
+      // background rows because Boot ROM/U-Boot do not clear a terminal they
+      // did not create.  Treat an unmistakable boot banner as a new terminal
+      // epoch and show only the newest epoch from this payload onward.
+      var prefix = ctx.bootScanTail || '';
+      var joined = prefix + raw;
+      var pattern = /(?:\x00sys:\s*0x[0-9a-f]+|(?:^|\r?\n)U-Boot(?: SPL)? \d{4}\.\d{2})/ig;
+      var match, cut = -1;
+      while ((match = pattern.exec(joined))) {
+        if (match.index + match[0].length > prefix.length) {
+          cut = Math.max(0, match.index - prefix.length);
+        }
+      }
+      ctx.bootScanTail = joined.slice(-32);
+      if (cut < 0) return raw;
+      try { ctx.term.reset(); ctx.term.clear(); ctx.term.clearSelection(); } catch (e) {}
+      ctx.serialRows = 24;
+      ctx.initialRendered = false;
+      return raw.slice(cut);
+    }
     function prepareSerialGeometry(raw) {
       if (ctx.sid !== 'serial' || !raw) return;
       // UEFI commonly paints an 80x50 text console with absolute CUP/HVP
@@ -502,7 +525,11 @@
       var pattern = /\x1b\[(?:([0-9]{1,3})(?:;[0-9]{0,3})?[Hf]|2J)/g;
       var match, rows = ctx.serialRows || visibleRows;
       while ((match = pattern.exec(raw))) {
-        if (!match[1]) { rows = visibleRows; continue; }
+        if (!match[1]) {
+          rows = visibleRows;
+          try { ctx.term.clearSelection(); } catch (e) {}
+          continue;
+        }
         var row = Number(match[1] || 1);
         if (row >= 1 && row <= 200) rows = Math.max(rows, row);
       }
@@ -518,6 +545,7 @@
     }
     if (typeof payload.data_b64 === 'string') {
       var raw = atob(payload.data_b64);
+      raw = newestBootCycle(raw);
       prepareSerialGeometry(raw);
       // Firmware menus paint the screen with cursor positioning and erases.
       // xterm normally tracks dirty rows, but a large sequence split across
@@ -528,9 +556,10 @@
           written);
       } else ctx.initialRendered = true;
     } else if (payload.data) {
-      prepareSerialGeometry(payload.data);
-      redraw = /\x1b(?:\[[0-9;?]*[ABCDEFGHJKSTfhl]|[78])/.test(payload.data);
-      ctx.term.write(payload.data, written);
+      var text = newestBootCycle(payload.data);
+      prepareSerialGeometry(text);
+      redraw = /\x1b(?:\[[0-9;?]*[ABCDEFGHJKSTfhl]|[78])/.test(text);
+      ctx.term.write(text, written);
     } else ctx.initialRendered = true;
   }
 
