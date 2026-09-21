@@ -30,6 +30,9 @@ class LogArchiveTests(unittest.TestCase):
         self.assertEqual(len(epochs), 2)
         newest, oldest = epochs
         self.assertEqual((newest['number'], newest['files'], newest['cross_day']), (2, 2, True))
+        self.assertEqual(newest['dates'], ['2026-09-20', '2026-09-21'])
+        self.assertEqual(oldest['dates'], ['2026-09-20'])
+        self.assertFalse(oldest['cross_day'])
         self.assertIn(b'second boot continues', read_epoch(str(self.root), newest))
         self.assertNotIn(b'first boot', read_epoch(str(self.root), newest))
         self.assertIn(b'first boot', read_epoch(str(self.root), oldest))
@@ -39,6 +42,17 @@ class LogArchiveTests(unittest.TestCase):
         path.write_bytes(b'2026-09-21 08:00:00  U-Boot SPL 2022.10\n'
                          b'2026-09-21 08:00:01  U-Boot 2022.10\n')
         self.assertEqual(len(boot_epochs(str(self.root), self.files())), 1)
+
+    def test_next_day_reboot_does_not_make_previous_boot_cross_day(self):
+        (self.root / 'serial-20260920.log').write_bytes(
+            b'2026-09-20 23:00:00  U-Boot 2024.10\n'
+            b'2026-09-20 23:00:01  running\n')
+        (self.root / 'serial-20260921.log').write_bytes(
+            b'2026-09-21 08:00:00  U-Boot 2024.10\n')
+        newest, oldest = boot_epochs(str(self.root), self.files())
+        self.assertEqual(oldest['dates'], ['2026-09-20'])
+        self.assertFalse(oldest['cross_day'])
+        self.assertEqual(newest['dates'], ['2026-09-21'])
 
 
 if __name__ == '__main__':

@@ -6,6 +6,8 @@
   var sessions = [{ sid: 'serial', kind: 'serial' }];
   var view = null, term = null;
   var sessionPage = 0, eventPage = 0;
+  var recordsTab = 'logs';
+  var archiveState = { key: '', mode: 'date', date: '', bootId: '' };
   var ACTIVITY_PAGE_SIZE = 10;
   var DEFAULT_TERMINAL_FONT_SIZE = 14.5;
   var takenOver = {};
@@ -71,8 +73,8 @@
       cursorBlink: !ctx.readonly,
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
       fontSize: DEFAULT_TERMINAL_FONT_SIZE,
-      theme: { background: '#10191F', foreground: '#D1DCDF', cursor: '#78DDD1',
-               selectionBackground: '#2E6667' }
+      theme: { background: '#111B21', foreground: '#D5DEDD', cursor: '#96D0C1',
+               selectionBackground: '#385C59' }
     });
     ctx.fit = new FitAddon.FitAddon();
     ctx.term.loadAddon(ctx.fit);
@@ -854,6 +856,152 @@
     flushInput(ctx);
   }
 
+  function archiveDate(file) {
+    if (file.date) return file.date;
+    var match = /(\d{4})(\d\d)(\d\d)\.log$/.exec(file.name);
+    return match ? match[1] + '-' + match[2] + '-' + match[3] : '日期未知';
+  }
+
+  function bootStartDate(boot) {
+    return (boot.started || '').slice(0, 10) || (boot.dates || [])[0] || '';
+  }
+
+  function openBootLog(ctx, boot) {
+    if (!isCurrent(ctx)) return;
+    var url = '/api/boot-log?key=' + encodeURIComponent(ctx.key)
+      + '&serial=' + encodeURIComponent(ctx.serial || '') + '&id=' + encodeURIComponent(boot.id);
+    openArchivedLog(ctx, boot.id, '启动 #' + boot.number + ' · ' + (boot.started || ''), url);
+  }
+
+  function archiveHeading(box, title) {
+    var heading = document.createElement('div');
+    heading.className = 'log-subhead'; heading.textContent = title;
+    box.appendChild(heading);
+  }
+
+  function renderArchive(ctx) {
+    if (!isCurrent(ctx)) return;
+    var box = $('d-logs'), picker = $('archive-picker');
+    box.textContent = ''; picker.textContent = '';
+    var files = ctx.archiveFiles || [], boots = ctx.archiveBoots || [];
+    var dates = Array.from(new Set(files.map(archiveDate))).sort().reverse();
+    var hasBoots = boots.length > 0;
+    if (!hasBoots) archiveState.mode = 'date';
+    ['date', 'boot'].forEach(function (mode) {
+      var button = $('archive-mode-' + mode);
+      button.classList.toggle('on', archiveState.mode === mode);
+      button.setAttribute('aria-pressed', archiveState.mode === mode ? 'true' : 'false');
+      button.disabled = mode === 'boot' && !hasBoots;
+    });
+    if (!files.length) { box.textContent = '还没有串口日志文件'; return; }
+    var select = document.createElement('select');
+    select.setAttribute('aria-label', archiveState.mode === 'date' ? '选择日志日期' : '选择启动次数');
+    picker.appendChild(select);
+    var summary = document.createElement('div');
+    summary.className = 'archive-summary'; picker.appendChild(summary);
+    if (archiveState.mode === 'date') {
+      if (dates.indexOf(archiveState.date) < 0) archiveState.date = dates[0];
+      dates.forEach(function (date) {
+        var starts = boots.filter(function (boot) { return bootStartDate(boot) === date; }).length;
+        var related = boots.filter(function (boot) { return (boot.dates || []).indexOf(date) >= 0; }).length;
+        var option = document.createElement('option');
+        option.value = date;
+        option.textContent = date + ' · 启动 ' + starts + ' 次'
+          + (related > starts ? ' · 延续 ' + (related - starts) + ' 次' : '');
+        select.appendChild(option);
+      });
+      select.value = archiveState.date;
+      select.addEventListener('change', function () {
+        archiveState.date = select.value; renderArchive(ctx);
+      });
+      var linked = boots.filter(function (boot) {
+        return (boot.dates || []).indexOf(archiveState.date) >= 0;
+      });
+      var startedHere = linked.filter(function (boot) {
+        return bootStartDate(boot) === archiveState.date;
+      }).length;
+      summary.textContent = '当天启动 ' + startedHere + ' 次'
+        + (linked.length > startedHere ? ' · 跨日延续 ' + (linked.length - startedHere) + ' 次' : '');
+      archiveHeading(box, '当日日志');
+      files.filter(function (file) { return archiveDate(file) === archiveState.date; }).forEach(function (file) {
+        var row = document.createElement('div'); row.className = 'log-row';
+        var date = document.createElement('span'); date.className = 'log-date';
+        date.textContent = archiveDate(file);
+        var open = document.createElement('button'); open.type = 'button';
+        open.textContent = file.name;
+        open.addEventListener('click', function () {
+          if (isCurrent(ctx)) openArchivedLog(ctx, file.name, '串口日志 · ' + archiveDate(file));
+        });
+        var size = document.createElement('span'); size.className = 'log-size';
+        size.textContent = fmt(file.size);
+        var download = document.createElement('a'); download.className = 'log-download';
+        download.href = '/api/log?key=' + encodeURIComponent(ctx.key)
+          + '&serial=' + encodeURIComponent(ctx.serial || '') + '&file=' + encodeURIComponent(file.name)
+          + '&download=1';
+        download.download = file.name; download.textContent = '下载';
+        row.appendChild(date); row.appendChild(open); row.appendChild(size);
+        row.appendChild(download); box.appendChild(row);
+      });
+      archiveHeading(box, '相关启动 · ' + linked.length);
+      linked.forEach(function (boot) {
+        var row = document.createElement('div'); row.className = 'log-row boot-row';
+        var relation = document.createElement('span'); relation.className = 'log-date';
+        relation.textContent = bootStartDate(boot) === archiveState.date
+          ? '本日启动 · ' + (boot.started || '时间未知') : '跨日延续 · 起于 ' + (boot.started || '时间未知');
+        var show = document.createElement('button'); show.type = 'button';
+        show.textContent = '启动 #' + boot.number + ' · ' + (boot.marker || '启动标志');
+        show.addEventListener('click', function () {
+          archiveState.bootId = boot.id; archiveState.mode = 'boot'; renderArchive(ctx);
+        });
+        var open = document.createElement('button'); open.type = 'button';
+        open.className = 'archive-open'; open.textContent = '终端打开';
+        open.addEventListener('click', function () { openBootLog(ctx, boot); });
+        row.appendChild(relation); row.appendChild(show); row.appendChild(open); box.appendChild(row);
+      });
+      if (!linked.length) {
+        var empty = document.createElement('div'); empty.className = 'log-note';
+        empty.textContent = '这一天没有检测到 Boot ROM / U-Boot 启动标志；完整日期日志仍可查看。';
+        box.appendChild(empty);
+      }
+    } else {
+      var boot = boots.filter(function (item) { return item.id === archiveState.bootId; })[0] || boots[0];
+      archiveState.bootId = boot.id;
+      boots.forEach(function (item) {
+        var option = document.createElement('option');
+        option.value = item.id;
+        option.textContent = '启动 #' + item.number + ' · ' + (item.started || '时间未知');
+        select.appendChild(option);
+      });
+      select.value = boot.id;
+      select.addEventListener('change', function () {
+        archiveState.bootId = select.value; renderArchive(ctx);
+      });
+      summary.textContent = (boot.marker || '启动标志') + ' · ' + fmt(boot.size)
+        + (boot.cross_day ? ' · 跨日运行' : '');
+      var card = document.createElement('div'); card.className = 'boot-detail';
+      var title = document.createElement('strong');
+      title.textContent = '启动 #' + boot.number + ' · ' + (boot.started || '时间未知');
+      card.appendChild(title);
+      var datesLabel = document.createElement('span'); datesLabel.className = 'log-note';
+      datesLabel.textContent = '涉及日期 · 点击日期返回当日日志';
+      card.appendChild(datesLabel);
+      var links = document.createElement('div'); links.className = 'archive-date-links';
+      (boot.dates || []).forEach(function (date) {
+        var link = document.createElement('button'); link.type = 'button';
+        link.textContent = date;
+        link.addEventListener('click', function () {
+          archiveState.date = date; archiveState.mode = 'date'; renderArchive(ctx);
+        });
+        links.appendChild(link);
+      });
+      card.appendChild(links);
+      var openBoot = document.createElement('button'); openBoot.type = 'button';
+      openBoot.className = 'pri'; openBoot.textContent = '在终端打开本次启动';
+      openBoot.addEventListener('click', function () { openBootLog(ctx, boot); });
+      card.appendChild(openBoot); box.appendChild(card);
+    }
+  }
+
   function loadLogs() {
     var ctx = view;
     if (!isCurrent(ctx)) return;
@@ -861,64 +1009,16 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!isCurrent(ctx) || (d.key && d.key !== ctx.key)) return;
-        var box = $('d-logs');
-        box.textContent = '';
-        var allFiles = d.files || [];
-        var files = allFiles.filter(function (file) {
+        if (archiveState.key !== ctx.key) {
+          archiveState = { key: ctx.key, mode: 'date', date: '', bootId: '' };
+        }
+        ctx.archiveFiles = (d.files || []).filter(function (file) {
           return (file.kind || (file.name.indexOf('ssh-') === 0 ? 'ssh' : 'serial')) === 'serial';
         });
-        if (!files.length) {
-          box.textContent = '（还没有串口日志文件）'; return;
-        }
-        $('log-location').textContent = '点击后在终端标签打开 · '
-          + (d.archive ? 'logs/' + d.archive + '/' : '待识别连接的临时日志');
-        files.forEach(function (f) {
-          var row = document.createElement('div'); row.className = 'log-row';
-          var date = document.createElement('span'); date.className = 'log-date';
-          date.textContent = f.date || '日期未知';
-          var a = document.createElement('button');
-          a.type = 'button';
-          a.addEventListener('click', function () {
-            if (isCurrent(ctx)) openArchivedLog(ctx, f.name, '串口日志 · ' + (f.date || f.name));
-          });
-          a.textContent = f.name;
-          var size = document.createElement('span'); size.className = 'log-size'; size.textContent = fmt(f.size);
-          var download = document.createElement('a'); download.className = 'log-download';
-          download.href = '/api/log?key=' + encodeURIComponent(ctx.key)
-            + '&serial=' + encodeURIComponent(ctx.serial || '') + '&file=' + encodeURIComponent(f.name)
-            + '&download=1';
-          download.download = f.name; download.textContent = '下载';
-          row.appendChild(date); row.appendChild(a); row.appendChild(size); row.appendChild(download); box.appendChild(row);
-        });
-        var boots = d.boots || [];
-        if (boots.length) {
-          var heading = document.createElement('div'); heading.className = 'log-subhead';
-          heading.textContent = '检测到 ' + boots.length + ' 次启动'; box.appendChild(heading);
-          boots.forEach(function (boot) {
-            var row = document.createElement('div'); row.className = 'log-row boot-row';
-            var date = document.createElement('span'); date.className = 'log-date';
-            date.textContent = boot.started || '时间未知';
-            var button = document.createElement('button'); button.type = 'button';
-            button.textContent = '启动 #' + boot.number + ' · ' + (boot.marker || '启动标志');
-            button.addEventListener('click', function () {
-              var url = '/api/boot-log?key=' + encodeURIComponent(ctx.key)
-                + '&serial=' + encodeURIComponent(ctx.serial || '') + '&id=' + encodeURIComponent(boot.id);
-              openArchivedLog(ctx, boot.id, '启动 #' + boot.number + ' · ' + (boot.started || ''), url);
-            });
-            var meta = document.createElement('span'); meta.className = 'log-size';
-            meta.textContent = fmt(boot.size) + (boot.cross_day ? ' · 跨日' : '');
-            row.appendChild(date); row.appendChild(button); row.appendChild(meta); box.appendChild(row);
-          });
-        } else {
-          var noBoot = document.createElement('div'); noBoot.className = 'log-note';
-          noBoot.textContent = '尚未在归档中检测到 Boot ROM / U-Boot 启动标志。'; box.appendChild(noBoot);
-        }
-        var sshCount = allFiles.length - files.length;
-        if (sshCount) {
-          var note = document.createElement('div'); note.className = 'log-note';
-          note.textContent = sshCount + ' 份 SSH transcript 请从上方对应会话的“查看记录”打开。';
-          box.appendChild(note);
-        }
+        ctx.archiveBoots = d.boots || [];
+        $('log-location').textContent = d.archive
+          ? 'logs/' + d.archive + '/' : '待识别连接的临时日志';
+        renderArchive(ctx);
       }).catch(function (e) {
         if (isCurrent(ctx)) $('d-logs').textContent = '读取日志列表失败：' + e.message;
       });
@@ -1124,12 +1224,43 @@
     $('terminal-search').focus();
     if ($('terminal-search').select) $('terminal-search').select();
   });
+  function setRecordsTab(name) {
+    recordsTab = name;
+    ['logs', 'sessions', 'events', 'commands'].forEach(function (tab) {
+      var selected = tab === name;
+      $('record-tab-' + tab).classList.toggle('on', selected);
+      $('record-tab-' + tab).setAttribute('aria-selected', selected ? 'true' : 'false');
+      $('record-panel-' + tab).hidden = !selected;
+    });
+    $('d-records').scrollTop = 0;
+  }
   function setRecordsOpen(open) {
     $('d-records').hidden = !open;
     $('console-layout').classList.toggle('records-open', open);
     $('b-records').setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) setRecordsTab(recordsTab);
     setTimeout(resizeTerm, 0);
   }
+  var recordTabs = ['logs', 'sessions', 'events', 'commands'];
+  recordTabs.forEach(function (tab, index) {
+    var button = $('record-tab-' + tab);
+    button.addEventListener('click', function () { setRecordsTab(tab); });
+    button.addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      var offset = event.key === 'ArrowRight' ? 1 : -1;
+      var next = recordTabs[(index + offset + recordTabs.length) % recordTabs.length];
+      setRecordsTab(next);
+      $('record-tab-' + next).focus();
+    });
+  });
+  ['date', 'boot'].forEach(function (mode) {
+    $('archive-mode-' + mode).addEventListener('click', function () {
+      var ctx = view;
+      if (!isCurrent(ctx)) return;
+      archiveState.mode = mode; renderArchive(ctx);
+    });
+  });
   $('b-records').addEventListener('click', function () { setRecordsOpen($('d-records').hidden); });
   $('b-records-close').addEventListener('click', function () { setRecordsOpen(false); });
   /* ---------- 动作 ---------- */

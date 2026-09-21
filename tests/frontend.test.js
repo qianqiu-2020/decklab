@@ -52,6 +52,7 @@ function harness() {
     if (!elements.has(id)) {
       const element = new Element();
       if (id === 'd-slow-paste') element.checked = false;
+      if (id === 'd-records') element.hidden = true;
       elements.set(id, element);
     }
     return elements.get(id);
@@ -513,7 +514,7 @@ test('archived log terminal is isolated from late responses after switching devi
   const h = await setup(); h.select('A');
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [{ name: 'serial-test.log', size: 20 }] });
   await drain();
-  const button = h.get('d-logs').children[0].children[1];
+  const button = h.get('d-logs').children.find(row => row.className === 'log-row').children[1];
   assert.equal(button.tagName, 'button'); button.click();
   const archived = h.terminals.at(-1);
   assert.ok(h.get('d-term').scrolled);
@@ -534,7 +535,7 @@ test('multiple archived logs open as cached read-only terminal tabs', async () =
   ];
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files });
   await drain();
-  h.get('d-logs').children[0].children[1].click();
+  h.get('d-logs').children.find(row => row.className === 'log-row').children[1].click();
   const newest = h.terminals.at(-1);
   assert.equal(newest.options.convertEol, true);
   h.take('/api/log').resolve({ data_b64: Buffer.from('new log').toString('base64'),
@@ -543,7 +544,9 @@ test('multiple archived logs open as cached read-only terminal tabs', async () =
   await drain();
   newest.flush();
   assert.equal(newest.parsed, 'new log');
-  h.get('d-logs').children[1].children[1].click();
+  const dateSelect = h.get('archive-picker').children[0];
+  dateSelect.value = '2026-09-19'; dateSelect.emit('change');
+  h.get('d-logs').children.find(row => row.className === 'log-row').children[1].click();
   const oldest = h.terminals.at(-1);
   h.take('/api/log').resolve({ data_b64: Buffer.from('old log').toString('base64'),
     data: 'old log', start_off: 0, off: 7, size: 7, more: false });
@@ -566,18 +569,67 @@ test('daily logs are downloadable and detected boot epochs open in terminal tabs
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [
     { name: 'serial-20260921.log', kind: 'serial', date: '2026-09-21', size: 100 },
   ], boots: [{ id: 'boot-abc', number: 3, started: '2026-09-21 08:00:00',
-    marker: 'U-Boot SPL', size: 70, files: 1, cross_day: false }] });
+    marker: 'U-Boot SPL', size: 70, files: 1, dates: ['2026-09-21'], cross_day: false }] });
   await drain();
   const rows = h.get('d-logs').children;
-  assert.ok(rows[0].children[3].href.includes('download=1'));
-  assert.equal(rows[0].children[3].download, 'serial-20260921.log');
+  const dailyRow = rows.find(row => row.className === 'log-row');
+  assert.ok(dailyRow.children[3].href.includes('download=1'));
+  assert.equal(dailyRow.children[3].download, 'serial-20260921.log');
   const bootRow = rows.find(row => row.className.includes('boot-row'));
   bootRow.children[1].click();
+  assert.equal(h.get('archive-mode-boot').attributes['aria-pressed'], 'true');
+  const bootCard = h.get('d-logs').children.find(row => row.className === 'boot-detail');
+  bootCard.children[2].children[0].click();
+  assert.equal(h.get('archive-mode-date').attributes['aria-pressed'], 'true');
+  h.get('d-logs').children.find(row => row.className.includes('boot-row')).children[2].click();
   const request = h.take('/api/boot-log');
   assert.ok(request.url.includes('id=boot-abc'));
   request.resolve({ data: 'one boot', start_off: 0, off: 8, size: 8, more: false });
   await drain(); h.terminals.at(-1).flush();
   assert.equal(h.terminals.at(-1).parsed, 'one boot');
+});
+
+test('record tabs avoid scrolling through unrelated history', async () => {
+  const h = await setup(); h.select('A');
+  h.get('b-records').click();
+  assert.equal(h.get('record-panel-logs').hidden, false);
+  assert.equal(h.get('record-panel-sessions').hidden, true);
+  h.get('record-tab-sessions').click();
+  assert.equal(h.get('record-panel-logs').hidden, true);
+  assert.equal(h.get('record-panel-sessions').hidden, false);
+  h.get('record-tab-events').click();
+  assert.equal(h.get('record-panel-events').hidden, false);
+  h.get('record-tab-commands').click();
+  assert.equal(h.get('record-panel-commands').hidden, false);
+});
+
+test('dates and boot numbers navigate in both directions across midnight', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [
+    { name: 'serial-20260921.log', kind: 'serial', date: '2026-09-21', size: 100 },
+    { name: 'serial-20260920.log', kind: 'serial', date: '2026-09-20', size: 100 },
+  ], boots: [
+    { id: 'boot-3', number: 3, started: '2026-09-21 09:00:00', marker: 'U-Boot',
+      dates: ['2026-09-21'], size: 30 },
+    { id: 'boot-2', number: 2, started: '2026-09-20 23:59:00', marker: 'Boot ROM',
+      dates: ['2026-09-20', '2026-09-21'], size: 80, cross_day: true },
+    { id: 'boot-1', number: 1, started: '2026-09-20 10:00:00', marker: 'U-Boot',
+      dates: ['2026-09-20'], size: 40 },
+  ] });
+  await drain();
+  assert.ok(h.get('archive-picker').children[1].textContent.includes('当天启动 1 次'));
+  assert.ok(h.get('archive-picker').children[1].textContent.includes('跨日延续 1 次'));
+  const linked = h.get('d-logs').children.filter(row => row.className.includes('boot-row'));
+  assert.equal(linked.length, 2);
+  assert.ok(linked[1].children[0].textContent.includes('跨日延续'));
+  linked[1].children[1].click();
+  assert.equal(h.get('archive-mode-boot').attributes['aria-pressed'], 'true');
+  const dates = h.get('d-logs').children.find(row => row.className === 'boot-detail').children[2].children;
+  assert.deepEqual(dates.map(button => button.textContent), ['2026-09-20', '2026-09-21']);
+  dates[0].click();
+  assert.equal(h.get('archive-mode-date').attributes['aria-pressed'], 'true');
+  assert.equal(h.get('archive-picker').children[0].value, '2026-09-20');
+  assert.ok(h.get('archive-picker').children[1].textContent.includes('当天启动 2 次'));
 });
 
 test('common commands fill the input without executing on click', async () => {

@@ -32,6 +32,11 @@ def _stamp_seconds(value):
         return None
 
 
+def _archive_date(entry):
+    date = entry.get('date') or ''
+    return '%s-%s-%s' % (date[:4], date[4:6], date[6:]) if re.fullmatch(r'\d{8}', date) else date
+
+
 def boot_epochs(root, files):
     """Return boot ranges spanning one or more chronological daily files.
 
@@ -39,7 +44,7 @@ def boot_epochs(root, files):
     Ranges use byte offsets so the original logs remain the source of truth.
     """
     ordered = sorted((entry for entry in files if entry.get('kind') == 'serial'),
-                     key=lambda entry: (entry.get('date', ''), entry.get('mtime', 0),
+                     key=lambda entry: (_archive_date(entry), entry.get('mtime', 0),
                                         entry.get('name', '')))
     snapshots = []
     candidates = []
@@ -49,7 +54,7 @@ def boot_epochs(root, files):
     for index, entry in enumerate(ordered):
         path = os.path.join(root, entry['name'])
         size = os.path.getsize(path)
-        snapshots.append((entry['name'], size))
+        snapshots.append((entry['name'], size, _archive_date(entry)))
         with open(path, 'rb') as source:
             while True:
                 offset = source.tell()
@@ -82,12 +87,14 @@ def boot_epochs(root, files):
         end_offset = end['offset'] if end else snapshots[end_index][1]
         parts = []
         for index in range(start['file_index'], end_index + 1):
-            name, size = snapshots[index]
+            name, size, date = snapshots[index]
             begin = start['offset'] if index == start['file_index'] else 0
             finish = end_offset if index == end_index else size
             if finish > begin:
-                parts.append({'file': name, 'start': begin, 'end': finish,
+                parts.append({'file': name, 'date': date, 'start': begin, 'end': finish,
                               'size': finish - begin})
+        dates = list(dict.fromkeys(part['date'] for part in parts))
+        dates = [date for date in dates if date]
         identity = '%s:%d' % (snapshots[start['file_index']][0], start['offset'])
         epochs.append({
             'id': 'boot-' + hashlib.sha256(identity.encode()).hexdigest()[:16],
@@ -96,8 +103,8 @@ def boot_epochs(root, files):
             'ended': (end['started'] if end else last_stamp),
             'marker': start['marker'],
             'files': len(parts),
-            'cross_day': bool(start['started'] and (end['started'] if end else last_stamp)
-                              and start['started'][:10] != (end['started'] if end else last_stamp)[:10]),
+            'dates': dates,
+            'cross_day': len(dates) > 1,
             'size': sum(part['size'] for part in parts),
             'parts': parts,
         })

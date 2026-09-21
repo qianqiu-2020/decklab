@@ -40,7 +40,16 @@ const server = http.createServer((req, res) => {
     { sid: 'ssh456def', actor: 'codex/diagnosis', title: 'uname -a', status: 'completed', started: Date.now()/1000-300, exit_code: 0 },
   ] });
   if (u.pathname === '/api/logs') return json({ serial: '0059D968E583C49A', label: 'milkv2', files: [
-    { name: 'ssh-ssh456def-20260919.log', size: log.length }, { name: 'serial-20260919.log', size: 8192 }] });
+    { name: 'ssh-ssh456def-20260919.log', size: log.length },
+    { name: 'serial-20260921.log', kind: 'serial', date: '2026-09-21', size: 8192 },
+    { name: 'serial-20260920.log', kind: 'serial', date: '2026-09-20', size: 4096 }],
+    boots: [
+      { id: 'boot-three', number: 3, started: '2026-09-21 08:00:00', marker: 'U-Boot SPL',
+        dates: ['2026-09-21'], size: 1024 },
+      { id: 'boot-two', number: 2, started: '2026-09-20 23:59:00', marker: 'Boot ROM',
+        dates: ['2026-09-20', '2026-09-21'], size: 6144, cross_day: true },
+      { id: 'boot-one', number: 1, started: '2026-09-20 10:00:00', marker: 'U-Boot',
+        dates: ['2026-09-20'], size: 1024 }] });
   if (u.pathname === '/api/log') return json({ data: log, off: log.length, start_off: 0, size: log.length, more: false });
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
   if (!['/index.html', '/static/app.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/app.css', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
@@ -110,6 +119,14 @@ let chrome, ws;
   assert.ok(await evaluate(columnsFit), 'SSH columns must still fit with records open');
   const recordsShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-records.png'),Buffer.from(recordsShot.data,'base64'));
+  assert.ok(await evaluate('document.querySelectorAll("#d-logs .boot-row").length >= 2'),
+    'date view lists the boots touching the selected day');
+  await evaluate('document.querySelectorAll("#d-logs .boot-row")[1].querySelector("button").click()');
+  assert.equal(await evaluate('document.querySelector("#archive-mode-boot").getAttribute("aria-pressed")'), 'true');
+  assert.equal(await evaluate('document.querySelectorAll("#d-logs .archive-date-links button").length'), 2,
+    'cross-day boot links back to both daily archives');
+  await evaluate('document.querySelector("#d-logs .archive-date-links button").click()');
+  assert.equal(await evaluate('document.querySelector("#archive-mode-date").getAttribute("aria-pressed")'), 'true');
   await evaluate('document.querySelector("#b-records").click()');
   await delay(100);
   assert.ok(await evaluate(`new Promise(resolve => {

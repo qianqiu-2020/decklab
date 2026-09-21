@@ -80,16 +80,35 @@
     </div>
     <section class="records" id="d-records" hidden>
       <div class="records-title"><strong>记录与归档</strong><button id="b-records-close" type="button">关闭</button></div>
-      <div class="section-head"><h2>SSH 会话记录</h2><span>在线会话可实时查看，关闭后 transcript 仍保留</span></div>
-      <div id="d-activity" class="activity"></div>
-      <div class="pager"><button id="activity-prev" type="button">较新</button><span id="activity-page"></span><button id="activity-next" type="button">更早</button></div>
-      <div class="section-head"><h2>关键操作记录</h2><span>逐按键写入保留在审计库中，此处不重复显示</span></div>
-      <div id="d-events" class="activity"></div>
-      <div class="pager"><button id="event-prev" type="button">较新</button><span id="event-page"></span><button id="event-next" type="button">更早</button></div>
-      <div class="section-head"><h2>历史常用命令</h2><span>按使用次数排序；点击填入后再执行</span></div>
-      <div class="commands" id="d-commands"></div>
-      <div class="section-head"><h2>串口日志归档</h2><span id="log-location"></span></div>
-      <div class="logs" id="d-logs"></div>
+      <div class="records-tabs" role="tablist" aria-label="记录分类">
+        <button id="record-tab-logs" type="button" role="tab" aria-controls="record-panel-logs">串口归档</button>
+        <button id="record-tab-sessions" type="button" role="tab" aria-controls="record-panel-sessions">SSH 会话</button>
+        <button id="record-tab-events" type="button" role="tab" aria-controls="record-panel-events">关键操作</button>
+        <button id="record-tab-commands" type="button" role="tab" aria-controls="record-panel-commands">常用命令</button>
+      </div>
+      <div class="records-panel" id="record-panel-logs" role="tabpanel">
+        <div class="section-head"><h2>串口日志归档</h2><span id="log-location"></span></div>
+        <div class="archive-tabs">
+          <button id="archive-mode-date" type="button">按日期</button>
+          <button id="archive-mode-boot" type="button">按启动</button>
+        </div>
+        <div id="archive-picker" class="archive-picker"></div>
+        <div class="logs" id="d-logs"></div>
+      </div>
+      <div class="records-panel" id="record-panel-sessions" role="tabpanel" hidden>
+        <div class="section-head"><h2>SSH 会话记录</h2><span>在线会话可实时查看，关闭后 transcript 仍保留</span></div>
+        <div id="d-activity" class="activity"></div>
+        <div class="pager"><button id="activity-prev" type="button">较新</button><span id="activity-page"></span><button id="activity-next" type="button">更早</button></div>
+      </div>
+      <div class="records-panel" id="record-panel-events" role="tabpanel" hidden>
+        <div class="section-head"><h2>关键操作记录</h2><span>逐按键写入保留在审计库中，此处不重复显示</span></div>
+        <div id="d-events" class="activity"></div>
+        <div class="pager"><button id="event-prev" type="button">较新</button><span id="event-page"></span><button id="event-next" type="button">更早</button></div>
+      </div>
+      <div class="records-panel" id="record-panel-commands" role="tabpanel" hidden>
+        <div class="section-head"><h2>历史常用命令</h2><span>按使用次数排序；点击填入后再执行</span></div>
+        <div class="commands" id="d-commands"></div>
+      </div>
     </section>
     </div>
   </div>
