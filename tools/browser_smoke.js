@@ -18,7 +18,10 @@ const fixtures = [
 ].map(d => ({ ...d, label: d.key, bytes: 8192, probes: 0, last_seen: Date.now() / 1000,
   info: ['milkv2', 'milkv'].includes(d.key) ? { serial: d.serial, reported_serial: '0123456789ABCDEF',
     serial_source: d.key === 'milkv' ? 'boot-marker' : 'soc-sysfs', identity_status: 'provisional' } : {} }));
-const log = '<script>globalThis.injected = true</script>\n2026-09-19 command: uname -a\nLinux bianbu 6.6.63 riscv64\n';
+const log = '<script>globalThis.injected = true</script>\n'
+  + '2026-09-19 command: uname -a\nLinux bianbu 6.6.63 riscv64\n'
+  + '2026-09-19 10:00:00  root@bianbu:~# uname -a\nLinux riscv64\n'
+  + '2026-09-19 10:01:00  root@bianbu:~# dmesg | tail -1\nready\n';
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   res.setHeader('Cache-Control', 'no-store');
@@ -147,7 +150,9 @@ let chrome, ws;
   })`), 'SSH wraps immediately after its last visible column');
   assert.equal(await evaluate('document.querySelector("#b-send").disabled'), true);
   await evaluate('document.querySelector("#d-logs button").click()');
-  await delay(300);
+  await delay(500);
+  assert.ok(await evaluate('testTerm.markers.length >= 2'),
+    'archived shell commands get default xterm line decorations');
   assert.ok(await evaluate('Array.from({length:testTerm.buffer.active.length},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString(true)||"").join("\\n").includes("Linux bianbu 6.6.63 riscv64")'));
   assert.ok(await evaluate('Array.from({length:testTerm.buffer.active.length},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString(true)||"").some(line=>line.startsWith("Linux bianbu 6.6.63 riscv64"))'), 'archived LF must return to column zero');
   assert.ok(await evaluate('document.querySelector("#d-tabs").textContent.includes("串口日志")'));

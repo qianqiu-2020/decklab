@@ -41,6 +41,7 @@
     clearTimeout(old.sizeTimer);
     clearTimeout(old.selTimer);
     clearTimeout(old.navTimer);
+    clearCommandDecorations(old);
     if (old.refreshFrame && window.cancelAnimationFrame) window.cancelAnimationFrame(old.refreshFrame);
     // reset() 不会清空 xterm 的异步解析队列；旧 CSI 6n 还可能触发 onData，
     // 把上一台的终端应答写到新设备。销毁实例，并让所有旧回调检查所属视图。
@@ -63,6 +64,7 @@
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
                 inputQueue: [], inputSending: false, inputTimer: 0,
                 navEntries: [], navSelected: -1, navTimer: 0, navRendered: false,
+                commandDecorations: [], commandColorSignature: '',
                 lastSel: '', searchQuery: '', searchMatch: -1,
                 serialRows: 24, bootScanTail: '', phaseScanTail: '', linuxConsole: false };
     view = ctx;
@@ -73,6 +75,7 @@
       convertEol: ctx.kind === 'log',
       scrollback: 8000,
       cursorBlink: !ctx.readonly,
+      allowProposedApi: true,
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
       fontSize: DEFAULT_TERMINAL_FONT_SIZE,
       theme: { background: '#111B21', foreground: '#D5DEDD', cursor: '#96D0C1',
@@ -195,6 +198,39 @@
     return entries;
   }
 
+  function clearCommandDecorations(ctx) {
+    (ctx.commandDecorations || []).forEach(function (decoration) { decoration.dispose(); });
+    ctx.commandDecorations = [];
+    ctx.commandColorSignature = '';
+  }
+
+  function colorCommandLines(ctx) {
+    if (!isCurrent(ctx) || !ctx.term.registerMarker || !ctx.term.registerDecoration) return;
+    var active = ctx.term.buffer.active;
+    if (active.type === 'alternate') return;
+    var entries = terminalCommands(ctx).slice(-300);
+    var signature = ctx.term.cols + '|' + entries.map(function (entry) {
+      return entry.row + ':' + entry.column + ':' + entry.command;
+    }).join('|');
+    if (signature === ctx.commandColorSignature) return;
+    clearCommandDecorations(ctx);
+    ctx.commandColorSignature = signature;
+    var colors = ['#94D0C2', '#A6C3E2', '#E0BE8A', '#C5B4E0'];
+    entries.forEach(function (entry, index) {
+      if (entry.column >= ctx.term.cols) return;
+      var marker = ctx.term.registerMarker(entry.row - (active.baseY + active.cursorY));
+      if (!marker) return;
+      var background = ctx.term.registerDecoration({ marker: marker, x: 0,
+        width: ctx.term.cols, backgroundColor: '#1D2F35' });
+      var foreground = ctx.term.registerDecoration({ marker: marker, x: entry.column,
+        width: Math.min(entry.command.length, ctx.term.cols - entry.column),
+        foregroundColor: colors[index % colors.length] });
+      if (background) ctx.commandDecorations.push(background);
+      if (foreground) ctx.commandDecorations.push(foreground);
+      ctx.commandDecorations.push(marker);
+    });
+  }
+
   function jumpToCommand(ctx, index) {
     if (!isCurrent(ctx) || index < 0 || index >= ctx.navEntries.length) return;
     ctx.navSelected = index;
@@ -241,9 +277,10 @@
   }
 
   function scheduleCommandNav(ctx) {
-    if (!isCurrent(ctx) || recordsTab !== 'inputs' || $('d-records').hidden || ctx.navTimer) return;
+    if (!isCurrent(ctx) || ctx.navTimer) return;
     ctx.navTimer = setTimeout(function () {
       ctx.navTimer = 0;
+      colorCommandLines(ctx);
       renderCommandNav(ctx);
     }, 350);
   }
@@ -258,6 +295,7 @@
       window.cancelAnimationFrame(ctx.refreshFrame); ctx.refreshFrame = 0;
     }
     clearTerminalSearch(false);
+    clearCommandDecorations(ctx);
     try { ctx.term.reset(); ctx.term.clear(); } catch (e) {}
     ctx.navRendered = false;
     renderCommandNav(ctx);
@@ -284,6 +322,7 @@
       pushSize(ctx);
     });
     pushSize(ctx);
+    scheduleCommandNav(ctx);
   }
   function visibleTerminalRows(ctx, dimensions) {
     var proposed = dimensions && dimensions.rows ? dimensions.rows : ctx.term.rows;
@@ -664,6 +703,7 @@
       }
       ctx.bootScanTail = joined.slice(-32);
       if (cut < 0) return raw;
+      clearCommandDecorations(ctx);
       try { ctx.term.reset(); ctx.term.clear(); ctx.term.clearSelection(); } catch (e) {}
       ctx.serialRows = 24;
       ctx.phaseScanTail = '';
@@ -1353,7 +1393,7 @@
       var current = ctx.navSelected;
       if (current < 0) {
         var active = ctx.term.buffer.active;
-        var visible = (active.ydisp || 0) + ctx.term.rows / 2;
+        var visible = (active.viewportY || 0) + ctx.term.rows / 2;
         current = ctx.navEntries.findIndex(function (entry) { return entry.row >= visible; });
         if (current < 0) current = ctx.navEntries.length - 1;
         current -= step;
