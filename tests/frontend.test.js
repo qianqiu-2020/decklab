@@ -620,6 +620,18 @@ test('live serial stays at firmware-compatible 80 columns and redraw replays fro
   assert.ok(!terminal.parsed.includes('stale'));
 });
 
+test('live serial learns an EDK2 80x50 screen before parsing its cursor positions', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  assert.equal(terminal.rows, 42);
+  h.take('/api/session').resolve(readResponse('A',
+    '\x1b[47m\x1b[05;58HDevice Path\x1b[50;27H<Enter>=Select'));
+  await drain();
+  assert.equal(terminal.cols, 80);
+  assert.equal(terminal.rows, 50, 'EDK2 row 50 must not be clamped into the visible browser height');
+  terminal.flush(); await drain();
+  assert.ok(terminal.refreshes > 0);
+});
+
 (async () => {
   for (const [name, fn] of tests) {
     await fn(); console.log('ok - ' + name);

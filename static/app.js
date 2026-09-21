@@ -55,7 +55,8 @@
                 readonly: selectedSession.kind === 'log' || isAgentSession,
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
-                sendTail: Promise.resolve(), lastSel: '', searchQuery: '', searchMatch: -1 };
+                sendTail: Promise.resolve(), lastSel: '', searchQuery: '', searchMatch: -1,
+                serialRows: 24 };
     view = ctx;
     setInputMode(ctx);
     term = ctx.term = new Terminal({
@@ -207,7 +208,8 @@
     // about the visual row. Keep only the live serial console at 80 columns.
     if (ctx.sid === 'serial') {
       var dimensions = ctx.fit.proposeDimensions ? ctx.fit.proposeDimensions() : null;
-      var rows = dimensions && dimensions.rows ? dimensions.rows : ctx.term.rows;
+      var rows = Math.max(ctx.serialRows || 24,
+        dimensions && dimensions.rows ? dimensions.rows : ctx.term.rows);
       if (ctx.term.cols !== 80 || ctx.term.rows !== rows) ctx.term.resize(80, rows);
       return;
     }
@@ -487,12 +489,32 @@
       if (lines > ctx.term.options.scrollback) ctx.term.options.scrollback = lines;
     }
     var redraw = false;
+    function prepareSerialGeometry(raw) {
+      if (ctx.sid !== 'serial' || !raw) return;
+      // UEFI commonly paints an 80x50 text console with absolute CUP/HVP
+      // coordinates.  Clamping row 50 into a browser-fitted 40-row terminal
+      // makes later erases overwrite the whole visible menu.  Learn the
+      // firmware's logical height before xterm parses the same payload, then
+      // keep that height across browser resizes.
+      var pattern = /\x1b\[([0-9]{1,3})(?:;[0-9]{0,3})?[Hf]/g;
+      var match, rows = ctx.serialRows || 24;
+      while ((match = pattern.exec(raw))) {
+        var row = Number(match[1] || 1);
+        if (row >= 1 && row <= 200) rows = Math.max(rows, row);
+      }
+      if (rows !== ctx.serialRows) {
+        ctx.serialRows = rows;
+        fitTerminal(ctx);
+        syncTerminalLayers(ctx);
+      }
+    }
     function written() {
       ctx.initialRendered = true;
       if (redraw) scheduleFullRefresh(ctx);
     }
     if (typeof payload.data_b64 === 'string') {
       var raw = atob(payload.data_b64);
+      prepareSerialGeometry(raw);
       // Firmware menus paint the screen with cursor positioning and erases.
       // xterm normally tracks dirty rows, but a large sequence split across
       // HTTP reads can leave canvas layers visually stale until the next input.
@@ -502,6 +524,7 @@
           written);
       } else ctx.initialRendered = true;
     } else if (payload.data) {
+      prepareSerialGeometry(payload.data);
       redraw = /\x1b(?:\[[0-9;?]*[ABCDEFGHJKSTfhl]|[78])/.test(payload.data);
       ctx.term.write(payload.data, written);
     } else ctx.initialRendered = true;
