@@ -100,15 +100,20 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                                              timeout=300 if slow else 30)
             connection.request(self.command, self.path, body=body, headers=headers)
             response = connection.getresponse()
-            data = response.read()
             self.send_response(response.status)
-            for name in ('Content-Type', 'Cache-Control'):
+            for name in ('Content-Type', 'Cache-Control', 'Content-Disposition'):
                 value = response.getheader(name)
                 if value:
                     self.send_header(name, value)
-            self.send_header('Content-Length', str(len(data)))
+            length = response.getheader('Content-Length')
+            if length is not None:
+                self.send_header('Content-Length', length)
             self.end_headers()
-            self.wfile.write(data)
+            while True:
+                chunk = response.read(65536)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
         except ValueError:
             self._json(400, {'error': 'bad content length'})
         except (OSError, http.client.HTTPException, TimeoutError) as error:

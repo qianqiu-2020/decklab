@@ -55,7 +55,7 @@
                 readonly: selectedSession.kind === 'log' || isAgentSession,
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
-                sendTail: Promise.resolve(), lastSel: '', searchQuery: '', searchMatch: -1,
+                pendingInput: '', inputSending: false, lastSel: '', searchQuery: '', searchMatch: -1,
                 serialRows: 24, bootScanTail: '' };
     view = ctx;
     setInputMode(ctx);
@@ -464,7 +464,9 @@
     sessionPage = 0; eventPage = 0;
     $('d-activity').textContent = '';
     $('d-events').textContent = '';
+    $('d-commands').textContent = '';
     loadActivity();
+    loadCommands();
     lastInfoTs = d && d.info ? d.info.ts : 0;
     lastInfoIdentity = d ? [d.key, d.connection_id, lastInfoTs,
       d.info && d.info.serial_source || '', d.info && d.info.identity_status || ''].join('|') : '';
@@ -577,6 +579,7 @@
   function loop(ctx) {
     if (!isCurrent(ctx)) return;
     var readSeq = ++ctx.readSeq;
+    var nextDelay = 10;
     ctx.ctrl = new AbortController();
     fetch('/api/session?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '') + '&sid=' + encodeURIComponent(ctx.sid)
           + '&off=' + ctx.off, { cache: 'no-store', signal: ctx.ctrl.signal })
@@ -588,6 +591,7 @@
           throw new Error('会话响应与请求不匹配');
         }
         ctx.off = d.off;
+        nextDelay = d.alive === false ? 500 : 10;
         $('d-dev').textContent = d.dev || d.ip || '';
         // 原始字节直接交给 xterm —— 光标定位、颜色、备用屏幕缓冲都由它处理,
         // vim/htop 这类全屏程序才能正确重画(剥 ANSI 再追加会糊成一团)
@@ -602,7 +606,9 @@
       .finally(function () {
         if (!isCurrent(ctx) || readSeq !== ctx.readSeq) return;
         // 定时器本身也必须绑定视图，否则旧定时器会多开一条新会话轮询。
-        ctx.loopTimer = setTimeout(function () { loop(ctx); }, 300);
+        // /api/session is already a long poll.  Start the next read promptly
+        // after output so terminal echo is not held behind an extra 300 ms.
+        ctx.loopTimer = setTimeout(function () { loop(ctx); }, nextDelay);
       });
   }
 
@@ -733,20 +739,30 @@
       $('d-status').textContent = ctx.kind === 'log' ? ' 当前是只读归档日志' : ' 当前正在只读查看 agent 会话';
       return;
     }
-    // 连续按键若并发发 HTTP，后发请求可能先写入。按视图串行发送，切换后
-    // 丢弃尚未发出的输入；已在途请求始终保留原 key/sid，绝不改投新设备。
-    ctx.sendTail = ctx.sendTail.then(function () {
-      if (!isCurrent(ctx)) return;
-      return fetch('/api/session-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: ctx.key, serial: ctx.serial, sid: ctx.sid, data: text }) })
+    // Keep at most one write request in flight.  Keystrokes typed during its
+    // round trip are sent as one ordered batch instead of one TCP request each.
+    ctx.pendingInput += text;
+    function flushInput() {
+      if (!isCurrent(ctx) || ctx.inputSending || !ctx.pendingInput) return;
+      var batch = ctx.pendingInput;
+      ctx.pendingInput = '';
+      ctx.inputSending = true;
+      fetch('/api/session-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: ctx.key, serial: ctx.serial, sid: ctx.sid, data: batch }) })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (isCurrent(ctx) && !d.ok) $('d-status').textContent = ' 写入失败：' + (d.error || '');
+        if (!isCurrent(ctx)) return;
+        if (!d.ok) $('d-status').textContent = ' 写入失败：' + (d.error || '');
+        else if (/[\r\n]/.test(batch)) loadCommands();
       })
       .catch(function (e) {
         if (isCurrent(ctx)) $('d-status').textContent = ' 写入失败：' + e.message;
+      }).finally(function () {
+        ctx.inputSending = false;
+        if (isCurrent(ctx) && ctx.pendingInput) flushInput();
       });
-    });
+    }
+    flushInput();
   }
 
   function loadLogs() {
@@ -778,8 +794,36 @@
           });
           a.textContent = f.name;
           var size = document.createElement('span'); size.className = 'log-size'; size.textContent = fmt(f.size);
-          row.appendChild(date); row.appendChild(a); row.appendChild(size); box.appendChild(row);
+          var download = document.createElement('a'); download.className = 'log-download';
+          download.href = '/api/log?key=' + encodeURIComponent(ctx.key)
+            + '&serial=' + encodeURIComponent(ctx.serial || '') + '&file=' + encodeURIComponent(f.name)
+            + '&download=1';
+          download.download = f.name; download.textContent = '下载';
+          row.appendChild(date); row.appendChild(a); row.appendChild(size); row.appendChild(download); box.appendChild(row);
         });
+        var boots = d.boots || [];
+        if (boots.length) {
+          var heading = document.createElement('div'); heading.className = 'log-subhead';
+          heading.textContent = '检测到 ' + boots.length + ' 次启动'; box.appendChild(heading);
+          boots.forEach(function (boot) {
+            var row = document.createElement('div'); row.className = 'log-row boot-row';
+            var date = document.createElement('span'); date.className = 'log-date';
+            date.textContent = boot.started || '时间未知';
+            var button = document.createElement('button'); button.type = 'button';
+            button.textContent = '启动 #' + boot.number + ' · ' + (boot.marker || '启动标志');
+            button.addEventListener('click', function () {
+              var url = '/api/boot-log?key=' + encodeURIComponent(ctx.key)
+                + '&serial=' + encodeURIComponent(ctx.serial || '') + '&id=' + encodeURIComponent(boot.id);
+              openArchivedLog(ctx, boot.id, '启动 #' + boot.number + ' · ' + (boot.started || ''), url);
+            });
+            var meta = document.createElement('span'); meta.className = 'log-size';
+            meta.textContent = fmt(boot.size) + (boot.cross_day ? ' · 跨日' : '');
+            row.appendChild(date); row.appendChild(button); row.appendChild(meta); box.appendChild(row);
+          });
+        } else {
+          var noBoot = document.createElement('div'); noBoot.className = 'log-note';
+          noBoot.textContent = '尚未在归档中检测到 Boot ROM / U-Boot 启动标志。'; box.appendChild(noBoot);
+        }
         var sshCount = allFiles.length - files.length;
         if (sshCount) {
           var note = document.createElement('div'); note.className = 'log-note';
@@ -811,12 +855,12 @@
     select(key);
   }
 
-  function openArchivedLog(ctx, name, label) {
+  function openArchivedLog(ctx, name, label, url) {
     if (!isCurrent(ctx)) return;
     var sid = 'log:' + name;
     var archived = sessions.filter(function (s) { return s.sid === sid; })[0];
     if (!archived) {
-      archived = { sid: sid, kind: 'log', name: name, label: label || name,
+      archived = { sid: sid, kind: 'log', name: name, label: label || name, url: url || '',
                    loaded: false, payload: null };
       sessions.push(archived);
     }
@@ -831,8 +875,9 @@
       return;
     }
     $('d-status').textContent = ' 正在读取只读归档 ' + archived.name + '…';
-    fetch('/api/log?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
-      + '&file=' + encodeURIComponent(archived.name) + '&full=1')
+    fetch(archived.url || ('/api/log?key=' + encodeURIComponent(ctx.key)
+      + '&serial=' + encodeURIComponent(ctx.serial || '')
+      + '&file=' + encodeURIComponent(archived.name) + '&full=1'))
       .then(function (r) { return r.json(); }).then(function (d) {
         if (!isCurrent(ctx) || curSid !== archived.sid) return;
         if (d.error) throw new Error(d.error);
@@ -844,6 +889,33 @@
         $('d-status').textContent = archived.status;
       }).catch(function (e) {
         if (isCurrent(ctx) && curSid === archived.sid) $('d-status').textContent = ' 读取归档失败：' + e.message;
+      });
+  }
+
+  function loadCommands() {
+    var ctx = view;
+    if (!isCurrent(ctx)) return;
+    fetch('/api/commands?key=' + encodeURIComponent(ctx.key)
+      + '&serial=' + encodeURIComponent(ctx.serial || ''), { cache: 'no-store' })
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        if (!isCurrent(ctx) || (data.key && data.key !== ctx.key)) return;
+        var box = $('d-commands'); box.textContent = '';
+        var commands = data.commands || [];
+        if (!commands.length) { box.textContent = '（还没有可复用的命令）'; return; }
+        commands.forEach(function (entry) {
+          var button = document.createElement('button'); button.type = 'button';
+          button.className = 'command-chip';
+          button.textContent = entry.command + (entry.use_count > 1 ? '  ×' + entry.use_count : '');
+          button.title = '填入命令输入框';
+          button.addEventListener('click', function () {
+            if (!isCurrent(ctx) || ctx.readonly) return;
+            $('d-in').value = entry.command; $('d-in').focus();
+          });
+          box.appendChild(button);
+        });
+      }).catch(function (error) {
+        if (isCurrent(ctx)) $('d-commands').textContent = '读取命令历史失败：' + error.message;
       });
   }
 

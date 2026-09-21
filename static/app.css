@@ -154,11 +154,16 @@
   .pager{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:-10px 0 22px}
   .pager span{min-width:92px;text-align:center;color:var(--ink-3);font-size:12px}
   .logs{padding:0;display:grid;gap:7px;margin-bottom:12px}
-  .log-row{display:grid;grid-template-columns:100px minmax(0,1fr) auto;gap:10px;align-items:center;
+  .log-row{display:grid;grid-template-columns:145px minmax(0,1fr) auto auto;gap:10px;align-items:center;
     border:1px solid var(--line);border-radius:7px;padding:8px 11px;background:var(--surface)}
   .log-row .log-date,.log-row .log-size{color:var(--ink-3);font:12px ui-monospace,monospace}
   .log-row button{text-align:left;overflow-wrap:anywhere}
+  .log-download{margin:0!important}
+  .log-subhead{font-weight:600;margin:10px 1px 2px;color:var(--ink-2)}
   .log-note{color:var(--ink-3);font-size:12px;padding:3px 1px}
+  .commands{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:20px;color:var(--ink-3);font-size:12px}
+  .command-chip{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-family:"IBM Plex Mono",monospace;text-align:left}
   @media(max-width:600px){.overview{gap:8px}.overview>div{padding:12px;display:block}.overview span{display:block}.activity-row{flex-wrap:wrap}.section-head{display:block}}
 
   .workspace.selected{display:grid;grid-template-columns:clamp(210px,16vw,250px) minmax(0,1fr);gap:14px;align-items:start}

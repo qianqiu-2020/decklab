@@ -5,13 +5,14 @@ import json
 import os
 import shutil
 import time
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 from .config import BY_PATH, LOG_ROOT, RESCUE_BIN
 from .transport import try_rescue
 from .devices import Manager
 from .storage import IdentityError
 from .httpd import BoundedThreadingTCPServer as BoundedThreadingServer
+from .log_archive import read_epoch
 from . import __version__
 
 MGR = Manager()
@@ -38,6 +39,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if device and q.get('serial') and q['serial'][0] != device.serial:
             return None
         return device
+
+    def _download_log(self, path, name):
+        """Stream one validated regular archive file without loading it into RAM."""
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            source = os.fdopen(fd, 'rb')
+        except OSError:
+            return self._json(404, {'error': 'log unavailable'})
+        with source:
+            size = os.fstat(source.fileno()).st_size
+            ascii_name = ''.join(char if 32 <= ord(char) < 127 and char not in '"\\'
+                                 else '_' for char in name)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Disposition', 'attachment; filename="%s"; filename*=UTF-8\'\'%s'
+                             % (ascii_name, quote(name)))
+            self.send_header('Content-Length', str(size))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            shutil.copyfileobj(source, self.wfile, length=65536)
 
     def do_GET(self):
         self.response_key = None
@@ -111,7 +132,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             out += d.list_sessions()
             return self._json(200, {'sessions': out, 'label': d.label})
 
-        if route in ('/api/logs', '/api/log', '/api/activity'):
+        if route in ('/api/logs', '/api/log', '/api/boot-log', '/api/activity', '/api/commands'):
             d = self._dev(q)
             if not d:
                 return self._json(404, {'error': 'no such device'})
@@ -134,21 +155,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     'event_total': MGR.store.visible_event_count(d.serial) if d.serial else 0,
                     # Keep old clients useful while they migrate to independent pagers.
                     'next_offset': session_offset + len(history)})
+            if route == '/api/commands':
+                commands = MGR.store.commands(d.serial, 20) if d.serial else []
+                return self._json(200, {'commands': commands})
             files = d.log_files()
             if route == '/api/logs':
                 archive = os.path.relpath(d.stable_dir(), LOG_ROOT)
+                boots = d.boot_epochs(files)
+                for boot in boots:
+                    boot.pop('parts', None)
                 return self._json(200, {'label': d.label, 'serial': d.serial,
-                                        'archive': archive, 'files': files})
+                                        'archive': archive, 'files': files, 'boots': boots})
+            if route == '/api/boot-log':
+                boot_id = (q.get('id') or [''])[0]
+                boot = next((item for item in d.boot_epochs(files) if item['id'] == boot_id), None)
+                if not boot:
+                    return self._json(404, {'error': 'no such boot'})
+                try:
+                    data = read_epoch(d.stable_dir(), boot)
+                except OSError:
+                    return self._json(404, {'error': 'boot log unavailable'})
+                return self._json(200, {'id': boot_id, 'data': data.decode('utf-8', 'replace'),
+                    'data_b64': base64.b64encode(data).decode('ascii'), 'start_off': 0,
+                    'off': len(data), 'size': len(data), 'more': False})
             name = (q.get('file') or [''])[0]
             if name not in {entry['name'] for entry in files}:
                 return self._json(404, {'error': 'no such log'})
+            path = os.path.join(d.stable_dir(), name)
+            if (q.get('download') or ['0'])[0] == '1':
+                return self._download_log(path, name)
             try:
                 offset = int((q.get('off') or ['-1'])[0])
                 if offset < -1:
                     raise ValueError
                 full = (q.get('full') or ['0'])[0] == '1'
                 # Open only regular files inside the selected board's directory, no symlink traversal.
-                path = os.path.join(d.stable_dir(), name)
                 fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
                 with os.fdopen(fd, 'rb') as source:
                     size = os.fstat(source.fileno()).st_size
@@ -291,6 +332,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not s:
                     return self._json(404, {'error': 'no such session'})
                 ok, err = (s.write(text), '')
+            if ok:
+                d.record_input(sid, actor, text)
             return self._json(200 if ok else 503, {'ok': ok, 'error': err})
 
         if route == '/api/session-takeover':

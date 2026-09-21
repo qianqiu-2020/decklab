@@ -75,6 +75,12 @@ class Store:
             CREATE TABLE IF NOT EXISTS identity_conflicts (
                 serial TEXT PRIMARY KEY, detected REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS commands (
+                serial TEXT NOT NULL REFERENCES boards(serial), command TEXT NOT NULL,
+                first_used REAL NOT NULL, last_used REAL NOT NULL, use_count INTEGER NOT NULL,
+                PRIMARY KEY(serial, command)
+            );
+            CREATE INDEX IF NOT EXISTS command_board ON commands(serial, use_count DESC, last_used DESC);
         ''')
         self.db.commit()
 
@@ -163,7 +169,7 @@ class Store:
             self.db.execute('PRAGMA defer_foreign_keys=ON')
             self.db.execute('UPDATE boards SET serial=?, info=? WHERE serial=?',
                             (new_serial, json.dumps(info, ensure_ascii=False), old_serial))
-            for table in ('sessions', 'events'):
+            for table in ('sessions', 'events', 'commands'):
                 self.db.execute('UPDATE ' + table + ' SET serial=? WHERE serial=?', (new_serial, old_serial))
             self.db.execute('INSERT INTO events(serial,ts,actor,action,detail) VALUES(?,?,?,?,?)',
                             (new_serial, time.time(), 'admin', 'identity-corrected', old_serial))
@@ -186,7 +192,7 @@ class Store:
                 last_path=?, last_dev=? WHERE serial=?''',
                 (new_serial, json.dumps(info, ensure_ascii=False), time.time(), path, dev,
                  old_serial))
-            for table in ('sessions', 'events'):
+            for table in ('sessions', 'events', 'commands'):
                 self.db.execute('UPDATE ' + table + ' SET serial=? WHERE serial=?',
                                 (new_serial, old_serial))
             self.db.execute('INSERT INTO events(serial,ts,actor,action,detail) VALUES(?,?,?,?,?)',
@@ -277,3 +283,23 @@ class Store:
         with self.lock:
             return self.db.execute('''SELECT COUNT(*) FROM events
                 WHERE serial=? AND action<>'session-send' ''', (serial,)).fetchone()[0]
+
+    def record_command(self, serial, command):
+        command = str(command).strip()
+        if (not command or len(command.encode('utf-8')) > 2048
+                or any(ord(char) < 32 and char != '\t' for char in command)):
+            return False
+        now = time.time()
+        with self.lock, self.db:
+            self.db.execute('''INSERT INTO commands VALUES(?,?,?,?,1)
+                ON CONFLICT(serial,command) DO UPDATE SET
+                last_used=excluded.last_used, use_count=commands.use_count+1''',
+                (serial, command, now, now))
+        return True
+
+    def commands(self, serial, limit=20):
+        with self.lock:
+            return [dict(row) for row in self.db.execute('''
+                SELECT command, first_used, last_used, use_count FROM commands
+                WHERE serial=? ORDER BY use_count DESC, last_used DESC LIMIT ?''',
+                (serial, limit))]

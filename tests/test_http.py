@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import tempfile
 import threading
 import unittest
 from unittest import mock
@@ -129,6 +130,7 @@ class HandlerTests(unittest.TestCase):
 
     def test_logs_list_uses_serial_archive_without_rewriting_files(self):
         self.device.log_files.return_value = [{'name': 'serial-20260919.log', 'size': 123}]
+        self.device.boot_epochs.return_value = []
         self.device.stable_dir.return_value = str(ROOT / 'logs' / 'SN1')
         self.device.label = 'riscv-118'
         handler = self.handler('/api/logs?key=board-key')
@@ -140,6 +142,21 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(payload['archive'], 'SN1')
         self.assertEqual(payload['files'][0]['size'], 123)
         replace.assert_not_called()
+
+    def test_log_download_streams_original_bytes_with_attachment_name(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / 'serial-20260921.log'
+            original = b'raw\x00serial\xfflog\n'
+            path.write_bytes(original)
+            self.device.log_files.return_value = [{'name': path.name, 'kind': 'serial'}]
+            self.device.stable_dir.return_value = folder
+            handler = self.handler('/api/log?key=board-key&file=' + path.name + '&download=1')
+            handler.do_GET()
+            self.assertEqual(handler.send_response.call_args.args[0], 200)
+            self.assertEqual(handler.wfile.getvalue(), original)
+            headers = dict(call.args for call in handler.send_header.call_args_list)
+            self.assertIn('attachment', headers['Content-Disposition'])
+            self.assertEqual(headers['Content-Length'], str(len(original)))
 
     def test_human_takeover_of_agent_ssh_is_validated_and_audited(self):
         self.device.get_session.return_value = mock.Mock()

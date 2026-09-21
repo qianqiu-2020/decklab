@@ -469,6 +469,26 @@ class PersistenceTests(unittest.TestCase):
         for name in ('../registry.sqlite3', 'escape.log'):
             self.assertEqual(self.handler('/api/log?key=riscv-118&file=' + name)[0], 404)
 
+    def test_command_history_counts_commands_and_omits_password_input(self):
+        d = self.connection()
+        self.identify(d)
+        d.console_tail = 'root@board:~# '
+        d.record_input('serial', 'web', 'uname ')
+        d.record_input('serial', 'web', '-a\r')
+        d.record_input('serial', 'web', 'uname -a\r')
+        d.console_tail = '[sudo] password for root: '
+        d.record_input('serial', 'web', 'top-secret\r')
+        d.console_tail = 'root@board:~# '
+        d.record_input('serial', 'web', 'export API_TOKEN=also-secret\r')
+        d.record_input('serial', 'web', ' hidden-from-history\r')
+
+        history = self.store.commands(d.serial)
+        self.assertEqual([(item['command'], item['use_count']) for item in history],
+                         [('uname -a', 2)])
+        status, payload = self.handler('/api/commands?key=riscv-118')
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['commands'][0]['command'], 'uname -a')
+
     def test_completed_and_unknown_sessions_survive_close_and_restart(self):
         d = self.connection()
         self.identify(d)

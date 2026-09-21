@@ -178,7 +178,7 @@ test('typing is ordered; unsent input and late send errors are discarded on swit
   old.data('1'); old.data('2'); old.data('3'); await drain();
   assert.deepEqual(h.sends().map(r => r.body.data), ['1']);
   h.sends()[0].resolve({ ok: true }); await drain();
-  assert.deepEqual(h.sends().map(r => r.body.data), ['1', '2']);
+  assert.deepEqual(h.sends().map(r => r.body.data), ['1', '23']);
   h.select('B'); h.get('d-status').textContent = 'B status';
   h.sends()[1].reject(new Error('old failure')); await drain();
   old.data('stale'); await drain();
@@ -333,7 +333,7 @@ test('late read failure cannot replace the new view status', async () => {
 test('poll timer is cancelled and its callback cannot create a second poll chain', async () => {
   const h = await setup(); h.select('A');
   h.take('/api/session').resolve(readResponse('A', '')); await drain();
-  const [id, oldTimer] = h.timer(300);
+  const [id, oldTimer] = h.timer(10);
   h.select('B');
   assert.equal(h.timers.has(id), false);
   const count = h.requests.filter(r => r.url.startsWith('/api/session?')).length;
@@ -366,7 +366,7 @@ test('split CJK bytes use one streaming xterm decoder per view', async () => {
   h.take('/api/session').resolve(readResponse('A', bytes.subarray(0, 2), 2));
   await drain(); assert.ok(term.queued[0].data instanceof Uint8Array); term.flush();
   assert.equal(term.parsed, '');
-  h.fire(h.timer(300)[0]);
+  h.fire(h.timer(10)[0]);
   h.take('/api/session').resolve(readResponse('A', bytes.subarray(2), bytes.length));
   await drain(); term.flush(); assert.equal(term.parsed, '中文');
 });
@@ -463,7 +463,7 @@ test('archived log terminal is isolated from late responses after switching devi
   const h = await setup(); h.select('A');
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [{ name: 'serial-test.log', size: 20 }] });
   await drain();
-  const button = h.get('d-logs').children.at(-1).children[1];
+  const button = h.get('d-logs').children[0].children[1];
   assert.equal(button.tagName, 'button'); button.click();
   const archived = h.terminals.at(-1);
   assert.ok(h.get('d-term').scrolled);
@@ -509,6 +509,36 @@ test('multiple archived logs open as cached read-only terminal tabs', async () =
   assert.equal(cached.parsed, 'new log');
   assert.equal(h.requests.filter(r => r.url.startsWith('/api/log?')).length, 2,
     'switching back must use the cached archive snapshot');
+});
+
+test('daily logs are downloadable and detected boot epochs open in terminal tabs', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [
+    { name: 'serial-20260921.log', kind: 'serial', date: '2026-09-21', size: 100 },
+  ], boots: [{ id: 'boot-abc', number: 3, started: '2026-09-21 08:00:00',
+    marker: 'U-Boot SPL', size: 70, files: 1, cross_day: false }] });
+  await drain();
+  const rows = h.get('d-logs').children;
+  assert.ok(rows[0].children[3].href.includes('download=1'));
+  assert.equal(rows[0].children[3].download, 'serial-20260921.log');
+  const bootRow = rows.find(row => row.className.includes('boot-row'));
+  bootRow.children[1].click();
+  const request = h.take('/api/boot-log');
+  assert.ok(request.url.includes('id=boot-abc'));
+  request.resolve({ data: 'one boot', start_off: 0, off: 8, size: 8, more: false });
+  await drain(); h.terminals.at(-1).flush();
+  assert.equal(h.terminals.at(-1).parsed, 'one boot');
+});
+
+test('common commands fill the input without executing on click', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/commands').resolve({ key: 'A', commands: [
+    { command: 'journalctl -b', use_count: 4 },
+  ] });
+  await drain();
+  h.get('d-commands').children[0].click();
+  assert.equal(h.get('d-in').value, 'journalctl -b');
+  assert.equal(h.sends().length, 0);
 });
 
 test('SSH sessions and key events have independent bounded pages', async () => {
@@ -639,7 +669,7 @@ test('full clear lets GRUB leave the previous EDK2 50-row screen', async () => {
   await drain();
   assert.equal(terminal.rows, 50);
   terminal.flush(); await drain();
-  const poll = h.timer(300); assert.ok(poll); h.fire(poll[0]);
+  const poll = h.timer(10); assert.ok(poll); h.fire(poll[0]);
   h.take('/api/session').resolve(readResponse('A',
     '\x1b[0m\x1b[37m\x1b[40m\x1b[2J\x1b[01;01H\x1b[?25l', 54));
   await drain();
@@ -667,7 +697,7 @@ test('boot banner split across reads still resets the live terminal once', async
   const h = await setup(); const terminal = h.select('A');
   h.take('/api/session').resolve(readResponse('A', 'stale\x1b[47m\r\nU-Boot SP', 20));
   await drain(); terminal.flush(); await drain();
-  const poll = h.timer(300); assert.ok(poll); h.fire(poll[0]);
+  const poll = h.timer(10); assert.ok(poll); h.fire(poll[0]);
   h.take('/api/session').resolve(readResponse('A', 'L 2022.10 fresh', 35));
   await drain(); terminal.flush(); await drain();
   assert.equal(terminal.wasReset, true);

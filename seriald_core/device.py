@@ -14,6 +14,7 @@ from .sessions import SshSession
 from .storage import IdentityError, archive_component
 from .identity import eeprom_serial, usable_serial
 from .boot_marker import init_command
+from .log_archive import boot_epochs
 
 class Device:
     """One physical connection, optionally bound to a persistent board serial."""
@@ -64,6 +65,8 @@ class Device:
         self.logpath = None
         self.dead = False
         self.history_loaded = record is None
+        self.input_lines = {}
+        self.input_sensitive = set()
 
     def preload(self):
         """启动时把最近一份串口日志的尾部装回内存缓冲。
@@ -154,6 +157,50 @@ class Device:
         # Filename prefixes mix serial/SSH logs, so lexicographic order is not time order.
         files.sort(key=lambda item: (item['date'], item['mtime'], item['name']), reverse=True)
         return files
+
+    def boot_epochs(self, files=None):
+        return boot_epochs(self.stable_dir(), files if files is not None else self.log_files())
+
+    def _output_tail(self, sid):
+        if sid == 'serial':
+            return self.console_tail
+        session = self.get_session(sid)
+        if not session:
+            return ''
+        with session.cv:
+            return bytes(session.buf[-2048:]).decode('utf-8', 'replace')
+
+    def record_input(self, sid, actor, text):
+        """Reconstruct submitted command lines while refusing password prompts."""
+        if not self.serial or not self.manager or not text:
+            return
+        key = (sid, actor)
+        tail = ANSI.sub('', self._output_tail(sid))
+        if re.search(r'(?:password|passphrase|密码)[^\n\r:：]{0,80}[:：]\s*$', tail, re.I):
+            self.input_sensitive.add(key)
+        line = self.input_lines.get(key, '')
+        # Remove cursor/function-key CSI sequences.  Their editing semantics are
+        # ambiguous, so they must never become fake reusable commands.
+        text = re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]', '', text)
+        for char in text:
+            if char in '\r\n':
+                command = line.strip()
+                contains_secret = re.search(
+                    r'(?i)(?:password|passwd|passphrase|token|secret|api[_-]?key)\s*=', line)
+                if (command and not line.startswith(' ') and not contains_secret
+                        and key not in self.input_sensitive):
+                    self.manager.store.record_command(self.serial, command)
+                line = ''
+                self.input_sensitive.discard(key)
+            elif char in ('\x08', '\x7f'):
+                line = line[:-1]
+            elif char == '\x03':
+                line = ''
+                self.input_sensitive.discard(key)
+            elif char == '\t' or ord(char) >= 32:
+                if len(line) < 2048:
+                    line += char
+        self.input_lines[key] = line
 
     def open_log(self):
         path = os.path.join(self.stable_dir(), 'serial-%s.log' % time.strftime(DATE_FMT))
