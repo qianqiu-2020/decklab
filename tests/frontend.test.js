@@ -15,6 +15,7 @@ class Element {
     this.tagName = tag; this.children = []; this.events = {};
     this.dataset = {}; this.style = {}; this.hidden = false;
     this.checked = true; this.value = ''; this._text = '';
+    this.attributes = {};
     this.classList = { toggle() {} };
   }
   set textContent(value) { this._text = value; this.children = []; }
@@ -22,6 +23,10 @@ class Element {
   set innerHTML(value) { this.textContent = value; }
   appendChild(child) { this.children.push(child); return child; }
   addEventListener(name, fn) { (this.events[name] ||= []).push(fn); }
+  removeEventListener(name, fn) {
+    this.events[name] = (this.events[name] || []).filter(listener => listener !== fn);
+  }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
   emit(name, event = {}) {
     for (const fn of this.events[name] || []) fn(event);
   }
@@ -45,6 +50,14 @@ function harness() {
       this.options = options;
       this.cols = 80; this.rows = 24; this.queued = []; this.parsed = '';
       this.decoder = new TextDecoder(); terminals.push(this);
+      const owner = this;
+      this.buffer = { active: {
+        get length() { return owner.parsed.split('\n').length; },
+        getLine(row) {
+          const line = owner.parsed.split('\n')[row];
+          return line === undefined ? undefined : { translateToString: () => line.replace(/\s+$/, '') };
+        },
+      } };
       this.csi = new Map();
       this.parser = {
         registerCsiHandler: (id, fn) => this.csi.set((id.prefix || '') + id.final, fn),
@@ -59,6 +72,8 @@ function harness() {
     attachCustomKeyEventHandler(fn) { this.key = fn; }
     getSelection() { return ''; }
     clearSelection() {}
+    select(col, row, length) { this.selected = { col, row, length }; }
+    scrollToLine(row) { this.scrolledToLine = row; }
     focus() {}
     refresh() {}
     write(data, callback) { this.queued.push({ data, callback }); }
@@ -562,6 +577,22 @@ test('agent SSH activity opens read-only without input or resize writes', async 
   assert.equal(h.get('b-takeover').hidden, true);
   terminal.data('human intervention\r'); await drain();
   assert.equal(h.sends().at(-1).body.data, 'human intervention\r');
+});
+
+test('terminal search selects matches and wraps in both directions', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  h.take('/api/session').resolve(readResponse('A', 'alpha root\nbeta\nroot gamma'));
+  await drain(); terminal.flush();
+  h.get('terminal-search').value = 'root';
+  h.get('terminal-search-next').click();
+  assert.deepEqual(terminal.selected, { col: 6, row: 0, length: 4 });
+  assert.equal(h.get('terminal-search-status').textContent, '1 / 2');
+  h.get('terminal-search-next').click();
+  assert.deepEqual(terminal.selected, { col: 0, row: 2, length: 4 });
+  h.get('terminal-search-next').click();
+  assert.deepEqual(terminal.selected, { col: 6, row: 0, length: 4 });
+  h.get('terminal-search-prev').click();
+  assert.deepEqual(terminal.selected, { col: 0, row: 2, length: 4 });
 });
 
 (async () => {

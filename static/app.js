@@ -28,6 +28,9 @@
     if (old.scrollHandler && $('d-term').removeEventListener) {
       $('d-term').removeEventListener('click', old.scrollHandler, true);
     }
+    if (old.wheelHandler && $('d-term').removeEventListener) {
+      $('d-term').removeEventListener('wheel', old.wheelHandler, false);
+    }
     if (old.ctrl) old.ctrl.abort();
     clearTimeout(old.loopTimer);
     clearTimeout(old.sizeTimer);
@@ -51,7 +54,7 @@
                 readonly: selectedSession.kind === 'log' || isAgentSession,
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, sessionsSeq: 0, activitySeq: 0,
-                sendTail: Promise.resolve(), lastSel: '' };
+                sendTail: Promise.resolve(), lastSel: '', searchQuery: '', searchMatch: -1 };
     view = ctx;
     setInputMode(ctx);
     term = ctx.term = new Terminal({
@@ -83,6 +86,22 @@
       viewport.scrollTop = Math.max(0, ratio * viewport.scrollHeight - viewport.clientHeight / 2);
     };
     $('d-term').addEventListener('click', ctx.scrollHandler, true);
+    // xterm consumes wheel input, but at the first/last line some browsers
+    // chain the unused delta to the page.  Stop that chain while preserving
+    // xterm's own target listener and scrollbar behavior.
+    ctx.wheelHandler = function (event) {
+      if (!isCurrent(ctx) || !event) return;
+      var viewport = ctx.term.element && ctx.term.element.querySelector
+        ? ctx.term.element.querySelector('.xterm-viewport') : null;
+      if (!viewport) return;
+      var atTop = viewport.scrollTop <= 0;
+      var atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 1;
+      if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) {
+        if (event.preventDefault) event.preventDefault();
+      }
+      if (event.stopPropagation) event.stopPropagation();
+    };
+    $('d-term').addEventListener('wheel', ctx.wheelHandler, { passive: false });
     SerialdTerminalPolicy.install(ctx, {
       isCurrent: isCurrent,
       keyboardEnabled: function () { return $('d-kbd').checked; },
@@ -91,6 +110,58 @@
       copySelection: copySel
     });
     return ctx;
+  }
+
+  function terminalMatches(ctx, query) {
+    var active = ctx && ctx.term && ctx.term.buffer && ctx.term.buffer.active;
+    if (!active || !query) return [];
+    var needle = query.toLocaleLowerCase();
+    var matches = [];
+    for (var row = 0; row < active.length; row++) {
+      var line = active.getLine(row);
+      if (!line || !line.translateToString) continue;
+      var text = line.translateToString(true).toLocaleLowerCase();
+      var from = 0, found;
+      while ((found = text.indexOf(needle, from)) !== -1) {
+        matches.push({ row: row, col: found });
+        from = found + Math.max(1, needle.length);
+      }
+    }
+    return matches;
+  }
+
+  function searchTerminal(direction) {
+    var ctx = view;
+    if (!isCurrent(ctx)) return;
+    var query = $('terminal-search').value;
+    if (!query) {
+      ctx.term.clearSelection(); ctx.searchQuery = ''; ctx.searchMatch = -1;
+      $('terminal-search-status').textContent = ''; return;
+    }
+    var matches = terminalMatches(ctx, query);
+    if (!matches.length) {
+      ctx.term.clearSelection(); ctx.searchQuery = query; ctx.searchMatch = -1;
+      $('terminal-search-status').textContent = '无匹配'; return;
+    }
+    if (ctx.searchQuery !== query || ctx.searchMatch < 0 || ctx.searchMatch >= matches.length) {
+      ctx.searchMatch = direction < 0 ? matches.length - 1 : 0;
+    } else {
+      ctx.searchMatch = (ctx.searchMatch + direction + matches.length) % matches.length;
+    }
+    ctx.searchQuery = query;
+    var match = matches[ctx.searchMatch];
+    ctx.term.select(match.col, match.row, query.length);
+    ctx.term.scrollToLine(match.row);
+    $('terminal-search-status').textContent = (ctx.searchMatch + 1) + ' / ' + matches.length;
+  }
+
+  function clearTerminalSearch(focusTerminal) {
+    $('terminal-search').value = '';
+    $('terminal-search-status').textContent = '';
+    if (view && view.term) {
+      view.searchQuery = ''; view.searchMatch = -1; view.term.clearSelection();
+      if (focusTerminal) view.term.focus();
+    }
   }
 
   function resizeTerm() {
@@ -334,6 +405,8 @@
     var d = (lastDevices || []).filter(function (x) { return x.key === key; })[0];
     $('detail').hidden = false;
     $('workspace').classList.toggle('selected', true);
+    document.body.classList.toggle('detail-open', true);
+    clearTerminalSearch(false);
     $('d-name').textContent = d ? d.label : key;
     $('d-dev').textContent = d ? d.dev : '';
     $('d-key').textContent = d && d.serial ? 'SN ' + d.serial : key;
@@ -734,6 +807,36 @@
   $('activity-next').addEventListener('click', function () { sessionPage++; loadActivity(); });
   $('event-prev').addEventListener('click', function () { if (eventPage) { eventPage--; loadActivity(); } });
   $('event-next').addEventListener('click', function () { eventPage++; loadActivity(); });
+  $('terminal-search-next').addEventListener('click', function () { searchTerminal(1); });
+  $('terminal-search-prev').addEventListener('click', function () { searchTerminal(-1); });
+  $('terminal-search-clear').addEventListener('click', function () { clearTerminalSearch(true); });
+  $('terminal-search').addEventListener('input', function () {
+    if (view) { view.searchQuery = ''; view.searchMatch = -1; }
+    $('terminal-search-status').textContent = '';
+  });
+  $('terminal-search').addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') {
+      if (event.preventDefault) event.preventDefault();
+      searchTerminal(event.shiftKey ? -1 : 1);
+    } else if (event.key === 'Escape') {
+      if (event.preventDefault) event.preventDefault();
+      clearTerminalSearch(true);
+    }
+  });
+  document.addEventListener('keydown', function (event) {
+    if (!selKey || !(event.ctrlKey || event.metaKey) || String(event.key).toLowerCase() !== 'f') return;
+    if (event.preventDefault) event.preventDefault();
+    $('terminal-search').focus();
+    if ($('terminal-search').select) $('terminal-search').select();
+  });
+  function setRecordsOpen(open) {
+    $('d-records').hidden = !open;
+    $('console-layout').classList.toggle('records-open', open);
+    $('b-records').setAttribute('aria-expanded', open ? 'true' : 'false');
+    setTimeout(resizeTerm, 0);
+  }
+  $('b-records').addEventListener('click', function () { setRecordsOpen($('d-records').hidden); });
+  $('b-records-close').addEventListener('click', function () { setRecordsOpen(false); });
   /* ---------- 动作 ---------- */
   $('b-send').addEventListener('click', function () {
     var v = $('d-in').value; if (!v || !selKey) return;
@@ -879,6 +982,7 @@
   $('b-close').addEventListener('click', function () {
     disposeView(); selKey = null; $('detail').hidden = true;
     $('workspace').classList.toggle('selected', false);
+    document.body.classList.toggle('detail-open', false);
     markSelected(); pollDevices();
   });
 

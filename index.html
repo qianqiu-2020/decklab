@@ -48,23 +48,36 @@
     </div>
     <div class="tabs" id="d-tabs"></div>
     <div class="info" id="d-info" hidden></div>
-    <div class="termhost" id="d-term"></div>
-    <div class="sendrow">
-      <label class="chk"><input type="checkbox" id="d-kbd" checked> 键盘直通</label>
-      <input type="text" id="d-in" placeholder="或在此整行输入后回车" autocomplete="off" spellcheck="false">
-      <button class="pri" id="b-send" type="button">发送</button>
-      <button id="b-cr" type="button" title="只发一个回车（唤醒板子 / 看是否还活着）">↵</button>
-      <button id="b-ctrlc" type="button" title="发送 Ctrl-C">Ctrl-C</button>
-      <button id="b-paste" type="button" title="粘贴剪贴板内容到会话">粘贴</button>
-      <button id="b-takeover" type="button" hidden title="允许从网页向当前 agent SSH shell 输入，并记录介入事件">介入此会话</button>
+    <div class="terminal-tools">
+      <label for="terminal-search">查找终端</label>
+      <input id="terminal-search" type="text" placeholder="Ctrl+F" autocomplete="off" spellcheck="false">
+      <button id="terminal-search-prev" type="button" title="上一个匹配（Shift+Enter）">↑</button>
+      <button id="terminal-search-next" type="button" title="下一个匹配（Enter）">↓</button>
+      <button id="terminal-search-clear" type="button">清除</button>
+      <span id="terminal-search-status"></span>
+      <button id="b-records" type="button" aria-expanded="false">记录与归档</button>
     </div>
-    <div class="hint">
-      勾选「键盘直通」后，点击终端即可输入。agent 会话和归档日志以只读方式查看。<br>
-      <b>复制</b>：鼠标拖选后自动复制；<b>粘贴</b>：<span class="mono">Ctrl+V</span> 或点「粘贴」。
-      <span class="mono">Ctrl+C</span> 会中断板子上的当前命令。<span id="d-status"></span>
+    <div class="console-layout" id="console-layout">
+    <div class="console-main">
+      <div class="termhost" id="d-term"></div>
+      <div class="sendrow">
+        <label class="chk"><input type="checkbox" id="d-kbd" checked> 键盘直通</label>
+        <input type="text" id="d-in" placeholder="或在此整行输入后回车" autocomplete="off" spellcheck="false">
+        <button class="pri" id="b-send" type="button">发送</button>
+        <button id="b-cr" type="button" title="只发一个回车（唤醒板子 / 看是否还活着）">↵</button>
+        <button id="b-ctrlc" type="button" title="发送 Ctrl-C">Ctrl-C</button>
+        <button id="b-paste" type="button" title="粘贴剪贴板内容到会话">粘贴</button>
+        <button id="b-takeover" type="button" hidden title="允许从网页向当前 agent SSH shell 输入，并记录介入事件">介入此会话</button>
+      </div>
+      <div class="hint">
+        勾选「键盘直通」后，点击终端即可输入。agent 会话和归档日志以只读方式查看。
+        <b>复制</b>：拖选；<b>搜索</b>：<span class="mono">Ctrl+F</span>；<b>粘贴</b>：<span class="mono">Ctrl+V</span>。
+        <span class="mono">Ctrl+C</span> 会中断当前命令。<span id="d-status"></span>
+      </div>
+      <div class="hint" id="d-hint" hidden></div>
     </div>
-    <div class="hint" id="d-hint" hidden></div>
-    <section class="records">
+    <section class="records" id="d-records" hidden>
+      <div class="records-title"><strong>记录与归档</strong><button id="b-records-close" type="button">关闭</button></div>
       <div class="section-head"><h2>SSH 会话记录</h2><span>在线会话可实时查看，关闭后 transcript 仍保留</span></div>
       <div id="d-activity" class="activity"></div>
       <div class="pager"><button id="activity-prev" type="button">较新</button><span id="activity-page"></span><button id="activity-next" type="button">更早</button></div>
@@ -74,6 +87,7 @@
       <div class="section-head"><h2>串口日志归档</h2><span id="log-location"></span></div>
       <div class="logs" id="d-logs"></div>
     </section>
+    </div>
   </div>
 
   </div>
