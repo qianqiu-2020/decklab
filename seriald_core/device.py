@@ -409,10 +409,17 @@ class Device:
         while time.monotonic() < end:
             if self.stop.is_set() or self.fd is None:
                 return None
+            with self.cv:
+                observed = self.base + len(self.buf)
             m = rx.search(ANSI.sub('', self._since(base)))
             if m:
                 return m
-            self.stop.wait(min(0.3, max(0, end - time.monotonic())))
+            # The sole collector reader notifies this condition for each append.
+            # Only sleep if no bytes arrived after the search, avoiding a lost
+            # wakeup and a fixed 300 ms delay on every transfer chunk.
+            with self.cv:
+                if self.base + len(self.buf) == observed:
+                    self.cv.wait(min(1.0, max(0, end - time.monotonic())))
         return None
 
     def ensure_shell(self, base):
@@ -468,13 +475,20 @@ class Device:
             self.probing = False
             self.operation_lock.release()
 
-    def _run_cmd_locked(self, cmd, timeout):
-        """Run one framed console command while operation_lock is held."""
+    def _run_cmd_locked(self, cmd, timeout, ensure_shell=True):
+        """Run one framed console command while operation_lock is held.
+
+        A transfer checks the shell once at start; every later chunk still
+        requires its own complete nonce-framed response.
+        """
         if self.fd is None or self.stop.is_set():
             return False, '设备未打开(串口没接上或已被拔掉)'
-        ok, base = self.ensure_shell(self.now_off())
-        if not ok:
-            return False, '板子不在 shell 提示符,且自动登录失败(可能需要手动处理)'
+        if ensure_shell:
+            ok, base = self.ensure_shell(self.now_off())
+            if not ok:
+                return False, '板子不在 shell 提示符,且自动登录失败(可能需要手动处理)'
+        elif not self.newline:
+            return False, '本连接尚未确定 shell 换行方式'
         nonce = secrets.token_hex(12)
         begin, end = '__SD_B_' + nonce + '__', '__SD_E_' + nonce + '__'
         # printf 参数拆开 marker,回显再怎么分块也不会成为完整标记行。

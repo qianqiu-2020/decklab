@@ -20,9 +20,14 @@ class ShellDevice:
         self.operation_lock = threading.Lock()
         self.probing = False
         self.commands = []
+        self.shell_checks = []
+        self.gzip_available = True
 
-    def _run_cmd_locked(self, command, timeout):
+    def _run_cmd_locked(self, command, timeout, ensure_shell=True):
         self.commands.append(command)
+        self.shell_checks.append(ensure_shell)
+        if not self.gzip_available:
+            command = command.replace('command -v gzip >/dev/null 2>&1', 'false')
         result = subprocess.run(['/bin/sh', '-c', command], capture_output=True,
                                 text=True, timeout=timeout)
         return True, result.stdout + result.stderr
@@ -54,6 +59,35 @@ class SerialFileTransferTests(unittest.TestCase):
         self.assertEqual(result['sha256'], hashlib.sha256(data).hexdigest())
         self.assertFalse(list(self.root.glob('*.part')))
         self.assertFalse(self.transfer.active)
+        self.assertEqual(self.device.shell_checks, [True] + [False] * (len(self.device.shell_checks) - 1))
+
+    def test_compressible_upload_and_download_keep_original_bytes(self):
+        data = b'boot: device initialized\n' * 600
+        target = self.root / 'boot.log'
+        self.upload(target, data)
+        self.assertEqual(target.read_bytes(), data)
+        self.assertTrue(any('| gzip -d >>' in command for command in self.device.commands))
+        state = self.transfer.start('download', str(target), self.device.connection_id)
+        received = bytearray()
+        for offset in range(0, len(data), CHUNK_SIZE):
+            part = self.transfer.chunk(state['id'], self.device.connection_id, offset)
+            received.extend(base64.b64decode(part['data_b64']))
+        self.assertEqual(self.transfer.finish(state['id'], self.device.connection_id)['sha256'],
+                         hashlib.sha256(data).hexdigest())
+        self.assertEqual(bytes(received), data)
+        self.assertTrue(any('| gzip -c | base64' in command for command in self.device.commands))
+
+    def test_missing_board_gzip_uses_plain_base64(self):
+        self.device.gzip_available = False
+        data = b'compress me\n' * 400
+        target = self.root / 'plain.log'
+        self.upload(target, data)
+        self.assertFalse(any('| gzip -d >>' in command for command in self.device.commands))
+        state = self.transfer.start('download', str(target), self.device.connection_id)
+        for offset in range(0, len(data), CHUNK_SIZE):
+            self.transfer.chunk(state['id'], self.device.connection_id, offset)
+        self.transfer.finish(state['id'], self.device.connection_id)
+        self.assertFalse(any('| gzip -c | base64' in command for command in self.device.commands))
 
     def test_upload_does_not_overwrite_without_explicit_flag(self):
         target = self.root / 'file.bin'

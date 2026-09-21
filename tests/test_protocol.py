@@ -3,6 +3,8 @@ import importlib.util
 import pathlib
 import re
 import subprocess
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -48,6 +50,18 @@ class DeviceFixture(unittest.TestCase):
 
 
 class FramingTests(DeviceFixture):
+    def test_transfer_frame_does_not_repeat_shell_probe(self):
+        response = BEGIN + '\nSD_OK=1\n' + END + '\n'
+        with mock.patch.object(self.device, 'ensure_shell') as shell, \
+                mock.patch.object(self.device, '_write', return_value=(True, '')), \
+                mock.patch.object(self.device, '_wait', return_value=True), \
+                mock.patch.object(self.device, '_since', return_value=response), \
+                mock.patch.object(sd.secrets, 'token_hex', return_value=NONCE):
+            ok, output = self.device._run_cmd_locked('true', 2, ensure_shell=False)
+        self.assertTrue(ok, output)
+        self.assertEqual(output, 'SD_OK=1\n')
+        shell.assert_not_called()
+
     def test_complete_matching_frame_extracts_only_its_body(self):
         response = ('command echo\r\n' + BEGIN + '\r\n' + BODY.replace('\n', '\r\n')
                     + END + '\r\nroot@board:# ')
@@ -228,6 +242,23 @@ class ShellLoginTests(DeviceFixture):
         match = self.device._wait(0, sd.RE_PROMPT, timeout=0.1)
         self.assertIsNotNone(match)
         self.assertEqual(match.group(0), '# ')
+
+    def test_wait_wakes_when_collector_appends_response(self):
+        def complete():
+            time.sleep(0.02)
+            with self.device.cv:
+                self.device.buf.extend(b'__SD_E_done__\r\n')
+                self.device.cv.notify_all()
+
+        worker = threading.Thread(target=complete)
+        worker.start()
+        start = time.monotonic()
+        try:
+            found = self.device._wait(0, r'(?m)^__SD_E_done__\r?\n', timeout=1)
+        finally:
+            worker.join()
+        self.assertIsNotNone(found)
+        self.assertLess(time.monotonic() - start, 0.25)
 
 
 class RootSshSetupTests(DeviceFixture):

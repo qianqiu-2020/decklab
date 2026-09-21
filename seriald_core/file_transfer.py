@@ -2,14 +2,17 @@
 import base64
 import binascii
 import hashlib
+import gzip
 import re
 import secrets
 import shlex
 import threading
 import time
+import zlib
 
 
 CHUNK_SIZE = 2048  # Encoded input stays below a typical 4096-byte tty line limit.
+COMPRESS_RATIO = 0.80  # Save enough wire time to justify a gzip process per chunk.
 IDLE_SECONDS = 10 * 60
 HEX_SHA256 = re.compile(r'^[0-9a-f]{64}$')
 
@@ -52,7 +55,8 @@ class SerialFileTransfer:
             raise TransferError('串口正在执行其他操作，请稍后重试', 409)
         device.probing = True
         try:
-            ok, output = device._run_cmd_locked(command, timeout)
+            ok, output = device._run_cmd_locked(command, timeout,
+                                                ensure_shell=self.state is None)
         finally:
             device.probing = False
             device.operation_lock.release()
@@ -117,7 +121,9 @@ class SerialFileTransfer:
                 temp = path + '.seriald-' + transfer_id + '.part'
                 command = ('umask 077; if [ -d {dst} ] || '
                            '{exists}; then printf "SD_ERROR=exists\\n"; '
-                           'elif (set -C; : > {tmp}); then printf "SD_OK=1\\n"; '
+                           'elif (set -C; : > {tmp}); then '
+                           'if command -v gzip >/dev/null 2>&1; then g=1; else g=0; fi; '
+                           'printf "SD_OK=1\\nSD_GZIP=%s\\n" "$g"; '
                            'else printf "SD_ERROR=create\\n"; fi').format(
                     dst=quoted,
                     exists=('false' if overwrite else '[ -e {0} ] || [ -L {0} ]'.format(quoted)),
@@ -125,23 +131,27 @@ class SerialFileTransfer:
                 output = self._run(command)
                 if _field(output, 'SD_OK') != '1':
                     raise TransferError('无法创建板端临时文件：' + (_field(output, 'SD_ERROR') or output[-200:]), 409)
-                state.update(temp=temp, size=size, hasher=hashlib.sha256(), overwrite=bool(overwrite))
+                state.update(temp=temp, size=size, hasher=hashlib.sha256(), overwrite=bool(overwrite),
+                             gzip=_field(output, 'SD_GZIP') == '1')
             else:
                 command = ('if [ -f {0} ] && [ -r {0} ]; then '
                            's=$(wc -c < {0}); h=$(sha256sum {0} | cut -d\x27 \x27 -f1); '
-                           'printf "SD_SIZE=%s\\nSD_SHA=%s\\n" "$s" "$h"; '
+                           'if command -v gzip >/dev/null 2>&1; then g=1; else g=0; fi; '
+                           'printf "SD_SIZE=%s\\nSD_SHA=%s\\nSD_GZIP=%s\\n" "$s" "$h" "$g"; '
                            'else printf "SD_ERROR=unreadable\\n"; fi').format(quoted)
                 output = self._run(command, timeout=120)
                 raw_size, digest = _field(output, 'SD_SIZE'), _field(output, 'SD_SHA')
                 if not raw_size or not raw_size.isdigit() or not digest or not HEX_SHA256.fullmatch(digest):
                     raise TransferError('板端文件不可读，或缺少 wc/sha256sum：'
                                         + (_field(output, 'SD_ERROR') or output[-200:]), 409)
-                state.update(size=int(raw_size), sha256=digest)
+                state.update(size=int(raw_size), sha256=digest,
+                             gzip=_field(output, 'SD_GZIP') == '1', compress=False)
             self.state = state
             self._schedule_expiry(transfer_id)
             return {'id': transfer_id, 'direction': direction, 'path': path,
                     'size': state['size'], 'sha256': state.get('sha256'),
-                    'chunk_size': CHUNK_SIZE, 'offset': 0}
+                    'chunk_size': CHUNK_SIZE, 'offset': 0,
+                    'gzip_available': state['gzip']}
         finally:
             self.lock.release()
 
@@ -170,10 +180,13 @@ class SerialFileTransfer:
                     raise TransferError('分块不是有效 base64') from None
                 if len(data) != expected:
                     raise TransferError('上传分块长度不匹配')
-                encoded = base64.b64encode(data).decode('ascii')
-                command = ('printf %s {0} | base64 -d >> {1}; r=$?; '
+                packed = gzip.compress(data, compresslevel=1, mtime=0) if state['gzip'] else data
+                compressed = len(packed) <= len(data) * COMPRESS_RATIO
+                encoded = base64.b64encode(packed if compressed else data).decode('ascii')
+                decode = 'base64 -d | gzip -d' if compressed else 'base64 -d'
+                command = ('printf %s {0} | {2} >> {1}; r=$?; '
                            's=$(wc -c < {1}); printf "SD_RC=%s\\nSD_SIZE=%s\\n" "$r" "$s"').format(
-                    shlex.quote(encoded), shlex.quote(state['temp']))
+                    shlex.quote(encoded), shlex.quote(state['temp']), decode)
                 try:
                     output = self._run(command)
                 except TransferError:
@@ -185,19 +198,31 @@ class SerialFileTransfer:
                 state['hasher'].update(data)
             else:
                 index = offset // CHUNK_SIZE
+                encode = 'gzip -c | base64' if state['compress'] else 'base64'
                 command = ('if [ -f {0} ]; then '
-                           'd=$(dd if={0} bs={1} skip={2} count=1 2>/dev/null | base64 | tr -d "\\r\\n"); '
+                           'd=$(dd if={0} bs={1} skip={2} count=1 2>/dev/null | {3} | tr -d "\\r\\n"); '
                            'printf "SD_DATA=%s\\n" "$d"; '
                            'else printf "SD_ERROR=missing\\n"; fi').format(
-                    shlex.quote(state['path']), CHUNK_SIZE, index)
+                    shlex.quote(state['path']), CHUNK_SIZE, index, encode)
                 output = self._run(command)
                 encoded = _field(output, 'SD_DATA')
                 try:
                     data = base64.b64decode(encoded, validate=True)
                 except (TypeError, ValueError, binascii.Error):
                     raise TransferError('板端返回的分块损坏', 502) from None
+                if state['compress']:
+                    try:
+                        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                        data = decoder.decompress(data, CHUNK_SIZE + 1)
+                        if len(data) > CHUNK_SIZE or not decoder.eof or decoder.unused_data:
+                            raise zlib.error('invalid gzip chunk length or trailer')
+                    except zlib.error:
+                        raise TransferError('板端返回的 gzip 分块损坏', 502) from None
                 if len(data) != expected:
                     raise TransferError('板端文件已变化，分块长度不匹配', 409)
+                if state['gzip']:
+                    packed = gzip.compress(data, compresslevel=1, mtime=0)
+                    state['compress'] = len(packed) <= len(data) * COMPRESS_RATIO
                 state.setdefault('hasher', hashlib.sha256()).update(data)
             state['offset'] += len(data)
             state['last'] = time.monotonic()

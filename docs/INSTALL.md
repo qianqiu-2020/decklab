@@ -6,7 +6,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.21_all.deb
+sudo apt install ./dist/seriald_1.4.22_all.deb
 systemctl status seriald
 serialctl devices
 ```
