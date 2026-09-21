@@ -26,7 +26,10 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST') { posts.push(u.pathname); json({ ok: false, error: 'read-only fixture' }); return; }
   if (u.pathname === '/api/devices') return json({ devices: fixtures });
   if (u.pathname === '/api/session') {
-    const bytes = u.searchParams.get('off') === '0' ? Buffer.from('root@bianbu:~# \x1b[6n\x1b[?6n\x1b[c\x1b]11;?\x07'.repeat(15)) : Buffer.alloc(0);
+    const bytes = u.searchParams.get('off') === '0' ? Buffer.from(
+      'root@bianbu:~# \x1b[6n\x1b[?6n\x1b[c\x1b]11;?\x07'.repeat(15)
+      + Array.from({length:80},(_,i)=>'\r\nserial line '+i).join('')
+      + '\x1b[2J\x1b[50;1Hlast firmware row') : Buffer.alloc(0);
     return json({ key: u.searchParams.get('key'), sid: u.searchParams.get('sid'), alive: true,
       off: 4096, data_b64: bytes.toString('base64') });
   }
@@ -79,6 +82,11 @@ let chrome, ws;
   assert.deepEqual(posts,[], 'rendering cursor queries must not send a POST');
   assert.ok(await evaluate('document.querySelector("#d-info").textContent.includes("SoC / eFuse")'));
   assert.ok(await evaluate('document.querySelector("#d-info").textContent.includes("0123456789ABCDEF")'));
+  assert.equal(await evaluate('getComputedStyle(document.querySelector("#d-info")).display'),'none',
+    'identity details should start collapsed to leave room for the terminal');
+  await evaluate('document.querySelector("#b-info").click()');
+  assert.notEqual(await evaluate('getComputedStyle(document.querySelector("#d-info")).display'),'none');
+  await evaluate('document.querySelector("#b-info").click()');
   await evaluate('document.querySelector("#d-activity button").click()');
   await delay(700);
   assert.deepEqual(posts,[], 'viewing an agent session must not send reports or resize it');
@@ -107,10 +115,39 @@ let chrome, ws;
   const out=path.join(root,'dist');fs.mkdirSync(out,{recursive:true});
   const screenshot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-desktop.png'),Buffer.from(screenshot.data,'base64'));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
+  await delay(150);
+  assert.ok(await evaluate(viewportFits), 'laptop-height terminal must keep the last row visible');
+  assert.ok(await evaluate('document.querySelector("#d-term").getBoundingClientRect().height >= 480'),
+    'laptop-height view must give most of the screen to the terminal');
   await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   await delay(300);
   assert.ok(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'),'mobile layout must not overflow');
   assert.ok(await evaluate(viewportFits), 'mobile page and terminal must fit the viewport with bottom clearance');
+  await evaluate('document.querySelector("#d-tabs button").click()');
+  await delay(200);
+  assert.ok(await evaluate('testTerm.rows >= 50'), 'firmware must retain its full logical screen');
+  assert.ok(await evaluate(`(() => {const host=document.querySelector('#d-term');const screen=host.querySelector('.xterm-screen');return screen.getBoundingClientRect().height<=host.querySelector('.xterm-viewport').clientHeight+1})()`),
+    'firmware screen rows should physically fit the terminal viewport');
+  assert.ok(await evaluate(`(() => {const v=document.querySelector('#d-term .xterm-viewport');return v.scrollHeight>v.clientHeight})()`),
+    'prior serial output should remain scrollable');
+  assert.ok(await evaluate(`(() => {const r=document.querySelector('#d-term .xterm-viewport').getBoundingClientRect();return document.elementFromPoint(r.right-5,(r.top+r.bottom)/2)?.classList.contains('xterm-viewport')})()`),
+    'serial scrollbar edge must receive clicks even at narrow widths');
+  const track = await evaluate(`(() => {const v=document.querySelector('#d-term .xterm-viewport');v.scrollTop=0;const r=v.getBoundingClientRect();return {x:r.right-5,y:r.bottom-12}})()`);
+  await rpc('Input.dispatchMouseEvent',{type:'mousePressed',x:track.x,y:track.y,button:'left',clickCount:1});
+  await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',x:track.x,y:track.y,button:'left',clickCount:1});
+  assert.ok(await evaluate('document.querySelector("#d-term .xterm-viewport").scrollTop > 0'),
+    'clicking the visible serial scrollbar must move through history');
+  const regularHeight = await evaluate('document.querySelector("#d-term").getBoundingClientRect().height');
+  await evaluate('document.querySelector("#b-expand").click()');
+  await delay(200);
+  assert.ok(await evaluate('document.querySelector("#d-term").getBoundingClientRect().height') > regularHeight + 100,
+    'maximized firmware terminal must reclaim space from board chrome');
+  assert.ok(await evaluate('document.scrollingElement.scrollHeight <= window.innerHeight + 1'));
+  const expandedShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-max.png'),Buffer.from(expandedShot.data,'base64'));
+  await evaluate('document.querySelector("#b-expand").click()');
+  await delay(100);
   await evaluate('document.querySelector("#b-records").click()');
   await delay(200);
   assert.ok(await evaluate('document.scrollingElement.scrollHeight <= window.innerHeight + 1'),

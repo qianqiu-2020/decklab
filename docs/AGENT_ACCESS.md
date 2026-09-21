@@ -25,7 +25,7 @@ serialctl --actor claude-code/diagnosis --device riscv-118 exec --command 'uname
 `--device` 接受标签或身份编号，不按 ttyUSB 编号或重复 hostname 选板。
 CLI 会固定选中时的 serial，后续请求若标签已换绑，会拒绝操作。
 
-未写永久序列号的 key 为 `unprovisioned-…`，摘要来自当前 USB by-path。确认目标连接后运行：
+尚未识别或确实缺少可用编号时，key 为 `unprovisioned-…`，摘要来自当前 USB by-path。确认目标连接后运行：
 
 ```sh
 serialctl --device unprovisioned-实际摘要 identify
@@ -33,6 +33,7 @@ serialctl --device 设备当前标签 rename --label riscv-118
 ```
 
 识别可能自动登录并在串口执行识别命令。已知序列号恢复原标签；标签变更不移动日志。
+服务运行中同一 by-path 重新枚举会沿用已绑定身份；换板前必须点击“准备换板”。
 服务优先读取 EEPROM ONIE `0x23`：支持 upstream 的 `cells/serial-number@*`，也能校验解析
 vendor 内核暴露的原始 at24 NVMEM。有效的设备树 `serial-number` 直接作为正式板卡编号；带
 `/chosen/u-boot,version` provenance 的 U-Boot 注入编号会保留更具体的来源标识；

@@ -98,10 +98,12 @@
   .terminal-tools #terminal-search-status{font:11.5px "IBM Plex Mono",monospace;color:var(--ink-3);white-space:nowrap}
   .terminal-tools #b-records{margin-left:auto}
   .terminal-tools #b-records[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent)}
+  .terminal-tools #d-status{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;font-size:12px;color:var(--ink-3)}
   .console-layout{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;min-height:0;flex:1;overflow:hidden}
   .console-layout.records-open{grid-template-columns:minmax(0,1fr) minmax(300px,360px)}
   .console-main{min-width:0;min-height:0;display:flex;flex-direction:column}
-  .termhost{min-height:0;flex:1;background:var(--term);padding:8px 10px 16px;
+  .termhost{min-height:0;flex:1;background:var(--term);border:solid var(--term);border-width:8px 0 16px 10px;
     overflow:hidden;overscroll-behavior:contain}
   .tabs{display:flex;gap:6px;padding:9px 14px;border-bottom:1px solid var(--line);
     flex-wrap:wrap;align-items:center;background:var(--surface-2)}
@@ -168,33 +170,54 @@
     font-family:"IBM Plex Mono",monospace;text-align:left}
   @media(max-width:600px){.overview{gap:8px}.overview>div{padding:12px;display:block}.overview span{display:block}.activity-row{flex-wrap:wrap}.section-head{display:block}}
 
-  .workspace{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
+  .workspace{flex:1;min-height:0;overflow:hidden;overscroll-behavior:contain}
+  .device-pane{display:flex;flex-direction:column;height:100%;min-height:0}
+  .device-pane>.grid{min-height:0;overflow:auto;align-content:start}
   .workspace.selected{display:grid;grid-template-columns:clamp(210px,16vw,250px) minmax(0,1fr);gap:14px;overflow:hidden}
-  .workspace.selected>.grid{grid-template-columns:1fr;align-content:start;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:4px}
+  .workspace.selected .device-pane>.grid{grid-template-columns:1fr;overflow-y:auto;overflow-x:hidden;padding-right:4px}
+  .workspace.selected .device-pane>.toolbar{flex-direction:column;gap:5px;margin-bottom:8px}
+  .workspace.selected .device-pane>.toolbar input,
+  .workspace.selected .device-pane>.toolbar select{width:100%;padding:6px;font-size:12px}
   .workspace.selected .dev{min-width:0;padding:13px}
   .workspace.selected .dev .meta,.workspace.selected .dev .stat,.workspace.selected .dev .stat span{min-width:0;overflow-wrap:anywhere}
   .workspace.selected>.detail{margin-top:0;min-width:0;min-height:0;display:flex;flex-direction:column}
   .detail>.hd,.detail>.tabs,.detail>.terminal-tools{flex:none}
-  .detail>.info{flex:none;max-height:20vh;overflow:auto}
+  .detail>.info{display:none;flex:none;max-height:20vh;overflow:auto}
+  .detail.info-open>.info:not([hidden]){display:grid}
+  #b-info[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent)}
   .workspace.selected .dev .stat{flex-wrap:wrap;gap:6px}
   .workspace.selected .dev .stat span:last-child{overflow-wrap:anywhere}
   body.detail-open .wrap{max-width:none;padding:12px 14px}
-  body.detail-open .sub,body.detail-open .overview{display:none}
-  body.detail-open .top{margin-bottom:8px}
-  body.detail-open .toolbar{margin-bottom:12px}
+  body.detail-open .top,body.detail-open .sub,body.detail-open .overview{display:none}
+  body.terminal-max .wrap{padding:4px}
+  body.terminal-max .top,body.terminal-max .workspace.selected>.device-pane,
+  body.terminal-max .detail>.hd,body.terminal-max .detail>.info{display:none}
+  body.terminal-max .workspace.selected{display:block}
+  body.terminal-max .workspace.selected>.detail{height:100%}
+  body.terminal-max .detail>.tabs{padding:4px 8px;max-height:none;flex-wrap:nowrap;overflow-x:auto}
+  body.terminal-max .terminal-tools{padding:4px 8px;flex-wrap:nowrap;overflow-x:auto}
+  body.terminal-max .sendrow{padding:5px 8px}
+  body.terminal-max .hint{display:none}
+  body.terminal-max #b-expand{background:var(--accent-soft);border-color:var(--accent)}
   @media(max-width:1200px){
     .console-layout.records-open{grid-template-columns:minmax(0,1fr) minmax(280px,32vw)}
   }
   @media(max-width:1000px){
     .workspace.selected{display:flex;flex-direction:column}
-    .workspace.selected>.grid{flex:0 0 auto;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));max-height:min(180px,22vh);margin-bottom:0}
+    .workspace.selected>.device-pane{flex:0 0 auto;max-height:min(180px,22vh)}
+    .workspace.selected .device-pane>.toolbar{flex-direction:row;gap:6px;margin-bottom:6px}
+    .workspace.selected .device-pane>.toolbar input{flex:1}
+    .workspace.selected .device-pane>.toolbar select{width:125px;flex:none}
+    .workspace.selected .device-pane>.grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));max-height:120px;margin-bottom:0}
     .workspace.selected>.detail{flex:1}
     .console-layout.records-open{display:flex;flex-direction:column}
     .console-layout.records-open>.console-main{flex:1}
     .records{flex:0 0 auto;border-left:0;border-top:1px solid var(--line);max-height:min(150px,20vh)}
   }
   @media(max-width:620px){
-    .workspace.selected>.grid{display:flex;max-height:86px;overflow-x:auto;overflow-y:hidden;padding:0 0 3px}
+    .workspace.selected>.device-pane{max-height:86px}
+    .workspace.selected .device-pane>.toolbar{display:none}
+    .workspace.selected .device-pane>.grid{display:flex;max-height:86px;overflow-x:auto;overflow-y:hidden;padding:0 0 3px}
     .workspace.selected .dev{flex:0 0 175px;padding:8px;gap:2px;overflow:hidden}
     .workspace.selected .dev .nm{font-size:15px}
     .workspace.selected .dev .meta,.workspace.selected .dev .last,

@@ -25,10 +25,11 @@ python3 /data/seriald/serialctl.py --device riscv-118 read
 `logs/_provisional/<serial_source>/<serial>/`。`--device` 可用标签或序列号；标签、USB 路径和 tty 节点可变。
 根据用户指定的板子确认目标，无法确定时询问，不选第一块在线设备。
 
-未写 EEPROM 序列号的连接显示为 `unprovisioned-…`，key 来自 USB by-path 摘要；每次连接日志仍隔离。
+尚未识别或确实缺少可用编号的连接显示为 `unprovisioned-…`，key 来自 USB by-path 摘要；每次连接日志仍隔离。
 需要主动访问时才对该连接
 运行 `identify`（可能自动登录、执行识别命令），按返回的新 key 使用设备。
-已知序列号保留其标签；改名用 `rename --label musepi2`。历史设备保持可见，重连后要重新识别。
+已知序列号保留其标签；改名用 `rename --label musepi2`。历史设备保持可见。同一 USB by-path
+在服务运行中重新枚举时沿用原绑定；换板前必须点击“准备换板”，换插口或服务异常重启后需重新识别。
 优先读取 EEPROM ONIE `0x23`：upstream 使用 `cells/serial-number@*`，无 cell 的 vendor 内核则
 校验并解析原始 at24 NVMEM；U-Boot 注入的相同 DT serial 也可识别。之后才尝试 SoC/eFuse。
 以返回的 `serial` 为身份，`reported_serial` 是固件原值，`serial_source` 说明来源。直接读取的 ONIE

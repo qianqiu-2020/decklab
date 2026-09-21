@@ -204,18 +204,46 @@
     });
     pushSize(ctx);
   }
+  function visibleTerminalRows(ctx, dimensions) {
+    var proposed = dimensions && dimensions.rows ? dimensions.rows : ctx.term.rows;
+    var element = ctx.term.element;
+    if (!element || !element.querySelector) return proposed;
+    var viewport = element.querySelector('.xterm-viewport');
+    var screen = element.querySelector('.xterm-screen');
+    var cellHeight = screen && ctx.term.rows
+      ? screen.getBoundingClientRect().height / ctx.term.rows : 0;
+    return viewport && viewport.clientHeight && cellHeight > 0
+      ? Math.min(proposed, Math.floor(viewport.clientHeight / cellHeight)) : proposed;
+  }
   function fitTerminal(ctx) {
     // UART has no PTY window-size negotiation. Linux serial consoles,
     // readline, EDK2 and GRUB normally lay out against 80 columns; fitting
     // xterm to a wide browser makes wrapped input and cursor-left disagree
     // about the visual row. Keep only the live serial console at 80 columns.
     if (ctx.sid === 'serial') {
+      var required = ctx.serialRows || 24;
+      var cap = required >= 40 && document.body.classList.contains('terminal-max') ? 10 : 12.5;
+      if (ctx.term.options.fontSize !== cap) ctx.term.options.fontSize = cap;
       var dimensions = ctx.fit.proposeDimensions ? ctx.fit.proposeDimensions() : null;
-      var rows = Math.max(ctx.serialRows || 24,
-        dimensions && dimensions.rows ? dimensions.rows : ctx.term.rows);
+      var visibleRows = visibleTerminalRows(ctx, dimensions);
+      // xterm's viewport does not scroll through extra logical screen rows.
+      // Shrink only a firmware-sized screen until the requested rows fit.
+      if (required >= 40 && dimensions && dimensions.rows) {
+        var fontSize = cap;
+        while (visibleRows < required && fontSize > 8) {
+          fontSize = Math.max(8, Math.min(fontSize - .5,
+            Math.floor(fontSize * visibleRows / required * 2) / 2));
+          ctx.term.options.fontSize = fontSize;
+          dimensions = ctx.fit.proposeDimensions();
+          if (!dimensions || !dimensions.rows) break;
+          visibleRows = visibleTerminalRows(ctx, dimensions);
+        }
+      }
+      var rows = Math.max(required, visibleRows);
       if (ctx.term.cols !== 80 || ctx.term.rows !== rows) ctx.term.resize(80, rows);
       return;
     }
+    if (ctx.term.options.fontSize !== 12.5) ctx.term.options.fontSize = 12.5;
     ctx.fit.fit();
   }
   function syncTerminalLayers(ctx) {
@@ -223,16 +251,11 @@
     var viewport = ctx.term.element.querySelector('.xterm-viewport');
     var screen = ctx.term.element.querySelector('.xterm-screen');
     if (!viewport || !screen || !viewport.clientWidth) return;
-    if (ctx.sid === 'serial') {
-      screen.style.width = '';
-      screen.style.maxWidth = '';
-      screen.style.overflow = 'hidden';
-      return;
-    }
-    // FitAddon can round a fractional cell width up by a few pixels.  That
-    // lets the screen/selection layer extend over the native scrollbar.
-    screen.style.width = viewport.clientWidth + 'px';
-    screen.style.maxWidth = viewport.clientWidth + 'px';
+    // The 80-column serial canvas can be wider than a narrow viewport. Leave
+    // an explicit hit area for the scrollbar, including overlay scrollbars.
+    var screenWidth = Math.max(0, viewport.clientWidth - 16) + 'px';
+    screen.style.width = screenWidth;
+    screen.style.maxWidth = screenWidth;
     screen.style.overflow = 'hidden';
   }
   // 把浏览器终端尺寸推给后端,后端 ioctl 到 pty —— 否则远端以为自己是 80x24,
@@ -345,7 +368,7 @@
       });
 
       var r1 = document.createElement('div'); r1.className = 'r1';
-      var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.state === 'pending' ? '待写序列号 · ' + (d.hostname || (d.dev || '').split('/').pop()) : d.label;
+      var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.state === 'pending' ? '待识别 · ' + (d.hostname || (d.dev || '').split('/').pop()) : d.label;
       var st = document.createElement('span');
       st.className = 'pill ' + (d.alive ? 'live' : 'dead');
       st.textContent = d.state === 'pending' ? 'USB 临时身份' : (d.alive ? '在线' : '历史设备');
@@ -380,7 +403,8 @@
         card.appendChild(rn);
       }
       var inf = d.info || {};
-      if (d.identity_error || d.needs_provisioning || inf.identity_status === 'provisional') {
+      if (d.identity_error || (d.needs_provisioning && Object.keys(inf).length)
+          || inf.identity_status === 'provisional') {
         var warning = document.createElement('div'); warning.className = 'identity-error';
         warning.textContent = (d.reported_serial ? 'SN ' + d.reported_serial + '：' : '') +
           (d.identity_error || (d.needs_provisioning
@@ -466,6 +490,8 @@
     sessions = [{ sid: 'serial', kind: 'serial' }];
     var d = (lastDevices || []).filter(function (x) { return x.key === key; })[0];
     $('detail').hidden = false;
+    $('detail').classList.remove('info-open');
+    $('b-info').setAttribute('aria-expanded', 'false');
     $('workspace').classList.toggle('selected', true);
     document.body.classList.toggle('detail-open', true);
     clearTerminalSearch(false);
@@ -538,13 +564,11 @@
       // starts a new logical screen: GRUB/Linux can therefore leave EDK2's
       // 50-row mode, while another row-50 CUP later in the same frame restores
       // it before xterm parses the payload.
-      var dimensions = ctx.fit.proposeDimensions ? ctx.fit.proposeDimensions() : null;
-      var visibleRows = dimensions && dimensions.rows ? dimensions.rows : 24;
       var pattern = /\x1b\[(?:([0-9]{1,3})(?:;[0-9]{0,3})?[Hf]|2J)/g;
-      var match, rows = ctx.serialRows || visibleRows;
+      var match, rows = ctx.serialRows || 24;
       while ((match = pattern.exec(raw))) {
         if (!match[1]) {
-          rows = visibleRows;
+          rows = 24;
           try { ctx.term.clearSelection(); } catch (e) {}
           continue;
         }
@@ -1031,6 +1055,17 @@
   $('terminal-search-prev').addEventListener('click', function () { searchTerminal(-1); });
   $('terminal-search-clear').addEventListener('click', function () { clearTerminalSearch(true); });
   $('b-redraw').addEventListener('click', redrawTerminal);
+  $('b-info').addEventListener('click', function () {
+    var open = $('detail').classList.toggle('info-open');
+    $('b-info').setAttribute('aria-expanded', open ? 'true' : 'false');
+    setTimeout(resizeTerm, 0);
+  });
+  $('b-expand').addEventListener('click', function () {
+    var expanded = document.body.classList.toggle('terminal-max');
+    $('b-expand').textContent = expanded ? '还原工作台' : '放大终端';
+    $('b-expand').setAttribute('aria-pressed', expanded ? 'true' : 'false');
+    setTimeout(resizeTerm, 0);
+  });
   $('terminal-search').addEventListener('input', function () {
     if (view) { view.searchQuery = ''; view.searchMatch = -1; }
     $('terminal-search-status').textContent = '';
@@ -1129,9 +1164,9 @@
   function renderInfo(info) {
     var box = $('d-info');
     if (!info || (!info.serial && !info.hostname && !(info.ips || []).length)) {
-      box.hidden = true; return;
+      box.hidden = true; $('b-info').disabled = true; return;
     }
-    box.hidden = false;
+    box.hidden = false; $('b-info').disabled = false;
     box.textContent = '';
     var sources = { 'eeprom-onie': '板载 EEPROM（ONIE TLV 0x23）',
       'uboot-injected': '板载 EEPROM（U-Boot 注入）',
@@ -1204,6 +1239,9 @@
     disposeView(); selKey = null; $('detail').hidden = true;
     $('workspace').classList.toggle('selected', false);
     document.body.classList.toggle('detail-open', false);
+    document.body.classList.remove('terminal-max');
+    $('b-expand').textContent = '放大终端';
+    $('b-expand').setAttribute('aria-pressed', 'false');
     markSelected(); pollDevices();
   });
 

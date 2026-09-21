@@ -24,13 +24,14 @@
     <div><strong id="count-history">0</strong><span>历史设备</span></div>
     <div><strong id="count-pending">0</strong><span>待识别串口</span></div>
   </div>
+  <div class="workspace" id="workspace">
+  <div class="device-pane">
   <div class="toolbar">
     <input id="device-search" placeholder="搜索标签、序列号、主机名或串口位置" aria-label="搜索设备">
     <select id="device-filter" aria-label="设备状态"><option value="all">全部设备</option><option value="online">在线</option><option value="offline">历史 / 离线</option><option value="pending">待识别</option></select>
   </div>
-
-  <div class="workspace" id="workspace">
   <div class="grid" id="grid"><p class="empty">正在扫描串口…</p></div>
+  </div>
 
   <div class="detail" id="detail" hidden>
     <div class="hd">
@@ -42,6 +43,7 @@
         <button id="b-rescue" type="button" title="关闭 autosuspend，并检查采集是否恢复">自愈串口</button>
         <button id="b-rebind" type="button" title="重新绑定 USB 串口，会暂时中断该设备连接" hidden>重新绑定串口</button>
         <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录">准备换板</button>
+        <button id="b-info" type="button" aria-expanded="false">设备信息</button>
         <button id="b-rename" type="button">改标签</button>
         <button id="b-close" type="button">收起</button>
       </span>
@@ -49,6 +51,7 @@
     <div class="tabs" id="d-tabs"></div>
     <div class="info" id="d-info" hidden></div>
     <div class="terminal-tools">
+      <button id="b-expand" type="button" aria-pressed="false" title="收起设备栏和信息面板，为固件菜单腾出屏幕高度">放大终端</button>
       <label for="terminal-search">查找终端</label>
       <input id="terminal-search" type="text" placeholder="Ctrl+F" autocomplete="off" spellcheck="false">
       <button id="terminal-search-prev" type="button" title="上一个匹配（Shift+Enter）">↑</button>
@@ -57,6 +60,7 @@
       <span id="terminal-search-status"></span>
       <button id="b-redraw" type="button" title="清空模拟器并从采集缓冲完整重放，修复 EDK2 / GRUB 等全屏界面">重绘</button>
       <button id="b-records" type="button" aria-expanded="false">记录与归档</button>
+      <span id="d-status" role="status"></span>
     </div>
     <div class="console-layout" id="console-layout">
     <div class="console-main">
@@ -70,11 +74,6 @@
         <button id="b-paste" type="button" title="粘贴剪贴板内容到会话">粘贴</button>
         <label class="chk" id="slow-paste-option" title="GRUB/固件接管串口输入后若批量粘贴丢字，可逐字符发送"><input type="checkbox" id="d-slow-paste"> 固件慢速粘贴</label>
         <button id="b-takeover" type="button" hidden title="允许从网页向当前 agent SSH shell 输入，并记录介入事件">介入此会话</button>
-      </div>
-      <div class="hint">
-        勾选「键盘直通」后，点击终端即可输入。agent 会话和归档日志以只读方式查看。
-        <b>复制</b>：拖选；<b>搜索</b>：<span class="mono">Ctrl+F</span>；<b>粘贴</b>：<span class="mono">Ctrl+V</span>。
-        <span class="mono">Ctrl+C</span> 会中断当前命令。<span id="d-status"></span>
       </div>
       <div class="hint" id="d-hint" hidden></div>
     </div>

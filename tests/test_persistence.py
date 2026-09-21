@@ -340,6 +340,55 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(replacement.serial, '')
         self.assertEqual(replacement.snapshot()['state'], 'pending')
 
+    def test_same_usb_path_keeps_board_across_tty_reenumeration(self):
+        old = self.connection('usb-1')
+        self.identify(old)
+        old.identity = (1, 2, 3)
+        old.fd = None
+        session = object()
+        old.ssh_sessions['ssh-existing'] = session
+        old.thread = mock.Mock()
+        old.thread.is_alive.return_value = False
+        stat_result = types.SimpleNamespace(st_dev=1, st_ino=22, st_rdev=3,
+                                            st_mode=stat.S_IFCHR | 0o600)
+        listdir = os.listdir
+        with mock.patch.object(devices.os, 'listdir',
+                side_effect=lambda path: ['usb-1'] if path == devices.BY_PATH else listdir(path)), \
+                mock.patch.object(devices.os.path, 'realpath', return_value='/fake/ttyUSB0'), \
+                mock.patch.object(devices.os, 'stat', return_value=stat_result), \
+                mock.patch.object(devices.threading, 'Thread'):
+            self.manager.scan()
+        replacement = self.manager.devices['usb-1']
+        self.connections.append(replacement)
+        self.assertIsNot(replacement, old)
+        self.assertEqual(replacement.serial, 'SN001')
+        self.assertEqual(replacement.key, 'riscv-118')
+        self.assertEqual(replacement.snapshot()['state'], 'offline')  # fake reader has not opened
+        self.assertEqual(replacement.stable_dir(), old.stable_dir())
+        self.assertIs(replacement.ssh_sessions['ssh-existing'], session)
+
+    def test_armed_board_swap_does_not_keep_old_identity_on_reenumeration(self):
+        old = self.connection('usb-1')
+        self.identify(old)
+        self.manager.prepare_switch(old)
+        old.identity = (1, 2, 3)
+        old.fd = None
+        old.thread = mock.Mock()
+        old.thread.is_alive.return_value = False
+        stat_result = types.SimpleNamespace(st_dev=1, st_ino=22, st_rdev=3,
+                                            st_mode=stat.S_IFCHR | 0o600)
+        listdir = os.listdir
+        with mock.patch.object(devices.os, 'listdir',
+                side_effect=lambda path: ['usb-1'] if path == devices.BY_PATH else listdir(path)), \
+                mock.patch.object(devices.os.path, 'realpath', return_value='/fake/ttyUSB0'), \
+                mock.patch.object(devices.os, 'stat', return_value=stat_result), \
+                mock.patch.object(devices.threading, 'Thread'):
+            self.manager.scan()
+        replacement = self.manager.devices['usb-1']
+        self.connections.append(replacement)
+        self.assertEqual(replacement.serial, '')
+        self.assertTrue(replacement.auto_identify)
+
     def test_prepare_switch_detaches_old_board_and_arms_one_probe(self):
         d = self.connection('usb-1')
         self.identify(d)

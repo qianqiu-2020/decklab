@@ -245,20 +245,35 @@ class Manager:
                     d.present = False
                     d = None
                 if d is None:
-                    record = None
-                    entry = self.handoff.pop(key, None)
-                    if (entry and tuple(entry['identity']) == identity and entry['dev'] == dev
-                            and self.store):
-                        record = self.store.get(entry['serial'])
-                    d = Device(key, dev, self if self.store else None, record)
-                    if record:
-                        self.boards[record['serial']] = d
-                    if self.armed_paths.get(key, 0) >= time.monotonic():
-                        d.auto_identify = True
-                        d.auto_identify_until = self.armed_paths[key]
-                    else:
-                        self.armed_paths.pop(key, None)
                     with self.lock:
+                        record = None
+                        previous = existing.get(key)
+                        armed = self.armed_paths.get(key, 0) >= time.monotonic()
+                        active_board = self.boards.get(previous.serial) if previous and previous.serial else None
+                        if (previous and previous.record and not armed
+                                and (active_board is previous or active_board is None or not active_board.present)
+                                and not (self.store and self.store.has_conflict(previous.serial))):
+                            # A USB reset creates a new tty inode (sometimes with the
+                            # same ttyUSB number). The user keeps this physical port
+                            # assigned until explicitly arming a board swap.
+                            record = previous.record
+                        else:
+                            entry = self.handoff.pop(key, None)
+                            if (entry and tuple(entry['identity']) == identity and entry['dev'] == dev
+                                    and self.store and not armed):
+                                record = self.store.get(entry['serial'])
+                        d = Device(key, dev, self if self.store else None, record)
+                        if record and previous:
+                            with previous.sessions_lock, d.sessions_lock:
+                                d.ssh_sessions.update(previous.ssh_sessions)
+                                previous.ssh_sessions.clear()
+                        if record:
+                            self.boards[record['serial']] = d
+                        if armed:
+                            d.auto_identify = True
+                            d.auto_identify_until = self.armed_paths[key]
+                        else:
+                            self.armed_paths.pop(key, None)
                         self.devices[key] = d
                 if d.thread and d.thread.is_alive():
                     continue

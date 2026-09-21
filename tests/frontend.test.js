@@ -16,7 +16,16 @@ class Element {
     this.dataset = {}; this.style = {}; this.hidden = false;
     this.checked = true; this.value = ''; this._text = '';
     this.attributes = {};
-    this.classList = { toggle() {} };
+    const classes = new Set();
+    this.classList = {
+      contains: name => classes.has(name),
+      toggle(name, force) {
+        const present = force === undefined ? !classes.has(name) : !!force;
+        if (present) classes.add(name); else classes.delete(name);
+        return present;
+      },
+      remove: name => classes.delete(name),
+    };
   }
   set textContent(value) { this._text = value; this.children = []; }
   get textContent() { return this._text; }
@@ -224,10 +233,14 @@ test('switching pending and confirmed devices never reuses identity details', as
     { key: 'known', label: 'known', serial: 'SN-KNOWN', connection_id: 'known-1', alive: true,
       info: { serial: 'SN-KNOWN', hostname: 'known', serial_source: 'eeprom-onie',
         identity_status: 'confirmed', ts: 11 } },
-    { key: 'pending', label: 'pending', serial: '', connection_id: 'pending-1', alive: true,
+    { key: 'pending', label: 'pending', serial: '', state: 'pending', connection_id: 'pending-1', alive: true,
       info: {} },
   ] });
   await drain();
+  const pendingCard = h.get('grid').children[1];
+  assert.ok(pendingCard.children[0].children[0].textContent.includes('待识别'));
+  assert.ok(!pendingCard.children.some(x => x.textContent.includes('EEPROM 尚未写入')),
+    'unprobed USB reconnect is not proof of missing EEPROM');
   h.select('known');
   assert.ok(h.get('d-info').children.some(row => row.children[0].textContent === '身份来源'));
   h.select('pending');
@@ -694,6 +707,12 @@ test('live serial learns an EDK2 80x50 screen before parsing its cursor position
   await drain();
   assert.equal(terminal.cols, 80);
   assert.equal(terminal.rows, 50, 'EDK2 row 50 must not be clamped into the visible browser height');
+  h.get('b-expand').click();
+  const expanded = h.timer(0); assert.ok(expanded); h.fire(expanded[0]);
+  assert.ok(terminal.options.fontSize <= 10, 'maximized firmware screen should fit more rows');
+  h.get('b-expand').click();
+  const restored = h.timer(0); assert.ok(restored); h.fire(restored[0]);
+  assert.ok(terminal.options.fontSize <= 12.5);
   terminal.flush(); await drain();
   assert.ok(terminal.refreshes > 0);
 });
