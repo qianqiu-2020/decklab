@@ -7,6 +7,7 @@
   var view = null, term = null;
   var sessionPage = 0, eventPage = 0;
   var ACTIVITY_PAGE_SIZE = 10;
+  var DEFAULT_TERMINAL_FONT_SIZE = 14.5;
   var takenOver = {};
 
   function setInputMode(ctx) {
@@ -69,7 +70,7 @@
       scrollback: 8000,
       cursorBlink: !ctx.readonly,
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
-      fontSize: 12.5,
+      fontSize: DEFAULT_TERMINAL_FONT_SIZE,
       theme: { background: '#0A0D0F', foreground: '#C8D0D6', cursor: '#7FE0D4',
                selectionBackground: '#2C5B57' }
     });
@@ -222,7 +223,8 @@
     // about the visual row. Keep only the live serial console at 80 columns.
     if (ctx.sid === 'serial') {
       var required = ctx.serialRows || 24;
-      var cap = required >= 40 && document.body.classList.contains('terminal-max') ? 10 : 12.5;
+      var cap = required >= 40 && document.body.classList.contains('terminal-max')
+        ? 10 : DEFAULT_TERMINAL_FONT_SIZE;
       if (ctx.term.options.fontSize !== cap) ctx.term.options.fontSize = cap;
       var dimensions = ctx.fit.proposeDimensions ? ctx.fit.proposeDimensions() : null;
       var visibleRows = visibleTerminalRows(ctx, dimensions);
@@ -243,7 +245,8 @@
       if (ctx.term.cols !== 80 || ctx.term.rows !== rows) ctx.term.resize(80, rows);
       return;
     }
-    if (ctx.term.options.fontSize !== 12.5) ctx.term.options.fontSize = 12.5;
+    if (ctx.term.options.fontSize !== DEFAULT_TERMINAL_FONT_SIZE)
+      ctx.term.options.fontSize = DEFAULT_TERMINAL_FONT_SIZE;
     // FitAddon calculates width from the host and subtracts a scrollbar even
     // when Chromium uses overlay scrollbars. Measure the actual viewport so
     // the PTY column count matches the pixels xterm can paint.

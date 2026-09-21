@@ -90,6 +90,7 @@ let chrome, ws;
   await evaluate('document.querySelector("#d-activity button").click()');
   await delay(700);
   assert.deepEqual(posts,[], 'viewing an agent session must not send reports or resize it');
+  assert.equal(await evaluate('testTerm.options.fontSize'), 14.5, 'SSH uses the readable default font size');
   assert.ok(await evaluate('testTerm.cols > 80'), 'terminal fits the detail panel');
   const columnsFit = `(() => {
     const host=document.querySelector('#d-term');
@@ -122,6 +123,7 @@ let chrome, ws;
   assert.ok(await evaluate('document.querySelector("#d-tabs").textContent.includes("串口日志")'));
   assert.equal(await evaluate('document.querySelector("#b-send").disabled'),true);
   assert.equal(await evaluate('testTerm.options.convertEol'),true);
+  assert.equal(await evaluate('testTerm.options.fontSize'), 14.5, 'archive uses the readable default font size');
   assert.equal(await evaluate('globalThis.injected === undefined'),true);
   assert.deepEqual(posts,[], 'viewing an archived terminal must remain read-only');
   const viewportFits = `(() => {

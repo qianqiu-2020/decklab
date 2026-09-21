@@ -701,6 +701,7 @@ test('live serial stays at firmware-compatible 80 columns and redraw replays fro
 
 test('live serial learns an EDK2 80x50 screen before parsing its cursor positions', async () => {
   const h = await setup(); const terminal = h.select('A');
+  assert.equal(terminal.options.fontSize, 14.5);
   assert.equal(terminal.rows, 42);
   h.take('/api/session').resolve(readResponse('A',
     '\x1b[47m\x1b[05;58HDevice Path\x1b[50;27H<Enter>=Select'));
@@ -712,7 +713,7 @@ test('live serial learns an EDK2 80x50 screen before parsing its cursor position
   assert.ok(terminal.options.fontSize <= 10, 'maximized firmware screen should fit more rows');
   h.get('b-expand').click();
   const restored = h.timer(0); assert.ok(restored); h.fire(restored[0]);
-  assert.ok(terminal.options.fontSize <= 12.5);
+  assert.ok(terminal.options.fontSize <= 14.5);
   terminal.flush(); await drain();
   assert.ok(terminal.refreshes > 0);
 });
