@@ -92,9 +92,13 @@ let chrome, ws;
   assert.deepEqual(posts,[], 'viewing an agent session must not send reports or resize it');
   assert.ok(await evaluate('testTerm.cols > 80'), 'terminal fits the detail panel');
   const columnsFit = `(() => {
-    const screen=document.querySelector('#d-term .xterm-screen').getBoundingClientRect();
+    const host=document.querySelector('#d-term');
+    const screen=host.querySelector('.xterm-screen').getBoundingClientRect();
+    const viewport=host.querySelector('.xterm-viewport');
     const cell=testTerm._core._renderService.dimensions.css.cell.width;
-    return testTerm.cols*cell <= screen.width+1;
+    const drawn=testTerm.cols*cell;
+    return drawn <= screen.width+1 && screen.width <= viewport.clientWidth+1 &&
+      viewport.clientWidth-drawn < cell+1;
   })()`;
   assert.ok(await evaluate(columnsFit), 'SSH columns must fit inside the visible screen');
   await evaluate('document.querySelector("#b-records").click()');
@@ -102,6 +106,14 @@ let chrome, ws;
   assert.ok(await evaluate(columnsFit), 'SSH columns must still fit with records open');
   await evaluate('document.querySelector("#b-records").click()');
   await delay(100);
+  assert.ok(await evaluate(`new Promise(resolve => {
+    testTerm.reset();
+    testTerm.write('x'.repeat(testTerm.cols - 1) + 'YZ', () => {
+      const first=testTerm.buffer.active.getLine(0)?.translateToString(true) || '';
+      const second=testTerm.buffer.active.getLine(1)?.translateToString(true) || '';
+      resolve(first.endsWith('Y') && second.startsWith('Z'));
+    });
+  })`), 'SSH wraps immediately after its last visible column');
   assert.equal(await evaluate('document.querySelector("#b-send").disabled'), true);
   await evaluate('document.querySelector("#d-logs button").click()');
   await delay(300);

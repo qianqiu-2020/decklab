@@ -77,9 +77,6 @@
     ctx.term.loadAddon(ctx.fit);
     $('d-term').textContent = '';
     ctx.term.open($('d-term'));
-    if (ctx.sid !== 'serial' && ctx.term.element && ctx.term.element.classList) {
-      ctx.term.element.classList.add('fit-gutter');
-    }
     // Some Chromium/Linux themes expose an overlay scrollbar whose track
     // accepts wheel input but ignores a track click.  Keep native dragging,
     // and provide the expected page jump when the click lands on xterm's
@@ -247,13 +244,37 @@
       return;
     }
     if (ctx.term.options.fontSize !== 12.5) ctx.term.options.fontSize = 12.5;
-    ctx.fit.fit();
+    // FitAddon calculates width from the host and subtracts a scrollbar even
+    // when Chromium uses overlay scrollbars. Measure the actual viewport so
+    // the PTY column count matches the pixels xterm can paint.
+    var viewport = ctx.term.element && ctx.term.element.querySelector
+      ? ctx.term.element.querySelector('.xterm-viewport') : null;
+    var renderDimensions = ctx.term._core && ctx.term._core._renderService
+      && ctx.term._core._renderService.dimensions;
+    var cell = renderDimensions && renderDimensions.css && renderDimensions.css.cell
+      && renderDimensions.css.cell.width;
+    if (!viewport || !viewport.clientWidth || !cell) {
+      ctx.fit.fit();
+      return;
+    }
+    var proposed = ctx.fit.proposeDimensions();
+    var cols = Math.max(2, Math.floor((viewport.clientWidth - 1) / cell));
+    var rows = Math.max(1, visibleTerminalRows(ctx, proposed));
+    if (ctx.term.cols !== cols || ctx.term.rows !== rows) ctx.term.resize(cols, rows);
   }
   function syncTerminalLayers(ctx) {
     if (!ctx || !ctx.term || !ctx.term.element || !ctx.term.element.querySelector) return;
     var viewport = ctx.term.element.querySelector('.xterm-viewport');
     var screen = ctx.term.element.querySelector('.xterm-screen');
     if (!viewport || !screen || !viewport.clientWidth) return;
+    if (ctx.sid !== 'serial') {
+      // Columns already fit the measured viewport; clip only xterm's spare
+      // pixels beyond that width, never a rendered character cell.
+      screen.style.width = viewport.clientWidth + 'px';
+      screen.style.maxWidth = viewport.clientWidth + 'px';
+      screen.style.overflow = 'hidden';
+      return;
+    }
     // The 80-column serial canvas can be wider than a narrow viewport. Leave
     // an explicit hit area for the scrollbar, including overlay scrollbars.
     var screenWidth = Math.max(0, viewport.clientWidth - 16) + 'px';
