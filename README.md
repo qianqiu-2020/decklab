@@ -1,6 +1,17 @@
 # seriald
 
-供人和 agent 共用的开发板工作台：持续采集串口、独立 SSH 会话、在线日志、历史设备和操作记录。支持 Ubuntu 服务安装及 Windows 便携上位机。
+面向 OS/BSP 开发的开发板工作台：持续采集串口，统一提供网页终端、SSH、历史日志和 Agent 接口。支持 Ubuntu 服务安装及 Windows 便携上位机。
+
+## 为什么使用 seriald
+
+按日常排障的影响排序，它解决了单独使用 minicom 时的这些问题：
+
+1. **多板身份和日志不再跟着 tty 编号漂移。** `/dev/ttyUSB*` 重枚举后可能换号；seriald 将用户标签绑定到板卡序列号，再关联当前串口位置，按序列号保存连续档案，设备列表能直接找到目标板和当前串口。
+2. **启动记录可追溯。** 串口输出自动归档，按日期和启动次数浏览；板子跨天运行或一天重启多次，也能定位某一次启动，不必依赖手动保存终端滚屏。
+3. **BSP 升级失败时快速找差异。** 对比同一块板升级前后，或两块板的启动日志，突出新增、缺失和变化的内容，帮助定位启动停在哪一步。
+4. **人、同事和 Agent 可同时看同一块板。** 服务独占串口采集，再把实时终端、SSH 会话和操作记录共享到网页与 CLI；可生成访问链接或限定设备的 Agent 授权，无需让多个 minicom 抢同一个设备节点。
+5. **板子没有网络也能传文件。** 板端有可用 shell 时，通过已有串口连接上传、下载或在两块板间中转文件，并校验大小和哈希。
+6. **USB 串口断连可尝试软件恢复。** Ubuntu 上位机的自愈操作先关闭 autosuspend，必要时执行 USB 软解绑/重绑定，减少反复手动拔插。
 
 设备身份优先使用 EEPROM ONIE 序列号，并兼容 vendor/upstream 内核的不同暴露方式；有效 DT `serial-number` 也直接作为正式编号；`key` 是用户标签（如 `riscv-118`、`musepi2`）。待确认的 SoC/eFuse 与 `/boot` 身份保存在 `logs/_provisional/`；没有编号时按 USB 连接隔离。标签、USB 插口和 tty 节点可改变。
 
@@ -8,11 +19,11 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.36_all.deb
+sudo apt install ./dist/seriald_1.4.37_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
-生产数据保存在 `/data/seriald-data`。
+生产数据保存在 `/data/seriald-data`。安装输出会打印本机和可用的局域网访问地址。
 更新或重启 control 不会关闭 collector 持有的串口和 SSH 会话；`serialctl health` 可核对 collector PID。
 在同一 USB-UART 后更换板子前，先在网页点击“准备换板”；新板日志会先隔离，出现登录提示后自动识别一次。
 [安装、配置和旧数据迁移](docs/INSTALL.md) · [架构与模块边界](docs/ARCHITECTURE.md)

@@ -1,4 +1,6 @@
 """Extract the deb and run it against an empty fake serial directory, never install it."""
+from contextlib import redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -8,6 +10,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -57,6 +60,14 @@ class PackageTests(unittest.TestCase):
             self.assertIn('collector restarted (collector code changed)', postinst)
             self.assertIn('collector kept running (collector code unchanged)', postinst)
             self.assertIn('collector started (was not running)', postinst)
+            address_script = postinst.split("<<'PY'", 1)[1].split('\n', 1)[1].split('\nPY\n', 1)[0]
+            address_output = io.StringIO()
+            with mock.patch('pathlib.Path.read_text', return_value='SERIALD_PORT=9123\nSERIALD_BIND=0.0.0.0\n'), \
+                    mock.patch('seriald_core.control_server.lan_hosts', return_value=['10.0.120.161']), \
+                    redirect_stdout(address_output):
+                exec(compile(address_script, 'postinst-access', 'exec'), {})
+            self.assertIn('http://127.0.0.1:9123/', address_output.getvalue())
+            self.assertIn('http://10.0.120.161:9123/', address_output.getvalue())
             installed_build_id = (extracted / 'usr/lib/seriald/.collector-build-id').read_text().strip()
             self.assertEqual(installed_build_id, collector_build_id())
             self.assertIn(installed_build_id, preinst)

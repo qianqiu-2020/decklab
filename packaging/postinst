@@ -40,5 +40,29 @@ case "$1" in
       deb-systemd-invoke restart seriald.service || true
       rm -f "$restart_marker"
     fi
+    PYTHONPATH=/usr/lib/seriald /usr/bin/python3 - <<'PY' || echo "seriald: could not determine access addresses" >&2
+import re
+from pathlib import Path
+from seriald_core.control_server import lan_hosts
+
+config = Path('/etc/seriald/seriald.env').read_text(encoding='utf-8')
+def setting(name, default):
+    match = re.search(r'^' + name + r'=(.*)$', config, re.MULTILINE)
+    return match.group(1).strip().strip('"\'') if match else default
+
+port = setting('SERIALD_PORT', '8898')
+bind = setting('SERIALD_BIND', '0.0.0.0')
+print('seriald: web and agent access:')
+if bind in ('0.0.0.0', '127.0.0.1', 'localhost'):
+    print(f'  local: http://127.0.0.1:{port}/')
+if bind == '0.0.0.0':
+    hosts = lan_hosts()
+    for host in hosts:
+        print(f'  LAN:   http://{host}:{port}/')
+    if not hosts:
+        print('  LAN:   no private IPv4 address detected; check network configuration')
+elif bind not in ('127.0.0.1', 'localhost'):
+    print(f'  bind:  http://{bind}:{port}/')
+PY
     ;;
 esac

@@ -6,7 +6,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.36_all.deb
+sudo apt install ./dist/seriald_1.4.37_all.deb
 systemctl status seriald
 serialctl devices
 ```
@@ -14,6 +14,7 @@ serialctl devices
 包安装后自动启动 `seriald-collector.service` 和 `seriald.service`。collector 是唯一串口读者；
 `seriald.service` 是可独立重启的 Web/API 控制面。**同一组串口不可同时运行源码服务和包服务**，切换安装前先停止旧服务。
 默认监听 `0.0.0.0:8898`；浏览器访问 `http://上位机地址:8898`。
+安装脚本会按配置端口打印本机与探测到的局域网 URL；若局域网地址未出现，请检查网卡配置。
 
 编辑 `/etc/seriald/seriald.env` 后执行 `sudo systemctl restart seriald`：
 
