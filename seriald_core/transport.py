@@ -4,7 +4,10 @@ import os
 import re
 import select
 import subprocess
-import termios
+try:
+    import termios
+except ImportError:  # Windows uses the single pySerial COM handle in WindowsManager.
+    termios = None
 import time
 
 from .config import RESCUE_BIN
@@ -108,6 +111,8 @@ def try_rescue(dev, mode='soft'):
                               -n 保证不会卡在密码提示,sudoers 没配就直接失败并如实上报
     白名单脚本必须由 root 拥有且不可被调用者改写,否则等于通用提权。
     """
+    if os.name == 'nt':
+        return False, 'Windows 不支持 Linux USB 自愈'
     name = usb_path_of(dev)
     if not name:
         return False, '找不到 %s 对应的 USB 设备路径' % dev

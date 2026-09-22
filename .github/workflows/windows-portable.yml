@@ -1,0 +1,54 @@
+name: Windows portable
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'seriald_windows.py'
+      - 'seriald_core/**'
+      - 'serialctl.py'
+      - 'static/**'
+      - 'vendor/**'
+      - 'index.html'
+      - 'requirements-windows.txt'
+      - 'tools/build_windows.ps1'
+      - 'docs/WINDOWS.md'
+      - 'Start-seriald.cmd'
+      - 'Start-seriald-LAN.cmd'
+      - 'Start-seriald-LAN.ps1'
+      - 'serialctl.cmd'
+      - '.github/workflows/windows-portable.yml'
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build portable ZIP
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File .\tools\build_windows.ps1
+      - name: Smoke test portable host
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath (Resolve-Path dist/seriald/seriald.exe) -ArgumentList '--no-browser','--port','18898' -PassThru
+          try {
+            $healthy = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $response = Invoke-RestMethod http://127.0.0.1:18898/healthz -TimeoutSec 2
+                if ($response.ok) { $healthy = $true; break }
+              } catch {}
+              if ($process.HasExited) { break }
+            }
+            if (-not $healthy) { throw 'Portable host did not serve /healthz' }
+            $response = Invoke-RestMethod http://127.0.0.1:18898/api/devices -TimeoutSec 5
+            if ($response.PSObject.Properties.Name -notcontains 'devices') { throw 'Collector API unavailable' }
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seriald-windows-portable
+          path: dist/seriald-windows-portable.zip

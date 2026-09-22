@@ -32,6 +32,11 @@ collector 干净重启时写入一次性短期 handoff；仅在同一 host boot�
 `seriald-control` 提供 TCP HTTP、静态页面和 Unix socket 反向代理。重启 control 不关闭 tty fd。
 collector 只监听 `SERIALD_SOCKET`，不暴露网络端口。
 
+实时终端通过 `GET /api/session-events` 建立 SSE 流；collector 在串口或 SSH 收到字节时唤醒
+订阅者，control 逐行转发，不等响应结束。事件携带字节偏移，断线时以 `Last-Event-ID` 续读；
+旧服务或 SSE 失败时网页回退到 `GET /api/session?off=…` 长轮询。输入始终通过
+`POST /api/session-send`，多人各有读取游标，共享同一串口或 SSH 会话输出。
+
 | 路径 | 职责 |
 | --- | --- |
 | `seriald.py` | 控制面入口 |
@@ -47,11 +52,15 @@ collector 只监听 `SERIALD_SOCKET`，不暴露网络端口。
 | `seriald_core/device.py` | 单块板的控制台流、识别事务和 SSH 会话编排 |
 | `seriald_core/devices.py` | 串口发现、单读者采集生命周期、身份绑定与在线设备 |
 | `seriald_core/sessions.py` | SSH PTY、独立日志、会话回收 |
+| `seriald_core/windows_manager.py` / `sessions_windows.py` | Windows COM 采集与 SSH channel 适配 |
 | `seriald_core/storage.py` | SQLite 注册表和持久化操作历史 |
 | `seriald_core/web.py` | HTTP 参数校验、API、静态文件 |
 | `seriald_core/admin.py` | 显式迁移旧目录，不访问硬件 |
 | `static/app.js` / `static/app.css` | 网页行为和样式；`index.html` 仅布局 |
 | `serialctl.py` | 无第三方依赖的 agent 客户端 |
+
+文件复制在两个串口上重叠源读取与目标写入。读取上限为 8 KiB；上传若压缩后的命令
+超过终端输入行长，客户端自动拆块重试。每块仍等待完整响应帧，最后校验 SHA-256。
 
 ## 持久化
 

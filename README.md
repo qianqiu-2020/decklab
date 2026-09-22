@@ -1,6 +1,6 @@
 # seriald
 
-供人和 agent 共用的 Linux 开发板工作台：持续采集串口、独立 SSH 会话、在线日志、历史设备和操作记录。
+供人和 agent 共用的开发板工作台：持续采集串口、独立 SSH 会话、在线日志、历史设备和操作记录。支持 Ubuntu 服务安装及 Windows 便携上位机。
 
 设备身份优先使用 EEPROM ONIE 序列号，并兼容 vendor/upstream 内核的不同暴露方式；有效 DT `serial-number` 也直接作为正式编号；`key` 是用户标签（如 `riscv-118`、`musepi2`）。待确认的 SoC/eFuse 与 `/boot` 身份保存在 `logs/_provisional/`；没有编号时按 USB 连接隔离。标签、USB 插口和 tty 节点可改变。
 
@@ -8,7 +8,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.23_all.deb
+sudo apt install ./dist/seriald_1.4.29_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
@@ -19,6 +19,11 @@ sudo apt install ./dist/seriald_1.4.23_all.deb
 · [硬件身份、/boot 兜底标记与重复编号处理](docs/HARDWARE_ID.md)
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
 · [分阶段重构计划](docs/REFACTOR_PLAN.md)
+
+Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API；使用方法与构建说明见
+[Windows 便携上位机](docs/WINDOWS.md)。
+
+![seriald 架构图](docs/seriald-architecture.png)
 
 ## Agent 使用
 
@@ -39,6 +44,8 @@ serialctl --device riscv-118 file-get --remote /tmp/boot.log --local ./boot.log
 
 网页的“启动对比”可比较同板两次或跨板的历史启动日志，突出新增异常线索；
 “文件传输”通过现有串口连接上传、下载或跨板复制，无需板子联网。
+
+[传输速率基线与排查方法](docs/TRANSFER_PERFORMANCE.md)
 
 ## 开发与检查
 

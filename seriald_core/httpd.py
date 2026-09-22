@@ -39,8 +39,9 @@ class BoundedThreadingTCPServer(_BoundedMixIn, socketserver.ThreadingTCPServer):
         super().__init__(*args, **kwargs)
 
 
-class BoundedThreadingUnixServer(_BoundedMixIn, socketserver.ThreadingUnixStreamServer):
-    def __init__(self, path, handler):
-        self._init_workers()
-        super().__init__(path, handler)
-        os.chmod(path, 0o660)
+if hasattr(socketserver, 'ThreadingUnixStreamServer'):
+    class BoundedThreadingUnixServer(_BoundedMixIn, socketserver.ThreadingUnixStreamServer):
+        def __init__(self, path, handler):
+            self._init_workers()
+            super().__init__(path, handler)
+            os.chmod(path, 0o660)

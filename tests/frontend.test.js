@@ -46,7 +46,7 @@ class Element {
   remove() { this.removed = true; }
 }
 
-function harness() {
+function harness(options = {}) {
   const elements = new Map();
   const get = id => {
     if (!elements.has(id)) {
@@ -57,7 +57,7 @@ function harness() {
     }
     return elements.get(id);
   };
-  const requests = [], terminals = [], timers = new Map(), intervals = [];
+  const requests = [], terminals = [], streams = [], timers = new Map(), intervals = [];
   let nextTimer = 0;
   class Terminal {
     constructor(options = {}) {
@@ -136,6 +136,12 @@ function harness() {
         resolve: data => resolve({ json: () => Promise.resolve(data) }), reject, taken: false });
     }),
   };
+  if (options.sse) sandbox.EventSource = class {
+    constructor(url) { this.url = url; this.closed = false; streams.push(this); }
+    close() { this.closed = true; }
+    emit(data) { if (this.onmessage) this.onmessage({ data: JSON.stringify(data) }); }
+    fail() { if (this.onerror) this.onerror(); }
+  };
   // Browser globals live on window.  Mirror that relationship so separately loaded
   // modules expose the same globals here as they do in a real page.
   sandbox.window = sandbox;
@@ -156,12 +162,12 @@ function harness() {
   };
   const timer = delay => [...timers.entries()].find(([, t]) => t.delay === delay);
   const fire = id => { const t = timers.get(id); timers.delete(id); assert.ok(t); t.fn(); };
-  return { get, document, requests, terminals, timers, intervals, take, sends, select, timer, fire };
+  return { get, document, requests, terminals, streams, timers, intervals, take, sends, select, timer, fire };
 }
 
 async function drain() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
-async function setup() {
-  const h = harness();
+async function setup(options) {
+  const h = harness(options);
   h.take('/api/devices').resolve({ devices: ['A', 'B'].map(key => ({
     key, label: key, dev: '/mock/' + key, alive: true, bytes: 0, probes: 0,
   })) });
@@ -194,6 +200,25 @@ test('queued old xterm output and CSI 6n cannot reach the new device', async () 
   h.take('/api/session').resolve(readResponse('B', 'B live\x1b[6n'));
   await drain(); current.flush(); await drain();
   assert.equal(h.sends().length, 0, 'current serial view is also a passive renderer');
+});
+
+test('SSE pushes output and falls back to offset polling without leaking old views', async () => {
+  const h = await setup({ sse: true });
+  const firstTerm = h.select('A'), first = h.streams.at(-1);
+  assert.ok(first.url.includes('/api/session-events?'));
+  assert.equal(h.requests.filter(r => r.url.startsWith('/api/session?')).length, 0);
+  first.emit(readResponse('A', 'hello', 5)); await drain(); firstTerm.flush();
+  assert.equal(firstTerm.parsed, 'hello');
+  const secondTerm = h.select('B'), second = h.streams.at(-1);
+  assert.equal(first.closed, true);
+  first.emit(readResponse('A', 'stale', 10));
+  second.emit(readResponse('B', 'world', 5)); await drain(); secondTerm.flush();
+  assert.equal(secondTerm.parsed, 'world');
+  second.fail();
+  assert.equal(second.closed, true);
+  const fallback = h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1);
+  assert.ok(fallback.url.includes('key=B'));
+  assert.ok(fallback.url.includes('off=5'));
 });
 
 test('typing is ordered; unsent input and late send errors are discarded on switch', async () => {

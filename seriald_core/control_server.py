@@ -76,6 +76,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
 
     def _proxy(self):
         connection = None
+        headers_sent = False
         try:
             if self.headers.get('Transfer-Encoding'):
                 return self._json(400, {'error': 'transfer encoding unsupported'})
@@ -87,6 +88,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 return self._json(400, {'error': 'incomplete body'})
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
+            events = self.command == 'GET' and urlparse(self.path).path == '/api/session-events'
+            if events and self.headers.get('Last-Event-ID'):
+                headers['Last-Event-ID'] = self.headers['Last-Event-ID']
             # Serial identification may wait for a complete framed response.
             # SSH enable can install packages, while SSH connect may configure
             # root access via the serial console after an auth failure.
@@ -96,10 +100,12 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             # showing a spurious "Failed to fetch".
             slow = self.command == 'POST' and urlparse(self.path).path in (
                 '/api/identify', '/api/ssh-enable', '/api/ssh-connect',
-                '/api/file-transfer/start', '/api/file-transfer/chunk',
+                '/api/file-transfer/start', '/api/file-transfer/chunk', '/api/file-transfer/batch',
                 '/api/file-transfer/finish', '/api/file-transfer/abort')
-            connection = UnixHTTPConnection(self.collector_socket,
-                                             timeout=300 if slow else 30)
+            timeout = 300 if slow else 30
+            connection = (http.client.HTTPConnection(*self.collector_socket, timeout=timeout)
+                          if isinstance(self.collector_socket, tuple)
+                          else UnixHTTPConnection(self.collector_socket, timeout=timeout))
             connection.request(self.command, self.path, body=body, headers=headers)
             response = connection.getresponse()
             self.send_response(response.status)
@@ -110,16 +116,32 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             length = response.getheader('Content-Length')
             if length is not None:
                 self.send_header('Content-Length', length)
+            if events and response.status == 200:
+                self.send_header('Connection', 'close')
+                self.close_connection = True
             self.end_headers()
+            headers_sent = True
+            if events and response.status == 200:
+                # A normal read(65536) waits for a full buffer or EOF; SSE must
+                # forward each line immediately, including idle heartbeats.
+                while True:
+                    line = response.readline(65536)
+                    if not line:
+                        break
+                    self.wfile.write(line)
+                    self.wfile.flush()
+                return
             while True:
                 chunk = response.read(65536)
                 if not chunk:
                     break
                 self.wfile.write(chunk)
         except ValueError:
-            self._json(400, {'error': 'bad content length'})
+            if not headers_sent:
+                self._json(400, {'error': 'bad content length'})
         except (OSError, http.client.HTTPException, TimeoutError) as error:
-            self._json(503, {'error': 'collector unavailable', 'detail': str(error)})
+            if not headers_sent:
+                self._json(503, {'error': 'collector unavailable', 'detail': str(error)})
         finally:
             if connection is not None:
                 connection.close()

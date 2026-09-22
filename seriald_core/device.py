@@ -7,11 +7,16 @@ import secrets
 import shlex
 import threading
 import time
+import sys
 
 from .config import ANSI, BY_PATH, DATE_FMT, HOST_PATTERNS, LOG_ROOT, SCROLLBACK, SSH_IDLE, SSH_LIMIT
 from .transport import write_serial
 from .protocol import PROBE_CMD, RE_LOGIN, RE_PASSWD, RE_PROMPT, SSH_CMD, parse_probe
-from .sessions import SshSession, check_password_login
+if sys.platform == 'win32':
+    from serial import SerialException
+    from .sessions_windows import SshSession, check_password_login
+else:
+    from .sessions import SshSession, check_password_login
 from .storage import IdentityError, archive_component
 from .identity import eeprom_serial, usable_serial
 from .boot_marker import init_command
@@ -314,6 +319,14 @@ class Device:
         with self.write_lock:
             if self.stop.is_set() or not self.present or self.fd is None:
                 return False, '设备未打开或已重新枚举'
+            if sys.platform == 'win32':
+                try:
+                    encoded = text.encode('utf-8', 'replace')
+                    if self.fd.write(encoded) != len(encoded):
+                        return False, 'COM 写入不完整'
+                    return True, ''
+                except (OSError, SerialException) as error:
+                    return False, str(error)
             return write_serial(os.path.join(BY_PATH, self.by_path), text,
                                 identity=self.identity, cancel=self.stop)
 

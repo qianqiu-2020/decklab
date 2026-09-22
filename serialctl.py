@@ -27,7 +27,9 @@ ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)')
 
 
 class ClientError(Exception):
-    pass
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 class Client:
@@ -71,7 +73,7 @@ class Client:
         except HTTPError as error:
             with error:
                 detail = error.read(4096).decode('utf-8', 'replace')
-            raise ClientError('HTTP %s: %s' % (error.code, detail)) from error
+            raise ClientError('HTTP %s: %s' % (error.code, detail), status=error.code) from error
         except (URLError, OSError, ValueError, http.client.HTTPException) as error:
             raise ClientError(str(error)) from error
         if not isinstance(result, dict):
@@ -246,6 +248,23 @@ def _abort_transfer(client, transfer_id):
             pass
 
 
+def _upload_slice(client, transfer_id, offset, data):
+    """Fit a raw slice under the board's canonical tty line limit."""
+    length = len(data)
+    while length:
+        try:
+            result = client.post('/api/file-transfer/chunk', id=transfer_id, offset=offset,
+                                 data_b64=base64.b64encode(data[:length]).decode('ascii'))
+            if result.get('offset') != offset + length:
+                raise ClientError('Upload offset mismatch')
+            return result
+        except ClientError as error:
+            if error.status != 413 or length == 1:
+                raise
+            length = max(1, length // 2)
+    raise ClientError('Empty upload slice')
+
+
 def file_put(client, local, remote, overwrite=False):
     path = Path(local).expanduser()
     if not path.is_file():
@@ -256,18 +275,25 @@ def file_put(client, local, remote, overwrite=False):
         started = client.post('/api/file-transfer/start', direction='upload', path=remote,
                               size=size, overwrite=overwrite)
         transfer_id = started['id']
-        chunk_size = started['chunk_size']
+        batch_size = started.get('batch_size', started['chunk_size'])
         offset = 0
         with path.open('rb') as source:
             while offset < size:
-                data = source.read(min(chunk_size, size - offset))
+                data = source.read(min(batch_size, size - offset))
                 if not data:
                     raise ClientError('Local file shrank during upload')
-                response = client.post('/api/file-transfer/chunk', id=transfer_id, offset=offset,
-                                       data_b64=base64.b64encode(data).decode('ascii'))
-                offset += len(data)
-                if response.get('offset') != offset:
-                    raise ClientError('Upload offset mismatch')
+                if started.get('batch_size'):
+                    response = client.post('/api/file-transfer/batch', id=transfer_id, offset=offset,
+                                           data_b64=base64.b64encode(data).decode('ascii'))
+                    if response.get('offset') != offset + len(data):
+                        raise ClientError('Upload batch offset mismatch')
+                    offset = response['offset']
+                else:
+                    sent = 0
+                    while sent < len(data):
+                        response = _upload_slice(client, transfer_id, offset, data[sent:])
+                        sent += response['offset'] - offset
+                        offset = response['offset']
         result = client.post('/api/file-transfer/finish', id=transfer_id)
         transfer_id = None
         return result
@@ -320,6 +346,11 @@ def file_copy(source, destination, remote, to_path, overwrite=False):
     if source.connection_id == destination.connection_id and source.key == destination.key:
         raise ClientError('Source and destination must be different devices')
     source_id = destination_id = None
+    source_seconds = destination_seconds = 0.0
+    def timed_post(client, route, **payload):
+        started = time.monotonic()
+        result = client.post(route, **payload)
+        return result, time.monotonic() - started
     try:
         incoming = source.post('/api/file-transfer/start', direction='download', path=remote)
         source_id = incoming['id']
@@ -327,22 +358,47 @@ def file_copy(source, destination, remote, to_path, overwrite=False):
                                     size=incoming['size'], overwrite=overwrite)
         destination_id = outgoing['id']
         offset = 0
+        started = time.monotonic()
         # Each board owns a different serial port. Prefetch the next source
-        # block while the current block is being written to the destination.
-        with ThreadPoolExecutor(max_workers=1) as reader:
-            pending = (reader.submit(source.post, '/api/file-transfer/chunk',
-                                     id=source_id, offset=0) if incoming['size'] else None)
-            while offset < incoming['size']:
-                chunk = pending.result()
-                data = base64.b64decode(chunk['data_b64'], validate=True)
-                next_offset = offset + len(data)
-                if not data or chunk.get('offset') != next_offset or next_offset > incoming['size']:
+        # batch while the current one is being written to the destination.
+        batch_size = outgoing.get('batch_size', incoming['chunk_size'])
+        def read_batch(first_offset):
+            data = bytearray()
+            seconds = 0.0
+            while (first_offset + len(data) < incoming['size']
+                   and len(data) < batch_size):
+                position = first_offset + len(data)
+                chunk, elapsed = timed_post(source, '/api/file-transfer/chunk',
+                                            id=source_id, offset=position)
+                part = base64.b64decode(chunk['data_b64'], validate=True)
+                if not part or chunk.get('offset') != position + len(part):
                     raise ClientError('Source transfer offset mismatch')
-                pending = (reader.submit(source.post, '/api/file-transfer/chunk',
-                                         id=source_id, offset=next_offset)
+                data.extend(part)
+                seconds += elapsed
+            return bytes(data), seconds
+        with ThreadPoolExecutor(max_workers=1) as reader:
+            pending = reader.submit(read_batch, 0) if incoming['size'] else None
+            while offset < incoming['size']:
+                data, read_seconds = pending.result()
+                source_seconds += read_seconds
+                next_offset = offset + len(data)
+                if not data or next_offset > incoming['size']:
+                    raise ClientError('Source transfer offset mismatch')
+                pending = (reader.submit(read_batch, next_offset)
                            if next_offset < incoming['size'] else None)
-                sent = destination.post('/api/file-transfer/chunk', id=destination_id,
-                                        offset=offset, data_b64=chunk['data_b64'])
+                write_started = time.monotonic()
+                if outgoing.get('batch_size'):
+                    sent = destination.post('/api/file-transfer/batch', id=destination_id,
+                                            offset=offset,
+                                            data_b64=base64.b64encode(data).decode('ascii'))
+                else:
+                    sent_offset = offset
+                    while sent_offset < next_offset:
+                        sent = _upload_slice(destination, destination_id, sent_offset,
+                                             data[sent_offset - offset:])
+                        sent_offset = sent['offset']
+                write_seconds = time.monotonic() - write_started
+                destination_seconds += write_seconds
                 if sent.get('offset') != next_offset:
                     raise ClientError('Destination transfer offset mismatch')
                 offset = next_offset
@@ -354,7 +410,16 @@ def file_copy(source, destination, remote, to_path, overwrite=False):
         destination_id = None
         if result.get('sha256') != verified['sha256']:
             raise ClientError('Destination SHA-256 mismatch')
-        return dict(result, source_device=source.key, destination_device=destination.key)
+        elapsed = time.monotonic() - started
+        size = incoming['size']
+        return dict(result, source_device=source.key, destination_device=destination.key,
+                    rate_diagnostics={
+                        'source_kib_s': round(size / max(source_seconds, 0.001) / 1024, 2),
+                        'destination_kib_s': round(size / max(destination_seconds, 0.001) / 1024, 2),
+                        'effective_kib_s': round(size / max(elapsed, 0.001) / 1024, 2),
+                        'source_request_s': round(source_seconds, 3),
+                        'destination_request_s': round(destination_seconds, 3),
+                        'total_s': round(elapsed, 3)})
     finally:
         _abort_transfer(source, source_id)
         _abort_transfer(destination, destination_id)

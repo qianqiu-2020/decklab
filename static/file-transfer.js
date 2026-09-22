@@ -34,7 +34,7 @@
   function averageRate(size) {
     return meter ? size / Math.max(0.001, (performance.now() - meter.start) / 1000) : 0;
   }
-  function progress(offset, size) {
+  function progress(offset, size, detail) {
     byId('ft-progress').value = size ? Math.round(offset / size * 100) : 100;
     if (!meter) beginProgress();
     var now = performance.now();
@@ -46,7 +46,7 @@
     var remaining = rate > 0 ? (size - offset) / rate : Infinity;
     status(SerialdUI.formatBytes(offset) + ' / ' + SerialdUI.formatBytes(size)
       + ' · ' + (rate > 0 ? rateText(rate) : '速率计算中')
-      + ' · 预计剩余 ' + duration(remaining));
+      + ' · 预计剩余 ' + duration(remaining) + (detail ? ' · ' + detail : ''));
     meter.shown = now;
   }
   async function api(device, action, payload) {
@@ -56,8 +56,42 @@
         connection_id: device.connection_id, actor: 'web' }, payload))
     });
     var result = await response.json();
-    if (!response.ok || !result.ok) throw new Error(result.error || '传输请求失败');
+    if (!response.ok || !result.ok) {
+      var error = new Error(result.error || '传输请求失败');
+      error.status = response.status;
+      throw error;
+    }
     return result;
+  }
+  async function timedApi(device, action, payload) {
+    var started = performance.now();
+    var result = await api(device, action, payload);
+    return { result: result, seconds: (performance.now() - started) / 1000 };
+  }
+  async function writeBlock(device, transfer, offset, raw) {
+    var started = performance.now(), sent = 0;
+    if (transfer.batch_size && raw.length <= transfer.batch_size) {
+      var batch = await api(device, 'batch', { id: transfer.id, offset: offset,
+        data_b64: bytes(raw) });
+      if (batch.offset !== offset + raw.length) throw new Error('目标板批量传输偏移不匹配');
+      return { result: batch, seconds: (performance.now() - started) / 1000 };
+    }
+    while (sent < raw.length) {
+      var length = raw.length - sent;
+      for (;;) {
+        try {
+          var result = await api(device, 'chunk', { id: transfer.id, offset: offset + sent,
+            data_b64: bytes(raw.subarray(sent, sent + length)) });
+          if (result.offset !== offset + sent + length) throw new Error('目标板传输偏移不匹配');
+          sent += length;
+          break;
+        } catch (error) {
+          if (error.status !== 413 || length === 1) throw error;
+          length = Math.max(1, Math.floor(length / 2));
+        }
+      }
+    }
+    return { result: { offset: offset + sent }, seconds: (performance.now() - started) / 1000 };
   }
   function checkCancelled() { if (cancelled) throw new Error('已取消传输'); }
 
@@ -69,9 +103,10 @@
       beginProgress();
       for (var offset = 0; offset < file.size;) {
         checkCancelled();
-        var chunk = new Uint8Array(await file.slice(offset, offset + transfer.chunk_size).arrayBuffer());
-        var result = await api(board, 'chunk', { id: transfer.id, offset: offset, data_b64: bytes(chunk) });
-        offset = result.offset;
+        var chunk = new Uint8Array(await file.slice(offset,
+          offset + (transfer.batch_size || transfer.chunk_size)).arrayBuffer());
+        var written = await writeBlock(board, transfer, offset, chunk);
+        offset = written.result.offset;
         progress(offset, file.size);
       }
       checkCancelled();
@@ -134,25 +169,48 @@
       outgoing = await api(destination, 'start', { direction: 'upload', path: target,
         size: incoming.size, overwrite: overwrite });
       beginProgress();
-      var chunk = incoming.size ? await api(board, 'chunk', { id: incoming.id, offset: 0 }) : null;
+      var sourceSeconds = 0, targetSeconds = 0, sourceBytes = 0, targetBytes = 0;
+      var batchSize = outgoing.batch_size || incoming.chunk_size;
+      async function readBatch(offset) {
+        var parts = [], length = 0, seconds = 0;
+        while (offset + length < incoming.size && length < batchSize) {
+          var read = await timedApi(board, 'chunk', { id: incoming.id, offset: offset + length });
+          var data = decode(read.result.data_b64);
+          if (!data.length || read.result.offset !== offset + length + data.length)
+            throw new Error('源板传输偏移不匹配');
+          parts.push(data); length += data.length; seconds += read.seconds;
+        }
+        var joined = new Uint8Array(length), cursor = 0;
+        parts.forEach(function (part) { joined.set(part, cursor); cursor += part.length; });
+        return { data: joined, offset: offset + length, seconds: seconds };
+      }
+      var chunk = incoming.size ? await readBatch(0) : null;
+      if (chunk) { sourceSeconds += chunk.seconds; sourceBytes = chunk.offset; }
       for (var offset = 0; offset < incoming.size;) {
         checkCancelled();
-        if (chunk.offset !== offset + decode(chunk.data_b64).length || chunk.offset > incoming.size)
+        if (chunk.offset !== offset + chunk.data.length || chunk.offset > incoming.size)
           throw new Error('源板传输偏移不匹配');
         // Source and destination are independent serial ports. Read the next
         // block while writing this one, then inspect both outcomes together.
-        var next = chunk.offset < incoming.size
-          ? api(board, 'chunk', { id: incoming.id, offset: chunk.offset }) : null;
-        var writes = [api(destination, 'chunk', { id: outgoing.id, offset: offset,
-          data_b64: chunk.data_b64 })];
+        var next = chunk.offset < incoming.size ? readBatch(chunk.offset) : null;
+        var writes = [writeBlock(destination, outgoing, offset, chunk.data)];
         if (next) writes.push(next);
         var outcomes = await Promise.allSettled(writes);
         var failure = outcomes.find(function (item) { return item.status === 'rejected'; });
         if (failure) throw failure.reason;
-        if (outcomes[0].value.offset !== chunk.offset) throw new Error('目标板传输偏移不匹配');
-        offset = outcomes[0].value.offset;
-        progress(offset, incoming.size);
-        chunk = next ? outcomes[1].value : null;
+        if (outcomes[0].value.result.offset !== chunk.offset) throw new Error('目标板传输偏移不匹配');
+        targetSeconds += outcomes[0].value.seconds;
+        targetBytes += chunk.offset - offset;
+        offset = outcomes[0].value.result.offset;
+        if (next) {
+          var read = outcomes[1].value;
+          sourceSeconds += read.seconds;
+          sourceBytes = read.offset;
+          chunk = read;
+        } else chunk = null;
+        var sourceRate = sourceSeconds ? rateText(sourceBytes / sourceSeconds) : '计算中';
+        var targetRate = targetSeconds ? rateText(targetBytes / targetSeconds) : '计算中';
+        progress(offset, incoming.size, '源读取 ' + sourceRate + ' · 目标写入 ' + targetRate);
       }
       checkCancelled();
       var sourceDone = await api(board, 'finish', { id: incoming.id });
@@ -162,6 +220,8 @@
       if (sourceDone.sha256 !== targetDone.sha256) throw new Error('目标板文件校验失败');
       byId('ft-progress').value = 100;
       status('板间复制完成 · 平均 ' + rateText(averageRate(targetDone.size))
+        + ' · 源读取 ' + rateText(sourceBytes / Math.max(sourceSeconds, 0.001))
+        + ' · 目标写入 ' + rateText(targetBytes / Math.max(targetSeconds, 0.001))
         + ' · ' + destination.key + ':' + target + ' · SHA-256 ' + targetDone.sha256);
     } finally {
       if (incoming) await api(board, 'abort', { id: incoming.id }).catch(function () {});

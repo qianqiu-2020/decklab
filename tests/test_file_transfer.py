@@ -1,13 +1,15 @@
 """Exercise serial transfer shell commands against a local temporary directory."""
 import base64
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import threading
 import unittest
 
-from seriald_core.file_transfer import CHUNK_SIZE, SerialFileTransfer, TransferError
+from seriald_core.file_transfer import (BATCH_SIZE, CHUNK_SIZE, MAX_CONSOLE_LINE,
+                                        SerialFileTransfer, TransferError, _field)
 from serialctl import ClientError, file_put, file_get, file_copy
 
 
@@ -34,6 +36,11 @@ class ShellDevice:
 
 
 class SerialFileTransferTests(unittest.TestCase):
+    def test_result_field_follows_echoed_batch_command(self):
+        output = 'SD_RC=%s\nSD_SIZE=%s\n\x1b[?2004l\rSD_RC=0\r\nSD_SIZE=30720\x13\n'
+        self.assertEqual(_field(output, 'SD_RC'), '0')
+        self.assertEqual(_field(output, 'SD_SIZE'), '30720')
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -44,11 +51,20 @@ class SerialFileTransferTests(unittest.TestCase):
     def upload(self, path, data, overwrite=False):
         state = self.transfer.start('upload', str(path), self.device.connection_id,
                                     size=len(data), overwrite=overwrite)
-        for offset in range(0, len(data), CHUNK_SIZE):
+        offset = 0
+        while offset < len(data):
             raw = data[offset:offset + CHUNK_SIZE]
-            chunk = self.transfer.chunk(state['id'], self.device.connection_id, offset,
-                                        base64.b64encode(raw).decode('ascii'))
+            while True:
+                try:
+                    chunk = self.transfer.chunk(state['id'], self.device.connection_id, offset,
+                                                base64.b64encode(raw).decode('ascii'))
+                    break
+                except TransferError as error:
+                    if error.status != 413 or len(raw) == 1:
+                        raise
+                    raw = raw[:max(1, len(raw) // 2)]
             self.assertEqual(chunk['offset'], offset + len(raw))
+            offset = chunk['offset']
         return self.transfer.finish(state['id'], self.device.connection_id)
 
     def test_binary_upload_is_atomic_and_uses_expected_hash(self):
@@ -104,7 +120,8 @@ class SerialFileTransferTests(unittest.TestCase):
         with self.assertRaisesRegex(TransferError, '偏移'):
             self.transfer.chunk(state['id'], self.device.connection_id, 1, 'AAAA')
         with self.assertRaisesRegex(TransferError, '长度'):
-            self.transfer.chunk(state['id'], self.device.connection_id, 0, 'AAAA')
+            self.transfer.chunk(state['id'], self.device.connection_id, 0,
+                                base64.b64encode(b'123456').decode('ascii'))
         self.transfer.abort(state['id'], self.device.connection_id)
         self.assertFalse(target.exists())
         self.assertFalse(list(self.root.glob('*.part')))
@@ -149,6 +166,39 @@ class SerialFileTransferTests(unittest.TestCase):
             self.transfer.chunk(state['id'], self.device.connection_id, 0, '!')
         self.transfer.abort(state['id'], self.device.connection_id)
 
+    def test_batch_upload_compressible_and_incompressible(self):
+        for name, data in [('log', b'boot: ready\n' * 2800),
+                           ('binary', os.urandom(BATCH_SIZE + 100))]:
+            target = self.root / name
+            state = self.transfer.start('upload', str(target), self.device.connection_id,
+                                        size=len(data))
+            offset = 0
+            while offset < len(data):
+                raw = data[offset:offset + BATCH_SIZE]
+                result = self.transfer.batch(state['id'], self.device.connection_id, offset,
+                                             base64.b64encode(raw).decode('ascii'))
+                offset = result['offset']
+            self.transfer.finish(state['id'], self.device.connection_id)
+            self.assertEqual(target.read_bytes(), data)
+        self.assertTrue(any('\n' in command and 'SD_RC=' in command
+                            for command in self.device.commands))
+        for command in self.device.commands:
+            if 'SD_RC=' in command and '\n' in command:
+                self.assertLessEqual(max(len(line.encode()) + 120
+                                         for line in command.split('\n')), MAX_CONSOLE_LINE)
+
+    def test_batch_rejects_bad_payload_without_advancing(self):
+        target = self.root / 'batch'
+        state = self.transfer.start('upload', str(target), self.device.connection_id,
+                                    size=BATCH_SIZE + 1)
+        with self.assertRaises(TransferError):
+            self.transfer.batch(state['id'], self.device.connection_id, 0, '!')
+        with self.assertRaises(TransferError):
+            self.transfer.batch(state['id'], self.device.connection_id, 0,
+                                base64.b64encode(b'x' * (BATCH_SIZE + 1)).decode('ascii'))
+        self.assertEqual(self.transfer.state['offset'], 0)
+        self.transfer.abort(state['id'], self.device.connection_id)
+
 
 class TransferClient:
     def __init__(self, key):
@@ -167,20 +217,36 @@ class TransferClient:
             if action == 'chunk':
                 return self.transfer.chunk(payload['id'], self.connection_id, payload['offset'],
                                            payload.get('data_b64'))
+            if action == 'batch':
+                return self.transfer.batch(payload['id'], self.connection_id, payload['offset'],
+                                           payload.get('data_b64'))
             if action == 'finish':
                 return self.transfer.finish(payload['id'], self.connection_id)
             if action == 'abort':
                 return self.transfer.abort(payload['id'], self.connection_id)
         except TransferError as error:
-            raise ClientError(str(error)) from error
+            raise ClientError(str(error), status=error.status) from error
         raise AssertionError(route)
 
 
 class CliFileTransferTests(unittest.TestCase):
+    def test_incompressible_upload_splits_without_losing_bytes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            data = os.urandom(CHUNK_SIZE + 3072)
+            source_path, target_path = root / 'source.bin', root / 'target.bin'
+            source_path.write_bytes(data)
+            target = TransferClient('target')
+            target.device.gzip_available = False
+            file_put(target, str(source_path), str(target_path))
+            self.assertEqual(target_path.read_bytes(), data)
+            self.assertGreater(sum(command.count('base64 -d')
+                                   for command in target.device.commands), 2)
+
     def test_board_copy_overlaps_two_independent_serial_ports(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            data = bytes(range(256)) * 24
+            data = bytes(range(256)) * 64
             source_path, target_path = root / 'source.bin', root / 'target.bin'
             source_path.write_bytes(data)
             source, target = TransferClient('source'), TransferClient('target')
@@ -195,12 +261,16 @@ class CliFileTransferTests(unittest.TestCase):
                         next_read_started.set()
                 return original_source(route, **payload)
             def target_post(route, **payload):
-                if route.endswith('/chunk') and payload['offset'] == 0:
+                if route.endswith('/batch') and payload['offset'] == 0:
                     self.assertTrue(next_read_started.wait(1), 'source prefetch did not overlap destination write')
                 return original_target(route, **payload)
             source.post, target.post = source_post, target_post
-            file_copy(source, target, str(source_path), str(target_path))
+            result = file_copy(source, target, str(source_path), str(target_path))
             self.assertEqual(target_path.read_bytes(), data)
+            rates = result['rate_diagnostics']
+            self.assertGreater(rates['source_kib_s'], 0)
+            self.assertGreater(rates['destination_kib_s'], 0)
+            self.assertGreater(rates['effective_kib_s'], 0)
 
     def test_local_upload_download_and_board_copy(self):
         with tempfile.TemporaryDirectory() as folder:

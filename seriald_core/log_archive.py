@@ -115,7 +115,7 @@ def read_epoch(root, epoch):
     data = bytearray()
     for part in epoch['parts']:
         path = os.path.join(root, part['file'])
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
         with os.fdopen(fd, 'rb') as source:
             source.seek(part['start'])
             remaining = part['end'] - part['start']

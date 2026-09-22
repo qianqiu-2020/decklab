@@ -4,7 +4,10 @@ import os
 import select
 import stat
 import sys
-import termios
+try:
+    import termios
+except ImportError:
+    termios = None
 import threading
 import time
 
@@ -191,6 +194,10 @@ class Manager:
             self.armed_paths.pop(by_path, None)
 
     @staticmethod
+    def _handoff_matches(entry, dev, identity):
+        return tuple(entry['identity']) == identity and entry['dev'] == dev
+
+    @staticmethod
     def _matches(d):
         try:
             s = os.stat(os.path.join(BY_PATH, d.by_path))
@@ -202,27 +209,9 @@ class Manager:
         with self.scan_lock:
             if self.stopping.is_set():
                 return {}
-            found = {}
-            try:
-                names = sorted(os.listdir(BY_PATH))
-            except OSError:
-                names = []
+            found = self._discover()
             with self.lock:
                 existing = dict(self.devices)
-            # 新 udev 会给同一 tty 多个别名;优先保留原锚点,按设备号去重。
-            names.sort(key=lambda key: (key not in existing, key))
-            seen = set()
-            for key in names:
-                path = os.path.join(BY_PATH, key)
-                try:
-                    dev = os.path.realpath(path)
-                    st = os.stat(path)
-                    if not stat.S_ISCHR(st.st_mode) or st.st_rdev in seen:
-                        continue
-                    seen.add(st.st_rdev)
-                    found[key] = (dev, (st.st_dev, st.st_ino, st.st_rdev))
-                except OSError:
-                    continue
             stopping = []
             for key, d in existing.items():
                 if found.get(key) != (d.dev, d.identity):
@@ -255,13 +244,10 @@ class Manager:
                         if (previous and previous.record and not armed
                                 and (active_board is previous or active_board is None or not active_board.present)
                                 and not (self.store and self.store.has_conflict(previous.serial))):
-                            # A USB reset creates a new tty inode (sometimes with the
-                            # same ttyUSB number). The user keeps this physical port
-                            # assigned until explicitly arming a board swap.
                             record = previous.record
                         else:
                             entry = self.handoff.pop(key, None)
-                            if (entry and tuple(entry['identity']) == identity and entry['dev'] == dev
+                            if (entry and self._handoff_matches(entry, dev, identity)
                                     and self.store and not armed):
                                 record = self.store.get(entry['serial'])
                         d = Device(key, dev, self if self.store else None, record)
@@ -280,12 +266,9 @@ class Manager:
                 if d.thread and d.thread.is_alive():
                     continue
                 if not d.operation_lock.acquire(blocking=False):
-                    continue                    # 旧识别事务退出前不能把新连接交给同一对象
+                    continue
                 try:
                     if d.identity != identity:
-                        # A known board is created with its durable record. Keep that
-                        # identity/source visible across tty re-enumeration until a
-                        # fresh probe replaces it; only unbound connections reset.
                         d.probe_info = dict(d.record['info']) if d.record else {}
                         d.hostname = d.probe_info.get('hostname', '')
                     d.dev, d.identity = dev, identity
@@ -299,6 +282,30 @@ class Manager:
                 finally:
                     d.operation_lock.release()
             return {key: value[0] for key, value in found.items()}
+
+    def _discover(self):
+        found = {}
+        try:
+            names = sorted(os.listdir(BY_PATH))
+        except OSError:
+            names = []
+        with self.lock:
+            existing = dict(self.devices)
+        # 新 udev 会给同一 tty 多个别名;优先保留原锚点,按设备号去重。
+        names.sort(key=lambda key: (key not in existing, key))
+        seen = set()
+        for key in names:
+            path = os.path.join(BY_PATH, key)
+            try:
+                dev = os.path.realpath(path)
+                st = os.stat(path)
+                if not stat.S_ISCHR(st.st_mode) or st.st_rdev in seen:
+                    continue
+                seen.add(st.st_rdev)
+                found[key] = (dev, (st.st_dev, st.st_ino, st.st_rdev))
+            except OSError:
+                continue
+        return found
 
     @staticmethod
     def _close_reader(d):

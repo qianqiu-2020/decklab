@@ -11,7 +11,9 @@ import time
 import zlib
 
 
-CHUNK_SIZE = 2048  # Encoded input stays below a typical 4096-byte tty line limit.
+CHUNK_SIZE = 10240  # Large reads; uploads split when their encoded shell line is too long.
+BATCH_SIZE = 3 * CHUNK_SIZE  # Fits the 64 KiB HTTP body limit even without compression.
+MAX_CONSOLE_LINE = 4095  # Typical canonical tty input limit, including framed command.
 COMPRESS_RATIO = 0.80  # Save enough wire time to justify a gzip process per chunk.
 IDLE_SECONDS = 10 * 60
 HEX_SHA256 = re.compile(r'^[0-9a-f]{64}$')
@@ -32,8 +34,12 @@ def _remote_path(value):
 
 
 def _field(output, name):
-    match = re.search(r'(?m)^' + re.escape(name) + r'=([^\r\n]*)$', output)
-    return match.group(1) if match else None
+    # Multiline batches echo later shell commands inside the response frame.
+    # The last complete field is the command's actual result, after its echo.
+    output = re.sub(r'[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]', '', output)
+    output = output.replace('\r\n', '\n').replace('\r', '\n')
+    matches = re.findall(r'(?m)^' + re.escape(name) + r'=([^\r\n]*)$', output)
+    return matches[-1] if matches else None
 
 
 class SerialFileTransfer:
@@ -150,7 +156,7 @@ class SerialFileTransfer:
             self._schedule_expiry(transfer_id)
             return {'id': transfer_id, 'direction': direction, 'path': path,
                     'size': state['size'], 'sha256': state.get('sha256'),
-                    'chunk_size': CHUNK_SIZE, 'offset': 0,
+                    'chunk_size': CHUNK_SIZE, 'batch_size': BATCH_SIZE, 'offset': 0,
                     'gzip_available': state['gzip']}
         finally:
             self.lock.release()
@@ -178,15 +184,19 @@ class SerialFileTransfer:
                     data = base64.b64decode(data_b64, validate=True)
                 except (TypeError, ValueError, binascii.Error):
                     raise TransferError('分块不是有效 base64') from None
-                if len(data) != expected:
+                if not data or len(data) > expected:
                     raise TransferError('上传分块长度不匹配')
-                packed = gzip.compress(data, compresslevel=1, mtime=0) if state['gzip'] else data
+                packed = gzip.compress(data, compresslevel=6, mtime=0) if state['gzip'] else data
                 compressed = len(packed) <= len(data) * COMPRESS_RATIO
                 encoded = base64.b64encode(packed if compressed else data).decode('ascii')
                 decode = 'base64 -d | gzip -d' if compressed else 'base64 -d'
                 command = ('printf %s {0} | {2} >> {1}; r=$?; '
                            's=$(wc -c < {1}); printf "SD_RC=%s\\nSD_SIZE=%s\\n" "$r" "$s"').format(
                     shlex.quote(encoded), shlex.quote(state['temp']), decode)
+                # _run_cmd_locked adds framing and the final shell newline.
+                # Reject before sending so clients can retry a smaller raw slice.
+                if len(command.encode('utf-8')) + 120 > MAX_CONSOLE_LINE:
+                    raise TransferError('分块编码后超过串口终端行长，请缩小分块', 413)
                 try:
                     output = self._run(command)
                 except TransferError:
@@ -221,7 +231,7 @@ class SerialFileTransfer:
                 if len(data) != expected:
                     raise TransferError('板端文件已变化，分块长度不匹配', 409)
                 if state['gzip']:
-                    packed = gzip.compress(data, compresslevel=1, mtime=0)
+                    packed = gzip.compress(data, compresslevel=6, mtime=0)
                     state['compress'] = len(packed) <= len(data) * COMPRESS_RATIO
                 state.setdefault('hasher', hashlib.sha256()).update(data)
             state['offset'] += len(data)
@@ -231,6 +241,57 @@ class SerialFileTransfer:
             if state['direction'] == 'download':
                 result['data_b64'] = base64.b64encode(data).decode('ascii')
             return result
+        finally:
+            self.lock.release()
+
+    def batch(self, transfer_id, connection_id, offset, data_b64):
+        """Write several console lines in one framed transaction and acknowledge once."""
+        if not self.lock.acquire(blocking=False):
+            raise TransferError('已有文件传输请求正在执行', 409)
+        try:
+            state = self._state(transfer_id, connection_id)
+            if state['direction'] != 'upload':
+                raise TransferError('批量写入只支持上传')
+            if type(offset) is not int or offset != state['offset'] or offset >= state['size']:
+                raise TransferError('分块偏移不匹配', 409)
+            try:
+                data = base64.b64decode(data_b64, validate=True)
+            except (TypeError, ValueError, binascii.Error):
+                raise TransferError('批量数据不是有效 base64') from None
+            if not data or len(data) > BATCH_SIZE or offset + len(data) > state['size']:
+                raise TransferError('批量数据长度无效', 413)
+            temp = shlex.quote(state['temp'])
+            lines = ['r=0;']
+            pending = [data[i:i + CHUNK_SIZE] for i in range(0, len(data), CHUNK_SIZE)]
+            while pending:
+                part = pending.pop(0)
+                packed = gzip.compress(part, compresslevel=6, mtime=0) if state['gzip'] else part
+                compressed = len(packed) <= len(part) * COMPRESS_RATIO
+                encoded = base64.b64encode(packed if compressed else part).decode('ascii')
+                decode = 'base64 -d | gzip -d' if compressed else 'base64 -d'
+                line = ('if [ "$r" = 0 ]; then printf %s {0} | {1} >> {2} || r=1; fi;'
+                        .format(shlex.quote(encoded), decode, temp))
+                if len(line.encode('utf-8')) + 120 > MAX_CONSOLE_LINE:
+                    if len(part) == 1:
+                        raise TransferError('分块编码后超过串口终端行长', 413)
+                    half = len(part) // 2
+                    pending[:0] = [part[:half], part[half:]]
+                    continue
+                lines.append(line)
+            lines.append('s=$(wc -c < {0}); printf "SD_RC=%s\\nSD_SIZE=%s\\n" "$r" "$s"'.format(temp))
+            try:
+                output = self._run('\n'.join(lines), timeout=90)
+            except TransferError:
+                state['failed'] = True
+                raise
+            if _field(output, 'SD_RC') != '0' or _field(output, 'SD_SIZE') != str(offset + len(data)):
+                state['failed'] = True
+                raise TransferError('板端批量写入失败或长度不匹配', 502)
+            state['hasher'].update(data)
+            state['offset'] += len(data)
+            state['last'] = time.monotonic()
+            return {'id': transfer_id, 'offset': state['offset'], 'size': state['size'],
+                    'bytes': len(data)}
         finally:
             self.lock.release()
 

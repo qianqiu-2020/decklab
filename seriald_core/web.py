@@ -23,6 +23,57 @@ STARTED = time.time()
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = 'seriald-collector/' + __version__
 
+    def _session_events(self, q):
+        """Stream one session's byte offsets; reconnect resumes via Last-Event-ID."""
+        d = self._dev(q)
+        if not d:
+            return self._json(404, {'error': 'no such device'})
+        sid = (q.get('sid') or ['serial'])[0]
+        stream = d if sid == 'serial' else d.get_session(sid)
+        if not stream:
+            return self._json(404, {'error': 'no such session'})
+        try:
+            off = int(self.headers.get('Last-Event-ID') or (q.get('off') or ['0'])[0])
+            if off < 0:
+                raise ValueError
+        except ValueError:
+            return self._json(400, {'error': 'bad offset'})
+        expected_key = d.key
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Accel-Buffering', 'no')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.wfile.flush()
+        try:
+            while d.key == expected_key:
+                new_off, data, alive = stream.read(off)
+                if data or not alive:
+                    payload = {'sid': sid, 'key': d.key, 'off': new_off, 'alive': alive,
+                               'data_b64': base64.b64encode(data).decode('ascii')}
+                    if sid == 'serial':
+                        payload['dev'] = d.dev
+                    else:
+                        payload['ip'] = stream.ip
+                    body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                    self.wfile.write(b'id: %d\ndata: ' % new_off + body + b'\n\n')
+                    self.wfile.flush()
+                    off = new_off
+                    if not alive:
+                        break
+                else:
+                    # read(0) intentionally returns immediately for snapshots;
+                    # wait on the producer condition to avoid a busy SSE loop.
+                    if off == 0:
+                        with stream.cv:
+                            if stream.fd is not None and not stream.buf:
+                                stream.cv.wait(10)
+                    self.wfile.write(b': keepalive\n\n')
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
     def _json(self, code, payload):
         if getattr(self, 'response_key', None):
             payload = dict(payload, key=self.response_key)
@@ -45,7 +96,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _download_log(self, path, name):
         """Stream one validated regular archive file without loading it into RAM."""
         try:
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
             source = os.fdopen(fd, 'rb')
         except OSError:
             return self._json(404, {'error': 'log unavailable'})
@@ -153,6 +204,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     'alive': alive, 'data_b64': base64.b64encode(data).decode('ascii'),
                                     'data': data.decode('utf-8', 'replace')})
 
+        if route == '/api/session-events':
+            return self._session_events(q)
+
         if route == '/api/sessions':
             d = self._dev(q)
             if not d:
@@ -220,7 +274,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     raise ValueError
                 full = (q.get('full') or ['0'])[0] == '1'
                 # Open only regular files inside the selected board's directory, no symlink traversal.
-                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
                 with os.fdopen(fd, 'rb') as source:
                     size = os.fstat(source.fileno()).st_size
                     start = (0 if full else max(0, size - 65536)) if offset == -1 else min(offset, size)
@@ -284,7 +338,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if route.startswith('/api/file-transfer/'):
             action = route.rsplit('/', 1)[-1]
-            if action not in ('start', 'chunk', 'finish', 'abort'):
+            if action not in ('start', 'chunk', 'batch', 'finish', 'abort'):
                 return self._json(404, {'ok': False, 'error': 'unknown transfer action'})
             connection_id = str(payload.get('connection_id') or '')
             try:
@@ -298,6 +352,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                         '%s %s (%s bytes)' % (result['direction'], result['path'], result['size']))
                 elif action == 'chunk':
                     result = d.file_transfer.chunk(str(payload.get('id') or ''), connection_id,
+                                                   payload.get('offset'), payload.get('data_b64'))
+                elif action == 'batch':
+                    result = d.file_transfer.batch(str(payload.get('id') or ''), connection_id,
                                                    payload.get('offset'), payload.get('data_b64'))
                 elif action == 'finish':
                     result = d.file_transfer.finish(str(payload.get('id') or ''), connection_id)

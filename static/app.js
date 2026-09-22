@@ -36,6 +36,7 @@
       $('d-term').removeEventListener('wheel', old.wheelHandler, false);
     }
     if (old.ctrl) old.ctrl.abort();
+    if (old.stream) old.stream.close();
     clearTimeout(old.loopTimer);
     clearTimeout(old.inputTimer);
     clearTimeout(old.sizeTimer);
@@ -290,6 +291,7 @@
     if (!isCurrent(ctx)) return;
     ctx.readSeq++;
     if (ctx.ctrl) ctx.ctrl.abort();
+    if (ctx.stream) { ctx.stream.close(); ctx.stream = null; }
     clearTimeout(ctx.loopTimer);
     if (ctx.refreshFrame && window.cancelAnimationFrame) {
       window.cancelAnimationFrame(ctx.refreshFrame); ctx.refreshFrame = 0;
@@ -309,7 +311,7 @@
       }
       return;
     }
-    loop(ctx);
+    startStream(ctx);
   }
 
   function resizeTerm() {
@@ -672,7 +674,7 @@
     loadSessions();
     // 关键:作废在途请求并立刻开新轮询。否则旧请求还挂在上一台设备上长轮询(最多 15s),
     // 切过去就得干等它返回 —— 这正是"切设备很慢"的原因。
-    loop(ctx);
+    startStream(ctx);
   }
 
   function writeTerminalPayload(ctx, payload) {
@@ -782,6 +784,37 @@
     else refresh();
   }
 
+  function startStream(ctx) {
+    if (!isCurrent(ctx)) return;
+    if (typeof window.EventSource !== 'function') { loop(ctx); return; }
+    var url = '/api/session-events?key=' + encodeURIComponent(ctx.key)
+      + '&serial=' + encodeURIComponent(ctx.serial || '')
+      + '&sid=' + encodeURIComponent(ctx.sid) + '&off=' + ctx.off;
+    var stream = new window.EventSource(url);
+    ctx.stream = stream;
+    stream.onmessage = function (event) {
+      if (!isCurrent(ctx) || ctx.stream !== stream) return;
+      var d;
+      try { d = JSON.parse(event.data); } catch (e) { stream.onerror(); return; }
+      if (!d || d.sid !== ctx.sid || d.key !== ctx.key || typeof d.off !== 'number') {
+        stream.onerror(); return;
+      }
+      if (d.off < ctx.off || (d.off === ctx.off && ctx.off > 0)) return;
+      ctx.off = d.off;
+      $('d-dev').textContent = d.dev || d.ip || '';
+      writeTerminalPayload(ctx, d);
+      if (d.alive === false) {
+        stream.close(); ctx.stream = null;
+        ctx.loopTimer = setTimeout(function () { loop(ctx); }, 500);
+      }
+    };
+    stream.onerror = function () {
+      if (ctx.stream !== stream) return;
+      stream.close(); ctx.stream = null;
+      if (isCurrent(ctx)) loop(ctx); // Old services and transient SSE failures keep working.
+    };
+  }
+
   function loop(ctx) {
     if (!isCurrent(ctx)) return;
     var readSeq = ++ctx.readSeq;
@@ -833,7 +866,7 @@
     loadLogs();
     var selected = sessions.filter(function (s) { return s.sid === sid; })[0];
     if (selected && selected.kind === 'log') loadArchivedLog(ctx, selected);
-    else loop(ctx);
+    else startStream(ctx);
     if ($('d-term').scrollIntoView) $('d-term').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function renderTabs() {

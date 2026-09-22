@@ -1,15 +1,19 @@
 import os
 import re
+import sys
 
-BASE = os.environ.get('SERIALD_BASE', '/data/seriald')      # 运行数据:注册表和序列号日志
+BASE = os.environ.get('SERIALD_BASE', os.path.join(os.path.dirname(sys.executable), 'data')
+                      if sys.platform == 'win32' else '/data/seriald')
 # 静态根(页面/前端库)与数据根分开 —— 打成 deb 后代码在 /usr/lib/seriald,
 # 包安装时通过环境配置到 /data/seriald-data；源码运行时默认留在仓库 /data/seriald。
-STATIC = os.environ.get('SERIALD_STATIC') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATIC = os.environ.get('SERIALD_STATIC') or (getattr(sys, '_MEIPASS', None)
+         or os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LOG_ROOT = os.path.join(BASE, 'logs')
 SOCKET = os.environ.get('SERIALD_SOCKET', os.path.join(BASE, 'seriald.sock'))
 HANDOFF = os.environ.get('SERIALD_HANDOFF', os.path.join(BASE, 'collector-handoff.json'))
 AUTH_TOKEN = os.environ.get('SERIALD_AUTH_TOKEN', '')
-BY_PATH = os.environ.get('SERIALD_BY_PATH', '/dev/serial/by-path')
+BY_PATH = os.environ.get('SERIALD_BY_PATH', 'Windows COM' if sys.platform == 'win32'
+                         else '/dev/serial/by-path')
 # 自愈脚本的位置。必须由 root 拥有且调用者不可写,否则 sudoers 白名单等于通用提权。
 # 打包后由 dpkg 装到 /usr/libexec/seriald/rescue.sh(天然满足这个前提)。
 RESCUE_BIN = os.environ.get('SERIALD_RESCUE_BIN', '/usr/local/sbin/seriald-rescue.sh')
