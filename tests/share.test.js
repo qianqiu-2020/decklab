@@ -8,6 +8,7 @@ class Element {
   constructor() { this.events = {}; this.children = []; this.value = ''; this.style = {}; this.disabled = false; }
   addEventListener(name, callback) { this.events[name] = callback; }
   click() { return this.events.click && this.events.click(); }
+  change() { return this.events.change && this.events.change(); }
   appendChild(child) { this.children.push(child); return child; }
   set textContent(value) { this.text = value; this.children = []; }
   get textContent() { return this.text || ''; }
@@ -26,7 +27,8 @@ async function main() {
   const fetch = async (route, options = {}) => {
     calls.push({ route, options });
     let body = {};
-    if (route === '/api/access') body = { share_enabled: false, agent_share_enabled: true, open_access: true };
+    if (route === '/api/access') body = { share_enabled: false, agent_share_enabled: true,
+      open_access: true, lan_hosts: ['10.0.120.161'] };
     else if (route === '/api/agent-grants') body = { grants: active.slice() };
     else if (route === '/api/agent-share') {
       const request = JSON.parse(options.body);
@@ -40,11 +42,17 @@ async function main() {
     } else throw new Error('unexpected fetch: ' + route);
     return { ok: true, json: async () => body };
   };
+  let rejectClipboard = false;
+  let legacyCopies = 0;
   const context = {
-    document: { getElementById: byId, createElement: () => new Element(), body: new Element() },
+    document: { getElementById: byId, createElement: () => new Element(), body: new Element(),
+      execCommand: command => { assert.equal(command, 'copy'); legacyCopies++; return true; } },
     window: { SerialdShareSelection: () => ({ key: 'milkv', label: 'milkv', serial: 'SN1' }) },
-    navigator: { clipboard: { writeText: async text => { clipboard.push(text); } } },
-    location: { origin: 'http://192.0.2.10:8898', hostname: '192.0.2.10' },
+    navigator: { clipboard: { writeText: async text => {
+      if (rejectClipboard) throw new Error('NotAllowedError');
+      clipboard.push(text);
+    } } },
+    location: { origin: 'http://127.0.0.1:8898', hostname: '127.0.0.1' },
     fetch, URL, Date, Promise, console
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'static/share.js'), 'utf8'), context);
@@ -53,14 +61,26 @@ async function main() {
 
   byId('b-agent-share').click();
   assert.equal(byId('agent-share-scope').value, 'device');
+  assert.equal(byId('agent-share-address-mode').value, 'lan');
+  assert.equal(byId('agent-share-url').value, 'http://10.0.120.161:8898');
+  byId('agent-share-address-mode').value = 'local';
+  byId('agent-share-address-mode').change();
+  assert.equal(byId('agent-share-url').value, 'http://127.0.0.1:8898');
+  byId('agent-share-address-mode').value = 'lan';
+  byId('agent-share-address-mode').change();
   await byId('agent-share-create').click();
   const request = calls.find(call => call.route === '/api/agent-share');
   assert.deepEqual(JSON.parse(request.options.body), { scope: 'device', serial: 'SN1' });
   const text = byId('agent-share-text').value;
   assert.match(text, /seriald-ag-secret/);
+  assert.match(text, /\nexport SERIALD_URL='http:\/\/10\.0\.120\.161:8898'\n/);
   assert.match(text, /skills\/seriald-board\/SKILL\.md/);
   assert.ok(text.indexOf(' exec --command ') < text.indexOf(' read --sid serial'));
   assert.match(text, /其他客户端仍可无令牌访问/);
+  rejectClipboard = true;
+  await byId('agent-share-copy').click();
+  assert.equal(legacyCopies, 1);
+  rejectClipboard = false;
   await byId('agent-share-copy').click();
   assert.equal(clipboard[0], text);
 

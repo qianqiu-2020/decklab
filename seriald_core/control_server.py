@@ -33,6 +33,30 @@ class UnixHTTPConnection(http.client.HTTPConnection):
         self.sock.connect(self.unix_path)
 
 
+def lan_hosts():
+    """Suggest reachable IPv4 addresses without depending on platform commands."""
+    hosts = set()
+    try:
+        hosts.update(item[4][0] for item in socket.getaddrinfo(
+            socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM))
+    except OSError:
+        pass
+    for target in ('10.0.0.1', '172.16.0.1', '192.168.0.1'):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                probe.connect((target, 80))
+                hosts.add(probe.getsockname()[0])
+        except OSError:
+            pass
+    def is_lan(host):
+        address = ipaddress.ip_address(host)
+        return any(address in network for network in (
+            ipaddress.ip_network('10.0.0.0/8'), ipaddress.ip_network('172.16.0.0/12'),
+            ipaddress.ip_network('192.168.0.0/16')))
+    return sorted((host for host in hosts if is_lan(host)),
+                  key=lambda host: (not host.startswith('10.'), host))
+
+
 class ControlHandler(http.server.SimpleHTTPRequestHandler):
     server_version = 'seriald-control/' + __version__
     collector_socket = SOCKET
@@ -48,6 +72,14 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     public_agent_files = frozenset(('/serialctl.py', '/skills/seriald-board/SKILL.md'))
     agent_denied_posts = frozenset(('/api/label', '/api/switch-mode', '/api/rescue',
                                     '/api/ssh-enable', '/api/session-takeover'))
+
+    def guess_type(self, path):
+        route = urlparse(self.path).path
+        if route == '/skills/seriald-board/SKILL.md':
+            return 'text/markdown; charset=utf-8'
+        if route == '/serialctl.py':
+            return 'text/x-python; charset=utf-8'
+        return super().guess_type(path)
 
     def _json(self, code, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()
@@ -330,7 +362,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return self._json(200, {'share_enabled': bool(self.auth_token and self._owner_authorized()),
                                     'agent_share_enabled': bool(self._owner_authorized() and self.grant_store),
                                     'open_access': not bool(self.auth_token),
-                                    'loopback_open': bool(self.trust_loopback)})
+                                    'loopback_open': bool(self.trust_loopback),
+                                    'lan_hosts': lan_hosts()})
         if route == '/api/agent-grants':
             if not self._owner_authorized() or not self.grant_store:
                 return self._json(403, {'error': '只有主访问凭证可以管理 Agent 授权'})

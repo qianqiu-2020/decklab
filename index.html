@@ -148,6 +148,7 @@
   <p>复制接入文本给 Claude Code、Codex 等 Agent。它会安装本机托管的 skill 和 CLI，优先通过 SSH 操作；启动、内核和 SSH 故障再查看串口。</p>
   <div class="agent-share-fields">
     <label>授权范围<select id="agent-share-scope"><option value="device">当前设备</option><option value="all">全部设备</option></select></label>
+    <label>连接位置<select id="agent-share-address-mode"><option value="local">本机</option><option value="lan">局域网</option></select></label>
     <label>Agent 可访问的服务地址<input id="agent-share-url" type="url" spellcheck="false" placeholder="http://上位机IP:8898"></label>
   </div>
   <p id="agent-share-hint"></p>

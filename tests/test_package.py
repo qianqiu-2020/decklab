@@ -146,6 +146,7 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual([(d['key'], d['serial'], d['state']) for d in devices],
                                  [('test-board', 'TEST-SERIAL', 'offline')])
                 with urlopen(url + '/skills/seriald-board/SKILL.md') as response:
+                    self.assertIn('charset=utf-8', response.headers['Content-Type'])
                     self.assertIn(b'seriald-board', response.read())
                 with urlopen(url + '/serialctl.py') as response:
                     self.assertIn(b'class Client', response.read())

@@ -6,6 +6,7 @@
   var topAgent = document.getElementById('b-agent-share-all');
   var deviceAgent = document.getElementById('b-agent-share');
   var scope = document.getElementById('agent-share-scope');
+  var addressMode = document.getElementById('agent-share-address-mode');
   var address = document.getElementById('agent-share-url');
   var hint = document.getElementById('agent-share-hint');
   var output = document.getElementById('agent-share-text');
@@ -15,10 +16,12 @@
   var grants = document.getElementById('agent-share-grants');
   var openAccess = false;
   var selected = null;
+  var lanHosts = [];
 
   fetch('/api/access', { cache: 'no-store' }).then(function (response) { return response.json(); })
     .then(function (access) {
       openAccess = !!access.open_access;
+      lanHosts = Array.isArray(access.lan_hosts) ? access.lan_hosts : [];
       button.hidden = !access.share_enabled;
       [topAgent, deviceAgent].forEach(function (element) {
         element.disabled = !access.agent_share_enabled;
@@ -30,18 +33,42 @@
       topAgent.disabled = deviceAgent.disabled = true;
     });
 
-  function copy(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText)
-      return navigator.clipboard.writeText(text);
-    var field = document.createElement('textarea');
-    field.value = text;
-    field.style.position = 'fixed';
-    field.style.opacity = '0';
-    document.body.appendChild(field);
+  async function copy(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(text); return; }
+      catch (_) { /* Non-secure HTTP or browser permissions may reject this API. */ }
+    }
+    var field = output.value === text ? output : document.createElement('textarea');
+    if (field !== output) {
+      field.value = text;
+      field.style.position = 'fixed';
+      field.style.left = '0';
+      field.style.top = '0';
+      document.body.appendChild(field);
+    }
+    field.focus();
     field.select();
     var copied = document.execCommand('copy');
-    field.remove();
-    return copied ? Promise.resolve() : Promise.reject(new Error('clipboard unavailable'));
+    if (field !== output) field.remove();
+    if (!copied) throw new Error('clipboard unavailable');
+  }
+
+  function localUrl() {
+    var url = new URL(location.origin);
+    url.hostname = '127.0.0.1';
+    return url.origin;
+  }
+  function lanUrl() {
+    var host = /^(localhost|127\.0\.0\.1|::1)$/.test(location.hostname)
+      ? lanHosts[0] : location.hostname;
+    if (!host) return '';
+    var url = new URL(location.origin);
+    url.hostname = host;
+    return url.origin;
+  }
+  function selectAddress() {
+    address.value = addressMode.value === 'lan' ? lanUrl() : localUrl();
+    agentStatus.textContent = address.value ? '' : '未发现局域网地址，请在下方填写上位机 IP。';
   }
 
   function shellQuote(value) { return "'" + value.replace(/'/g, "'\\''") + "'"; }
@@ -137,11 +164,10 @@
   function openAgent(initialScope) {
     selected = selectedDevice();
     scope.value = initialScope;
-    address.value = location.origin;
+    addressMode.value = lanUrl() ? 'lan' : 'local';
+    selectAddress();
     output.value = '';
     copyButton.disabled = true;
-    agentStatus.textContent = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
-      ? 'Agent 若在另一台电脑，请先把服务地址改为上位机局域网 IP。' : '';
     updateHint();
     dialog.showModal();
     loadGrants();
@@ -149,6 +175,7 @@
   topAgent.addEventListener('click', function () { openAgent('all'); });
   deviceAgent.addEventListener('click', function () { openAgent('device'); });
   scope.addEventListener('change', updateHint);
+  addressMode.addEventListener('change', selectAddress);
   document.getElementById('agent-share-close').addEventListener('click', function () {
     output.value = ''; dialog.close();
   });

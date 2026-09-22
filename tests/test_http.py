@@ -281,6 +281,12 @@ class HandlerTests(unittest.TestCase):
                 handler.do_GET()
                 self.assertEqual(handler.send_response.call_args.args[0], 200)
                 self.assertTrue(handler.wfile.getvalue())
+                content_type = [call.args[1] for call in handler.send_header.call_args_list
+                                if call.args[0].lower() == 'content-type']
+                self.assertEqual(len(content_type), 1)
+                self.assertIn('charset=utf-8', content_type[0])
+                if route.endswith('SKILL.md'):
+                    self.assertIn('开发板', handler.wfile.getvalue().decode('utf-8'))
 
     def test_protected_lan_allows_only_local_agents_without_token(self):
         local = self.control_handler('/healthz')

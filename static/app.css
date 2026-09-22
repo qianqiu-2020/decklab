@@ -59,7 +59,7 @@
   .agent-share-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
   .agent-share-head strong{font-size:18px}.agent-share-head small{display:block;color:var(--ink-3);font-size:12px}
   .agent-share-dialog p{color:var(--ink-2);font-size:12px;margin:12px 0}
-  .agent-share-fields{display:grid;grid-template-columns:minmax(160px,1fr) minmax(260px,2fr);gap:10px}
+  .agent-share-fields{display:grid;grid-template-columns:minmax(110px,1fr) minmax(110px,1fr) minmax(260px,2.4fr);gap:10px}
   .agent-share-fields label{display:grid;gap:4px;color:var(--ink-2);font-size:12px}
   .agent-share-fields input,.agent-share-fields select{width:100%;padding:8px;border:1px solid var(--line-strong);
     border-radius:8px;background:var(--surface);color:var(--ink)}
