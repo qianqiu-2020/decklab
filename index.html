@@ -17,6 +17,7 @@
     <h1>seriald</h1>
     <span class="mono" style="color:var(--ink-3);font-size:12px">串口设备管理</span>
     <button id="b-share" type="button" hidden title="创建 24 小时有效的网页访问链接">分享访问</button>
+    <button id="b-agent-share-all" type="button" disabled title="生成可撤销的 Agent 接入令牌与指引">Agent 接入</button>
     <span id="share-status" role="status"></span>
     <span class="conn"><span class="dot" id="conn-dot"></span><span id="conn-txt">连接中…</span></span>
   </div>
@@ -48,6 +49,7 @@
         <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录">准备换板</button>
         <button id="b-info" type="button" aria-expanded="false">设备信息</button>
         <button id="b-rename" type="button">改标签</button>
+        <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent">分享给 Agent</button>
         <button id="b-close" type="button">收起</button>
       </span>
     </div>
@@ -140,6 +142,19 @@
   <progress id="ft-progress" max="100" value="0"></progress>
   <div id="ft-status" role="status">选择文件或填写绝对路径后开始。</div>
   <div class="ft-actions"><button id="ft-cancel" type="button" disabled>取消传输</button><button class="pri" id="ft-start" type="button">开始传输</button></div>
+</dialog>
+<dialog id="agent-share-dialog" class="agent-share-dialog" aria-labelledby="agent-share-title">
+  <div class="agent-share-head"><div><strong id="agent-share-title">分享给 Agent</strong><small>生成独立令牌；默认不限期，可随时撤销</small></div><button id="agent-share-close" type="button">关闭</button></div>
+  <p>复制接入文本给 Claude Code、Codex 等 Agent。它会安装本机托管的 skill 和 CLI，优先通过 SSH 操作；启动、内核和 SSH 故障再查看串口。</p>
+  <div class="agent-share-fields">
+    <label>授权范围<select id="agent-share-scope"><option value="device">当前设备</option><option value="all">全部设备</option></select></label>
+    <label>Agent 可访问的服务地址<input id="agent-share-url" type="url" spellcheck="false" placeholder="http://上位机IP:8898"></label>
+  </div>
+  <p id="agent-share-hint"></p>
+  <div class="agent-share-actions"><button class="pri" id="agent-share-create" type="button">生成并复制</button><button id="agent-share-copy" type="button" disabled>再次复制</button><span id="agent-share-status" role="status"></span></div>
+  <textarea id="agent-share-text" readonly spellcheck="false" aria-label="Agent 接入文本" placeholder="生成后在此显示完整命令和指引"></textarea>
+  <div class="agent-share-head agent-share-list-head"><strong>已有授权</strong><button id="agent-share-refresh" type="button">刷新</button></div>
+  <div id="agent-share-grants" class="agent-share-grants"></div>
 </dialog>
 <dialog id="boot-compare-dialog" class="boot-compare-dialog" aria-labelledby="bc-title">
   <div class="bc-head"><div><strong id="bc-title">启动日志对比</strong><small>左侧基准 · 右侧异常或目标启动</small></div><button id="bc-close" type="button">关闭</button></div>

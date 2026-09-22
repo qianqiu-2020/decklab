@@ -319,6 +319,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(400, {'error': 'bad json'})
         except TimeoutError:
             return self._json(408, {'error': 'request body timed out'})
+        if route == '/api/agent-revoke':
+            actor = payload.get('actor')
+            if not isinstance(actor, str) or not actor.startswith('shared-agent/'):
+                return self._json(400, {'error': 'invalid agent actor'})
+            closed = 0
+            for device in MGR.all_devices():
+                with device.sessions_lock:
+                    ids = [sid for sid, session in device.ssh_sessions.items()
+                           if session.actor == actor]
+                for sid in ids:
+                    closed += bool(device.close_session(sid))
+                if ids and device.serial:
+                    MGR.store.event(device.serial, 'service', 'agent-revoke', actor)
+            return self._json(200, {'ok': True, 'closed_sessions': closed})
         q = {'key': [str(payload.get('key') or '')]}
         if payload.get('serial'):
             q['serial'] = [str(payload['serial'])]
@@ -332,7 +346,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not d.serial:
                     raise IdentityError('设备尚未识别')
                 MGR.store.session_result(d.serial, str(payload.get('sid') or ''),
-                                         payload.get('completed'), payload.get('exit_code'))
+                                         payload.get('completed'), payload.get('exit_code'), actor=actor)
                 return self._json(200, {'ok': True})
             except IdentityError as error:
                 return self._json(400, {'ok': False, 'error': str(error)})
@@ -490,6 +504,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             s = d.get_session(sid)
             if not s:
                 return self._json(404, {'error': 'no such session'})
+            if actor != s.actor and actor not in s.takeovers:
+                return self._json(403, {'ok': False, 'error': '先介入该 SSH 会话才能调整终端大小'})
             return self._json(200, {'ok': s.resize(cols, rows), 'cols': s.cols, 'rows': s.rows})
 
         if route == '/api/session-close':

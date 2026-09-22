@@ -235,15 +235,17 @@ class Store:
             self.db.execute("UPDATE sessions SET ended=?, status=CASE WHEN completed=1 THEN 'completed' WHEN completed=0 THEN 'unknown' ELSE 'closed' END WHERE sid=?",
                             (time.time(), sid))
 
-    def session_result(self, serial, sid, completed, exit_code):
+    def session_result(self, serial, sid, completed, exit_code, actor=None):
         if type(completed) is not bool or (exit_code is not None and
                 (type(exit_code) is not int or not 0 <= exit_code <= 255)):
             raise IdentityError('非法执行结果')
         if completed != (exit_code is not None):
             raise IdentityError('completed 与 exit_code 不一致')
         with self.lock, self.db:
-            cur = self.db.execute('UPDATE sessions SET completed=?, exit_code=?, status=? WHERE serial=? AND sid=?',
-                (completed, exit_code, 'completed' if completed else 'unknown', serial, sid))
+            cur = self.db.execute('UPDATE sessions SET completed=?, exit_code=?, status=? WHERE serial=? AND sid=?'
+                                  + (' AND actor=?' if actor is not None else ''),
+                (completed, exit_code, 'completed' if completed else 'unknown', serial, sid)
+                + ((actor,) if actor is not None else ()))
             if not cur.rowcount:
                 raise IdentityError('会话不存在')
 

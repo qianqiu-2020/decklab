@@ -11,6 +11,9 @@
   var ACTIVITY_PAGE_SIZE = 10;
   var DEFAULT_TERMINAL_FONT_SIZE = 14.5;
   var takenOver = {};
+  window.SerialdShareSelection = function () {
+    return lastDevices.filter(function (device) { return device.key === selKey; })[0] || null;
+  };
 
   function setInputMode(ctx) {
     ['d-in', 'd-kbd', 'd-slow-paste', 'b-send', 'b-cr', 'b-ctrlc', 'b-paste'].forEach(function (id) {

@@ -5,19 +5,20 @@ description: "通过 seriald 共享串口服务访问和排查开发板：按用
 
 # seriald 开发板访问
 
-调用已经运行的服务。包安装环境使用 `serialctl`；源码环境使用
-`python3 /data/seriald/serialctl.py`，客户端仅依赖 Python 3 标准库。
+调用已经运行的服务。包安装环境使用 `serialctl`；远程 Agent 可从
+`<SERIALD_URL>/serialctl.py` 下载后用 `python3 "$HOME/.local/share/seriald/serialctl.py"` 调用。
+以下示例中的 `serialctl` 可替换为该 Python 命令；客户端仅依赖 Python 3 标准库。
 默认 URL 是 `http://127.0.0.1:8898`，用户指定的 `SERIALD_URL` 或 `--url` 优先。
 服务启用认证时设置 `SERIALD_TOKEN` 或传 `--token`。
-现有开发主机地址是 `http://10.0.90.177:8898`；跨机器访问时显式指定。
+跨机器访问时显式指定上位机地址。网页“分享给 Agent”生成可撤销令牌，默认不限期；
+单设备令牌由服务端限制在所选序列号，全部设备令牌仍须按用户任务选择目标。
 连接服务失败不能直接判定开发板宕机。
 
 ## 选择身份与读取现场
 
 ```sh
-python3 /data/seriald/serialctl.py devices
-python3 /data/seriald/serialctl.py health
-python3 /data/seriald/serialctl.py --device riscv-118 read
+serialctl devices
+serialctl --device riscv-118 read
 ```
 
 `key` 就是当前用户标签；`serial` 是持久化主键，但可能是正式或候选身份。检查
@@ -48,11 +49,13 @@ python3 /data/seriald/serialctl.py --device riscv-118 read
 ## 执行与记录
 
 ```sh
-python3 /data/seriald/serialctl.py --actor claude-code/diagnosis --device riscv-118 exec \
+serialctl --actor claude-code/diagnosis --device riscv-118 exec \
   --command 'uname -a; uptime; df -h' --timeout 60
 ```
 
-用 `--actor` 标记本会话/操作者，方便人从网页旁观或回看。actor 是自报名称，不是认证。
+优先用 `exec` 建立 SSH 执行 Linux 命令。启动、内核、SSH 故障或固件交互才转串口。
+用 `--actor` 标记本会话/操作者，方便人从网页旁观或回看；普通访问时 actor 是自报名称，
+Agent 分享令牌则由服务端固定为授权标签。
 同一设备和 actor 的 `exec` 会复用持久 SSH 会话，网页会一直显示该标签，直到 agent 执行
 `ssh-close --sid <sid>` 或人在网页中关闭。不要借用其他 agent 或网页的会话。
 每次环境独立，把相关 `cd`、变量设置和命令放在同一次调用，正确引用本机 shell 参数。

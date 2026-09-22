@@ -14,9 +14,10 @@ import secrets
 import socket
 import time
 from http.cookies import SimpleCookie
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from .config import AUTH_TOKEN, SOCKET, STATIC
+from .config import AUTH_TOKEN, BASE, SOCKET, STATIC
+from .agent_grants import AgentGrantStore
 from .httpd import BoundedThreadingTCPServer
 from . import __version__
 
@@ -38,11 +39,15 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     static_root = STATIC
     auth_token = AUTH_TOKEN
     agent_tokens = {}
+    grant_store = None
     trust_loopback = False
     share_seconds = 24 * 60 * 60
     allowed_static = frozenset(('/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js',
                                 '/static/app.css', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
+    public_agent_files = frozenset(('/serialctl.py', '/skills/seriald-board/SKILL.md'))
+    agent_denied_posts = frozenset(('/api/label', '/api/switch-mode', '/api/rescue',
+                                    '/api/ssh-enable', '/api/session-takeover'))
 
     def _json(self, code, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()
@@ -54,15 +59,17 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _owner_authorized(self):
+        value = self.headers.get('Authorization', '')
+        if value.startswith('Bearer seriald-ag-'):
+            return False
         if not self.auth_token:
             return True
-        if self.trust_loopback:
+        if self.trust_loopback and not value:
             try:
                 if ipaddress.ip_address(self.client_address[0]).is_loopback:
                     return True
             except (AttributeError, ValueError, IndexError):
                 pass
-        value = self.headers.get('Authorization', '')
         supplied = ''
         if value.startswith('Bearer '):
             supplied = value[7:]
@@ -77,9 +84,13 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         return hmac.compare_digest(supplied, self.auth_token)
 
     def _authorized(self):
+        if self.headers.get('Authorization', '').startswith('Bearer seriald-ag-'):
+            return bool(self._agent_grant())
         if self._owner_authorized():
             return True
         if self._agent_actor():
+            return True
+        if self._agent_grant():
             return True
         value = self.headers.get('Authorization', '')
         if value.startswith('Bearer ') and self._valid_share(value[7:]):
@@ -101,6 +112,12 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             if hmac.compare_digest(token, expected):
                 return actor
         return ''
+
+    def _agent_grant(self):
+        authorization = self.headers.get('Authorization', '')
+        if not self.grant_store or not authorization.startswith('Bearer seriald-ag-'):
+            return None
+        return self.grant_store.lookup(authorization[7:])
 
     def _new_share(self):
         body = '%d.%s' % (int(time.time()) + self.share_seconds, secrets.token_urlsafe(12))
@@ -144,10 +161,48 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
         return True
 
+    def _small_json_body(self):
+        if self.headers.get('Transfer-Encoding'):
+            raise ValueError('transfer encoding unsupported')
+        length = int(self.headers.get('Content-Length') or 0)
+        if length < 0 or length > 4096:
+            raise ValueError('body must be at most 4096 bytes')
+        body = self.rfile.read(length)
+        if len(body) != length:
+            raise ValueError('incomplete body')
+        payload = json.loads(body.decode('utf-8')) if body else {}
+        if not isinstance(payload, dict):
+            raise ValueError('JSON object required')
+        return payload
+
+    def _close_revoked_sessions(self, actor):
+        body = json.dumps({'actor': actor}).encode()
+        try:
+            connection = (http.client.HTTPConnection(*self.collector_socket, timeout=5)
+                          if isinstance(self.collector_socket, tuple)
+                          else UnixHTTPConnection(self.collector_socket, timeout=5))
+            try:
+                connection.request('POST', '/api/agent-revoke', body=body,
+                                   headers={'Content-Type': 'application/json'})
+                response = connection.getresponse()
+                response.read()
+                return response.status == 200
+            finally:
+                connection.close()
+        except (OSError, http.client.HTTPException):
+            # The grant is already revoked; collector restart also closes sessions.
+            return False
+
     def _proxy(self):
         connection = None
         headers_sent = False
         try:
+            route = urlparse(self.path).path
+            grant = self._agent_grant()
+            if grant and self.command == 'POST' and route in self.agent_denied_posts:
+                return self._json(403, {'error': 'Agent 分享令牌不能执行平台管理操作'})
+            if grant and grant['scope'] == 'device' and route == '/api/health':
+                return self._json(403, {'error': '此令牌仅允许访问指定设备'})
             if self.headers.get('Transfer-Encoding'):
                 return self._json(400, {'error': 'transfer encoding unsupported'})
             length = int(self.headers.get('Content-Length') or 0)
@@ -156,19 +211,40 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             body = self.rfile.read(length) if length else None
             if length and len(body) != length:
                 return self._json(400, {'error': 'incomplete body'})
-            agent_actor = self._agent_actor()
-            if agent_actor and self.command == 'POST':
+            agent_actor = grant['actor'] if grant else self._agent_actor()
+            target_path = self.path
+            if self.command == 'POST' and agent_actor:
                 try:
                     payload = json.loads(body.decode('utf-8'))
                     if not isinstance(payload, dict):
                         raise ValueError('JSON object required')
                 except (UnicodeDecodeError, ValueError, AttributeError):
                     return self._json(400, {'error': 'bad json'})
+                if grant and grant['scope'] == 'device':
+                    if not payload.get('key'):
+                        return self._json(403, {'error': '此令牌需要指定设备 key'})
+                    payload['serial'] = grant['serial']
+                if grant and route == '/api/identify' and payload.get('init_boot_marker'):
+                    return self._json(403, {'error': 'Agent 分享令牌不能创建板端身份标记'})
                 payload['actor'] = agent_actor
                 body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
                 length = len(body)
                 if length > 65536:
                     return self._json(413, {'error': 'body must be at most 65536 bytes'})
+            elif grant and grant['scope'] == 'device' and route != '/api/devices':
+                parsed = urlparse(self.path)
+                query = parse_qsl(parsed.query, keep_blank_values=True)
+                if route == '/api/boot-compare':
+                    left = [value for name, value in query if name == 'left_serial']
+                    right = [value for name, value in query if name == 'right_serial']
+                    if left != [grant['serial']] or right != [grant['serial']]:
+                        return self._json(403, {'error': '此令牌只能比较同一授权设备的启动日志'})
+                else:
+                    if not any(name == 'key' and value for name, value in query):
+                        return self._json(403, {'error': '此令牌需要指定设备 key'})
+                    query = [(name, value) for name, value in query if name != 'serial']
+                    query.append(('serial', grant['serial']))
+                    target_path = urlunparse(parsed._replace(query=urlencode(query)))
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
             events = self.command == 'GET' and urlparse(self.path).path == '/api/session-events'
@@ -189,8 +265,19 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             connection = (http.client.HTTPConnection(*self.collector_socket, timeout=timeout)
                           if isinstance(self.collector_socket, tuple)
                           else UnixHTTPConnection(self.collector_socket, timeout=timeout))
-            connection.request(self.command, self.path, body=body, headers=headers)
+            connection.request(self.command, target_path, body=body, headers=headers)
             response = connection.getresponse()
+            if grant and grant['scope'] == 'device' and route == '/api/devices' and response.status == 200:
+                data = response.read(4 * 1024 * 1024 + 1)
+                if len(data) > 4 * 1024 * 1024:
+                    return self._json(413, {'error': 'device list too large'})
+                try:
+                    devices_payload = json.loads(data)
+                except ValueError:
+                    return self._json(502, {'error': 'collector returned invalid device list'})
+                devices_payload['devices'] = [item for item in devices_payload.get('devices', [])
+                                              if item.get('serial') == grant['serial']]
+                return self._json(200, devices_payload)
             self.send_response(response.status)
             for name in ('Content-Type', 'Cache-Control', 'Content-Disposition'):
                 value = response.getheader(name)
@@ -210,6 +297,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 while True:
                     line = response.readline(65536)
                     if not line:
+                        break
+                    if grant and not self._agent_grant():
                         break
                     self.wfile.write(line)
                     self.wfile.flush()
@@ -233,11 +322,19 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         route = urlparse(self.path).path
         if route.startswith('/share/'):
             return self._accept_share(route[len('/share/'):])
+        if route in self.public_agent_files:
+            return super().do_GET()
         if self._require_auth():
             return
         if route == '/api/access':
-            return self._json(200, {'share_enabled': bool(self.auth_token),
+            return self._json(200, {'share_enabled': bool(self.auth_token and self._owner_authorized()),
+                                    'agent_share_enabled': bool(self._owner_authorized() and self.grant_store),
+                                    'open_access': not bool(self.auth_token),
                                     'loopback_open': bool(self.trust_loopback)})
+        if route == '/api/agent-grants':
+            if not self._owner_authorized() or not self.grant_store:
+                return self._json(403, {'error': '只有主访问凭证可以管理 Agent 授权'})
+            return self._json(200, {'grants': self.grant_store.list()})
         if route == '/healthz':
             return self._json(200, {'ok': True, 'role': 'control', 'pid': os.getpid(),
                                     'version': __version__,
@@ -254,14 +351,38 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         if self._require_auth():
             return
-        if urlparse(self.path).path == '/api/share-link':
+        route = urlparse(self.path).path
+        if route in ('/api/agent-share', '/api/agent-revoke'):
+            if not self._owner_authorized() or not self.grant_store:
+                return self._json(403, {'error': '只有主访问凭证可以管理 Agent 授权'})
+            try:
+                payload = self._small_json_body()
+            except (ValueError, UnicodeDecodeError):
+                return self._json(400, {'error': '无效的授权请求'})
+            if route == '/api/agent-share':
+                scope, serial = payload.get('scope'), payload.get('serial', '')
+                if scope not in ('all', 'device') or not isinstance(serial, str) or len(serial) > 128 \
+                        or (scope == 'device' and not serial):
+                    return self._json(400, {'error': '请选择全部设备或提供设备序列号'})
+                token, grant = self.grant_store.issue(scope, serial)
+                return self._json(200, {'token': token, 'grant': grant})
+            grant_id = payload.get('id')
+            if not isinstance(grant_id, str) or not re.fullmatch(r'[0-9a-f]{16}', grant_id):
+                return self._json(400, {'error': '无效的授权 ID'})
+            actor = self.grant_store.revoke(grant_id)
+            if not actor:
+                return self._json(404, {'error': '授权不存在或已撤销'})
+            sessions_closed = self._close_revoked_sessions(actor)
+            return self._json(200, {'ok': True, 'id': grant_id,
+                                    'sessions_closed': sessions_closed})
+        if route == '/api/share-link':
             if not self.auth_token:
                 return self._json(400, {'error': '当前服务未启用密码'})
             if not self._owner_authorized():
                 return self._json(403, {'error': '只有主访问凭证可以创建分享链接'})
             return self._json(200, {'path': '/share/' + self._new_share(),
                                     'expires_in': self.share_seconds})
-        if urlparse(self.path).path.startswith('/api/'):
+        if route.startswith('/api/'):
             return self._proxy()
         return self._json(404, {'error': 'not found'})
 
@@ -287,6 +408,7 @@ def main():
     ControlHandler.collector_socket = SOCKET
     ControlHandler.static_root = STATIC
     ControlHandler.auth_token = AUTH_TOKEN
+    ControlHandler.grant_store = AgentGrantStore(os.path.join(BASE, 'agent-grants.sqlite3'))
     tokens_path = os.environ.get('SERIALD_AGENT_TOKENS_FILE', '')
     if tokens_path:
         with open(tokens_path, encoding='utf-8') as source:
@@ -299,12 +421,15 @@ def main():
                 or len(set(tokens.values())) != len(tokens)):
             parser.error('invalid SERIALD_AGENT_TOKENS_FILE or missing SERIALD_AUTH_TOKEN')
         ControlHandler.agent_tokens = tokens
-    with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as server:
-        print('seriald control on http://%s:%d/' % (args.bind, args.port), flush=True)
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
+    try:
+        with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as server:
+            print('seriald control on http://%s:%d/' % (args.bind, args.port), flush=True)
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+    finally:
+        ControlHandler.grant_store.close()
 
 
 if __name__ == '__main__':

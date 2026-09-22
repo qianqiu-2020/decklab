@@ -542,7 +542,9 @@ class PersistenceTests(unittest.TestCase):
         d = self.connection()
         self.identify(d)
         self.store.open_session('ssh1', d.serial, 'claude-code', 'uname -a', '192.0.2.1')
-        self.store.session_result(d.serial, 'ssh1', True, 7)
+        with self.assertRaises(IdentityError):
+            self.store.session_result(d.serial, 'ssh1', True, 7, actor='other-agent')
+        self.store.session_result(d.serial, 'ssh1', True, 7, actor='claude-code')
         self.store.close_session('ssh1')
         self.store.open_session('ssh2', d.serial, 'agent', 'long command', '192.0.2.1')
         self.store.session_result(d.serial, 'ssh2', False, None)

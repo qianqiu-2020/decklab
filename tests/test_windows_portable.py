@@ -15,6 +15,7 @@ from seriald_core import windows_manager
 from seriald_core.httpd import BoundedThreadingTCPServer
 from seriald_core.sessions_windows import SshSession, check_password_login
 from seriald_core.storage import Store
+from seriald_core.agent_grants import AgentGrantStore
 
 
 def port(device='COM7', location='1-4.2', serial_number='adapter-1'):
@@ -24,6 +25,18 @@ def port(device='COM7', location='1-4.2', serial_number='adapter-1'):
 
 
 class WindowsPortableTests(unittest.TestCase):
+    def test_agent_grant_persists_and_revokes_on_windows_data_path(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = root + '/agent-grants.sqlite3'
+            first = AgentGrantStore(path)
+            token, grant = first.issue('device', 'SN1')
+            first.close()
+            second = AgentGrantStore(path)
+            self.assertEqual(second.lookup(token)['serial'], 'SN1')
+            second.revoke(grant['id'])
+            self.assertIsNone(second.lookup(token))
+            second.close()
+
     def test_clean_windows_handoff_allows_clock_rounding(self):
         with tempfile.TemporaryDirectory() as root:
             path = root + '/handoff.json'

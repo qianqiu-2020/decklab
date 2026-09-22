@@ -36,12 +36,16 @@ collector 只监听 `SERIALD_SOCKET`，不暴露网络端口。
 订阅者，control 逐行转发，不等响应结束。事件携带字节偏移，断线时以 `Last-Event-ID` 续读；
 旧服务或 SSE 失败时网页回退到 `GET /api/session?off=…` 长轮询。输入始终通过
 `POST /api/session-send`，多人各有读取游标，共享同一串口或 SSH 会话输出。
+Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令牌哈希）；单设备范围以
+序列号而非可变标签固定。control 过滤设备列表并钉住后续请求的序列号，撤销后立即拒绝新请求、
+终止 SSE 并通知 collector 关闭相关 SSH 会话。开放模式仍允许无令牌访问。
 
 | 路径 | 职责 |
 | --- | --- |
 | `seriald.py` | 控制面入口 |
 | `seriald_core/collector_server.py` | 长期运行的采集/会话后端和 Unix socket API |
 | `seriald_core/control_server.py` | 可独立重启的 TCP、静态资源和 API 代理 |
+| `seriald_core/agent_grants.py` | Agent 令牌签发、持久化、撤销和范围查验 |
 | `seriald_core/httpd.py` | TCP/Unix HTTP 的线程和超时上限 |
 | `seriald_core/config.py` | 环境变量和运行配置 |
 | `seriald_core/transport.py` | 串口描述符、短写补齐、USB recovery |

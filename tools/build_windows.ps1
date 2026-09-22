@@ -25,6 +25,8 @@ try {
     if (Get-Command node -ErrorAction SilentlyContinue) {
         & node tests/frontend.test.js
         if ($LASTEXITCODE -ne 0) { throw 'Frontend regression tests failed.' }
+        & node tests/share.test.js
+        if ($LASTEXITCODE -ne 0) { throw 'Agent share UI tests failed.' }
     } else {
         Write-Warning 'Node.js is unavailable; frontend regression tests were not run.'
     }
@@ -34,6 +36,8 @@ try {
         --add-data 'index.html;.' `
         --add-data 'static;static' `
         --add-data 'vendor;vendor' `
+        --add-data 'serialctl.py;.' `
+        --add-data 'skills/seriald-board/SKILL.md;skills/seriald-board' `
         seriald_windows.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 

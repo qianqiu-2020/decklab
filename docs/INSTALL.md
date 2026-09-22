@@ -6,7 +6,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.33_all.deb
+sudo apt install ./dist/seriald_1.4.34_all.deb
 systemctl status seriald
 serialctl devices
 ```
@@ -32,6 +32,10 @@ SERIALD_AUTH_TOKEN=一段足够长的随机值
 `SERIALD_SSH_PASSWORD_OVERRIDE`。网页创建的 SSH 仍使用服务默认账户。
 `SERIALD_AUTH_TOKEN` 为空时不启用认证，仅适合可信开发网络。设置后，浏览器使用用户名 `seriald`、
 密码为该 token 的 HTTP Basic 登录；agent 设置 `SERIALD_TOKEN` 或传 `serialctl --token`。
+无需预先设置令牌文件：网页“分享给 Agent”会生成独立且可撤销的接入令牌，默认不限期，
+存于 `SERIALD_BASE/agent-grants.sqlite3`（只保存令牌哈希）。单设备分享按序列号限制该令牌的访问，
+撤销时会关闭其 SSH 会话；开放模式下未带令牌的访问仍保持原有权限。
+远程 Agent 可直接下载 `/serialctl.py` 和 `/skills/seriald-board/SKILL.md`，由网页复制完整命令。
 若要可信地区分不同 agent，设置 `SERIALD_AGENT_TOKENS_FILE` 指向仅 control 服务可读的 JSON 文件，
 例如 `{"claude-code/debug":"至少32字符的随机令牌"}`，同时启用 `SERIALD_AUTH_TOKEN`。
 agent 使用其专用令牌时，control 会覆盖请求中的 `actor`，操作记录和持久 SSH 会话便绑定到该标签。
@@ -85,7 +89,7 @@ by-path 且未进入“准备换板”模式，也会沿用原绑定；异常退
 `serialctl health` 同时返回数据盘总量、剩余字节以及 `logging_ok` / `log_errors`。
 日志写入失败不会停止实时终端，但会在设备列表和健康接口报警；排除磁盘或权限故障后会重试。
 服务不会自动删除审计日志，磁盘保留策略由运维方决定。备份时应同时保存 `registry.sqlite3`、
-其 WAL 文件和 `logs/`，建议先停止 collector 再复制，以获得一致的档案。
+其 WAL 文件、`agent-grants.sqlite3` 及其 WAL 文件、`logs/`，建议先停止相关服务再复制，以获得一致的档案。
 
 源码双进程开发：
 

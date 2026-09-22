@@ -19,6 +19,7 @@ import webbrowser
 from seriald_core import web
 from seriald_core.config import AUTH_TOKEN, BASE, HANDOFF, LOG_ROOT, STATIC
 from seriald_core.control_server import ControlHandler
+from seriald_core.agent_grants import AgentGrantStore
 from seriald_core.handoff import consume as consume_handoff, write as write_handoff
 from seriald_core.httpd import BoundedThreadingTCPServer
 from seriald_core.storage import Store
@@ -39,6 +40,7 @@ def main():
     with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as control:
         os.makedirs(LOG_ROOT, exist_ok=True)
         store = Store(os.path.join(BASE, 'registry.sqlite3'))
+        grants = AgentGrantStore(os.path.join(BASE, 'agent-grants.sqlite3'))
         store.recover_sessions()
         try:
             with BoundedThreadingTCPServer(('127.0.0.1', 0), web.Handler) as collector:
@@ -46,6 +48,7 @@ def main():
                 ControlHandler.collector_socket = ('127.0.0.1', collector.server_address[1])
                 ControlHandler.static_root = STATIC
                 ControlHandler.auth_token = AUTH_TOKEN
+                ControlHandler.grant_store = grants
                 ControlHandler.trust_loopback = os.environ.get('SERIALD_TRUST_LOOPBACK') == '1'
                 scanner = threading.Thread(target=web.MGR.loop, daemon=True)
                 scanner.start()
@@ -67,6 +70,7 @@ def main():
                     scanner.join(timeout=6)
         finally:
             store.close()
+            grants.close()
 
 
 if __name__ == '__main__':

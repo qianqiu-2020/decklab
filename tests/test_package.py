@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from seriald_core.storage import Store
 from seriald_core import __version__
@@ -74,6 +74,7 @@ class PackageTests(unittest.TestCase):
             code = extracted / 'usr/lib/seriald'
             self.assertTrue((extracted / 'usr/share/doc/seriald/DEVICE_IDENTITY_MATRIX.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/REFACTOR_PLAN.md').is_file())
+            self.assertTrue((extracted / 'usr/lib/seriald/skills/seriald-board/SKILL.md').is_file())
             package_env = (extracted / 'etc/seriald/seriald.env').read_text()
             self.assertIn('SERIALD_BASE=/data/seriald-data', package_env)
             self.assertIn('SERIALD_BIND=0.0.0.0', package_env)
@@ -144,6 +145,18 @@ class PackageTests(unittest.TestCase):
                     self.fail('isolated service did not start')
                 self.assertEqual([(d['key'], d['serial'], d['state']) for d in devices],
                                  [('test-board', 'TEST-SERIAL', 'offline')])
+                with urlopen(url + '/skills/seriald-board/SKILL.md') as response:
+                    self.assertIn(b'seriald-board', response.read())
+                with urlopen(url + '/serialctl.py') as response:
+                    self.assertIn(b'class Client', response.read())
+                share = Request(url + '/api/agent-share',
+                                data=json.dumps({'scope': 'device', 'serial': 'TEST-SERIAL'}).encode(),
+                                headers={'Content-Type': 'application/json'})
+                with urlopen(share) as response:
+                    grant = json.load(response)
+                scoped = Request(url + '/api/devices', headers={'Authorization': 'Bearer ' + grant['token']})
+                with urlopen(scoped) as response:
+                    self.assertEqual(json.load(response)['devices'][0]['serial'], 'TEST-SERIAL')
                 with urlopen(url + '/api/health') as response:
                     first_health = json.load(response)
                 self.assertEqual(first_health['role'], 'collector')
@@ -175,6 +188,8 @@ class PackageTests(unittest.TestCase):
                         time.sleep(.05)
                 else:
                     self.fail('control plane did not restart')
+                with urlopen(scoped) as response:
+                    self.assertEqual(json.load(response)['devices'][0]['serial'], 'TEST-SERIAL')
                 self.assertIsNone(collector.poll(), 'collector must survive control restart')
                 self.assertEqual(collector.pid, collector_pid)
                 self.assertEqual(restarted[0]['key'], 'test-board')

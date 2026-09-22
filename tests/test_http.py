@@ -14,6 +14,7 @@ from seriald_core import __version__
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 from seriald_core import web as sd
 from seriald_core import control_server as control
+from seriald_core.agent_grants import AgentGrantStore
 from seriald_core import transport as tr
 
 
@@ -170,6 +171,116 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(forwarded['actor'], 'claude-code')
         self.assertEqual(connection.request.call_args.kwargs['headers']['Content-Length'],
                          str(len(connection.request.call_args.kwargs['body'])))
+
+    def test_scoped_agent_grant_filters_devices_and_pins_post_to_serial(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = AgentGrantStore(str(pathlib.Path(folder) / 'grants.sqlite3'))
+            self.addCleanup(store.close)
+            token, grant = store.issue('device', 'SN1')
+            headers = {'Authorization': 'Bearer ' + token}
+            handler = self.control_handler('/api/devices')
+            handler.auth_token, handler.grant_store, handler.headers = 'owner', store, headers
+            handler.command = 'GET'
+            reply = mock.Mock(status=200)
+            reply.read.return_value = json.dumps({'devices': [
+                {'key': 'A', 'serial': 'SN1'}, {'key': 'B', 'serial': 'SN2'}]}).encode()
+            connection = mock.Mock()
+            connection.getresponse.return_value = reply
+            with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                handler.do_GET()
+            self.assertEqual([item['key'] for item in self.result(handler)[1]['devices']], ['A'])
+
+            body = json.dumps({'key': 'B', 'actor': 'web', 'data': 'pwd\r'}).encode()
+            handler = self.control_handler('/api/session-send')
+            handler.auth_token, handler.grant_store = 'owner', store
+            handler.headers = dict(headers, **{'Content-Length': str(len(body))})
+            handler.rfile, handler.command = io.BytesIO(body), 'POST'
+            reply = mock.Mock(status=200)
+            reply.getheader.return_value = None
+            reply.read.return_value = b''
+            connection.getresponse.return_value = reply
+            with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                handler.do_POST()
+            forwarded = json.loads(connection.request.call_args.kwargs['body'])
+            self.assertEqual((forwarded['serial'], forwarded['actor']), ('SN1', grant['actor']))
+
+            log = self.control_handler('/api/logs?key=A&serial=SN2')
+            log.auth_token, log.grant_store, log.headers = 'owner', store, headers
+            log.command = 'GET'
+            with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                log.do_GET()
+            forwarded_path = connection.request.call_args.args[1]
+            self.assertIn('serial=SN1', forwarded_path)
+            self.assertNotIn('SN2', forwarded_path)
+
+            compare = self.control_handler('/api/boot-compare?left_serial=SN2&right_serial=SN1')
+            compare.auth_token, compare.grant_store, compare.headers = 'owner', store, headers
+            compare.command = 'GET'
+            compare.do_GET()
+            self.assertEqual(self.result(compare)[0], 403)
+
+            denied = self.control_handler('/api/health')
+            denied.auth_token, denied.grant_store, denied.headers = 'owner', store, headers
+            denied.command = 'GET'
+            denied.do_GET()
+            self.assertEqual(self.result(denied)[0], 403)
+
+    def test_revoked_agent_token_cannot_reuse_open_mode_bypass(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = AgentGrantStore(str(pathlib.Path(folder) / 'grants.sqlite3'))
+            self.addCleanup(store.close)
+            token, grant = store.issue('all')
+            handler = self.control_handler('/api/devices')
+            handler.auth_token, handler.grant_store = '', store
+            handler.headers = {'Authorization': 'Bearer ' + token}
+            self.assertTrue(handler._authorized())
+            store.revoke(grant['id'])
+            self.assertFalse(handler._authorized())
+            self.assertFalse(handler._owner_authorized())
+            handler.auth_token = 'owner-secret'
+            handler.trust_loopback = True
+            handler.client_address = ('127.0.0.1', 12345)
+            self.assertFalse(handler._authorized())
+
+    def test_shared_agent_cannot_mint_or_revoke_grants_or_rename_board(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = AgentGrantStore(str(pathlib.Path(folder) / 'grants.sqlite3'))
+            self.addCleanup(store.close)
+            token, _ = store.issue('all')
+            headers = {'Authorization': 'Bearer ' + token}
+            for route, body in (('/api/agent-share', {'scope': 'all'}),
+                                ('/api/agent-revoke', {'id': '0123456789abcdef'}),
+                                ('/api/label', {'key': 'board-key', 'label': 'new'})):
+                with self.subTest(route=route):
+                    handler = self.control_handler(route)
+                    handler.auth_token, handler.grant_store = 'owner', store
+                    raw = json.dumps(body).encode()
+                    handler.headers = dict(headers, **{'Content-Length': str(len(raw))})
+                    handler.rfile, handler.command = io.BytesIO(raw), 'POST'
+                    handler.do_POST()
+                    self.assertEqual(self.result(handler)[0], 403)
+
+    def test_revoking_grant_closes_matching_live_ssh_sessions(self):
+        actor = 'shared-agent/abcdef0123456789'
+        matching = mock.Mock(actor=actor)
+        other = mock.Mock(actor='another-agent')
+        self.device.sessions_lock = threading.RLock()
+        self.device.ssh_sessions = {'ssh1': matching, 'ssh2': other}
+        self.device.close_session.return_value = True
+        body = json.dumps({'actor': actor}).encode()
+        handler = self.handler('/api/agent-revoke', body)
+        handler.do_POST()
+        self.assertEqual(self.result(handler)[1]['closed_sessions'], 1)
+        self.device.close_session.assert_called_once_with('ssh1')
+
+    def test_agent_skill_and_cli_are_self_hosted_without_login(self):
+        for route in ('/serialctl.py', '/skills/seriald-board/SKILL.md'):
+            with self.subTest(route=route):
+                handler = self.control_handler(route)
+                handler.auth_token = 'owner-secret'
+                handler.do_GET()
+                self.assertEqual(handler.send_response.call_args.args[0], 200)
+                self.assertTrue(handler.wfile.getvalue())
 
     def test_protected_lan_allows_only_local_agents_without_token(self):
         local = self.control_handler('/healthz')
@@ -328,12 +439,15 @@ class HandlerTests(unittest.TestCase):
         session.write.return_value = True
         self.device.get_session.return_value = session
         base = {'key': 'board-key', 'serial': 'SN1', 'sid': 'ssh-agent', 'actor': 'web'}
-        for route in ('/api/session-send', '/api/session-close'):
+        for route in ('/api/session-send', '/api/session-close', '/api/session-resize'):
             body = dict(base, data='pwd\r')
+            if route == '/api/session-resize':
+                body.update(cols=100, rows=30)
             handler = self.handler(route, json.dumps(body).encode())
             handler.do_POST()
             self.assertEqual(self.result(handler)[0], 403)
         session.write.assert_not_called()
+        session.resize.assert_not_called()
         self.device.close_session.assert_not_called()
 
         takeover = self.handler('/api/session-takeover', json.dumps(base).encode())

@@ -17,6 +17,11 @@ Windows 版独占接管本机 USB 串口的 COM 端口，提供网页与 `serial
 
 有密码入口首次运行会生成令牌，按 Windows 用户 DPAPI 加密存于 `data\lan-token.dpapi`，窗口显示浏览器登录用户名 `seriald` 和密码。网页顶部“分享访问”会复制 24 小时有效的链接；访问者打开后获得浏览器会话，无须再次输入密码。分享链接具备完整操作权限，只发给可信的人。同机 agent 直接运行 `serialctl.cmd devices`，无需令牌。远程 agent 设置 `SERIALD_URL=http://<Windows-IP>:8898` 和 `SERIALD_TOKEN=<窗口中的令牌>`；也可把分享链接最后一段作为有效期内的 `SERIALD_TOKEN`。例如在远程 Windows 命令提示符中：
 
+给 Claude Code、Codex 等 Agent 使用时，网页点击“分享给 Agent”，选择当前设备或全部设备并复制接入文本。
+它会提供独立令牌及当前主机托管的 `serialctl.py`、`seriald-board` skill 下载地址。
+Agent 令牌默认不限期，可在同一窗口撤销；授权记录保存在安装目录 `data\agent-grants.sqlite3`。
+无密码局域网模式下，令牌范围只约束使用该令牌的请求，其他客户端仍可直接访问服务。
+
 ```cmd
 set SERIALD_URL=http://192.168.1.20:8898
 set SERIALD_TOKEN=分享链接最后一段或窗口令牌

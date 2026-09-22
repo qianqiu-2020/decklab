@@ -6,6 +6,13 @@
 源码环境用 `python3 /data/seriald/serialctl.py` 替代命令名。客户端只需 Python 3 标准库；
 远程机器复制客户端即可，使用 `SERIALD_URL` 指向上位机。
 
+网页选中设备后点击“分享给 Agent”，或在首页点击“Agent 接入”分享全部设备。
+页面生成可复制的接入文本，包含服务地址、独立令牌和自托管下载命令：
+`<服务地址>/serialctl.py` 与 `<服务地址>/skills/seriald-board/SKILL.md`。
+令牌默认不限期，网页授权列表可随时撤销；单设备令牌绑定序列号，改标签后仍有效。
+撤销会拒绝后续 API 请求并关闭该令牌建立的 SSH 会话。开放模式下，其他客户端仍可不带令牌访问，
+因此单设备范围只约束使用该令牌的请求。Agent 应优先用 SSH `exec`，启动、内核及 SSH 故障再用串口 `read`。
+
 ```sh
 export SERIALD_URL=http://127.0.0.1:8898
 export SERIALD_TOKEN=服务端配置的访问令牌   # 服务未启用认证时省略
