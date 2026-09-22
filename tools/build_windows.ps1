@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-param()
+param([switch]$UseCurrentPython)
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') {
@@ -13,7 +13,8 @@ try {
     if (Test-Path (Join-Path $bundle 'data')) {
         throw 'dist\seriald\data contains runtime data. Move the running installation elsewhere before rebuilding; the build must not erase it.'
     }
-    & py -3.12 -m venv .venv
+    if ($UseCurrentPython) { & python -m venv .venv }
+    else { & py -3.12 -m venv .venv }
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is required (install it with the py launcher).' }
     $python = Join-Path $root '.venv\Scripts\python.exe'
     $pyinstaller = Join-Path $root '.venv\Scripts\pyinstaller.exe'
@@ -52,9 +53,13 @@ try {
     & (Join-Path $bundle 'seriald.exe') ctl --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI launcher failed.' }
 
+    $exeHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'seriald.exe') -Algorithm SHA256).Hash
+    Set-Content -LiteralPath (Join-Path $bundle 'seriald.exe.sha256') -Value $exeHash -Encoding ASCII
+
     $archive = Join-Path $root 'dist\seriald-windows-portable.zip'
     Compress-Archive -Path $bundle -DestinationPath $archive -Force
     Write-Host "Built $archive"
+    Write-Host "seriald.exe SHA-256: $exeHash"
     Write-Host 'Run Install-seriald.cmd from the source tree to install/update outside the build directory.'
 } finally {
     Pop-Location

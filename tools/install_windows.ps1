@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 param(
     [string]$Package,
-    [string]$InstallDir
+    [string]$InstallDir,
+    [string]$ExpectedSha256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,6 +50,19 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $bundle 'seriald.exe') -PathType Leaf)) {
         throw 'The ZIP is not a seriald Windows package.'
     }
+    $digestFile = Join-Path $bundle 'seriald.exe.sha256'
+    if (-not (Test-Path -LiteralPath $digestFile -PathType Leaf)) {
+        throw 'The package has no executable checksum. Rebuild it before installing.'
+    }
+    $expected = (Get-Content -LiteralPath $digestFile -Raw).Trim()
+    $actual = (Get-FileHash -LiteralPath (Join-Path $bundle 'seriald.exe') -Algorithm SHA256).Hash
+    if ($expected -notmatch '^[0-9A-Fa-f]{64}$' -or $actual -ne $expected) {
+        throw 'The package executable does not match its SHA-256 manifest.'
+    }
+    if ($ExpectedSha256 -and
+        ($ExpectedSha256 -notmatch '^[0-9A-Fa-f]{64}$' -or $actual -ne $ExpectedSha256)) {
+        throw "The package executable does not match the IT-approved SHA-256. Actual: $actual"
+    }
     if (Test-Path -LiteralPath (Join-Path $bundle 'data')) {
         throw 'The package unexpectedly contains runtime data; refusing to replace installed data.'
     }
@@ -70,6 +84,7 @@ try {
     }
     New-Item -ItemType Directory -Path $targetData -Force | Out-Null
     Write-Host "Installed seriald to $target"
+    Write-Host "seriald.exe SHA-256: $actual"
     Write-Host "Runtime data stays in $(Join-Path $target 'data')"
     Write-Host 'Start one of these files in the installed directory:'
     foreach ($name in @('Start-seriald.cmd', 'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN.cmd')) {

@@ -1,0 +1,6 @@
+# escape=`
+FROM python:3.12-windowsservercore-ltsc2022
+SHELL ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+WORKDIR C:/src
+COPY . C:/src/
+RUN .\tools\build_windows.ps1 -UseCurrentPython
