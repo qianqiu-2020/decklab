@@ -1,35 +1,48 @@
 #Requires -Version 5.1
 param(
     [string]$Package,
-    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'seriald')
+    [string]$InstallDir
 )
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Run this installer on Windows.' }
 $sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+if (-not $InstallDir) { $InstallDir = Join-Path $sourceRoot 'seriald-installed' }
 if (-not $Package) { $Package = Join-Path $sourceRoot 'dist\seriald-windows-portable.zip' }
 if (-not (Test-Path -LiteralPath $Package -PathType Leaf)) {
     throw "Package not found: $Package. Run Build-seriald.cmd first."
 }
 $target = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
 $source = $sourceRoot.TrimEnd('\')
+$defaultTarget = [IO.Path]::GetFullPath((Join-Path $sourceRoot 'seriald-installed')).TrimEnd('\')
+$legacyRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'seriald')).TrimEnd('\')
+$legacyData = Join-Path $legacyRoot 'data'
+$targetData = Join-Path $target 'data'
 if ($target.Equals($source, [StringComparison]::OrdinalIgnoreCase) -or
-    $target.StartsWith($source + '\', [StringComparison]::OrdinalIgnoreCase) -or
-    $source.StartsWith($target + '\', [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'InstallDir must be separate from the source and build tree.'
+    $source.StartsWith($target + '\', [StringComparison]::OrdinalIgnoreCase) -or
+    ($target.StartsWith($source + '\', [StringComparison]::OrdinalIgnoreCase) -and
+     -not $target.Equals($defaultTarget, [StringComparison]::OrdinalIgnoreCase))) {
+    throw 'InstallDir must be separate from source and build files; use seriald-installed or a directory outside the repository.'
 }
 
 $installedExe = Join-Path $target 'seriald.exe'
-if (Test-Path -LiteralPath $installedExe) {
+$migrateLegacy = -not (Test-Path -LiteralPath $targetData) -and
+    -not $target.Equals($legacyRoot, [StringComparison]::OrdinalIgnoreCase) -and
+    (Test-Path -LiteralPath $legacyData -PathType Container)
+if ((Test-Path -LiteralPath $installedExe) -or $migrateLegacy) {
+    $legacyExe = Join-Path $legacyRoot 'seriald.exe'
     $running = Get-CimInstance Win32_Process -Filter "Name='seriald.exe'" |
-        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.Equals($installedExe, [StringComparison]::OrdinalIgnoreCase) }
-    if ($running) { throw 'Stop the installed seriald window before updating; its COM ports are still open.' }
+        Where-Object { $_.ExecutablePath -and
+            ($_.ExecutablePath.Equals($installedExe, [StringComparison]::OrdinalIgnoreCase) -or
+             ($migrateLegacy -and $_.ExecutablePath.Equals($legacyExe, [StringComparison]::OrdinalIgnoreCase))) }
+    if ($running) { throw 'Stop the running seriald window before installing; its COM ports and data are still open.' }
 }
 
 $stage = Join-Path $env:TEMP ('seriald-install-' + [guid]::NewGuid().ToString('N'))
 $backup = Join-Path $env:TEMP ('seriald-backup-' + [guid]::NewGuid().ToString('N'))
 $mutationStarted = $false
 $keepBackup = $false
+$legacyCopyStarted = $false
 try {
     Expand-Archive -LiteralPath $Package -DestinationPath $stage
     $bundle = Join-Path $stage 'seriald'
@@ -50,7 +63,12 @@ try {
     foreach ($item in (Get-ChildItem -LiteralPath $bundle -Force)) {
         Copy-Item -LiteralPath $item.FullName -Destination $target -Recurse -Force
     }
-    New-Item -ItemType Directory -Path (Join-Path $target 'data') -Force | Out-Null
+    if ($migrateLegacy) {
+        $legacyCopyStarted = $true
+        Copy-Item -LiteralPath $legacyData -Destination $target -Recurse
+        Write-Host "Copied previous runtime data from $legacyData"
+    }
+    New-Item -ItemType Directory -Path $targetData -Force | Out-Null
     Write-Host "Installed seriald to $target"
     Write-Host "Runtime data stays in $(Join-Path $target 'data')"
     Write-Host 'Start one of these files in the installed directory:'
@@ -59,6 +77,9 @@ try {
     }
 } catch {
     $installError = $_
+    if ($legacyCopyStarted -and (Test-Path -LiteralPath $targetData)) {
+        Remove-Item -LiteralPath $targetData -Recurse -Force
+    }
     if ($mutationStarted) {
         try {
             foreach ($item in (Get-ChildItem -LiteralPath $target -Force | Where-Object { $_.Name -ne 'data' })) {

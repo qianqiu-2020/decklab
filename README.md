@@ -21,7 +21,7 @@ sudo apt install ./dist/seriald_1.4.36_all.deb
 · [分阶段重构计划](docs/REFACTOR_PLAN.md)
 
 Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。源码目录双击
-`Build-seriald.cmd` 构建、`Install-seriald.cmd` 安装到 `%LOCALAPPDATA%\seriald`；只从安装目录启动。三个启动入口分别提供
+`Build-seriald.cmd` 构建、`Install-seriald.cmd` 安装到当前源码目录下可见的 `seriald-installed\`；只从安装目录启动。三个启动入口分别提供
 本机无密码、局域网无密码、局域网有密码访问。使用方法见
 [Windows 便携上位机](docs/WINDOWS.md)。
 
