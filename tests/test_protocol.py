@@ -82,6 +82,13 @@ class FramingTests(DeviceFixture):
         self.assertTrue(ok, raw)
         self.assertEqual(raw, BODY + '\n')
 
+    def test_echo_can_precede_nonce_markers_on_same_line(self):
+        response = ('echoed-base64-fragment' + BEGIN + '\r\n' + BODY
+                    + 'echo-fragment' + END + '\r\n')
+        (ok, raw), _, _ = self.run_frame(response)
+        self.assertTrue(ok, raw)
+        self.assertEqual(raw, BODY + 'echo-fragment')
+
     def test_missing_begin_marker_rejects_frame(self):
         (ok, error), _, wait = self.run_frame(BODY + END + '\n')
         self.assertFalse(ok)
@@ -95,10 +102,10 @@ class FramingTests(DeviceFixture):
                 self.assertFalse(ok)
                 self.assertIn('超时', error)
 
-    def test_wrong_nonce_and_inline_end_marker_do_not_complete_wait(self):
+    def test_wrong_nonce_and_partial_end_marker_do_not_complete_wait(self):
         wrong = END.replace(NONCE, 'f' * 24)
         for response in (BEGIN + '\n' + BODY + wrong + '\n',
-                         BEGIN + '\n' + BODY + 'echo ' + END + '\n'):
+                         BEGIN + '\n' + BODY + 'echo ' + END[:-1] + '\n'):
             with self.subTest(response=response):
                 (ok, error), _, _ = self.run_frame(response)
                 self.assertFalse(ok)

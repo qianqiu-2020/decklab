@@ -199,6 +199,55 @@ class SerialFileTransferTests(unittest.TestCase):
         self.assertEqual(self.transfer.state['offset'], 0)
         self.transfer.abort(state['id'], self.device.connection_id)
 
+    def test_batch_lost_ack_is_confirmed_by_remote_size_and_hash(self):
+        data = os.urandom(BATCH_SIZE + 123)
+        target = self.root / 'lost-ack.bin'
+        original = self.device._run_cmd_locked
+        lost = False
+
+        def drop_one_ack(command, timeout, ensure_shell=True):
+            nonlocal lost
+            result = original(command, timeout, ensure_shell)
+            if not lost and '\n' in command and 'SD_RC=' in command:
+                lost = True
+                return False, '响应起始帧缺失或行结束符异常'
+            return result
+
+        self.device._run_cmd_locked = drop_one_ack
+        state = self.transfer.start('upload', str(target), self.device.connection_id,
+                                    size=len(data))
+        offset = 0
+        while offset < len(data):
+            part = data[offset:offset + BATCH_SIZE]
+            result = self.transfer.batch(state['id'], self.device.connection_id, offset,
+                                         base64.b64encode(part).decode('ascii'))
+            offset = result['offset']
+        result = self.transfer.finish(state['id'], self.device.connection_id)
+        self.assertTrue(lost)
+        self.assertEqual(target.read_bytes(), data)
+        self.assertEqual(result['sha256'], hashlib.sha256(data).hexdigest())
+        self.assertTrue(any('SD_SHA=' in command for command in self.device.commands))
+
+    def test_batch_unexecuted_command_does_not_advance_after_check(self):
+        data = os.urandom(1000)
+        target = self.root / 'unexecuted.bin'
+        original = self.device._run_cmd_locked
+
+        def drop_batch(command, timeout, ensure_shell=True):
+            if '\n' in command and 'SD_RC=' in command:
+                return False, '响应起始帧缺失或行结束符异常'
+            return original(command, timeout, ensure_shell)
+
+        self.device._run_cmd_locked = drop_batch
+        state = self.transfer.start('upload', str(target), self.device.connection_id,
+                                    size=len(data))
+        with self.assertRaisesRegex(TransferError, '校验未通过'):
+            self.transfer.batch(state['id'], self.device.connection_id, 0,
+                                base64.b64encode(data).decode('ascii'))
+        self.assertEqual(self.transfer.state['offset'], 0)
+        self.assertTrue(self.transfer.state['failed'])
+        self.transfer.abort(state['id'], self.device.connection_id)
+
 
 class TransferClient:
     def __init__(self, key):

@@ -512,7 +512,10 @@ class Device:
         ok, err = self._write(framed + self.newline)
         if not ok:
             return False, err
-        if not self._wait(base, r'(?m)^' + re.escape(end) + r'\r?\n', timeout):
+        # A long echoed upload line can interleave with printf output, leaving
+        # echo characters directly before a marker. The random marker is split
+        # in the command text, so an echo cannot contain it in full.
+        if not self._wait(base, re.escape(end) + r'\r?\n', timeout):
             return False, '等待板子完整响应超时'
         # Firmware/shells can emit a standalone CR or XON/XOFF around a marker.
         # Normalize only this command's parsed copy; the shared terminal keeps
@@ -520,7 +523,7 @@ class Device:
         raw = ANSI.sub('', self._since(base))
         raw = re.sub(r'[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]', '', raw)
         raw = raw.replace('\r\n', '\n').replace('\r', '\n')
-        match = re.search(r'(?m)^' + re.escape(begin) + r'\n([\s\S]*?)^'
+        match = re.search(re.escape(begin) + r'\n([\s\S]*?)'
                           + re.escape(end) + r'\n', raw)
         if not match:
             with self.cv:

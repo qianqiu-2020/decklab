@@ -106,6 +106,22 @@ class SerialFileTransfer:
         except TransferError:
             pass
 
+    def _upload_prefix_matches(self, state, size, digest):
+        """Resolve an ambiguous serial acknowledgement without replaying writes.
+
+        The board may have completed a batch even when its beginning marker was
+        lost from the UART output. Re-sending that batch would duplicate bytes.
+        """
+        temp = shlex.quote(state['temp'])
+        command = ('if [ -f {0} ]; then s=$(wc -c < {0}); '
+                   'h=$(sha256sum {0} | cut -d\x27 \x27 -f1); '
+                   'printf "SD_SIZE=%s\\nSD_SHA=%s\\n" "$s" "$h"; fi').format(temp)
+        try:
+            output = self._run(command, timeout=120)
+        except TransferError:
+            return False
+        return _field(output, 'SD_SIZE') == str(size) and _field(output, 'SD_SHA') == digest
+
     def start(self, direction, path, connection_id, actor='web', size=None, overwrite=False):
         path = _remote_path(path)
         if direction not in ('upload', 'download'):
@@ -197,15 +213,24 @@ class SerialFileTransfer:
                 # Reject before sending so clients can retry a smaller raw slice.
                 if len(command.encode('utf-8')) + 120 > MAX_CONSOLE_LINE:
                     raise TransferError('分块编码后超过串口终端行长，请缩小分块', 413)
+                frame_error = ''
                 try:
                     output = self._run(command)
-                except TransferError:
-                    state['failed'] = True
-                    raise
-                if _field(output, 'SD_RC') != '0' or _field(output, 'SD_SIZE') != str(offset + len(data)):
-                    state['failed'] = True
-                    raise TransferError('板端写入分块失败或长度不匹配', 502)
-                state['hasher'].update(data)
+                except TransferError as error:
+                    if error.status != 502:
+                        state['failed'] = True
+                        raise
+                    frame_error = str(error)
+                    output = ''
+                next_hash = state['hasher'].copy()
+                next_hash.update(data)
+                if (_field(output, 'SD_RC') != '0' or
+                        _field(output, 'SD_SIZE') != str(offset + len(data))):
+                    if not self._upload_prefix_matches(state, offset + len(data), next_hash.hexdigest()):
+                        state['failed'] = True
+                        raise TransferError('板端写入分块结果不确定，校验未通过' +
+                                            ('：' + frame_error if frame_error else ''), 502)
+                state['hasher'] = next_hash
             else:
                 index = offset // CHUNK_SIZE
                 encode = 'gzip -c | base64' if state['compress'] else 'base64'
@@ -279,15 +304,23 @@ class SerialFileTransfer:
                     continue
                 lines.append(line)
             lines.append('s=$(wc -c < {0}); printf "SD_RC=%s\\nSD_SIZE=%s\\n" "$r" "$s"'.format(temp))
+            frame_error = ''
             try:
                 output = self._run('\n'.join(lines), timeout=90)
-            except TransferError:
-                state['failed'] = True
-                raise
+            except TransferError as error:
+                if error.status != 502:
+                    state['failed'] = True
+                    raise
+                frame_error = str(error)
+                output = ''
+            next_hash = state['hasher'].copy()
+            next_hash.update(data)
             if _field(output, 'SD_RC') != '0' or _field(output, 'SD_SIZE') != str(offset + len(data)):
-                state['failed'] = True
-                raise TransferError('板端批量写入失败或长度不匹配', 502)
-            state['hasher'].update(data)
+                if not self._upload_prefix_matches(state, offset + len(data), next_hash.hexdigest()):
+                    state['failed'] = True
+                    raise TransferError('板端批量写入结果不确定，校验未通过' +
+                                        ('：' + frame_error if frame_error else ''), 502)
+            state['hasher'] = next_hash
             state['offset'] += len(data)
             state['last'] = time.monotonic()
             return {'id': transfer_id, 'offset': state['offset'], 'size': state['size'],
