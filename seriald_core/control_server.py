@@ -9,6 +9,7 @@ import http.server
 import ipaddress
 import json
 import os
+import re
 import secrets
 import socket
 import time
@@ -36,6 +37,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     collector_socket = SOCKET
     static_root = STATIC
     auth_token = AUTH_TOKEN
+    agent_tokens = {}
     trust_loopback = False
     share_seconds = 24 * 60 * 60
     allowed_static = frozenset(('/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js',
@@ -77,6 +79,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     def _authorized(self):
         if self._owner_authorized():
             return True
+        if self._agent_actor():
+            return True
         value = self.headers.get('Authorization', '')
         if value.startswith('Bearer ') and self._valid_share(value[7:]):
             return True
@@ -87,6 +91,16 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             session = None
         return bool(session and self._valid_share(session.value))
+
+    def _agent_actor(self):
+        value = self.headers.get('Authorization', '')
+        if not self.auth_token or not value.startswith('Bearer '):
+            return ''
+        token = value[7:]
+        for actor, expected in self.agent_tokens.items():
+            if hmac.compare_digest(token, expected):
+                return actor
+        return ''
 
     def _new_share(self):
         body = '%d.%s' % (int(time.time()) + self.share_seconds, secrets.token_urlsafe(12))
@@ -142,6 +156,19 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             body = self.rfile.read(length) if length else None
             if length and len(body) != length:
                 return self._json(400, {'error': 'incomplete body'})
+            agent_actor = self._agent_actor()
+            if agent_actor and self.command == 'POST':
+                try:
+                    payload = json.loads(body.decode('utf-8'))
+                    if not isinstance(payload, dict):
+                        raise ValueError('JSON object required')
+                except (UnicodeDecodeError, ValueError, AttributeError):
+                    return self._json(400, {'error': 'bad json'})
+                payload['actor'] = agent_actor
+                body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                length = len(body)
+                if length > 65536:
+                    return self._json(413, {'error': 'body must be at most 65536 bytes'})
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
             events = self.command == 'GET' and urlparse(self.path).path == '/api/session-events'
@@ -260,6 +287,18 @@ def main():
     ControlHandler.collector_socket = SOCKET
     ControlHandler.static_root = STATIC
     ControlHandler.auth_token = AUTH_TOKEN
+    tokens_path = os.environ.get('SERIALD_AGENT_TOKENS_FILE', '')
+    if tokens_path:
+        with open(tokens_path, encoding='utf-8') as source:
+            tokens = json.load(source)
+        if (not AUTH_TOKEN or not isinstance(tokens, dict)
+                or any(not isinstance(actor, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,79}', actor)
+                       or actor == 'web'
+                       or not isinstance(token, str) or len(token) < 32 or token == AUTH_TOKEN
+                       for actor, token in tokens.items())
+                or len(set(tokens.values())) != len(tokens)):
+            parser.error('invalid SERIALD_AGENT_TOKENS_FILE or missing SERIALD_AUTH_TOKEN')
+        ControlHandler.agent_tokens = tokens
     with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as server:
         print('seriald control on http://%s:%d/' % (args.bind, args.port), flush=True)
         try:

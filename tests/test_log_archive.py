@@ -2,6 +2,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from seriald_core.log_archive import boot_epochs, read_epoch
 
@@ -53,6 +54,24 @@ class LogArchiveTests(unittest.TestCase):
         self.assertEqual(oldest['dates'], ['2026-09-20'])
         self.assertFalse(oldest['cross_day'])
         self.assertEqual(newest['dates'], ['2026-09-21'])
+
+    def test_linux_only_boot_is_counted_without_spl_or_uboot(self):
+        path = self.root / 'serial-20260921.log'
+        path.write_bytes(b'2026-09-21 08:00:00  Linux version 6.18.0 board\n'
+                         b'2026-09-21 09:00:00  Linux version 6.18.0 board\n')
+        self.assertEqual([x['marker'] for x in boot_epochs(str(self.root), self.files())],
+                         ['Linux', 'Linux'])
+
+    def test_unchanged_archives_are_not_read_again(self):
+        path = self.root / 'serial-20260921.log'
+        path.write_bytes(b'2026-09-21 08:00:00  U-Boot 2024.10\n')
+        cache = {}
+        self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 1)
+        with mock.patch('builtins.open', side_effect=AssertionError('archive rescanned')):
+            self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 1)
+        with path.open('ab') as output:
+            output.write(b'2026-09-21 09:00:00  Linux version 6.18.0\n')
+        self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 2)
 
 
 if __name__ == '__main__':

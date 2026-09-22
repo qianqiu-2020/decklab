@@ -4,6 +4,9 @@ Windows 版独占接管本机 USB 串口的 COM 端口，提供网页与 `serial
 
 在源码目录双击 `Build-seriald.cmd`，或运行 `powershell -ExecutionPolicy Bypass -File .\tools\build_windows.ps1`。构建脚本创建 `.venv\`、运行 Windows 模拟测试，并在 `dist\` 生成 `seriald-windows-portable.zip`。然后双击 `Install-seriald.cmd`；它把包安装到 `%LOCALAPPDATA%\seriald`，与源码和测试目录分开，更新时保留其中的 `data\`。自选位置可运行 `powershell -ExecutionPolicy Bypass -File .\tools\install_windows.ps1 -InstallDir D:\seriald`。安装前先关闭旧的 seriald 窗口，释放 COM 口。
 
+安装脚本先备份旧程序文件，更新失败时回滚；`data\` 始终留在安装目录。若回滚本身失败，
+错误会给出临时备份目录，供手动恢复。
+
 安装目录提供三个启动入口，同一时间只运行其中一个：
 
 | 入口 | 监听与访问 |

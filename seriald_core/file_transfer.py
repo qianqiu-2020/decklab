@@ -122,6 +122,20 @@ class SerialFileTransfer:
             return False
         return _field(output, 'SD_SIZE') == str(size) and _field(output, 'SD_SHA') == digest
 
+    def _upload_promoted_matches(self, state, digest):
+        """Check an uncertain final acknowledgement without repeating the rename."""
+        target, temp = shlex.quote(state['path']), shlex.quote(state['temp'])
+        command = ('if [ -f {dst} ] && [ ! -e {tmp} ] && [ ! -L {tmp} ]; then '
+                   's=$(wc -c < {dst}); h=$(sha256sum {dst} | cut -d\x27 \x27 -f1); '
+                   'printf "SD_SIZE=%s\\nSD_SHA=%s\\n" "$s" "$h"; fi').format(
+                       dst=target, tmp=temp)
+        try:
+            output = self._run(command, timeout=120)
+        except TransferError:
+            return False
+        return (_field(output, 'SD_SIZE') == str(state['size'])
+                and _field(output, 'SD_SHA') == digest)
+
     def start(self, direction, path, connection_id, actor='web', size=None, overwrite=False):
         path = _remote_path(path)
         if direction not in ('upload', 'download'):
@@ -346,9 +360,19 @@ class SerialFileTransfer:
                            'else printf "SD_ERROR=promote\\n"; fi; '
                            'else printf "SD_ERROR=checksum\\n"; fi').format(
                     tmp=temp, size=state['size'], digest=shlex.quote(digest), promote=promote)
-                output = self._run(command, timeout=120)
+                frame_error = ''
+                try:
+                    output = self._run(command, timeout=120)
+                except TransferError as error:
+                    if error.status != 502:
+                        raise
+                    frame_error = str(error)
+                    output = ''
                 if _field(output, 'SD_OK') != '1':
-                    raise TransferError('板端校验或落盘失败：' + (_field(output, 'SD_ERROR') or output[-200:]), 502)
+                    if (_field(output, 'SD_ERROR') or
+                            not self._upload_promoted_matches(state, digest)):
+                        raise TransferError('板端校验或落盘失败：' +
+                                            (_field(output, 'SD_ERROR') or frame_error or output[-200:]), 502)
             else:
                 digest = state.get('hasher', hashlib.sha256()).hexdigest()
                 if digest != state['sha256']:

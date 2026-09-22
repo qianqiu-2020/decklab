@@ -556,6 +556,11 @@
         rn.textContent = d.rescue_note;
         card.appendChild(rn);
       }
+      if (d.log_error) {
+        var logWarning = document.createElement('div'); logWarning.className = 'identity-error';
+        logWarning.textContent = '串口日志写入失败：' + d.log_error;
+        card.appendChild(logWarning);
+      }
       var inf = d.info || {};
       if (d.identity_error || (d.needs_provisioning && Object.keys(inf).length)
           || inf.identity_status === 'provisional') {
@@ -881,6 +886,7 @@
       b.textContent = s.kind === 'serial' ? '串口'
         : (s.kind === 'log' ? s.label : ('SSH ' + (s.actor ? s.actor + ' · ' : '') + (s.ip || s.sid)));
       if (s.kind === 'log' || (s.actor && s.actor !== 'web' && !takenOver[s.sid])) b.textContent += ' · 只读';
+      if (s.log_error) b.textContent += ' · 日志写入失败';
       b.title = s.kind === 'serial' ? '板子控制台（实时输出）'
         : (s.kind === 'log' ? '归档日志快照，只读显示在终端中'
           : (s.persistent ? 'agent 持久 SSH 会话；同一 agent 后续命令复用此标签，直到手动关闭'

@@ -121,6 +121,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if route == '/api/health':
             disk = shutil.disk_usage(LOG_ROOT)
             devices = MGR.all_devices()
+            log_errors = []
+            for device in devices:
+                if isinstance(getattr(device, 'log_error', ''), str) and device.log_error:
+                    log_errors.append({'key': device.key, 'kind': 'serial', 'error': device.log_error})
+                sessions = getattr(device, 'ssh_sessions', {})
+                for session in (sessions.values() if isinstance(sessions, dict) else ()):
+                    if getattr(session, 'log_error', ''):
+                        log_errors.append({'key': device.key, 'kind': 'ssh',
+                                           'sid': session.sid, 'error': session.log_error})
             return self._json(200, {'ok': True, 'role': 'collector', 'pid': os.getpid(),
                                     'version': __version__,
                                     'started': STARTED, 'uptime': time.time() - STARTED,
@@ -128,7 +137,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     'online': sum(bool(d.serial and d.present) for d in devices),
                                     'pending': sum(bool(not d.serial and d.present) for d in devices),
                                     'offline': sum(not d.present for d in devices),
-                                    'disk_total': disk.total, 'disk_free': disk.free})
+                                    'disk_total': disk.total, 'disk_free': disk.free,
+                                    'logging_ok': not log_errors, 'log_errors': log_errors})
 
         if route == '/api/devices':
             devices = MGR.all_devices()
@@ -370,7 +380,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except TransferError as error:
                 return self._json(error.status, {'ok': False, 'error': str(error)})
 
-        if d.serial and route in ('/api/send', '/api/session-send', '/api/rescue', '/api/identify', '/api/ssh-enable'):
+        if d.serial and route in ('/api/send', '/api/rescue', '/api/identify', '/api/ssh-enable'):
             MGR.store.event(d.serial, actor, route.rsplit('/', 1)[-1],
                             'request: sid=' + str(payload.get('sid') or 'serial'))
 
@@ -452,15 +462,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 s = d.get_session(sid)
                 if not s:
                     return self._json(404, {'error': 'no such session'})
+                if actor != s.actor and actor not in s.takeovers:
+                    return self._json(403, {'ok': False, 'error': '先介入该 SSH 会话才能输入'})
                 ok, err = (s.write(text), '')
             if ok:
+                if d.serial:
+                    MGR.store.event(d.serial, actor, 'session-send', 'request: sid=' + sid)
                 d.record_input(sid, actor, text)
             return self._json(200 if ok else 503, {'ok': ok, 'error': err})
 
         if route == '/api/session-takeover':
             sid = str(payload.get('sid') or '')
-            if not d.serial or not d.get_session(sid):
+            s = d.get_session(sid)
+            if not d.serial or not s:
                 return self._json(404, {'ok': False, 'error': 'no such active SSH session'})
+            s.takeovers.add(actor)
             MGR.store.event(d.serial, actor, 'session-takeover', sid)
             return self._json(200, {'ok': True, 'sid': sid})
 
@@ -478,6 +494,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if route == '/api/session-close':
             sid = str(payload.get('sid') or '')
+            s = d.get_session(sid)
+            if not s:
+                return self._json(404, {'error': 'no such session'})
+            if actor != s.actor and actor not in s.takeovers:
+                return self._json(403, {'ok': False, 'error': '先介入该 SSH 会话才能关闭'})
             if not d.close_session(sid):
                 return self._json(404, {'error': 'no such session'})
             return self._json(200, {'ok': True})

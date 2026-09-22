@@ -22,6 +22,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
     & $python -m unittest discover -s tests -p test_windows_portable.py
     if ($LASTEXITCODE -ne 0) { throw 'Windows portable tests failed.' }
+    if (Get-Command node -ErrorAction SilentlyContinue) {
+        & node tests/frontend.test.js
+        if ($LASTEXITCODE -ne 0) { throw 'Frontend regression tests failed.' }
+    } else {
+        Write-Warning 'Node.js is unavailable; frontend regression tests were not run.'
+    }
 
     & $pyinstaller --noconfirm --clean --onedir --name seriald `
         --hidden-import serialctl `

@@ -6,7 +6,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.23_all.deb
+sudo apt install ./dist/seriald_1.4.33_all.deb
 systemctl status seriald
 serialctl devices
 ```
@@ -32,6 +32,10 @@ SERIALD_AUTH_TOKEN=一段足够长的随机值
 `SERIALD_SSH_PASSWORD_OVERRIDE`。网页创建的 SSH 仍使用服务默认账户。
 `SERIALD_AUTH_TOKEN` 为空时不启用认证，仅适合可信开发网络。设置后，浏览器使用用户名 `seriald`、
 密码为该 token 的 HTTP Basic 登录；agent 设置 `SERIALD_TOKEN` 或传 `serialctl --token`。
+若要可信地区分不同 agent，设置 `SERIALD_AGENT_TOKENS_FILE` 指向仅 control 服务可读的 JSON 文件，
+例如 `{"claude-code/debug":"至少32字符的随机令牌"}`，同时启用 `SERIALD_AUTH_TOKEN`。
+agent 使用其专用令牌时，control 会覆盖请求中的 `actor`，操作记录和持久 SSH 会话便绑定到该标签。
+共享的主令牌仍有完整管理权限；无认证模式下 `actor` 只是客户端自报的标签。
 终端访问等同于使用开发板登录账户，即使启用 token 也应限制防火墙访问范围。
 
 默认 root/bianbu SSH 认证被拒绝时，服务会尝试从已登录的串口 shell 执行免密码 sudo，
@@ -78,7 +82,10 @@ by-path 且未进入“准备换板”模式，也会沿用原绑定；异常退
 首次从 1.3.6 或更早版本升级时，旧包还没有代码指纹，因此仍会重启；若旧 collector
 早于 1.3.6，也没有 handoff，需要重新点击“识别设备”一次。内部 socket
 `/run/seriald/collector.sock` 不应暴露到网络。
-`serialctl health` 同时返回数据盘总量和剩余字节；服务不会自动删除审计日志，磁盘保留策略由运维方决定。
+`serialctl health` 同时返回数据盘总量、剩余字节以及 `logging_ok` / `log_errors`。
+日志写入失败不会停止实时终端，但会在设备列表和健康接口报警；排除磁盘或权限故障后会重试。
+服务不会自动删除审计日志，磁盘保留策略由运维方决定。备份时应同时保存 `registry.sqlite3`、
+其 WAL 文件和 `logs/`，建议先停止 collector 再复制，以获得一致的档案。
 
 源码双进程开发：
 

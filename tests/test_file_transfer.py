@@ -248,6 +248,53 @@ class SerialFileTransferTests(unittest.TestCase):
         self.assertTrue(self.transfer.state['failed'])
         self.transfer.abort(state['id'], self.device.connection_id)
 
+    def test_final_ack_lost_after_rename_confirms_destination_without_repeating(self):
+        data = os.urandom(2048)
+        target = self.root / 'final-ack.bin'
+        state = self.transfer.start('upload', str(target), self.device.connection_id,
+                                    size=len(data))
+        self.transfer.batch(state['id'], self.device.connection_id, 0,
+                            base64.b64encode(data).decode('ascii'))
+        original = self.device._run_cmd_locked
+        lost = False
+
+        def drop_final_ack(command, timeout, ensure_shell=True):
+            nonlocal lost
+            result = original(command, timeout, ensure_shell)
+            if not lost and 'SD_OK=1' in command and 'sha256sum' in command:
+                lost = True
+                return False, '响应起始帧缺失'
+            return result
+
+        self.device._run_cmd_locked = drop_final_ack
+        result = self.transfer.finish(state['id'], self.device.connection_id)
+        self.assertTrue(lost)
+        self.assertEqual(target.read_bytes(), data)
+        self.assertEqual(result['sha256'], hashlib.sha256(data).hexdigest())
+        self.assertEqual(sum('SD_OK=1' in command and 'sha256sum' in command
+                             for command in self.device.commands), 1)
+        self.assertFalse(self.transfer.active)
+
+    def test_final_ack_lost_before_rename_does_not_claim_success(self):
+        data = b'unchanged'
+        target = self.root / 'no-rename.bin'
+        state = self.transfer.start('upload', str(target), self.device.connection_id,
+                                    size=len(data))
+        self.transfer.batch(state['id'], self.device.connection_id, 0,
+                            base64.b64encode(data).decode('ascii'))
+        original = self.device._run_cmd_locked
+
+        def drop_final_command(command, timeout, ensure_shell=True):
+            if 'SD_OK=1' in command and 'sha256sum' in command:
+                return False, '响应起始帧缺失'
+            return original(command, timeout, ensure_shell)
+
+        self.device._run_cmd_locked = drop_final_command
+        with self.assertRaisesRegex(TransferError, '响应起始帧缺失'):
+            self.transfer.finish(state['id'], self.device.connection_id)
+        self.assertFalse(target.exists())
+        self.transfer.abort(state['id'], self.device.connection_id)
+
 
 class TransferClient:
     def __init__(self, key):

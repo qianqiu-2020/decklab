@@ -88,6 +88,8 @@ class Device:
         self.write_lock = threading.Lock()      # fd 退役与写入串行,绝不占用输出 cv
         self.sessions_lock = threading.RLock()
         self.log_lock = threading.RLock()
+        self.boot_index_lock = threading.Lock()
+        self.boot_index_cache = {}
         self.stop = threading.Event()
         self.thread = None
         self.identity = None
@@ -100,6 +102,7 @@ class Device:
         self.ssh_sessions = {}            # sid -> SshSession(与串口并存的独立会话)
         self.ssh_pending = 0
         self.logf = None
+        self.log_error = ''
         # preload 可能在没有日志时早退;所有状态必须先初始化。
         self.logpath = None
         self.dead = False
@@ -198,7 +201,13 @@ class Device:
         return files
 
     def boot_epochs(self, files=None):
-        return boot_epochs(self.stable_dir(), files if files is not None else self.log_files())
+        with self.boot_index_lock:
+            selected = files if files is not None else self.log_files()
+            result = boot_epochs(self.stable_dir(), selected, cache=self.boot_index_cache)
+            names = {entry['name'] for entry in selected if entry.get('kind') == 'serial'}
+            for name in set(self.boot_index_cache) - names:
+                del self.boot_index_cache[name]
+            return result
 
     def _output_tail(self, sid):
         if sid == 'serial':
@@ -250,6 +259,7 @@ class Device:
             self.logf = None
         self.logf = open(path, 'a', encoding='utf-8', buffering=1)
         self.logpath = path
+        self.log_error = ''
 
     def _log_text(self, text):
         try:
@@ -258,9 +268,16 @@ class Device:
             for raw in text.split('\n'):
                 line = ANSI.sub('', raw.rstrip('\r').split('\r')[-1]).rstrip()
                 if line:
+                    # File-transfer shell echo and SD_DATA responses can contain
+                    # whole file chunks. Keep the action visible, not the payload.
+                    line = re.sub(r'(printf %s )[A-Za-z0-9+/=]{80,}( \| (?:base64 -d))',
+                                  r'\1[base64 omitted]\2', line)
+                    line = re.sub(r'(SD_DATA=)[A-Za-z0-9+/=]{80,}',
+                                  r'\1[base64 omitted]', line)
                     self.logf.write('%s  %s\n' % (stamp, line))
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
             # 磁盘满/目录不可写不能杀死唯一采集线程,内存扇出仍要继续。
+            self.log_error = str(error)
             if self.logf:
                 try:
                     self.logf.close()
@@ -788,6 +805,7 @@ class Device:
                 'hostname': self.hostname, 'alive': self.fd is not None and self.present,
                 'bytes': self.bytes, 'last_rx': self.last_rx,
                 'last_line': tail, 'log': os.path.basename(self.logpath or ''),
+                'log_error': self.log_error,
                 'probes': self.probed, 'fail_count': self.fail_count,
                 'rescue_note': self.rescue_note, 'busy': self.probing,
                 'identity_error': self.identity_error, 'reported_serial': self.reported_serial,

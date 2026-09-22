@@ -77,6 +77,9 @@ class SshSession:
         self.rows = 32
         self.logf = None
         self.logpath = None
+        self.log_error = ''
+        self._log_retry_after = 0.0
+        self.takeovers = set()
         self._logdir = logdir
         self._logday = time.strftime(DATE_FMT)
         self._log_decoder = codecs.getincrementaldecoder('utf-8')('replace')
@@ -97,11 +100,16 @@ class SshSession:
             self.logf = open(path, 'a', encoding='utf-8', buffering=1)
             self.logpath = path
             self._logday = day
-        except OSError:
+            self.log_error = ''
+        except OSError as error:
             self.logf = None
+            self.log_error = str(error)
+            self._log_retry_after = time.monotonic() + 5
 
     def _log(self, data, final=False):
         with self._log_lock:
+            if not self.logf and not self._log_finished and time.monotonic() >= self._log_retry_after:
+                self._open_log(self._logdir)
             if self.logf and not self._log_finished and self._logday != time.strftime(DATE_FMT):
                 # SSH 会话可能跨天,不能一直把后续输出写进连接当天的文件。
                 try:
@@ -126,8 +134,15 @@ class SshSession:
                     line = ANSI.sub('', raw.rstrip('\r').split('\r')[-1]).rstrip()
                     if line:
                         self.logf.write('%s  %s\n' % (stamp, line))
-            except OSError:
-                pass
+                self.log_error = ''
+            except OSError as error:
+                self.log_error = str(error)
+                try:
+                    self.logf.close()
+                except OSError:
+                    pass
+                self.logf = None
+                self._log_retry_after = time.monotonic() + 5
 
     def _close_log(self):
         self._log(b'', final=True)
@@ -328,5 +343,6 @@ class SshSession:
             return {'sid': self.sid, 'kind': 'ssh', 'ip': self.ip,
                     'actor': self.actor, 'title': self.title,
                     'persistent': self.persistent,
+                    'log_error': self.log_error,
                     'alive': self.fd is not None and not self.closed,
                     'started': self.started, 'bytes': len(self.buf)}

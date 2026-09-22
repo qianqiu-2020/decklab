@@ -155,6 +155,7 @@ class DeviceTests(DeviceFixture):
         self.assertIn(b'root@board:~# ', device.buf)
         self.assertGreater(device.last_rx, 0)
         self.assertEqual(device.hostname, 'board')
+        self.assertIn('disk full', device.snapshot()['log_error'])
 
     def test_utf8_and_lines_survive_arbitrary_read_boundaries(self):
         device = self.device()
@@ -166,6 +167,17 @@ class DeviceTests(DeviceFixture):
         self.assertIn('板子输出正常', contents)
         self.assertNotIn('\ufffd', contents)
         self.assertEqual(contents.count('板子输出正常'), 1)
+
+    def test_file_transfer_echo_is_redacted_from_archive_only(self):
+        device = self.device()
+        payload = 'A' * 128
+        raw = ('printf %s ' + payload + ' | base64 -d >> /tmp/file\n'
+               'SD_DATA=' + payload + '\n').encode()
+        device.append(raw)
+        self.assertIn(payload.encode(), device.buf)
+        archive = pathlib.Path(device.logpath).read_text()
+        self.assertNotIn(payload, archive)
+        self.assertIn('[base64 omitted]', archive)
 
     def test_status_markers_do_not_mask_live_prompt_or_claim_device_output(self):
         device = self.device()

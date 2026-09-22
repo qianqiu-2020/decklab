@@ -53,6 +53,15 @@ class SshSessionTests(unittest.TestCase):
         self.assertNotIn('\ufffd', log.saved)
         self.assertTrue(log.closed)
 
+    def test_log_write_failure_is_visible_and_does_not_stop_live_output(self):
+        session = self.session()
+        session.logf = mock.Mock()
+        session.logf.write.side_effect = OSError('disk full')
+        session._append(b'visible\n')
+        self.assertEqual(bytes(session.buf), b'visible\n')
+        self.assertIn('disk full', session.snapshot()['log_error'])
+        self.assertIsNone(session.logf)
+
     def test_write_never_starts_or_restarts_session(self):
         session = self.session()
         with mock.patch.object(session, 'ensure', side_effect=AssertionError('implicit restart')):

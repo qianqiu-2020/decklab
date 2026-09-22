@@ -51,6 +51,9 @@ class SshSession:
         self.cols, self.rows = 120, 32
         self._logdir, self._logday = logdir, time.strftime(DATE_FMT)
         self.logf, self.logpath = None, None
+        self.log_error = ''
+        self._log_retry_after = 0.0
+        self.takeovers = set()
         self._log_decoder = codecs.getincrementaldecoder('utf-8')('replace')
         self._log_pending, self._log_finished = '', False
         self._open_log()
@@ -61,13 +64,21 @@ class SshSession:
             self._logday = time.strftime(DATE_FMT)
             self.logpath = os.path.join(self._logdir, 'ssh-%s-%s.log' % (self.sid, self._logday))
             self.logf = open(self.logpath, 'a', encoding='utf-8', buffering=1)
-        except OSError:
+            self.log_error = ''
+        except OSError as error:
             self.logf = None
+            self.log_error = str(error)
+            self._log_retry_after = time.monotonic() + 5
 
     def _log(self, data, final=False):
         with self._log_lock:
+            if not self.logf and not self._log_finished and time.monotonic() >= self._log_retry_after:
+                self._open_log()
             if self.logf and not self._log_finished and self._logday != time.strftime(DATE_FMT):
-                self.logf.close()
+                try:
+                    self.logf.close()
+                except OSError as error:
+                    self.log_error = str(error)
                 self.logf = None
                 self._open_log()
             if not self.logf or self._log_finished:
@@ -85,8 +96,15 @@ class SshSession:
                     line = ANSI.sub('', raw.rstrip('\r').split('\r')[-1]).rstrip()
                     if line:
                         self.logf.write('%s  %s\n' % (stamp, line))
-            except OSError:
-                pass
+                self.log_error = ''
+            except OSError as error:
+                self.log_error = str(error)
+                try:
+                    self.logf.close()
+                except OSError:
+                    pass
+                self.logf = None
+                self._log_retry_after = time.monotonic() + 5
 
     def _append(self, data):
         chunk = data if isinstance(data, bytes) else data.encode('utf-8', 'replace')
@@ -233,5 +251,6 @@ class SshSession:
             return {'sid': self.sid, 'kind': 'ssh', 'ip': self.ip,
                     'actor': self.actor, 'title': self.title,
                     'persistent': self.persistent,
+                    'log_error': self.log_error,
                     'alive': self.fd is not None and not self.closed,
                     'started': self.started, 'bytes': len(self.buf)}

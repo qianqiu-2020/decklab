@@ -150,6 +150,27 @@ class HandlerTests(unittest.TestCase):
         headers = dict(call.args for call in denied.send_header.call_args_list)
         self.assertIn('Basic realm="seriald"', headers['WWW-Authenticate'])
 
+    def test_named_agent_token_overrides_untrusted_actor_before_proxy(self):
+        token = 't' * 40
+        handler = self.control_handler('/api/session-send')
+        handler.auth_token = 'owner-secret'
+        handler.agent_tokens = {'claude-code': token}
+        handler.command = 'POST'
+        body = json.dumps({'sid': 'ssh1', 'actor': 'web', 'data': 'pwd\r'}).encode()
+        handler.headers = {'Authorization': 'Bearer ' + token,
+                           'Content-Type': 'application/json', 'Content-Length': str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        connection = mock.Mock()
+        connection.getresponse.return_value.status = 200
+        connection.getresponse.return_value.getheader.return_value = None
+        connection.getresponse.return_value.read.return_value = b''
+        with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+            handler.do_POST()
+        forwarded = json.loads(connection.request.call_args.kwargs['body'])
+        self.assertEqual(forwarded['actor'], 'claude-code')
+        self.assertEqual(connection.request.call_args.kwargs['headers']['Content-Length'],
+                         str(len(connection.request.call_args.kwargs['body'])))
+
     def test_protected_lan_allows_only_local_agents_without_token(self):
         local = self.control_handler('/healthz')
         local.auth_token = 'secret'
@@ -219,6 +240,20 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(payload['version'], __version__)
         self.assertEqual((payload['devices'], payload['online'], payload['pending'], payload['offline']),
                          (3, 1, 1, 1))
+        self.assertTrue(payload['logging_ok'])
+
+    def test_health_exposes_serial_and_ssh_log_failures(self):
+        session = mock.Mock(sid='ssh1', log_error='ssh disk full')
+        self.device.log_error = 'serial disk full'
+        self.device.ssh_sessions = {'ssh1': session}
+        handler = self.handler('/api/health')
+        with mock.patch.object(self.manager, 'all_devices', return_value=[self.device]), \
+                mock.patch.object(sd.shutil, 'disk_usage',
+                                  return_value=mock.Mock(total=1000, free=0)):
+            handler.do_GET()
+        _, payload = self.result(handler)
+        self.assertFalse(payload['logging_ok'])
+        self.assertEqual([x['kind'] for x in payload['log_errors']], ['serial', 'ssh'])
 
     def test_logs_list_uses_serial_archive_without_rewriting_files(self):
         self.device.log_files.return_value = [{'name': 'serial-20260919.log', 'size': 123}]
@@ -275,7 +310,9 @@ class HandlerTests(unittest.TestCase):
         self.device.file_transfer.chunk.assert_called_once_with('abc', 'attachment-1', 0, 'YWJj')
 
     def test_human_takeover_of_agent_ssh_is_validated_and_audited(self):
-        self.device.get_session.return_value = mock.Mock()
+        session = mock.Mock(actor='agent', takeovers=set())
+        session.write.return_value = True
+        self.device.get_session.return_value = session
         body = json.dumps({'key': 'board-key', 'serial': 'SN1', 'sid': 'ssh-agent',
                            'actor': 'web'}).encode()
         handler = self.handler('/api/session-takeover', body)
@@ -283,7 +320,29 @@ class HandlerTests(unittest.TestCase):
         status, payload = self.result(handler)
         self.assertEqual(status, 200)
         self.assertTrue(payload['ok'])
+        self.assertIn('web', session.takeovers)
         self.manager.store.event.assert_called_once_with('SN1', 'web', 'session-takeover', 'ssh-agent')
+
+    def test_agent_ssh_rejects_other_actor_until_explicit_takeover(self):
+        session = mock.Mock(actor='agent', takeovers=set())
+        session.write.return_value = True
+        self.device.get_session.return_value = session
+        base = {'key': 'board-key', 'serial': 'SN1', 'sid': 'ssh-agent', 'actor': 'web'}
+        for route in ('/api/session-send', '/api/session-close'):
+            body = dict(base, data='pwd\r')
+            handler = self.handler(route, json.dumps(body).encode())
+            handler.do_POST()
+            self.assertEqual(self.result(handler)[0], 403)
+        session.write.assert_not_called()
+        self.device.close_session.assert_not_called()
+
+        takeover = self.handler('/api/session-takeover', json.dumps(base).encode())
+        takeover.do_POST()
+        self.assertEqual(self.result(takeover)[0], 200)
+        send = self.handler('/api/session-send', json.dumps(dict(base, data='pwd\r')).encode())
+        send.do_POST()
+        self.assertEqual(self.result(send)[0], 200)
+        session.write.assert_called_once_with('pwd\r')
 
     def test_invalid_offsets_are_rejected_without_reading_device(self):
         for route in ('serial', 'session'):

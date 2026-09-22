@@ -10,6 +10,7 @@ BOOT_MARKERS = (
     (re.compile(br'(?:^|\x00)sys:\s*0x[0-9a-f]+', re.I), 'Boot ROM'),
     (re.compile(br'\bU-Boot SPL \d{4}\.\d{2}', re.I), 'U-Boot SPL'),
     (re.compile(br'\bU-Boot \d{4}\.\d{2}', re.I), 'U-Boot'),
+    (re.compile(br'\bLinux version \d', re.I), 'Linux'),
 )
 
 
@@ -37,7 +38,7 @@ def _archive_date(entry):
     return '%s-%s-%s' % (date[:4], date[4:6], date[6:]) if re.fullmatch(r'\d{8}', date) else date
 
 
-def boot_epochs(root, files):
+def boot_epochs(root, files, cache=None):
     """Return boot ranges spanning one or more chronological daily files.
 
     Boot ROM followed immediately by U-Boot/SPL is one boot, rather than two.
@@ -53,32 +54,45 @@ def boot_epochs(root, files):
     last_marker_time = None
     for index, entry in enumerate(ordered):
         path = os.path.join(root, entry['name'])
-        size = os.path.getsize(path)
+        stat = os.stat(path)
+        size = stat.st_size
         snapshots.append((entry['name'], size, _archive_date(entry)))
-        with open(path, 'rb') as source:
-            while True:
-                offset = source.tell()
-                line = source.readline()
-                if not line:
-                    break
-                stamp = _timestamp(line)
-                if stamp:
-                    last_stamp = stamp
-                kind = _marker(line)
-                if not kind:
-                    continue
-                # Firmware commonly prints Boot ROM, SPL and U-Boot banners in
-                # one second.  Count that chain once, but keep later resets.
-                marker_time = _stamp_seconds(stamp)
-                close_chain = (marker_time is not None and last_marker_time is not None
-                               and 0 <= marker_time - last_marker_time <= 10)
-                same_chain = ((last_marker_kind == 'Boot ROM' and kind in ('U-Boot SPL', 'U-Boot'))
-                              or (last_marker_kind == 'U-Boot SPL' and kind == 'U-Boot'))
-                if candidates and close_chain and same_chain:
-                    continue
-                candidates.append({'file_index': index, 'offset': offset,
-                                   'started': stamp, 'marker': kind})
-                last_marker_kind, last_marker_time = kind, marker_time
+        fingerprint = (root, stat.st_dev, stat.st_ino, size, stat.st_mtime_ns)
+        cached = cache.get(entry['name']) if cache is not None else None
+        if cached is not None and cached[0] == fingerprint:
+            markers, file_last_stamp = cached[1:]
+        else:
+            markers, file_last_stamp = [], ''
+            with open(path, 'rb') as source:
+                while True:
+                    offset = source.tell()
+                    line = source.readline()
+                    if not line:
+                        break
+                    stamp = _timestamp(line)
+                    if stamp:
+                        file_last_stamp = stamp
+                    kind = _marker(line)
+                    if kind:
+                        markers.append((offset, stamp, kind))
+            if cache is not None:
+                cache[entry['name']] = (fingerprint, markers, file_last_stamp)
+        if file_last_stamp:
+            last_stamp = file_last_stamp
+        for offset, stamp, kind in markers:
+            # Firmware banners and the first Linux banner form one boot.
+            marker_time = _stamp_seconds(stamp)
+            close_chain = (marker_time is not None and last_marker_time is not None
+                           and 0 <= marker_time - last_marker_time <= (120 if kind == 'Linux' else 10))
+            same_chain = ((last_marker_kind == 'Boot ROM' and kind in ('U-Boot SPL', 'U-Boot'))
+                          or (last_marker_kind == 'U-Boot SPL' and kind == 'U-Boot')
+                          or (last_marker_kind in ('Boot ROM', 'U-Boot SPL', 'U-Boot')
+                              and kind == 'Linux'))
+            if candidates and close_chain and same_chain:
+                continue
+            candidates.append({'file_index': index, 'offset': offset,
+                               'started': stamp, 'marker': kind})
+            last_marker_kind, last_marker_time = kind, marker_time
 
     epochs = []
     for number, start in enumerate(candidates):
