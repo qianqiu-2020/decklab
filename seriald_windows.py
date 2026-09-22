@@ -46,6 +46,7 @@ def main():
                 ControlHandler.collector_socket = ('127.0.0.1', collector.server_address[1])
                 ControlHandler.static_root = STATIC
                 ControlHandler.auth_token = AUTH_TOKEN
+                ControlHandler.trust_loopback = os.environ.get('SERIALD_TRUST_LOOPBACK') == '1'
                 scanner = threading.Thread(target=web.MGR.loop, daemon=True)
                 scanner.start()
                 worker = threading.Thread(target=collector.serve_forever, daemon=True)

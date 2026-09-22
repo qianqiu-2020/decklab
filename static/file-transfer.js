@@ -260,7 +260,9 @@
       select.appendChild(option);
     });
     updateMode();
-    dialog.showModal();
+    // Keep the workbench interactive: only the serial ports in this transfer
+    // are reserved by the backend. Other boards and SSH tabs stay usable.
+    dialog.show();
   }
 
   var handle = dialog.querySelector('.ft-head');

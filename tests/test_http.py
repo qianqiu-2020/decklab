@@ -150,6 +150,61 @@ class HandlerTests(unittest.TestCase):
         headers = dict(call.args for call in denied.send_header.call_args_list)
         self.assertIn('Basic realm="seriald"', headers['WWW-Authenticate'])
 
+    def test_protected_lan_allows_only_local_agents_without_token(self):
+        local = self.control_handler('/healthz')
+        local.auth_token = 'secret'
+        local.trust_loopback = True
+        local.client_address = ('127.0.0.1', 12345)
+        local.do_GET()
+        self.assertEqual(local.send_response.call_args.args[0], 200)
+
+        remote = self.control_handler('/healthz')
+        remote.auth_token = 'secret'
+        remote.trust_loopback = True
+        remote.client_address = ('192.0.2.10', 12345)
+        remote.do_GET()
+        self.assertEqual(remote.send_response.call_args.args[0], 401)
+
+    def test_share_link_grants_expiring_browser_cookie_but_cannot_create_more_links(self):
+        owner = self.control_handler('/api/share-link')
+        owner.auth_token = 'secret'
+        owner.headers = {'Authorization': 'Bearer secret'}
+        owner.do_POST()
+        self.assertEqual(owner.send_response.call_args.args[0], 200)
+        path = json.loads(owner.wfile.getvalue())['path']
+
+        guest = self.control_handler(path)
+        guest.auth_token = 'secret'
+        guest.do_GET()
+        self.assertEqual(guest.send_response.call_args.args[0], 303)
+        cookie = dict(call.args for call in guest.send_header.call_args_list)['Set-Cookie']
+        self.assertIn('HttpOnly', cookie)
+
+        page = self.control_handler('/healthz')
+        page.auth_token = 'secret'
+        page.headers = {'Cookie': cookie.split(';', 1)[0]}
+        page.do_GET()
+        self.assertEqual(page.send_response.call_args.args[0], 200)
+
+        agent = self.control_handler('/healthz')
+        agent.auth_token = 'secret'
+        agent.headers = {'Authorization': 'Bearer ' + path.rsplit('/', 1)[-1]}
+        agent.do_GET()
+        self.assertEqual(agent.send_response.call_args.args[0], 200)
+
+        denied = self.control_handler('/api/share-link')
+        denied.auth_token = 'secret'
+        denied.headers = page.headers
+        denied.do_POST()
+        self.assertEqual(denied.send_response.call_args.args[0], 403)
+
+        with mock.patch.object(control.time, 'time', return_value=control.time.time() + 90000):
+            expired = self.control_handler('/healthz')
+            expired.auth_token = 'secret'
+            expired.headers = page.headers
+            expired.do_GET()
+        self.assertEqual(expired.send_response.call_args.args[0], 401)
+
     def test_health_reports_running_version_and_device_states(self):
         devices = [mock.Mock(serial='SN1', present=True),
                    mock.Mock(serial='', present=True),

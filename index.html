@@ -16,6 +16,8 @@
   <div class="top">
     <h1>seriald</h1>
     <span class="mono" style="color:var(--ink-3);font-size:12px">串口设备管理</span>
+    <button id="b-share" type="button" hidden title="创建 24 小时有效的网页访问链接">分享访问</button>
+    <span id="share-status" role="status"></span>
     <span class="conn"><span class="dot" id="conn-dot"></span><span id="conn-txt">连接中…</span></span>
   </div>
   <p class="sub">开发板工作台 · 按标签访问，以序列号保存设备档案、终端记录与 agent 操作历史。</p>
@@ -159,6 +161,7 @@
 <script src="/static/terminal-policy.js"></script>
 <script src="/static/file-transfer.js"></script>
 <script src="/static/boot-compare.js"></script>
+<script src="/static/share.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

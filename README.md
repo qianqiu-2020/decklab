@@ -8,7 +8,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.31_all.deb
+sudo apt install ./dist/seriald_1.4.32_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
@@ -20,7 +20,9 @@ sudo apt install ./dist/seriald_1.4.31_all.deb
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
 · [分阶段重构计划](docs/REFACTOR_PLAN.md)
 
-Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API；使用方法与构建说明见
+Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。源码目录双击
+`Build-seriald.cmd` 构建、`Install-seriald.cmd` 安装到 `%LOCALAPPDATA%\seriald`；三个启动入口分别提供
+本机无密码、局域网无密码、局域网有密码访问。使用方法见
 [Windows 便携上位机](docs/WINDOWS.md)。
 
 ![seriald 架构图](docs/seriald-architecture.png)

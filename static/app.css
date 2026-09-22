@@ -49,6 +49,8 @@
   .mono{font-family:"IBM Plex Mono",monospace}
   .conn{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11.5px;
     color:var(--ink-3);display:flex;align-items:center;gap:7px}
+  #b-share{padding:3px 9px;font-size:11px;color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
+  #share-status{font-size:11px;color:var(--ink-3)}
   .dot{width:7px;height:7px;border-radius:50%;background:var(--live);flex:0 0 auto}
   .dot.bad{background:var(--dead)}
 
@@ -153,7 +155,8 @@
   .logs a:hover{text-decoration:underline}
   .empty{color:var(--ink-3);padding:22px 4px;font-size:14px}
   .hint{font-size:12.5px;color:var(--ink-3);padding:0 15px 12px}
-  .file-transfer-dialog{width:min(520px,calc(100vw - 24px));max-height:min(760px,calc(100dvh - 24px));
+  .file-transfer-dialog{position:fixed;z-index:1000;top:72px;right:18px;left:auto;margin:0;
+    width:min(520px,calc(100vw - 24px));max-height:min(760px,calc(100dvh - 24px));
     padding:20px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);
     color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.3);overflow:auto}
   .file-transfer-dialog::backdrop{background:rgba(12,24,27,.55)}

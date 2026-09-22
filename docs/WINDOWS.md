@@ -1,34 +1,27 @@
-# Windows 便携上位机
+# Windows 上位机：构建、安装与访问
 
-Windows 版直接接管本机 USB 串口对应的 COM 端口，提供与 Linux 版相同的网页和 `serialctl` API。它不是远程访问 Linux 采集器的客户端。
+Windows 版独占接管本机 USB 串口的 COM 端口，提供网页与 `serialctl` agent API。Windows 需安装 Git、Python 3.12（含 `py` 启动器）；构建需要网络下载 Python 依赖，安装已构建的 ZIP 不需要 Python。
 
-在 Windows 上从 GitLab 拉取源码并构建 `seriald-windows-portable.zip`，解压后运行 `Start-seriald.cmd`。网页默认打开 `http://127.0.0.1:8898/`，注册表和日志写入解压目录下的 `data/`。请将整个目录放在可写位置；更新时替换程序文件并保留 `data/`。此程序只管理它能在本机看到的 COM 端口，不能与另一串口软件同时打开同一端口。
+在源码目录双击 `Build-seriald.cmd`，或运行 `powershell -ExecutionPolicy Bypass -File .\tools\build_windows.ps1`。构建脚本创建 `.venv\`、运行 Windows 模拟测试，并在 `dist\` 生成 `seriald-windows-portable.zip`。然后双击 `Install-seriald.cmd`；它把包安装到 `%LOCALAPPDATA%\seriald`，与源码和测试目录分开，更新时保留其中的 `data\`。自选位置可运行 `powershell -ExecutionPolicy Bypass -File .\tools\install_windows.ps1 -InstallDir D:\seriald`。安装前先关闭旧的 seriald 窗口，释放 COM 口。
 
-要让局域网内其他电脑访问，双击 `Start-seriald-LAN.cmd`，默认监听 `0.0.0.0:8898`；可在命令行传 `-Port 9000` 改端口。首次启动自动生成访问令牌，保存在 `data/lan-token.dpapi`（Windows 当前用户 DPAPI 加密），窗口会显示网页 Basic Auth 的用户名 `seriald` 和令牌。后续同一 Windows 用户启动会复用令牌；换用户或换电脑时需重新生成。浏览器使用 Windows 的实际 IP，例如 `http://192.168.1.20:8898/`。如被防火墙拦截，需一次性允许该端口的专用网络入站 TCP；不要将此无 TLS 的服务直接暴露到公网。
+安装目录提供三个启动入口，同一时间只运行其中一个：
 
-Agent 在同一台 Windows 电脑上可以运行 `serialctl.cmd devices`、`serialctl.cmd --device riscv-118 read` 等命令；其他电脑上的 agent 设置 `SERIALD_URL=http://<Windows-IP>:8898` 和 `SERIALD_TOKEN=<窗口显示的令牌>` 后使用 `serialctl.py`。脚本会自动设置服务端的 `SERIALD_AUTH_TOKEN`；Windows 防火墙仍需允许相应端口。对外暴露时应使用受信任网络或反向代理 TLS。
+| 入口 | 监听与访问 |
+| --- | --- |
+| `Start-seriald.cmd` | `127.0.0.1:8898`，本机无密码 |
+| `Start-seriald-LAN-Open.cmd` | `0.0.0.0:8898`，局域网无密码；仅用于可信网络 |
+| `Start-seriald-LAN.cmd` | `0.0.0.0:8898`，远程需要密码；本机浏览器和 agent 无密码 |
 
-Windows COM 采集使用 pySerial 的单个独占句柄，读写共享该句柄；Linux 仍保留单读者和独立只写描述符。设备身份来自板上序列号；COM 编号只作为可变节点。若适配器报告 USB 拓扑位置，程序以该位置锚定连接；否则退回 COM 编号。换板前点击“准备换版”。Windows 版不提供 Linux USB 自愈。
+有密码入口首次运行会生成令牌，按 Windows 用户 DPAPI 加密存于 `data\lan-token.dpapi`，窗口显示浏览器登录用户名 `seriald` 和密码。网页顶部“分享访问”会复制 24 小时有效的链接；访问者打开后获得浏览器会话，无须再次输入密码。分享链接具备完整操作权限，只发给可信的人。同机 agent 直接运行 `serialctl.cmd devices`，无需令牌。远程 agent 设置 `SERIALD_URL=http://<Windows-IP>:8898` 和 `SERIALD_TOKEN=<窗口中的令牌>`；也可把分享链接最后一段作为有效期内的 `SERIALD_TOKEN`。例如在远程 Windows 命令提示符中：
 
-开发者可在 Windows 的 PowerShell 中运行：
-
-```powershell
-py -3.12 -m venv .venv
-.venv\Scripts\python -m pip install -r requirements-windows.txt
-.venv\Scripts\python -m unittest discover -s tests -p test_windows_portable.py
-.venv\Scripts\python seriald_windows.py --no-browser
+```cmd
+set SERIALD_URL=http://192.168.1.20:8898
+set SERIALD_TOKEN=分享链接最后一段或窗口令牌
+py serialctl.py devices
 ```
 
-在 Windows 上安装 Git、Python 3.12（含 `py` 启动器）后，打开 PowerShell：
+远程 agent 只需复制仓库中的 `serialctl.py`，它不打开本机 COM 口。三个入口都不应直接暴露到公网；跨不可信网络需 TLS 代理。
 
-```powershell
-git clone git@gitlab.dc.com:bianbu/seriald.git
-cd seriald
-powershell -ExecutionPolicy Bypass -File .\tools\build_windows.ps1
-```
+更新时在源码目录执行 `git pull --ff-only`，再运行 `Build-seriald.cmd`、`Install-seriald.cmd`。不要在安装目录开发或直接在 `dist\seriald` 下运行测试；安装数据只保存在安装目录 `data\`。Windows 防火墙如阻止局域网访问，允许相应端口的专用网络入站 TCP。COM 口不能同时被其他串口软件占用；换板前在网页点击“准备换板”。
 
-后续更新源码时，在仓库目录先运行 `git pull --ff-only`，再运行同一构建命令。源码仓库与实际运行的解压目录分开放置，避免构建时碰到 `data/`。如果 Windows 尚未配置 GitLab SSH 密钥，使用你能访问的 HTTPS 克隆地址代替上面的 SSH 地址。
-
-脚本安装依赖、运行 Windows 模拟测试并生成 `dist\seriald-windows-portable.zip`；构建期间不会打开真实 COM 口。将 ZIP 解压到可写目录，进入其中的 `seriald` 文件夹，双击 `Start-seriald.cmd`（仅本机）或 `Start-seriald-LAN.cmd`（局域网）。先在网页或运行 `serialctl.cmd devices` 确认板子出现，再验证读写、拔插后的识别、SSH 和文件传输。`data/` 是持久数据，后续更新时保留它；不要在曾经运行过程序的 `dist/seriald` 目录直接重新构建。
-
-PyInstaller 必须在 Windows 上构建 Windows 可执行文件。仓库中的 `.github/workflows/windows-portable.yml` 是 GitHub Actions 配置；GitLab 不会自动运行它，目前以 Windows 本机构建为准。
+开发者可独立使用源码与临时 `SERIALD_BASE` 运行 `seriald_windows.py --no-browser`，但日常实机验收应先构建并安装，再通过安装目录的三个入口测试。PyInstaller 必须在 Windows 上生成 Windows 可执行文件；GitLab 不运行仓库中的 GitHub Actions 工作流。

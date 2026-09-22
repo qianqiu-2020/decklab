@@ -29,10 +29,12 @@ if (Test-Path $tokenFile) {
 }
 
 $env:SERIALD_AUTH_TOKEN = $token
+$env:SERIALD_TRUST_LOOPBACK = '1'
 Write-Host "seriald LAN: listening on 0.0.0.0:$Port"
 Write-Host "Open http://<Windows-IP>:$Port/ from another computer."
 Write-Host 'Browser username: seriald'
 Write-Host "Browser password: $token"
+Write-Host 'Local agents can use serialctl.cmd without a token; remote agents need SERIALD_TOKEN.'
 Write-Host 'Keep this window open. Allow inbound TCP on the selected port for Private networks in Windows Firewall.'
 & $exe --bind 0.0.0.0 --port $Port
 if ($LASTEXITCODE -ne 0) { throw "seriald exited with code $LASTEXITCODE" }

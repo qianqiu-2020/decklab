@@ -31,7 +31,8 @@ try {
         seriald_windows.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 
-    Copy-Item Start-seriald.cmd, Start-seriald-LAN.cmd, Start-seriald-LAN.ps1, serialctl.cmd -Destination $bundle
+    Copy-Item Start-seriald.cmd, Start-seriald-LAN.cmd, Start-seriald-LAN.ps1, `
+        Start-seriald-LAN-Open.cmd, Start-seriald-LAN-Open.ps1, serialctl.cmd -Destination $bundle
     Copy-Item docs\WINDOWS.md -Destination (Join-Path $bundle 'README.md')
     & (Join-Path $bundle 'seriald.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }
@@ -41,7 +42,7 @@ try {
     $archive = Join-Path $root 'dist\seriald-windows-portable.zip'
     Compress-Archive -Path $bundle -DestinationPath $archive -Force
     Write-Host "Built $archive"
-    Write-Host 'Unzip it on the Windows host, then run seriald\Start-seriald.cmd.'
+    Write-Host 'Run Install-seriald.cmd from the source tree to install/update outside the build directory.'
 } finally {
     Pop-Location
 }

@@ -3,11 +3,16 @@ import argparse
 import base64
 import binascii
 import hmac
+import hashlib
 import http.client
 import http.server
+import ipaddress
 import json
 import os
+import secrets
 import socket
+import time
+from http.cookies import SimpleCookie
 from urllib.parse import urlparse
 
 from .config import AUTH_TOKEN, SOCKET, STATIC
@@ -31,7 +36,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     collector_socket = SOCKET
     static_root = STATIC
     auth_token = AUTH_TOKEN
-    allowed_static = frozenset(('/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/ui-common.js', '/static/terminal-policy.js',
+    trust_loopback = False
+    share_seconds = 24 * 60 * 60
+    allowed_static = frozenset(('/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js',
                                 '/static/app.css', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
 
@@ -44,9 +51,15 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _authorized(self):
+    def _owner_authorized(self):
         if not self.auth_token:
             return True
+        if self.trust_loopback:
+            try:
+                if ipaddress.ip_address(self.client_address[0]).is_loopback:
+                    return True
+            except (AttributeError, ValueError, IndexError):
+                pass
         value = self.headers.get('Authorization', '')
         supplied = ''
         if value.startswith('Bearer '):
@@ -60,6 +73,49 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             except (binascii.Error, UnicodeDecodeError, ValueError):
                 supplied = ''
         return hmac.compare_digest(supplied, self.auth_token)
+
+    def _authorized(self):
+        if self._owner_authorized():
+            return True
+        value = self.headers.get('Authorization', '')
+        if value.startswith('Bearer ') and self._valid_share(value[7:]):
+            return True
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get('Cookie', ''))
+            session = cookie.get('seriald_share')
+        except Exception:
+            session = None
+        return bool(session and self._valid_share(session.value))
+
+    def _new_share(self):
+        body = '%d.%s' % (int(time.time()) + self.share_seconds, secrets.token_urlsafe(12))
+        mac = hmac.new(self.auth_token.encode(), body.encode(), hashlib.sha256).hexdigest()
+        return body + '.' + mac
+
+    def _valid_share(self, token):
+        if not self.auth_token or len(token) > 160:
+            return False
+        try:
+            expiry, nonce, signature = token.split('.')
+            if not expiry.isdigit() or not nonce or not signature or int(expiry) < time.time():
+                return False
+            body = expiry + '.' + nonce
+            expected = hmac.new(self.auth_token.encode(), body.encode(), hashlib.sha256).hexdigest()
+            return hmac.compare_digest(signature, expected)
+        except (AttributeError, ValueError):
+            return False
+
+    def _accept_share(self, token):
+        if not self._valid_share(token):
+            return self._json(403, {'error': '分享链接无效或已过期'})
+        self.send_response(303)
+        self.send_header('Location', '/')
+        self.send_header('Set-Cookie', 'seriald_share=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax' %
+                         (token, max(0, int(token.split('.')[0]) - int(time.time()))))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
 
     def _require_auth(self):
         if self._authorized():
@@ -147,9 +203,14 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 connection.close()
 
     def do_GET(self):
+        route = urlparse(self.path).path
+        if route.startswith('/share/'):
+            return self._accept_share(route[len('/share/'):])
         if self._require_auth():
             return
-        route = urlparse(self.path).path
+        if route == '/api/access':
+            return self._json(200, {'share_enabled': bool(self.auth_token),
+                                    'loopback_open': bool(self.trust_loopback)})
         if route == '/healthz':
             return self._json(200, {'ok': True, 'role': 'control', 'pid': os.getpid(),
                                     'version': __version__,
@@ -166,6 +227,13 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         if self._require_auth():
             return
+        if urlparse(self.path).path == '/api/share-link':
+            if not self.auth_token:
+                return self._json(400, {'error': '当前服务未启用密码'})
+            if not self._owner_authorized():
+                return self._json(403, {'error': '只有主访问凭证可以创建分享链接'})
+            return self._json(200, {'path': '/share/' + self._new_share(),
+                                    'expires_in': self.share_seconds})
         if urlparse(self.path).path.startswith('/api/'):
             return self._proxy()
         return self._json(404, {'error': 'not found'})
@@ -175,7 +243,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         return os.path.join(self.static_root, *route.split('/'))
 
     def end_headers(self):
-        if urlparse(self.path).path in ('/', '', '/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/ui-common.js',
+        if urlparse(self.path).path in ('/', '', '/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
                                         '/static/terminal-policy.js', '/static/app.css'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()

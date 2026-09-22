@@ -59,8 +59,9 @@ const server = http.createServer((req, res) => {
     rows: [{ type: 'equal', left_no: 1, left: 'U-Boot', right_no: 1, right: 'U-Boot' },
       { type: 'insert', left_no: null, left: '', right_no: 2, right: 'mmc timeout' }], truncated: false });
   if (u.pathname === '/api/log') return json({ data: log, off: log.length, start_off: 0, size: log.length, more: false });
+  if (u.pathname === '/api/access') return json({ share_enabled: false });
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/app.css', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  if (!['/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/app.css', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : 'text/html');
   res.end(fs.readFileSync(path.join(root, route)));
 });
@@ -106,6 +107,8 @@ let chrome, ws;
     'identity details should start collapsed to leave room for the terminal');
   await evaluate('document.querySelector("#b-file-transfer").click()');
   assert.equal(await evaluate('document.querySelector("#file-transfer-dialog").open'), true);
+  assert.equal(await evaluate('document.querySelector("#file-transfer-dialog").matches(":modal")'), false,
+    'transfer must leave the rest of the workbench interactive');
   assert.ok(await evaluate('document.querySelectorAll("#ft-target-device option").length >= 2'));
   await evaluate('document.querySelector("#ft-mode").value="copy"; document.querySelector("#ft-mode").dispatchEvent(new Event("change"))');
   assert.equal(await evaluate('document.querySelector("#ft-source-field").hidden'), false);
@@ -116,13 +119,13 @@ let chrome, ws;
     return {left:r.left,top:r.top,x:r.left+60,y:r.top+22}; })()`);
   await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:beforeDrag.x,y:beforeDrag.y});
   await rpc('Input.dispatchMouseEvent',{type:'mousePressed',x:beforeDrag.x,y:beforeDrag.y,button:'left',clickCount:1});
-  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:beforeDrag.x+50,y:beforeDrag.y+30,button:'left',buttons:1});
-  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:beforeDrag.x+110,y:beforeDrag.y+65,button:'left',buttons:1});
-  await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',x:beforeDrag.x+110,y:beforeDrag.y+65,button:'left',clickCount:1});
+  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:beforeDrag.x-50,y:beforeDrag.y+30,button:'left',buttons:1});
+  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:beforeDrag.x-110,y:beforeDrag.y+65,button:'left',buttons:1});
+  await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',x:beforeDrag.x-110,y:beforeDrag.y+65,button:'left',clickCount:1});
   const afterDrag=await evaluate(`(() => { const r=document.querySelector('#file-transfer-dialog').getBoundingClientRect();
     return {left:r.left,top:r.top}; })()`);
-  assert.ok(afterDrag.left > beforeDrag.left+50 && afterDrag.top > beforeDrag.top+25,
-    'transfer dialog header should drag the modal');
+  assert.ok(afterDrag.left < beforeDrag.left-50 && afterDrag.top > beforeDrag.top+25,
+    'transfer dialog header should drag the floating panel');
   await evaluate('document.querySelector("#ft-close").click()');
   assert.deepEqual(posts,[], 'opening transfer controls must not write to a board');
   await evaluate('document.querySelector("#b-boot-compare").click()');
