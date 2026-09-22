@@ -514,11 +514,18 @@ class Device:
             return False, err
         if not self._wait(base, r'(?m)^' + re.escape(end) + r'\r?\n', timeout):
             return False, '等待板子完整响应超时'
-        raw = ANSI.sub('', self._since(base)).replace('\r\n', '\n')
+        # Firmware/shells can emit a standalone CR or XON/XOFF around a marker.
+        # Normalize only this command's parsed copy; the shared terminal keeps
+        # the exact received bytes for interactive display and archived logs.
+        raw = ANSI.sub('', self._since(base))
+        raw = re.sub(r'[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]', '', raw)
+        raw = raw.replace('\r\n', '\n').replace('\r', '\n')
         match = re.search(r'(?m)^' + re.escape(begin) + r'\n([\s\S]*?)^'
                           + re.escape(end) + r'\n', raw)
         if not match:
-            return False, '响应帧不完整(可能超出缓冲上限)'
+            with self.cv:
+                truncated = base < self.base
+            return False, ('响应帧超出缓冲上限' if truncated else '响应起始帧缺失或行结束符异常')
         return True, match.group(1)
 
     def run_probe(self, init_boot_marker=False):

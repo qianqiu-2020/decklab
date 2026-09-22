@@ -75,10 +75,17 @@ class FramingTests(DeviceFixture):
         self.assertTrue(command.endswith(self.device.newline))
         self.assertEqual(wait.call_count, 1)
 
+    def test_standalone_carriage_return_and_flow_control_around_markers(self):
+        response = ('echo\r\n\x11\r' + BEGIN + '\r' + BODY.replace('\n', '\r\n')
+                    + '\x13\r\n' + END + '\r\n')
+        (ok, raw), _, _ = self.run_frame(response)
+        self.assertTrue(ok, raw)
+        self.assertEqual(raw, BODY + '\n')
+
     def test_missing_begin_marker_rejects_frame(self):
         (ok, error), _, wait = self.run_frame(BODY + END + '\n')
         self.assertFalse(ok)
-        self.assertIn('帧不完整', error)
+        self.assertIn('起始帧缺失', error)
         self.assertEqual(wait.call_count, 1)
 
     def test_partial_end_marker_and_missing_newline_do_not_complete_wait(self):
