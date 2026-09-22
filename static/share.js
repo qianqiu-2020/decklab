@@ -210,16 +210,12 @@
     button.disabled = true;
     status.textContent = '正在创建分享链接…';
     try {
-      var host = location.hostname;
-      if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
-        host = window.prompt('输入这台电脑的局域网 IP，以便其他人打开链接：', '');
-        if (!host) { status.textContent = '未创建分享链接'; return; }
-      }
+      var lan = lanUrl();
+      if (!lan) throw new Error('未发现局域网 IP，请先确认上位机已连接局域网');
       var response = await fetch('/api/share-link', { method: 'POST' });
       var result = await response.json();
       if (!response.ok || !result.path) throw new Error(result.error || '创建失败');
-      var url = new URL(result.path, location.origin);
-      url.hostname = host;
+      var url = new URL(result.path, lan);
       try { await copy(url.href); status.textContent = '链接已复制，24 小时有效'; }
       catch (_) {
         window.prompt('复制分享链接（24 小时有效）：', url.href);

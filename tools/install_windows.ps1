@@ -53,7 +53,10 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $target 'data') -Force | Out-Null
     Write-Host "Installed seriald to $target"
     Write-Host "Runtime data stays in $(Join-Path $target 'data')"
-    Write-Host 'Start one of: Start-seriald.cmd, Start-seriald-LAN-Open.cmd, Start-seriald-LAN.cmd (password).'
+    Write-Host 'Start one of these files in the installed directory:'
+    foreach ($name in @('Start-seriald.cmd', 'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN.cmd')) {
+        Write-Host "  $(Join-Path $target $name)"
+    }
 } catch {
     $installError = $_
     if ($mutationStarted) {

@@ -7,7 +7,8 @@ Windows 版独占接管本机 USB 串口的 COM 端口，提供网页与 `serial
 安装脚本先备份旧程序文件，更新失败时回滚；`data\` 始终留在安装目录。若回滚本身失败，
 错误会给出临时备份目录，供手动恢复。
 
-安装目录提供三个启动入口，同一时间只运行其中一个：
+安装目录提供三个启动入口，同一时间只运行其中一个。源码目录只有构建与安装入口；
+`Start-seriald*.cmd` 只存在于打包产物 `dist\seriald\` 和安装目录中。安装完成会打印三个启动脚本的完整路径。
 
 | 入口 | 监听与访问 |
 | --- | --- |
@@ -15,7 +16,7 @@ Windows 版独占接管本机 USB 串口的 COM 端口，提供网页与 `serial
 | `Start-seriald-LAN-Open.cmd` | `0.0.0.0:8898`，局域网无密码；仅用于可信网络 |
 | `Start-seriald-LAN.cmd` | `0.0.0.0:8898`，远程需要密码；本机浏览器和 agent 无密码 |
 
-有密码入口首次运行会生成令牌，按 Windows 用户 DPAPI 加密存于 `data\lan-token.dpapi`，窗口显示浏览器登录用户名 `seriald` 和密码。网页顶部“分享访问”会复制 24 小时有效的链接；访问者打开后获得浏览器会话，无须再次输入密码。分享链接具备完整操作权限，只发给可信的人。同机 agent 直接运行 `serialctl.cmd devices`，无需令牌。远程 agent 设置 `SERIALD_URL=http://<Windows-IP>:8898` 和 `SERIALD_TOKEN=<窗口中的令牌>`；也可把分享链接最后一段作为有效期内的 `SERIALD_TOKEN`。例如在远程 Windows 命令提示符中：
+有密码入口首次运行会生成令牌，按 Windows 用户 DPAPI 加密存于 `data\lan-token.dpapi`，窗口显示浏览器登录用户名 `seriald` 和密码。网页顶部“分享访问”会自动选择上位机局域网 IP 并复制 24 小时有效的链接；访问者打开后获得浏览器会话，无须再次输入密码。分享链接具备完整操作权限，只发给可信的人。同机 agent 直接运行 `serialctl.cmd devices`，无需令牌。远程 agent 设置 `SERIALD_URL=http://<Windows-IP>:8898` 和 `SERIALD_TOKEN=<窗口中的令牌>`；也可把分享链接最后一段作为有效期内的 `SERIALD_TOKEN`。例如在远程 Windows 命令提示符中：
 
 给 Claude Code、Codex 等 Agent 使用时，网页点击“分享给 Agent”，选择当前设备或全部设备并复制接入文本。
 它会提供独立令牌及当前主机托管的 `serialctl.py`、`seriald-board` skill 下载地址。

@@ -27,9 +27,10 @@ async function main() {
   const fetch = async (route, options = {}) => {
     calls.push({ route, options });
     let body = {};
-    if (route === '/api/access') body = { share_enabled: false, agent_share_enabled: true,
+    if (route === '/api/access') body = { share_enabled: true, agent_share_enabled: true,
       open_access: true, lan_hosts: ['10.0.120.161'] };
     else if (route === '/api/agent-grants') body = { grants: active.slice() };
+    else if (route === '/api/share-link') body = { path: '/share/browser-token' };
     else if (route === '/api/agent-share') {
       const request = JSON.parse(options.body);
       const grant = { id: 'abc123', actor: 'shared-agent/abc123', scope: request.scope,
@@ -47,7 +48,8 @@ async function main() {
   const context = {
     document: { getElementById: byId, createElement: () => new Element(), body: new Element(),
       execCommand: command => { assert.equal(command, 'copy'); legacyCopies++; return true; } },
-    window: { SerialdShareSelection: () => ({ key: 'milkv', label: 'milkv', serial: 'SN1' }) },
+    window: { SerialdShareSelection: () => ({ key: 'milkv', label: 'milkv', serial: 'SN1' }),
+      prompt: () => { throw new Error('LAN IP should be discovered without prompting'); } },
     navigator: { clipboard: { writeText: async text => {
       if (rejectClipboard) throw new Error('NotAllowedError');
       clipboard.push(text);
@@ -83,6 +85,8 @@ async function main() {
   rejectClipboard = false;
   await byId('agent-share-copy').click();
   assert.equal(clipboard[0], text);
+  await byId('b-share').click();
+  assert.equal(clipboard.at(-1), 'http://10.0.120.161:8898/share/browser-token');
 
   const row = byId('agent-share-grants').children[0];
   await row.children[1].click();

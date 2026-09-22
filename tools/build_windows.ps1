@@ -41,8 +41,11 @@ try {
         seriald_windows.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 
-    Copy-Item Start-seriald.cmd, Start-seriald-LAN.cmd, Start-seriald-LAN.ps1, `
-        Start-seriald-LAN-Open.cmd, Start-seriald-LAN-Open.ps1, serialctl.cmd -Destination $bundle
+    $launchers = Join-Path $root 'tools\windows-launchers'
+    foreach ($name in @('Start-seriald.cmd', 'Start-seriald-LAN.cmd', 'Start-seriald-LAN.ps1',
+                       'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN-Open.ps1', 'serialctl.cmd')) {
+        Copy-Item -LiteralPath (Join-Path $launchers $name) -Destination $bundle
+    }
     Copy-Item docs\WINDOWS.md -Destination (Join-Path $bundle 'README.md')
     & (Join-Path $bundle 'seriald.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }
