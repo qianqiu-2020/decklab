@@ -127,14 +127,24 @@
   input::placeholder{color:var(--ink-3)}
   input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
-  .terminal-tools{display:flex;align-items:center;gap:6px;padding:7px 11px;
-    border-bottom:1px solid var(--line);background:var(--surface)}
-  .terminal-tools label{font-size:12px;color:var(--ink-3);white-space:nowrap}
-  .terminal-tools input{width:min(250px,30vw);height:31px;padding:5px 9px;font-family:"IBM Plex Mono",monospace}
-  .terminal-tools button{padding:4px 9px;height:31px}
+  .terminal-tools{display:flex;align-items:center;gap:8px;padding:7px 11px;
+    border-bottom:1px solid var(--line);background:var(--surface);overflow-x:auto}
+  .terminal-search-tools,.terminal-nav-tools,.terminal-extra-tools{display:flex;align-items:center;gap:4px;flex:none}
+  .terminal-search-tools{padding:2px 4px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
+  .terminal-search-tools label{width:22px;text-align:center;color:var(--ink-3)}
+  .terminal-search-tools input{width:clamp(145px,16vw,220px);height:28px;padding:4px 6px;
+    border:0;background:transparent;font-family:"IBM Plex Mono",monospace}
+  .terminal-search-tools input:focus{outline:0}
+  .terminal-search-tools:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .terminal-search-tools button{width:26px;height:27px;padding:0;border:0;background:transparent;font-size:16px}
+  .terminal-search-tools button:disabled{opacity:.3}
+  .terminal-tools .tool-icon{display:inline-block;min-width:16px;text-align:center;font-size:16px;line-height:1}
+  .terminal-nav-tools{padding-left:8px;border-left:1px solid var(--line)}
+  .terminal-extra-tools{padding-left:8px;border-left:1px solid var(--line)}
+  .terminal-tools button{height:31px;padding:4px 8px;white-space:nowrap}
+  .terminal-nav-tools button,.terminal-extra-tools button{display:inline-flex;align-items:center;gap:5px}
+  .terminal-nav-tools button[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
   .terminal-tools #terminal-search-status{font:11.5px "IBM Plex Mono",monospace;color:var(--ink-3);white-space:nowrap}
-  .terminal-tools #b-records{margin-left:auto}
-  .terminal-tools #b-records[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent)}
   .terminal-tools #d-status{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
     white-space:nowrap;font-size:12px;color:var(--ink-3)}
   .console-layout{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;min-height:0;flex:1;overflow:hidden}
@@ -389,9 +399,8 @@
     .detail .tabs button{flex:none}
     .detail>.info{max-height:58px;overflow:auto}
     .terminal-tools{overflow-x:auto;padding:5px 8px}
-    .terminal-tools input{width:130px;flex:none}
+    .terminal-search-tools input{width:130px;flex:none}
     .terminal-tools button,.terminal-tools label{flex:none}
-    .terminal-tools #b-records{margin-left:0}
     .sendrow{flex-wrap:nowrap;overflow-x:auto;padding:6px 8px}
     .sendrow input[type="text"]{min-width:120px}
     .sendrow button,.sendrow label{flex:none}

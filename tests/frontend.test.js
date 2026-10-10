@@ -86,7 +86,7 @@ function harness(options = {}) {
     onSelectionChange(fn) { this.selection = fn; }
     attachCustomKeyEventHandler(fn) { this.key = fn; }
     getSelection() { return ''; }
-    clearSelection() {}
+    clearSelection() { this.selected = undefined; }
     select(col, row, length) { this.selected = { col, row, length }; }
     scrollToLine(row) { this.scrolledToLine = row; }
     focus() {}
@@ -684,6 +684,21 @@ test('record tabs avoid scrolling through unrelated history', async () => {
   assert.equal(h.get('record-panel-commands').hidden, false);
 });
 
+test('log and input shortcuts open their own panel and can close it', async () => {
+  const h = await setup(); h.select('A');
+  h.get('b-command-nav').click();
+  assert.equal(h.get('d-records').hidden, false);
+  assert.equal(h.get('record-panel-inputs').hidden, false);
+  assert.equal(h.get('b-command-nav').attributes['aria-pressed'], 'true');
+  h.get('b-records').click();
+  assert.equal(h.get('record-panel-logs').hidden, false);
+  assert.equal(h.get('b-records').attributes['aria-pressed'], 'true');
+  assert.equal(h.get('b-command-nav').attributes['aria-pressed'], 'false');
+  h.get('b-records').click();
+  assert.equal(h.get('d-records').hidden, true);
+  assert.equal(h.get('b-records').attributes['aria-pressed'], 'false');
+});
+
 test('online boards precede pending ports and historical boards', async () => {
   const h = harness();
   h.take('/api/devices').resolve({ devices: [
@@ -858,6 +873,11 @@ test('terminal search selects matches and wraps in both directions', async () =>
   assert.deepEqual(terminal.selected, { col: 6, row: 0, length: 4 });
   h.get('terminal-search-prev').click();
   assert.deepEqual(terminal.selected, { col: 0, row: 2, length: 4 });
+  h.get('terminal-search-clear').click();
+  assert.equal(h.get('terminal-search').value, '');
+  assert.equal(h.get('terminal-search-status').textContent, '');
+  assert.equal(h.get('terminal-search-clear').disabled, true);
+  assert.equal(terminal.selected, undefined);
 });
 
 test('live serial stays at firmware-compatible 80 columns and redraw replays from zero', async () => {

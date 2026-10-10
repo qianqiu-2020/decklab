@@ -155,6 +155,7 @@
     var ctx = view;
     if (!isCurrent(ctx)) return;
     var query = $('terminal-search').value;
+    $('terminal-search-clear').disabled = !query;
     if (!query) {
       ctx.term.clearSelection(); ctx.searchQuery = ''; ctx.searchMatch = -1;
       $('terminal-search-status').textContent = ''; return;
@@ -179,6 +180,7 @@
   function clearTerminalSearch(focusTerminal) {
     $('terminal-search').value = '';
     $('terminal-search-status').textContent = '';
+    $('terminal-search-clear').disabled = true;
     if (view && view.term) {
       view.searchQuery = ''; view.searchMatch = -1; view.term.clearSelection();
       if (focusTerminal) view.term.focus();
@@ -1388,13 +1390,14 @@
   });
   $('b-expand').addEventListener('click', function () {
     var expanded = document.body.classList.toggle('terminal-max');
-    $('b-expand').textContent = expanded ? '还原工作台' : '放大终端';
+    $('b-expand-label').textContent = expanded ? '还原工作台' : '放大终端';
     $('b-expand').setAttribute('aria-pressed', expanded ? 'true' : 'false');
     setTimeout(resizeTerm, 0);
   });
   $('terminal-search').addEventListener('input', function () {
     if (view) { view.searchQuery = ''; view.searchMatch = -1; }
     $('terminal-search-status').textContent = '';
+    $('terminal-search-clear').disabled = !$('terminal-search').value;
   });
   $('terminal-search').addEventListener('keydown', function (event) {
     if (event.key === 'Enter') {
@@ -1420,6 +1423,8 @@
       $('record-panel-' + tab).hidden = !selected;
     });
     $('d-records').scrollTop = 0;
+    $('b-records').setAttribute('aria-pressed', name === 'logs' && !$('d-records').hidden ? 'true' : 'false');
+    $('b-command-nav').setAttribute('aria-pressed', name === 'inputs' && !$('d-records').hidden ? 'true' : 'false');
     if (name === 'logs' && !$('d-records').hidden) loadLogs();
     if (name === 'inputs' && view) renderCommandNav(view);
   }
@@ -1428,7 +1433,15 @@
     $('console-layout').classList.toggle('records-open', open);
     $('b-records').setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) setRecordsTab(recordsTab);
+    else {
+      $('b-records').setAttribute('aria-pressed', 'false');
+      $('b-command-nav').setAttribute('aria-pressed', 'false');
+    }
     setTimeout(resizeTerm, 0);
+  }
+  function toggleRecordsTab(name) {
+    if (!$('d-records').hidden && recordsTab === name) setRecordsOpen(false);
+    else { recordsTab = name; setRecordsOpen(true); }
   }
   var recordTabs = ['logs', 'inputs', 'sessions', 'events', 'commands'];
   recordTabs.forEach(function (tab, index) {
@@ -1444,8 +1457,7 @@
     });
   });
   $('b-command-nav').addEventListener('click', function () {
-    setRecordsOpen(true);
-    setRecordsTab('inputs');
+    toggleRecordsTab('inputs');
   });
   $('b-file-transfer').addEventListener('click', function () {
     if (!selKey) return;
@@ -1481,7 +1493,7 @@
       archiveState.mode = mode; renderArchive(ctx);
     });
   });
-  $('b-records').addEventListener('click', function () { setRecordsOpen($('d-records').hidden); });
+  $('b-records').addEventListener('click', function () { toggleRecordsTab('logs'); });
   $('b-records-close').addEventListener('click', function () { setRecordsOpen(false); });
   /* ---------- 动作 ---------- */
   $('b-send').addEventListener('click', function () {
@@ -1630,7 +1642,7 @@
     $('workspace').classList.toggle('selected', false);
     document.body.classList.toggle('detail-open', false);
     document.body.classList.remove('terminal-max');
-    $('b-expand').textContent = '放大终端';
+    $('b-expand-label').textContent = '放大终端';
     $('b-expand').setAttribute('aria-pressed', 'false');
     markSelected(); pollDevices();
   });

@@ -56,18 +56,24 @@
     <div class="tabs" id="d-tabs"></div>
     <div class="info" id="d-info" hidden></div>
     <div class="terminal-tools">
-      <button id="b-expand" type="button" aria-pressed="false" title="收起设备栏和信息面板，为固件菜单腾出屏幕高度">放大终端</button>
-      <label for="terminal-search">查找终端</label>
-      <input id="terminal-search" type="text" placeholder="Ctrl+F" autocomplete="off" spellcheck="false">
-      <button id="terminal-search-prev" type="button" title="上一个匹配（Shift+Enter）">↑</button>
-      <button id="terminal-search-next" type="button" title="下一个匹配（Enter）">↓</button>
-      <button id="terminal-search-clear" type="button">清除</button>
+      <div class="terminal-search-tools" role="search" aria-label="终端内容搜索">
+        <label for="terminal-search" class="tool-icon" aria-hidden="true">⌕</label>
+        <input id="terminal-search" type="text" placeholder="搜索终端 · Ctrl+F" aria-label="搜索终端内容" autocomplete="off" spellcheck="false">
+        <button id="terminal-search-prev" type="button" title="上一个匹配（Shift+Enter）" aria-label="上一个匹配">↑</button>
+        <button id="terminal-search-next" type="button" title="下一个匹配（Enter）" aria-label="下一个匹配">↓</button>
+        <button id="terminal-search-clear" type="button" title="清空搜索词和匹配高亮" aria-label="清空搜索词和匹配高亮" disabled>×</button>
+      </div>
       <span id="terminal-search-status"></span>
-      <button id="b-redraw" type="button" title="清空模拟器并从采集缓冲完整重放，修复 EDK2 / GRUB 等全屏界面">重绘</button>
-      <button id="b-command-nav" type="button" title="在当前终端缓冲中按 shell 命令跳转">输入导航</button>
-      <button id="b-file-transfer" type="button" title="通过串口上传、下载或在开发板之间复制文件">文件传输</button>
-      <button id="b-boot-compare" type="button" title="比较同一块或不同开发板的两次启动日志">启动对比</button>
-      <button id="b-records" type="button" aria-expanded="false">记录与归档</button>
+      <div class="terminal-nav-tools" aria-label="侧栏导航">
+        <button id="b-records" type="button" aria-expanded="false" aria-pressed="false" title="打开串口日志归档"><span class="tool-icon" aria-hidden="true">▤</span>串口日志</button>
+        <button id="b-command-nav" type="button" aria-pressed="false" title="在当前终端缓冲中按 shell 命令跳转"><span class="tool-icon" aria-hidden="true">☷</span>输入导航</button>
+      </div>
+      <div class="terminal-extra-tools" aria-label="终端工具">
+        <button id="b-boot-compare" type="button" title="比较同一块或不同开发板的两次启动日志"><span class="tool-icon" aria-hidden="true">◫</span>启动对比</button>
+        <button id="b-file-transfer" type="button" title="通过串口上传、下载或在开发板之间复制文件"><span class="tool-icon" aria-hidden="true">⇄</span>文件传输</button>
+        <button id="b-redraw" type="button" title="清空模拟器并从采集缓冲完整重放，修复 EDK2 / GRUB 等全屏界面"><span class="tool-icon" aria-hidden="true">↻</span>重绘</button>
+        <button id="b-expand" type="button" aria-pressed="false" title="收起设备栏和信息面板，为固件菜单腾出屏幕高度"><span class="tool-icon" aria-hidden="true">⛶</span><span id="b-expand-label">放大终端</span></button>
+      </div>
       <span id="d-status" role="status"></span>
     </div>
     <div class="console-layout" id="console-layout">
