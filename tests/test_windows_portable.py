@@ -124,6 +124,20 @@ class WindowsPortableTests(unittest.TestCase):
             self.assertIsNone(device.fd)
             handle.close.assert_called_once()
 
+    def test_quiet_com_port_removed_is_closed_for_rediscovery(self):
+        manager = windows_manager.WindowsManager()
+        device = device_module.Device('usb-1-4.2-UART', 'COM7', manager)
+        device.identity, device.present = (1, 2, 3), True
+        handle = mock.Mock(in_waiting=0, is_open=True)
+        handle.read.return_value = b''
+        with mock.patch.object(manager, '_matches', side_effect=[True, True, False]), \
+                mock.patch.object(windows_manager.serial, 'Serial', return_value=handle), \
+                mock.patch.object(device, '_say'):
+            manager._capture(device)
+        self.assertIsNone(device.fd)
+        self.assertFalse(device.present)
+        handle.close.assert_called_once()
+
     def test_com_write_rejects_short_write(self):
         device = device_module.Device('usb-1', 'COM7')
         device.present = True

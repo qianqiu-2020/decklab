@@ -60,14 +60,25 @@ def boot_epochs(root, files, cache=None):
         fingerprint = (root, stat.st_dev, stat.st_ino, size, stat.st_mtime_ns)
         cached = cache.get(entry['name']) if cache is not None else None
         if cached is not None and cached[0] == fingerprint:
-            markers, file_last_stamp = cached[1:]
+            markers, file_last_stamp = cached[1:3]
         else:
-            markers, file_last_stamp = [], ''
+            # Growing daily logs are indexed from the last complete line.
+            # An incomplete trailing line is re-read once more bytes arrive.
+            same_file = (cached is not None and len(cached) == 4
+                         and cached[0][:3] == fingerprint[:3]
+                         and cached[0][3] <= size)
+            markers = list(cached[1]) if same_file else []
+            file_last_stamp = cached[2] if same_file else ''
+            resume = cached[3] if same_file else 0
             with open(path, 'rb') as source:
+                source.seek(resume)
                 while True:
                     offset = source.tell()
                     line = source.readline()
                     if not line:
+                        break
+                    if not line.endswith(b'\n'):
+                        resume = offset
                         break
                     stamp = _timestamp(line)
                     if stamp:
@@ -75,8 +86,9 @@ def boot_epochs(root, files, cache=None):
                     kind = _marker(line)
                     if kind:
                         markers.append((offset, stamp, kind))
+                    resume = source.tell()
             if cache is not None:
-                cache[entry['name']] = (fingerprint, markers, file_last_stamp)
+                cache[entry['name']] = (fingerprint, markers, file_last_stamp, resume)
         if file_last_stamp:
             last_stamp = file_last_stamp
         for offset, stamp, kind in markers:

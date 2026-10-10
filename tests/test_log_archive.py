@@ -73,6 +73,44 @@ class LogArchiveTests(unittest.TestCase):
             output.write(b'2026-09-21 09:00:00  Linux version 6.18.0\n')
         self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 2)
 
+    def test_growing_archive_reads_only_new_complete_lines(self):
+        path = self.root / 'serial-20260921.log'
+        path.write_bytes(b'2026-09-21 08:00:00  U-Boot 2024.10\n' + b'x' * 200000 + b'\n')
+        cache = {}
+        self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 1)
+        previous_end = cache[path.name][3]
+        with path.open('ab') as output:
+            output.write(b'2026-09-21 09:00:00  Linux version 6.18.0\n')
+        seeks = []
+        real_open = open
+        class TrackedFile:
+            def __init__(self, filename):
+                self.source = real_open(filename, 'rb')
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.source.close()
+            def seek(self, offset):
+                seeks.append(offset)
+                return self.source.seek(offset)
+            def tell(self):
+                return self.source.tell()
+            def readline(self):
+                return self.source.readline()
+        with mock.patch('seriald_core.log_archive.open', side_effect=lambda filename, mode: TrackedFile(filename), create=True):
+            self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 2)
+        self.assertEqual(seeks, [previous_end])
+        self.assertGreater(cache[path.name][3], 200000)
+
+    def test_incomplete_boot_banner_is_indexed_after_newline(self):
+        path = self.root / 'serial-20260921.log'
+        path.write_bytes(b'2026-09-21 08:00:00  U-Boot 2024.')
+        cache = {}
+        self.assertEqual(boot_epochs(str(self.root), self.files(), cache=cache), [])
+        with path.open('ab') as output:
+            output.write(b'10\n')
+        self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

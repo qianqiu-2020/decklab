@@ -8,6 +8,7 @@
   var sessionPage = 0, eventPage = 0;
   var recordsTab = 'logs';
   var archiveState = { key: '', mode: 'date', date: '', bootId: '' };
+  var ARCHIVE_REFRESH_MS = 15000;
   var ACTIVITY_PAGE_SIZE = 10;
   var DEFAULT_TERMINAL_FONT_SIZE = 14.5;
   var takenOver = {};
@@ -66,6 +67,7 @@
                 readonly: selectedSession.kind === 'log' || isAgentSession,
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
+                logsSeq: 0,
                 inputQueue: [], inputSending: false, inputTimer: 0,
                 navEntries: [], navSelected: -1, navTimer: 0, navRendered: false,
                 commandDecorations: [], commandColorSignature: '',
@@ -551,7 +553,18 @@
       var s2 = document.createElement('span'); s2.textContent = '末次 ' + ago(d.last_rx || d.last_seen);
       var s3 = document.createElement('span'); s3.textContent = d.by_path || d.last_path || '';
       stat.appendChild(s1); stat.appendChild(s2); stat.appendChild(s3);
+      if (d.alive) {
+        var checked = document.createElement('span');
+        checked.textContent = '采集检查 ' + ago(d.last_health_check);
+        stat.appendChild(checked);
+      }
       card.appendChild(stat);
+      if (d.alive && Date.now() / 1000 - (d.last_rx || d.capture_started || 0) > 300) {
+        var quiet = document.createElement('div'); quiet.className = 'last';
+        quiet.textContent = '串口已静默 ' + ago(d.last_rx || d.capture_started)
+          + '；采集器仍在检查连接，板子也可能只是没有输出';
+        card.appendChild(quiet);
+      }
 
       if (d.rescue_note) {                       // 自愈结果挂到卡片上,别让人去翻日志
         var rn = document.createElement('div'); rn.className = 'last';
@@ -1172,22 +1185,29 @@
   function loadLogs() {
     var ctx = view;
     if (!isCurrent(ctx)) return;
+    var seq = ++ctx.logsSeq;
     fetch('/api/logs?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || ''), { cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (!isCurrent(ctx) || (d.key && d.key !== ctx.key)) return;
+        if (!isCurrent(ctx) || seq !== ctx.logsSeq || (d.key && d.key !== ctx.key)) return;
         if (archiveState.key !== ctx.key) {
           archiveState = { key: ctx.key, mode: 'date', date: '', bootId: '' };
         }
+        var oldDates = (ctx.archiveFiles || []).map(archiveDate).sort().reverse();
+        var followedDate = archiveState.date && archiveState.date === oldDates[0];
+        var followedBoot = archiveState.bootId && (ctx.archiveBoots || []).length
+          && archiveState.bootId === ctx.archiveBoots[0].id;
         ctx.archiveFiles = (d.files || []).filter(function (file) {
           return (file.kind || (file.name.indexOf('ssh-') === 0 ? 'ssh' : 'serial')) === 'serial';
         });
         ctx.archiveBoots = d.boots || [];
+        if (followedDate && ctx.archiveFiles.length) archiveState.date = archiveDate(ctx.archiveFiles[0]);
+        if (followedBoot && ctx.archiveBoots.length) archiveState.bootId = ctx.archiveBoots[0].id;
         $('log-location').textContent = d.archive
           ? 'logs/' + d.archive + '/' : '待识别连接的临时日志';
         renderArchive(ctx);
       }).catch(function (e) {
-        if (isCurrent(ctx)) $('d-logs').textContent = '读取日志列表失败：' + e.message;
+        if (isCurrent(ctx) && seq === ctx.logsSeq) $('d-logs').textContent = '读取日志列表失败：' + e.message;
       });
   }
 
@@ -1221,6 +1241,7 @@
       sessions.push(archived);
     }
     switchSession(sid);
+    setRecordsOpen(false);
   }
 
   function loadArchivedLog(ctx, archived) {
@@ -1400,6 +1421,7 @@
       $('record-panel-' + tab).hidden = !selected;
     });
     $('d-records').scrollTop = 0;
+    if (name === 'logs' && !$('d-records').hidden) loadLogs();
     if (name === 'inputs' && view) renderCommandNav(view);
   }
   function setRecordsOpen(open) {
@@ -1616,4 +1638,8 @@
 
   pollDevices();
   setInterval(pollDevices, 3000);
+  setInterval(function () {
+    if (view && !$('d-records').hidden && recordsTab === 'logs'
+        && document.visibilityState !== 'hidden') loadLogs();
+  }, ARCHIVE_REFRESH_MS);
 })();

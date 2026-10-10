@@ -365,6 +365,23 @@ class ManagerTests(DeviceFixture):
         self.assertIsNone(device.fd)
         self.assertTrue(device.dead)
 
+    def test_quiet_disconnected_tty_is_reopened_after_passive_health_check(self):
+        manager = sd.Manager()
+        device = self.device()
+        device.present, device.identity = True, (1, 2, 3)
+        with mock.patch.object(manager, '_matches', return_value=True), \
+                mock.patch.object(sd, 'open_serial', return_value=98765), \
+                mock.patch.object(sd.select, 'select', return_value=([], [], [])), \
+                mock.patch.object(sd.termios, 'tcgetattr', side_effect=OSError(errno.EIO, 'gone')) as check, \
+                mock.patch.object(sd.os, 'close') as close, \
+                mock.patch.object(device, '_say'), \
+                mock.patch.object(device.stop, 'wait', side_effect=lambda timeout: device.stop.set()):
+            manager._capture(device)
+        check.assert_called_once_with(98765)
+        close.assert_called_once_with(98765)
+        self.assertIsNone(device.fd)
+        self.assertFalse(device.snapshot()['alive'])
+
     def test_old_operation_finishes_before_reactivation_and_metadata_reset(self):
         manager = sd.Manager()
         device = self.device('usb-anchor')

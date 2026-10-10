@@ -19,7 +19,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.38_all.deb
+sudo apt install ./dist/seriald_1.4.39_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
@@ -58,6 +58,9 @@ serialctl --device riscv-118 file-get --remote /tmp/boot.log --local ./boot.log
 
 网页的“启动对比”可比较同板两次或跨板的历史启动日志，突出新增异常线索；
 “文件传输”通过现有串口连接上传、下载或跨板复制，无需板子联网。
+日志面板打开时会刷新启动索引，此后每 15 秒更新；打开日期或启动归档会在完整宽度的终端中显示全文。
+采集器每 30 秒被动检查无输出的串口句柄，失效后自动等待重新枚举；页面同时显示最近收包与采集检查时间。
+完全静默的板子与硬件链路故障无法仅凭主机端检查区分，必要时可手动探测或使用 USB 自愈。
 
 [传输速率基线与排查方法](docs/TRANSFER_PERFORMANCE.md)
 

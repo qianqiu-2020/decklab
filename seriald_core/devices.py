@@ -348,15 +348,22 @@ class Manager:
                 try:
                     ready, _, _ = select.select([d.fd], [], [], 0.5)
                     if not ready:
+                        # A quiet board is normal, but the host-side tty can
+                        # disappear without a readable EOF.  Check the driver
+                        # periodically without sending anything to the board.
+                        if time.time() - d.last_health_check >= 30:
+                            termios.tcgetattr(d.fd)
+                            d.last_health_check = time.time()
                         continue
                     data = os.read(d.fd, 65536)
                     if not data:
                         # EOF 的 fd 会一直 readable;不关闭/退避会空转占满 CPU。
                         raise OSError(errno.EIO, '串口 EOF')
                     d.append(data)
+                    d.last_health_check = time.time()
                 except (BlockingIOError, InterruptedError):
                     continue
-                except (OSError, ValueError) as e:
+                except (OSError, ValueError, termios.error) as e:
                     self._close_reader(d)
                     d._say('%s 读取中断: %s' % (d.dev, e))
                     d.stop.wait(1.0)

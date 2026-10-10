@@ -70,6 +70,7 @@ class Device:
         self.fd = None
         self.bytes = 0
         self.last_rx = 0.0
+        self.last_health_check = 0.0   # host-side UART check; does not probe the board
         self.started = time.time()
         self.probed = 0                   # 主动探测次数
         self.last_probe = 0.0
@@ -174,6 +175,7 @@ class Device:
         self.started = time.time()
         self.bytes = 0
         self.last_rx = 0.0
+        self.last_health_check = 0.0
         self.console_tail = ''
         self.history_loaded = True
         self.logpath = None
@@ -804,6 +806,7 @@ class Device:
                 'label': self.label,
                 'hostname': self.hostname, 'alive': self.fd is not None and self.present,
                 'bytes': self.bytes, 'last_rx': self.last_rx,
+                'last_health_check': self.last_health_check, 'capture_started': self.started,
                 'last_line': tail, 'log': os.path.basename(self.logpath or ''),
                 'log_error': self.log_error,
                 'probes': self.probed, 'fail_count': self.fail_count,

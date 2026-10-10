@@ -623,6 +623,48 @@ test('daily logs are downloadable and detected boot epochs open in terminal tabs
   assert.equal(h.terminals.at(-1).parsed, 'one boot');
 });
 
+test('open log panel refreshes boot counts and keeps following the newest boot', async () => {
+  const h = await setup(); h.select('A');
+  const file = { name: 'serial-20261010.log', kind: 'serial', date: '2026-10-10', size: 100 };
+  const boot = number => ({ id: 'boot-' + number, number, started: '2026-10-10 08:00:00',
+    marker: 'U-Boot', dates: ['2026-10-10'], size: 40 });
+  h.take('/api/logs').resolve({ key: 'A', files: [file], boots: [boot(1)] }); await drain();
+  h.get('b-records').click();
+  h.take('/api/logs').resolve({ key: 'A', files: [file], boots: [boot(1)] }); await drain();
+  h.get('archive-mode-boot').click();
+  assert.equal(h.get('archive-picker').children[0].value, 'boot-1');
+  h.intervals.find(item => item.delay === 15000).fn();
+  h.take('/api/logs').resolve({ key: 'A', files: [file], boots: [boot(2), boot(1)] }); await drain();
+  assert.equal(h.get('archive-picker').children[0].value, 'boot-2');
+  h.get('archive-mode-date').click();
+  assert.ok(h.get('archive-picker').children[1].textContent.includes('当天启动 2 次'));
+});
+
+test('older log-list responses cannot replace a newer refresh', async () => {
+  const h = await setup(); h.select('A');
+  const old = h.take('/api/logs');
+  h.get('b-records').click();
+  const fresh = h.take('/api/logs');
+  const file = { name: 'serial-20261010.log', kind: 'serial', date: '2026-10-10', size: 100 };
+  fresh.resolve({ key: 'A', files: [file], boots: [] }); await drain();
+  old.resolve({ key: 'A', files: [], boots: [] }); await drain();
+  assert.equal(h.get('archive-picker').children[0].value, '2026-10-10');
+});
+
+test('opening a log gives its full-width terminal view', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/logs').resolve({ key: 'A', files: [
+    { name: 'serial-20261010.log', kind: 'serial', date: '2026-10-10', size: 100 },
+  ] }); await drain();
+  h.get('b-records').click();
+  h.take('/api/logs').resolve({ key: 'A', files: [
+    { name: 'serial-20261010.log', kind: 'serial', date: '2026-10-10', size: 100 },
+  ] }); await drain();
+  h.get('d-logs').children.find(row => row.className === 'log-row').children[1].click();
+  assert.equal(h.get('d-records').hidden, true);
+  assert.equal(h.get('console-layout').classList.contains('records-open'), false);
+});
+
 test('record tabs avoid scrolling through unrelated history', async () => {
   const h = await setup(); h.select('A');
   h.get('b-records').click();

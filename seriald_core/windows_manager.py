@@ -1,6 +1,7 @@
 """Windows COM collector; one pySerial handle owns both input and output."""
 import hashlib
 import re
+import time
 
 import serial
 from serial.tools import list_ports
@@ -93,6 +94,12 @@ class WindowsManager(Manager):
                     data = device.fd.read(min(max(device.fd.in_waiting, 1), 65536))
                     if data:
                         device.append(data)
+                        device.last_health_check = time.time()
+                    elif time.time() - device.last_health_check >= 30:
+                        if not device.fd.is_open or not self._matches(device):
+                            device._say('%s 串口已断开，等待重新枚举' % device.dev)
+                            break
+                        device.last_health_check = time.time()
                 except (OSError, serial.SerialException) as error:
                     device._say('%s 读取中断: %s' % (device.dev, error))
                     break
