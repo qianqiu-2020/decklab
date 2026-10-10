@@ -11,7 +11,7 @@
 3. **BSP 升级失败时快速找差异。** 对比同一块板升级前后，或两块板的启动日志，突出新增、缺失和变化的内容，帮助定位启动停在哪一步。
 4. **人、同事和 Agent 可同时看同一块板。** 服务独占串口采集，再把实时终端、SSH 会话和操作记录共享到网页与 CLI；可生成访问链接或限定设备的 Agent 授权，无需让多个 minicom 抢同一个设备节点。
 5. **板子没有网络也能传文件。** 板端有可用 shell 时，通过已有串口连接上传、下载或在两块板间中转文件，并校验大小和哈希。
-6. **USB 串口断连可尝试软件恢复。** Ubuntu 上位机的自愈操作先关闭 autosuspend，必要时执行 USB 软解绑/重绑定，减少反复手动拔插。
+6. **USB 串口断连可尝试软件恢复。** Ubuntu 上位机可执行 USB 软解绑/重绑定，减少反复手动拔插。
 
 设备身份优先使用 EEPROM ONIE 序列号，并兼容 vendor/upstream 内核的不同暴露方式；有效 DT `serial-number` 也直接作为正式编号；`key` 是用户标签（如 `riscv-118`、`musepi2`）。待确认的 SoC/eFuse 与 `/boot` 身份保存在 `logs/_provisional/`；没有编号时按 USB 连接隔离。标签、USB 插口和 tty 节点可改变。
 
@@ -19,7 +19,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.42_all.deb
+sudo apt install ./dist/seriald_1.4.43_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，

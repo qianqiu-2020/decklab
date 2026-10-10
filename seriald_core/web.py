@@ -416,11 +416,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if route == '/api/rescue':
             if d.file_transfer.active:
                 return self._json(409, {'ok': False, 'error': '串口文件传输中，请先完成或取消'})
-            # 手动自愈。mode: soft=只关 autosuspend(最轻), rebind=追加软拔插。
-            # 分两步是为了能区分病因,见 rescue.sh 注释。
-            mode = str(payload.get('mode') or 'soft')
-            if mode not in ('soft', 'rebind'):
-                return self._json(400, {'error': 'mode must be soft|rebind'})
+            # 只有用户主动选择才重新绑定 USB，不基于静默时长自动执行。
+            mode = str(payload.get('mode') or 'rebind')
+            if mode != 'rebind':
+                return self._json(400, {'error': 'mode must be rebind'})
             if not d.operation_lock.acquire(blocking=False):
                 return self._json(409, {'ok': False, 'error': '已有控制台操作在进行中'})
             try:

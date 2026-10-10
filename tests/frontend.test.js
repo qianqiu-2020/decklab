@@ -437,18 +437,18 @@ test('closing the panel cancels late paste and rescue effects', async () => {
   assert.equal(h.terminals[0].disposed, true);
 });
 
-test('rescue distinguishes helper success and requires an explicit rebind click', async () => {
+test('reconnect directly rebinds USB but does not claim recovery without received bytes', async () => {
   const h = await setup(); h.select('A'); h.get('b-rescue').click();
-  h.take('/api/rescue').resolve({ ok: true, recovered: false, note: 'steps done', requires_setup: false });
+  const first = h.take('/api/rescue');
+  assert.deepEqual(first.body, { key: 'A', mode: 'rebind' });
+  first.resolve({ ok: true, recovered: false, note: 'steps done', requires_setup: false });
   await drain();
   assert.ok(h.get('d-status').textContent.includes('尚未确认采集恢复'));
-  assert.equal(h.get('b-rebind').hidden, false);
   assert.equal(h.requests.filter(r => r.url === '/api/rescue').length, 1);
-  h.get('b-rebind').click();
+  h.get('b-rescue').click();
   const rebind = h.take('/api/rescue');
   assert.deepEqual(rebind.body, { key: 'A', mode: 'rebind' });
   rebind.resolve({ ok: true, recovered: true, note: 'capture alive' }); await drain();
-  assert.equal(h.get('b-rebind').hidden, true);
   assert.ok(h.get('d-status').textContent.includes('采集已恢复'));
 });
 

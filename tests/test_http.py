@@ -572,7 +572,7 @@ class HandlerTests(unittest.TestCase):
                         self.device.bytes += 5
                     return True, 'mock helper completed'
                 handler = self.handler('/api/rescue', json.dumps({
-                    'key': 'board-key', 'mode': 'soft'}).encode())
+                    'key': 'board-key', 'mode': 'rebind'}).encode())
                 with mock.patch.object(sd, 'try_rescue', side_effect=rescue_step), \
                         mock.patch.object(self.manager, '_matches', return_value=True):
                     handler.do_POST()
@@ -599,10 +599,19 @@ class HandlerTests(unittest.TestCase):
         rescue.assert_not_called()
         matches.assert_not_called()
 
+    def test_removed_soft_recovery_cannot_trigger_usb_rebind(self):
+        handler = self.handler('/api/rescue', json.dumps({'key': 'board-key', 'mode': 'soft'}).encode())
+        with mock.patch.object(sd, 'try_rescue') as rescue:
+            handler.do_POST()
+        status, payload = self.result(handler)
+        self.assertEqual(status, 400)
+        self.assertEqual(payload['error'], 'mode must be rebind')
+        rescue.assert_not_called()
+
 
 class RootRescueTests(unittest.TestCase):
     def test_any_failed_step_makes_entire_root_rebind_fail(self):
-        for failed_suffix in ('power/control', 'usb/unbind', 'usb/bind'):
+        for failed_suffix in ('usb/unbind', 'usb/bind'):
             with self.subTest(step=failed_suffix):
                 file_mock = mock.mock_open()
 
@@ -613,24 +622,28 @@ class RootRescueTests(unittest.TestCase):
 
                 with mock.patch.object(tr, 'usb_path_of', return_value='3-4.2'), \
                         mock.patch.object(tr.os, 'geteuid', return_value=0), \
-                        mock.patch.object(tr, 'open', side_effect=open_file, create=True) as open_mock:
+                        mock.patch.object(tr, 'open', side_effect=open_file, create=True) as open_mock, \
+                        mock.patch.object(tr.time, 'sleep'):
                     ok, note = tr.try_rescue('/fake/ttyUSB0', 'rebind')
                 self.assertFalse(ok)
                 self.assertIn('失败', note)
-                self.assertEqual(open_mock.call_count, 3)
+                self.assertEqual(open_mock.call_count, 2)
 
     def test_all_successful_root_steps_report_success(self):
         with mock.patch.object(tr, 'usb_path_of', return_value='3-4.2'), \
                 mock.patch.object(tr.os, 'geteuid', return_value=0), \
-                mock.patch.object(tr, 'open', mock.mock_open(), create=True) as open_mock:
+                mock.patch.object(tr, 'open', mock.mock_open(), create=True) as open_mock, \
+                mock.patch.object(tr.time, 'sleep'):
             ok, _ = tr.try_rescue('/fake/ttyUSB0', 'rebind')
         self.assertTrue(ok)
-        self.assertEqual(open_mock.call_count, 3)
+        self.assertEqual(open_mock.call_count, 2)
+        self.assertEqual([call.args[0] for call in open_mock.call_args_list],
+                         ['/sys/bus/usb/drivers/usb/unbind', '/sys/bus/usb/drivers/usb/bind'])
 
     def test_invalid_root_path_is_rejected_before_sysfs_access(self):
         with mock.patch.object(tr, 'usb_path_of', return_value='3-4/../../evil'), \
                 mock.patch.object(tr, 'open', mock.mock_open(), create=True) as open_mock:
-            ok, _ = tr.try_rescue('/fake/ttyUSB0', 'soft')
+            ok, _ = tr.try_rescue('/fake/ttyUSB0', 'rebind')
         self.assertFalse(ok)
         open_mock.assert_not_called()
 

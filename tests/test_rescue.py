@@ -15,13 +15,12 @@ class RescueValidationTests(unittest.TestCase):
         self.assertIn(message, result.stderr)
         self.assertEqual(result.stdout, '')
 
-    def test_invalid_device_names_are_rejected_in_both_modes(self):
+    def test_invalid_device_names_are_rejected(self):
         for name in ('', '3-4/../../../../tmp/x', '3-4.', '3-4..2',
                      '3-4:1.0', '3-4\n', '3-a', '-3-4', '/3-4',
                      '3-4;echo pwn', '3-4$(echo pwn)'):
-            for mode in ('soft', 'rebind'):
-                with self.subTest(name=name, mode=mode):
-                    self.assert_rejected([name, mode], '设备名不合法')
+            with self.subTest(name=name):
+                self.assert_rejected([name, 'rebind'], '设备名不合法')
 
     def test_argument_count_is_checked_before_sysfs_access(self):
         for args in ([], ['3-4', 'soft', 'extra']):
@@ -29,7 +28,8 @@ class RescueValidationTests(unittest.TestCase):
                 self.assert_rejected(args, '设备名不合法')
 
     def test_unknown_mode_is_rejected_before_sysfs_access(self):
-        self.assert_rejected(['3-4', 'invalid'], '模式只能是 soft 或 rebind')
+        for mode in ('soft', 'invalid'):
+            self.assert_rejected(['3-4', mode], '模式只能是 rebind')
 
 
 if __name__ == '__main__':

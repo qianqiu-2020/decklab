@@ -98,12 +98,8 @@ def usb_path_of(dev):
     return hits[-1] if hits else None
 
 
-def try_rescue(dev, mode='soft'):
-    """尝试自愈一个打不开的串口。
-
-    分两步(见 rescue.sh 注释):soft 只关 autosuspend;rebind 追加软拔插。
-    这一步能顺带区分病因 —— 只关 autosuspend 就复活,说明是"挂起唤醒失败";
-    还要软拔插才行,说明是更底层的固件级死锁。
+def try_rescue(dev, mode='rebind'):
+    """通过 USB unbind/bind 重新接入串口。
 
     执行路径:
       * seriald 以 root 跑  -> 直接写 /sys(最简,无需任何配置)
@@ -116,7 +112,7 @@ def try_rescue(dev, mode='soft'):
     name = usb_path_of(dev)
     if not name:
         return False, '找不到 %s 对应的 USB 设备路径' % dev
-    if mode not in ('soft', 'rebind') or not re.fullmatch(r'[0-9]+-[0-9]+(?:\.[0-9]+)*', name):
+    if mode != 'rebind' or not re.fullmatch(r'[0-9]+-[0-9]+(?:\.[0-9]+)*', name):
         return False, 'USB 路径或自愈模式不合法'
     steps = []
     failed = False
@@ -136,23 +132,16 @@ def try_rescue(dev, mode='soft'):
         return ok, '%s [%s]' % (out or '无输出', name)
 
     # root 直连:不依赖脚本
-    ctl = '/sys/bus/usb/devices/%s/power/control' % name
-    try:
-        with open(ctl, 'w') as f:
-            f.write('on')
-        steps.append('autosuspend 已关')
-    except OSError as e:
-        failed = True
-        steps.append('关 autosuspend 失败: %s' % (e.strerror or e))
-    if mode == 'rebind':
-        for act in ('unbind', 'bind'):
-            try:
-                with open('/sys/bus/usb/drivers/usb/%s' % act, 'w') as f:
-                    f.write(name)
-                steps.append(act)
-            except OSError as e:
-                failed = True
-                steps.append('%s 失败: %s' % (act, e.strerror or e))
+    for act in ('unbind', 'bind'):
+        if act == 'bind':
+            time.sleep(1)
+        try:
+            with open('/sys/bus/usb/drivers/usb/%s' % act, 'w') as f:
+                f.write(name)
+            steps.append(act)
+        except OSError as e:
+            failed = True
+            steps.append('%s 失败: %s' % (act, e.strerror or e))
     # 一步成功不代表整次 rebind 成功;与特权脚本的退出码语义一致。
     ok = not failed
     return ok, '%s [%s]' % ('; '.join(steps), name)

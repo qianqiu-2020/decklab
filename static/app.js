@@ -57,7 +57,7 @@
   function createView(key, sid) {
     disposeView();
     selKey = key; curSid = sid;
-    $('b-rebind').hidden = true;
+    $('b-rescue').disabled = false;
     var board = lastDevices.filter(function (d) { return d.key === key; })[0] || {};
     var selectedSession = sessions.filter(function (s) { return s.sid === sid; })[0] || {};
     var isAgentSession = selectedSession.kind === 'ssh' && !!selectedSession.actor
@@ -84,8 +84,8 @@
       allowProposedApi: true,
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
       fontSize: DEFAULT_TERMINAL_FONT_SIZE,
-      theme: { background: '#111B21', foreground: '#D5DEDD', cursor: '#96D0C1',
-               selectionBackground: '#E6B45D', selectionForeground: '#111B21' }
+      theme: { background: '#0F151D', foreground: '#DCE5F0', cursor: '#82C5FF',
+               selectionBackground: '#E6B45D', selectionForeground: '#0F151D' }
     });
     ctx.fit = new FitAddon.FitAddon();
     ctx.term.loadAddon(ctx.fit);
@@ -520,6 +520,8 @@
       var card = document.createElement('div');
       card.className = 'dev' + (!d.alive ? ' offline' : '') + (d.key === selKey ? ' sel' : '');
       card.dataset.key = d.key;          // 供 markSelected() 就地改高亮用
+      card.title = (d.by_path || d.last_path || '')
+        + (d.alive ? '\n采集检查：' + ago(d.last_health_check) : '');
       card.tabIndex = 0;
       card.addEventListener('click', function () { select(d.key); });
       card.addEventListener('keydown', function (e) {
@@ -529,12 +531,12 @@
       var r1 = document.createElement('div'); r1.className = 'r1';
       var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.state === 'pending' ? '待识别 · ' + (d.hostname || (d.dev || '').split('/').pop()) : d.label;
       var st = document.createElement('span');
-      st.className = 'pill ' + (d.alive ? 'live' : 'dead');
+      st.className = 'pill ' + (d.state === 'pending' ? 'pending' : (d.alive ? 'live' : 'dead'));
       st.textContent = d.state === 'pending' ? 'USB 临时身份' : (d.alive ? '在线' : '历史设备');
       r1.appendChild(nm); r1.appendChild(st);
-      if (d.hostname) {
+      if (d.hostname && d.hostname !== d.label) {
         var sn = document.createElement('span'); sn.className = 'pill sniff';
-        sn.textContent = '嗅探:' + d.hostname; r1.appendChild(sn);
+        sn.textContent = d.hostname; r1.appendChild(sn);
       }
       card.appendChild(r1);
 
@@ -551,16 +553,12 @@
       var stat = document.createElement('div'); stat.className = 'stat';
       var s1 = document.createElement('span'); s1.textContent = fmt(d.bytes) + ' 记录';
       var s2 = document.createElement('span'); s2.textContent = '末次 ' + ago(d.last_rx || d.last_seen);
-      var s3 = document.createElement('span'); s3.textContent = d.by_path || d.last_path || '';
+      var s3 = document.createElement('span'); s3.className = 'attachment'; s3.textContent = d.by_path || d.last_path || '';
       stat.appendChild(s1); stat.appendChild(s2); stat.appendChild(s3);
-      if (d.alive) {
-        var checked = document.createElement('span');
-        checked.textContent = '采集检查 ' + ago(d.last_health_check);
-        stat.appendChild(checked);
-      }
       card.appendChild(stat);
-      if (d.alive && Date.now() / 1000 - (d.last_rx || d.capture_started || 0) > 300) {
-        var quiet = document.createElement('div'); quiet.className = 'last';
+      if (d.alive && (d.last_rx || d.capture_started)
+          && Date.now() / 1000 - (d.last_rx || d.capture_started) > 300) {
+        var quiet = document.createElement('div'); quiet.className = 'quiet-note';
         quiet.textContent = '串口已静默 ' + ago(d.last_rx || d.capture_started)
           + '；采集器仍在检查连接，板子也可能只是没有输出';
         card.appendChild(quiet);
@@ -899,6 +897,7 @@
       var b = document.createElement('button');
       b.type = 'button';
       b.className = (s.sid === curSid ? 'on' : '');
+      b.dataset.kind = s.kind;
       b.textContent = s.kind === 'serial' ? '串口'
         : (s.kind === 'log' ? s.label : ('SSH ' + (s.actor ? s.actor + ' · ' : '') + (s.ip || s.sid)));
       if (s.kind === 'log' || (s.actor && s.actor !== 'web' && !takenOver[s.sid])) b.textContent += ' · 只读';
@@ -1387,7 +1386,8 @@
   });
   $('b-expand').addEventListener('click', function () {
     var expanded = document.body.classList.toggle('terminal-max');
-    $('b-expand-label').textContent = expanded ? '还原工作台' : '放大终端';
+    $('b-expand-label').textContent = expanded ? '还原' : '放大';
+    $('b-expand').title = expanded ? '还原工作台' : '放大终端';
     $('b-expand').setAttribute('aria-pressed', expanded ? 'true' : 'false');
     setTimeout(resizeTerm, 0);
   });
@@ -1553,10 +1553,7 @@
         if (isCurrent(ctx)) $('d-status').textContent = ' 进入换板模式失败：' + e.message;
       });
   });
-  // helper 完成设置不等于采集已经恢复；不能因响应里缺少 hint 就自动软拔插。
-  // 先报告恢复状态，再由用户明确选择会中断 USB 连接的重新绑定。
-  $('b-rescue').addEventListener('click', function () { doRescue('soft'); });
-  $('b-rebind').addEventListener('click', function () { doRescue('rebind'); });
+  $('b-rescue').addEventListener('click', function () { doRescue(); });
 
   /* ---------- 识别设备 / 一键开 SSH ---------- */
   function renderInfo(info) {
@@ -1612,12 +1609,14 @@
       });
   }
   $('b-identify').addEventListener('click', function () { postAction('/api/identify', '识别设备'); });
-  function doRescue(mode, ctx) {
-    ctx = ctx || view;
-    if (!isCurrent(ctx)) return;
-    $('d-status').textContent = ' 正在自愈(' + (mode === 'soft' ? '关挂起' : '软拔插') + ')…';
+  function doRescue() {
+    var ctx = view;
+    if (!isCurrent(ctx) || ctx.reconnecting) return;
+    ctx.reconnecting = true;
+    $('b-rescue').disabled = true;
+    $('d-status').textContent = ' 正在重新连接串口（USB 软拔插）…';
     fetch('/api/rescue', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: ctx.key, serial: ctx.serial, mode: mode }) })
+      body: JSON.stringify({ key: ctx.key, serial: ctx.serial, mode: 'rebind' }) })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!isCurrent(ctx)) return;
@@ -1625,11 +1624,13 @@
           (d.ok ? '步骤完成，尚未确认采集恢复' : '自愈失败')) + (d.note ? '：' + d.note : '');
         if (d.hint) { $('d-hint').hidden = false; $('d-hint').textContent = d.hint; }
         else $('d-hint').hidden = true;
-        $('b-rebind').hidden = !!d.recovered || !!d.requires_setup;
         pollDevices();
       })
       .catch(function (e) {
         if (isCurrent(ctx)) $('d-status').textContent = ' 自愈请求失败：' + e.message;
+      }).finally(function () {
+        ctx.reconnecting = false;
+        if (isCurrent(ctx)) $('b-rescue').disabled = false;
       });
   }
   $('d-term').addEventListener('click', function () { if (term) term.focus(); });
@@ -1638,7 +1639,8 @@
     $('workspace').classList.toggle('selected', false);
     document.body.classList.toggle('detail-open', false);
     document.body.classList.remove('terminal-max');
-    $('b-expand-label').textContent = '放大终端';
+    $('b-expand-label').textContent = '放大';
+    $('b-expand').title = '放大终端';
     $('b-expand').setAttribute('aria-pressed', 'false');
     markSelected(); pollDevices();
   });
