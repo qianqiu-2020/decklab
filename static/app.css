@@ -110,6 +110,19 @@
   .detail .hd .k{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3)}
   .detail .hd #d-dev{padding:2px 7px;background:var(--surface-2);border-radius:4px;color:var(--ink-2)}
   .detail .hd .sp{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+  .device-maintenance{position:relative}
+  .device-maintenance summary{list-style:none;cursor:pointer;font-size:12.5px;font-weight:550;
+    padding:6px 11px;border:1px solid var(--line-strong);border-radius:6px;color:var(--ink-2);
+    background:var(--surface);white-space:nowrap}
+  .device-maintenance summary::-webkit-details-marker{display:none}
+  .device-maintenance summary::after{content:" ▾";color:var(--ink-3)}
+  .device-maintenance summary:hover,.device-maintenance[open] summary{border-color:var(--accent);
+    color:var(--accent);background:var(--accent-soft)}
+  .device-maintenance summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .device-maintenance>div{position:absolute;z-index:8;right:0;top:calc(100% + 5px);min-width:156px;
+    display:grid;gap:5px;padding:7px;border:1px solid var(--line-strong);border-radius:8px;
+    background:var(--surface);box-shadow:var(--shadow)}
+  .device-maintenance>div button{text-align:left;white-space:nowrap}
   .detail .hd #b-identify{border-color:var(--accent-line);color:var(--accent);
     background:var(--accent-soft)}
   .detail .hd #b-close{border-color:transparent;background:transparent}
@@ -137,7 +150,6 @@
   .terminal-search-tools input:focus{outline:0}
   .terminal-search-tools:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
   .terminal-search-tools button{width:26px;height:27px;padding:0;border:0;background:transparent;font-size:16px}
-  .terminal-search-tools button:disabled{opacity:.3}
   .terminal-tools .tool-icon{display:inline-block;min-width:16px;text-align:center;font-size:16px;line-height:1}
   .terminal-nav-tools{padding-left:8px;border-left:1px solid var(--line)}
   .terminal-extra-tools{padding-left:8px;border-left:1px solid var(--line)}
@@ -252,7 +264,7 @@
     z-index:2;background:var(--ground);padding:10px 0;border-bottom:1px solid var(--line);
     font-size:15px;color:var(--ink)}
   .records-tabs{position:sticky;top:38px;z-index:2;display:grid;
-    grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;padding:9px 0 8px;
+    grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:9px 0 8px;
     background:var(--ground);border-bottom:1px solid var(--line)}
   .records-tabs button{min-width:0;padding:6px 2px;border-color:transparent;background:transparent;
     color:var(--ink-3);white-space:nowrap;font-size:11px}
@@ -393,14 +405,16 @@
     .workspace.selected .dev .nm{font-size:15px}
     .workspace.selected .dev .meta,.workspace.selected .dev .last,
     .workspace.selected .dev .stat,.workspace.selected .dev .identity-error{display:none}
-    .detail .hd{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;padding:7px 9px}
-    .detail .hd .sp{flex-wrap:nowrap;margin-left:0}
+    .detail .hd{flex-wrap:wrap;overflow:visible;white-space:normal;padding:7px 9px}
+    .detail .hd .sp{flex-wrap:wrap;margin-left:0}
     .detail .tabs{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;padding:6px 9px}
     .detail .tabs button{flex:none}
     .detail>.info{max-height:58px;overflow:auto}
-    .terminal-tools{overflow-x:auto;padding:5px 8px}
-    .terminal-search-tools input{width:130px;flex:none}
-    .terminal-tools button,.terminal-tools label{flex:none}
+    .terminal-tools{flex-wrap:wrap;overflow-x:visible;padding:5px 8px;gap:5px}
+    .terminal-search-tools{flex:1 1 220px}
+    .terminal-search-tools input{width:100%;min-width:90px;flex:1}
+    .terminal-nav-tools,.terminal-extra-tools{padding-left:0;border-left:0;flex-wrap:wrap}
+    .terminal-tools #d-status{flex-basis:100%}
     .sendrow{flex-wrap:nowrap;overflow-x:auto;padding:6px 8px}
     .sendrow input[type="text"]{min-width:120px}
     .sendrow button,.sendrow label{flex:none}

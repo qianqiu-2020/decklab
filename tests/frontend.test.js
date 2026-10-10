@@ -873,11 +873,11 @@ test('terminal search selects matches and wraps in both directions', async () =>
   assert.deepEqual(terminal.selected, { col: 6, row: 0, length: 4 });
   h.get('terminal-search-prev').click();
   assert.deepEqual(terminal.selected, { col: 0, row: 2, length: 4 });
-  h.get('terminal-search-clear').click();
+  h.get('terminal-search').emit('keydown', { key: 'Escape', preventDefault() {} });
   assert.equal(h.get('terminal-search').value, '');
   assert.equal(h.get('terminal-search-status').textContent, '');
-  assert.equal(h.get('terminal-search-clear').disabled, true);
   assert.equal(terminal.selected, undefined);
+  assert.equal(terminal.options.theme.selectionBackground, '#E6B45D');
 });
 
 test('live serial stays at firmware-compatible 80 columns and redraw replays from zero', async () => {

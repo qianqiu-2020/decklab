@@ -85,7 +85,7 @@
       fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
       fontSize: DEFAULT_TERMINAL_FONT_SIZE,
       theme: { background: '#111B21', foreground: '#D5DEDD', cursor: '#96D0C1',
-               selectionBackground: '#385C59' }
+               selectionBackground: '#E6B45D', selectionForeground: '#111B21' }
     });
     ctx.fit = new FitAddon.FitAddon();
     ctx.term.loadAddon(ctx.fit);
@@ -155,7 +155,6 @@
     var ctx = view;
     if (!isCurrent(ctx)) return;
     var query = $('terminal-search').value;
-    $('terminal-search-clear').disabled = !query;
     if (!query) {
       ctx.term.clearSelection(); ctx.searchQuery = ''; ctx.searchMatch = -1;
       $('terminal-search-status').textContent = ''; return;
@@ -180,7 +179,6 @@
   function clearTerminalSearch(focusTerminal) {
     $('terminal-search').value = '';
     $('terminal-search-status').textContent = '';
-    $('terminal-search-clear').disabled = true;
     if (view && view.term) {
       view.searchQuery = ''; view.searchMatch = -1; view.term.clearSelection();
       if (focusTerminal) view.term.focus();
@@ -223,13 +221,13 @@
     if (signature === ctx.commandColorSignature) return;
     clearCommandDecorations(ctx);
     ctx.commandColorSignature = signature;
-    var commandColor = '#94D0C2';
+    var commandColor = '#C6EFE4';
     entries.forEach(function (entry) {
       if (entry.column >= ctx.term.cols) return;
       var marker = ctx.term.registerMarker(entry.row - (active.baseY + active.cursorY));
       if (!marker) return;
       var background = ctx.term.registerDecoration({ marker: marker, x: 0,
-        width: ctx.term.cols, backgroundColor: '#1D2F35' });
+        width: ctx.term.cols, backgroundColor: '#29414A' });
       var foreground = ctx.term.registerDecoration({ marker: marker, x: entry.column,
         width: Math.min(entry.command.length, ctx.term.cols - entry.column),
         foregroundColor: commandColor });
@@ -1381,7 +1379,6 @@
   $('event-next').addEventListener('click', function () { eventPage++; loadActivity(); });
   $('terminal-search-next').addEventListener('click', function () { searchTerminal(1); });
   $('terminal-search-prev').addEventListener('click', function () { searchTerminal(-1); });
-  $('terminal-search-clear').addEventListener('click', function () { clearTerminalSearch(true); });
   $('b-redraw').addEventListener('click', redrawTerminal);
   $('b-info').addEventListener('click', function () {
     var open = $('detail').classList.toggle('info-open');
@@ -1395,9 +1392,8 @@
     setTimeout(resizeTerm, 0);
   });
   $('terminal-search').addEventListener('input', function () {
-    if (view) { view.searchQuery = ''; view.searchMatch = -1; }
+    if (view) { view.searchQuery = ''; view.searchMatch = -1; view.term.clearSelection(); }
     $('terminal-search-status').textContent = '';
-    $('terminal-search-clear').disabled = !$('terminal-search').value;
   });
   $('terminal-search').addEventListener('keydown', function (event) {
     if (event.key === 'Enter') {

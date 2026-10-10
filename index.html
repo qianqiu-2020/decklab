@@ -16,7 +16,7 @@
   <div class="top">
     <h1>seriald</h1>
     <span class="mono" style="color:var(--ink-3);font-size:12px">串口设备管理</span>
-    <button id="b-share" type="button" hidden title="创建 24 小时有效的网页访问链接">分享访问</button>
+    <button id="b-share" type="button" hidden title="创建可撤销的网页访问链接">分享访问</button>
     <button id="b-agent-share-all" type="button" disabled title="生成可撤销的 Agent 接入令牌与指引">Agent 接入</button>
     <span id="share-status" role="status"></span>
     <span class="conn"><span class="dot" id="conn-dot"></span><span id="conn-txt">连接中…</span></span>
@@ -44,12 +44,14 @@
       <span class="k" id="d-key">—</span>
       <span class="sp">
         <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd">识别设备</button>
-        <button id="b-rescue" type="button" title="关闭 autosuspend，并检查采集是否恢复">自愈串口</button>
-        <button id="b-rebind" type="button" title="重新绑定 USB 串口，会暂时中断该设备连接" hidden>重新绑定串口</button>
-        <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录">准备换板</button>
         <button id="b-info" type="button" aria-expanded="false">设备信息</button>
-        <button id="b-rename" type="button">改标签</button>
         <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent">分享给 Agent</button>
+        <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录">准备换板</button>
+        <details class="device-maintenance"><summary>设备维护</summary><div>
+          <button id="b-rename" type="button">改标签</button>
+          <button id="b-rescue" type="button" title="关闭 autosuspend，并检查采集是否恢复">自愈串口</button>
+          <button id="b-rebind" type="button" title="重新绑定 USB 串口，会暂时中断该设备连接" hidden>重新绑定串口</button>
+        </div></details>
         <button id="b-close" type="button">收起</button>
       </span>
     </div>
@@ -58,10 +60,9 @@
     <div class="terminal-tools">
       <div class="terminal-search-tools" role="search" aria-label="终端内容搜索">
         <label for="terminal-search" class="tool-icon" aria-hidden="true">⌕</label>
-        <input id="terminal-search" type="text" placeholder="搜索终端 · Ctrl+F" aria-label="搜索终端内容" autocomplete="off" spellcheck="false">
+        <input id="terminal-search" type="text" placeholder="搜索终端 · Ctrl+F" aria-label="搜索终端内容" title="按 Enter 搜索，Esc 清空" autocomplete="off" spellcheck="false">
         <button id="terminal-search-prev" type="button" title="上一个匹配（Shift+Enter）" aria-label="上一个匹配">↑</button>
         <button id="terminal-search-next" type="button" title="下一个匹配（Enter）" aria-label="下一个匹配">↓</button>
-        <button id="terminal-search-clear" type="button" title="清空搜索词和匹配高亮" aria-label="清空搜索词和匹配高亮" disabled>×</button>
       </div>
       <span id="terminal-search-status"></span>
       <div class="terminal-nav-tools" aria-label="侧栏导航">
