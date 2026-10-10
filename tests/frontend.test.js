@@ -651,18 +651,23 @@ test('older log-list responses cannot replace a newer refresh', async () => {
   assert.equal(h.get('archive-picker').children[0].value, '2026-10-10');
 });
 
-test('opening a log gives its full-width terminal view', async () => {
+test('opening archived logs keeps the picker visible for quick switching', async () => {
   const h = await setup(); h.select('A');
-  h.take('/api/logs').resolve({ key: 'A', files: [
+  const files = [
     { name: 'serial-20261010.log', kind: 'serial', date: '2026-10-10', size: 100 },
-  ] }); await drain();
+    { name: 'serial-20261009.log', kind: 'serial', date: '2026-10-09', size: 80 },
+  ];
+  h.take('/api/logs').resolve({ key: 'A', files }); await drain();
   h.get('b-records').click();
-  h.take('/api/logs').resolve({ key: 'A', files: [
-    { name: 'serial-20261010.log', kind: 'serial', date: '2026-10-10', size: 100 },
-  ] }); await drain();
+  h.take('/api/logs').resolve({ key: 'A', files }); await drain();
   h.get('d-logs').children.find(row => row.className === 'log-row').children[1].click();
-  assert.equal(h.get('d-records').hidden, true);
-  assert.equal(h.get('console-layout').classList.contains('records-open'), false);
+  assert.equal(h.get('d-records').hidden, false);
+  assert.equal(h.get('console-layout').classList.contains('records-open'), true);
+  const picker = h.get('archive-picker').children[0];
+  picker.value = '2026-10-09'; picker.emit('change');
+  h.get('d-logs').children.find(row => row.className === 'log-row').children[1].click();
+  assert.equal(h.get('d-records').hidden, false);
+  assert.equal(h.get('console-layout').classList.contains('records-open'), true);
 });
 
 test('record tabs avoid scrolling through unrelated history', async () => {

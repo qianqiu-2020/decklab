@@ -1241,7 +1241,6 @@
       sessions.push(archived);
     }
     switchSession(sid);
-    setRecordsOpen(false);
   }
 
   function loadArchivedLog(ctx, archived) {
