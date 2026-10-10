@@ -1,6 +1,6 @@
 # seriald
 
-面向 OS/BSP 开发的开发板工作台：持续采集串口，统一提供网页终端、SSH、历史日志和 Agent 接口。支持 Ubuntu 服务安装及 Windows 便携上位机。
+面向 OS/BSP 开发的开发板工作台：持续采集串口，统一提供网页终端、SSH、历史日志和 Agent 接口。支持 Ubuntu 服务安装及 Windows 上位机。
 
 ## 为什么使用 seriald
 
@@ -19,7 +19,7 @@
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.4.47_all.deb
+sudo apt install ./dist/seriald_1.4.48_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
@@ -31,11 +31,11 @@ sudo apt install ./dist/seriald_1.4.47_all.deb
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
 · [分阶段重构计划](docs/REFACTOR_PLAN.md)
 
-Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。源码目录双击
-`Build-seriald.cmd` 构建、`Install-seriald.cmd` 安装到当前源码目录下可见的 `seriald-installed\`；只从安装目录启动。三个启动入口分别提供
-本机无密码、局域网无密码、局域网有密码访问。使用方法见
-[Windows 便携上位机](docs/WINDOWS.md)。也可用 Windows Docker 容器构建相同 ZIP；
-IT 可按 EXE SHA-256 审批限定程序路径和端口的防火墙规则，升级后需重新审批。
+Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。安装构建依赖后，
+双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.4.48-windows-x64-setup.exe`：
+首次选择安装目录，后续升级记住原目录，保留 `data/`，无需手动解压覆盖。首次从便携版迁移时选中原目录。
+开始菜单提供本机、局域网无密码、局域网有密码三个入口。详见 [Windows 构建与安装](docs/WINDOWS.md)。
+也支持 Windows Docker 容器构建；IT 可按 EXE SHA-256 审批防火墙规则，升级后需重新审批。
 
 ![seriald 架构图](docs/seriald-architecture.png)
 

@@ -1,17 +1,37 @@
 # Windows 上位机：构建、安装与访问
 
-Windows 版独占接管本机 USB 串口的 COM 端口，提供网页与 `serialctl` agent API。原生构建需 Git、Python 3.12（含 `py` 启动器）；Docker 构建需 Git 和支持 Windows containers 的 Docker Desktop。两种构建都需联网下载依赖，安装已构建的 ZIP 不需要 Python。
+Windows 版直接接管本机 COM 串口，提供网页终端与 Agent API。推荐分发 **Setup 安装包**：使用者不需要安装 Python，双击即可选择目录并安装。安装不要求管理员权限；局域网防火墙仍由 IT 单独审批。
 
-在源码目录双击 `Build-seriald.cmd`，或运行 `powershell -ExecutionPolicy Bypass -File .\tools\build_windows.ps1`。构建脚本创建 `.venv\`、运行 Windows 模拟测试，并在 `dist\` 生成 `seriald-windows-portable.zip`。然后双击 `Install-seriald.cmd`；它把包安装到源码目录下可见的 `seriald-installed\`，与源码及 `dist\` 构建目录分开，更新时保留其中的 `data\`。首次使用新路径时，若旧版 `%LOCALAPPDATA%\seriald\data` 存在，会复制旧数据；旧目录不删除。自选位置可运行 `powershell -ExecutionPolicy Bypass -File .\tools\install_windows.ps1 -InstallDir D:\seriald`。安装前先关闭旧的 seriald 窗口，释放 COM 口。
+## 安装与升级
 
-也可以在 Windows 11 Pro/Enterprise 的 Docker Desktop 中切换到 **Windows containers**，双击 `Build-seriald-Docker.cmd` 构建同一种 ZIP。构建使用 Windows Server Core + Python 3.12 镜像；Linux/WSL2 容器不能交叉生成这个 Windows PyInstaller 程序。Docker 只参与构建，运行时仍在 Windows 主机安装并直接接管 COM 口。此方式需要 Docker Desktop、Windows 容器功能和较大的镜像下载；宿主机/镜像版本需兼容。当前仓库没有 Windows Docker 测试环境，首次使用请在目标 Windows 机器验证构建与启动。[Docker Desktop 要求](https://docs.docker.com/desktop/setup/install/windows-install/) · [Windows 容器版本兼容性](https://learn.microsoft.com/en-us/virtualization/windowscontainers/deploy-containers/version-compatibility) · [PyInstaller 平台限制](https://pyinstaller.org/en/stable/)
+首次运行 `seriald-1.4.48-windows-x64-setup.exe`，选择一个可写的安装目录。默认在安装包所在位置创建可见的 `seriald-installed/`；若安装包位于源码的 `dist/`，默认改用源码目录下的 `seriald-installed/`，与构建目录分开。首次从解压版迁移时，**选择原安装目录**，无需搬运数据。
 
-两种构建方式都会在包内生成 `seriald.exe.sha256`；安装时先核对 EXE 与清单，再备份旧程序文件，更新失败时回滚；`data\` 始终留在安装目录。清单用于检测包内文件不一致，IT 审批须从可信渠道独立确认摘要。若回滚本身失败，
-错误会给出临时备份目录，供手动恢复。
+后续双击新版本 Setup，安装器记住上次目录并覆盖程序文件，保留 `data/` 中的日志、设备档案和认证配置。升级前关闭 seriald 窗口以释放 COM 口；安装器也会检测占用的文件并提示关闭程序。安装完成从开始菜单或安装目录重新启动，三种模式任选其一。卸载仅移除安装的程序与快捷方式，保留运行数据。
+
+## 构建安装包
+
+原生构建需要 Git、**64 位 Python 3.12**（含 `py` 启动器）和 **Inno Setup 6.5 或更新版本**。先安装编译器，再在源码目录构建：
+
+```powershell
+winget install --id JRSoftware.InnoSetup -e -s winget -i
+.\Build-seriald.cmd
+```
+
+构建会创建 `.venv/`、运行回归测试并输出：
+
+- `dist/seriald-1.4.48-windows-x64-setup.exe`：常规安装与升级。
+- 对应 `.exe.sha256`：安装包摘要，供可信渠道核对。
+- `dist/seriald-windows-portable.zip`：便携备选。
+
+仅需 ZIP 时运行 `.\Build-seriald.cmd -PortableOnly`，无需 Inno Setup。`Install-seriald.cmd` 保留为 **ZIP 安装脚本**：默认装到源码旁的 `seriald-installed/`，保留 `data/`，备份旧程序，替换失败时回滚；也支持 `tools/install_windows.ps1 -InstallDir D:\seriald`。它可复制旧 `%LOCALAPPDATA%\seriald\data`，但不会删除旧目录。IT 可传 `-ExpectedSha256 <批准的程序EXE摘要>` 进行校验。常规用户直接使用 Setup。
+
+Windows 11 Pro/Enterprise 的 Docker Desktop 切换到 **Windows containers** 后，也可双击 `Build-seriald-Docker.cmd`，生成同样的 Setup 和 ZIP。容器使用 Windows Server Core、Python 3.12 及已校验发布者签名的 Inno Setup 编译器。Docker 只参与构建，程序在 Windows 主机运行；Linux/WSL2 容器不能交叉生成该 PyInstaller 程序。宿主机需与镜像兼容，首次构建下载较大。[Windows 容器兼容性](https://learn.microsoft.com/en-us/virtualization/windowscontainers/deploy-containers/version-compatibility)
+
+Windows CI 还会验证：迁移已有目录、二次升级记住路径、数据保留及卸载保留数据。可在没有注册 seriald 安装的干净 Windows 测试账户运行 `tools/test_windows_installer.ps1`；测试不打开 COM 口。
 
 ## 升级与 IT 防火墙审批
 
-普通升级：关闭正在运行的 seriald 窗口，执行 `git pull --ff-only`，重新构建并运行 `Install-seriald.cmd`，再从 `seriald-installed\` 启动。安装脚本保留 `data\`，并在失败时恢复旧程序；COM 口在升级期间会短暂释放。不能在运行中的 Windows 单进程上无中断替换 EXE。IT 管理的升级可向安装脚本传 `-ExpectedSha256 <IT批准的EXE摘要>`，在替换旧程序前再次核对。
+自行构建时先 `git pull --ff-only`，重新构建并运行新版本 Setup。COM 口在升级期间会短暂释放，Windows 单进程不能无中断替换 EXE。IT 管理的安装位置应由 IT 统一升级。
 
 需要局域网入站访问时，请 IT 审核脚本并将其置于 IT 管理的位置，再在**管理员 PowerShell** 中运行。IT 应从可信的构建记录核对 EXE 的 SHA-256；脚本拒绝与批准摘要不同的程序，只创建与 `seriald.exe` 的绝对路径、TCP 端口、专用/域网络及本地子网匹配的规则。seriald 本身仍以普通用户运行。
 
@@ -26,7 +46,7 @@ $hash = '由 IT 独立核实的 64 位 SHA-256'
 如同事位于另一网段，IT 可用 `-RemoteAddress 10.0.120.0/21` 指定范围。撤销时用 `-Action Remove -Port 8898`。每次升级 EXE 都会改变摘要：应在升级前移除旧规则，安装后让 IT 用新摘要重新批准。Windows 防火墙规则本身按**路径**匹配，并不会在每次连接时重新计算哈希；若需要防止用户在批准后替换 EXE，应由 IT 把程序安装在普通用户不可写的受保护目录并管理升级。本仓库默认的 `seriald-installed\` 便于开发，但不提供持续的哈希强制执行。[Windows 防火墙规则参数](https://learn.microsoft.com/en-us/powershell/module/netsecurity/new-netfirewallrule)
 
 安装目录提供三个启动入口，同一时间只运行其中一个。源码目录只有构建与安装入口；
-`Start-seriald*.cmd` 只存在于打包产物 `dist\seriald\` 和安装目录中。安装完成会打印三个启动脚本的完整路径。
+`Start-seriald*.cmd` 只存在于打包产物 `dist\seriald\` 和安装目录中。Setup 会添加三个开始菜单快捷方式；ZIP 安装脚本会打印启动路径。
 
 | 入口 | 监听与访问 |
 | --- | --- |

@@ -1,4 +1,4 @@
-name: Windows portable
+name: Windows packages
 on:
   workflow_dispatch:
   push:
@@ -10,12 +10,11 @@ on:
       - 'vendor/**'
       - 'index.html'
       - 'requirements-windows.txt'
-      - 'tools/build_windows.ps1'
+      - 'tools/*windows*.ps1'
+      - 'tools/install_inno_build_tool.ps1'
+      - 'tools/windows-launchers/**'
+      - 'packaging/seriald-windows.iss'
       - 'docs/WINDOWS.md'
-      - 'Start-seriald.cmd'
-      - 'Start-seriald-LAN.cmd'
-      - 'Start-seriald-LAN.ps1'
-      - 'serialctl.cmd'
       - '.github/workflows/windows-portable.yml'
 jobs:
   build:
@@ -25,7 +24,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build portable ZIP
+      - name: Install installer compiler
+        shell: pwsh
+        run: .\tools\install_inno_build_tool.ps1
+      - name: Build setup EXE and portable ZIP
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File .\tools\build_windows.ps1
       - name: Smoke test portable host
@@ -48,7 +50,13 @@ jobs:
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify install and upgrade preserve runtime data
+        shell: pwsh
+        run: .\tools\test_windows_installer.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: seriald-windows-portable
-          path: dist/seriald-windows-portable.zip
+          name: seriald-windows
+          path: |
+            dist/seriald-*-windows-x64-setup.exe
+            dist/seriald-*-windows-x64-setup.exe.sha256
+            dist/seriald-windows-portable.zip

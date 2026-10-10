@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-param([switch]$UseCurrentPython)
+param([switch]$UseCurrentPython, [switch]$PortableOnly)
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') {
@@ -18,6 +18,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is required (install it with the py launcher).' }
     $python = Join-Path $root '.venv\Scripts\python.exe'
     $pyinstaller = Join-Path $root '.venv\Scripts\pyinstaller.exe'
+
+    & $python -c 'import sys; sys.exit(0 if sys.maxsize > 2**32 else 1)'
+    if ($LASTEXITCODE -ne 0) { throw 'The Windows x64 package requires 64-bit Python.' }
 
     & $python -m pip install -r requirements-windows.txt
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
@@ -56,11 +59,17 @@ try {
     $exeHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'seriald.exe') -Algorithm SHA256).Hash
     Set-Content -LiteralPath (Join-Path $bundle 'seriald.exe.sha256') -Value $exeHash -Encoding ASCII
 
+    $version = (& $python -c 'from seriald_core.version import __version__; print(__version__)').Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read the bundle version.' }
+    Set-Content -LiteralPath (Join-Path $bundle 'package-version.txt') -Value $version -Encoding ASCII
+
     $archive = Join-Path $root 'dist\seriald-windows-portable.zip'
     Compress-Archive -Path $bundle -DestinationPath $archive -Force
     Write-Host "Built $archive"
     Write-Host "seriald.exe SHA-256: $exeHash"
-    Write-Host 'Run Install-seriald.cmd from the source tree to install/update outside the build directory.'
+    if (-not $PortableOnly) { & (Join-Path $PSScriptRoot 'build_windows_installer.ps1') }
+    if ($PortableOnly) { Write-Host 'ZIP only: run Install-seriald.cmd to install/update.' }
+    else { Write-Host 'Distribute the setup EXE for installation and future upgrades.' }
 } finally {
     Pop-Location
 }

@@ -3,4 +3,5 @@ FROM python:3.12-windowsservercore-ltsc2022
 SHELL ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
 WORKDIR C:/src
 COPY . C:/src/
+RUN .\tools\install_inno_build_tool.ps1
 RUN .\tools\build_windows.ps1 -UseCurrentPython
