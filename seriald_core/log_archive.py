@@ -8,13 +8,17 @@ from datetime import datetime
 STAMP = re.compile(br'^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)  ')
 BOOT_MARKERS = (
     (re.compile(br'(?:^|\x00)sys:\s*0x[0-9a-f]+', re.I), 'Boot ROM'),
-    (re.compile(br'\bU-Boot SPL \d{4}\.\d{2}', re.I), 'U-Boot SPL'),
-    (re.compile(br'\bU-Boot \d{4}\.\d{2}', re.I), 'U-Boot'),
-    (re.compile(br'\bLinux version \d', re.I), 'Linux'),
+    (re.compile(br'^U-Boot SPL \d{4}\.\d{2}', re.I), 'U-Boot SPL'),
+    (re.compile(br'^U-Boot \d{4}\.\d{2}', re.I), 'U-Boot'),
+    (re.compile(br'^(?:<\d+>)?(?:\[\s*\d+(?:\.\d+)?\]\s*)?Linux version \d', re.I), 'Linux'),
 )
 
 
 def _marker(line):
+    # Remove our host timestamp and terminal paint codes, but never search
+    # arbitrary text: journalctl pages and shell commands can quote banners.
+    line = STAMP.sub(b'', line, count=1)
+    line = re.sub(br'\x1b\[[0-?]*[ -/]*[@-~]', b'', line).lstrip(b' \t\r\x00')
     for pattern, label in BOOT_MARKERS:
         if pattern.search(line):
             return label
@@ -101,6 +105,9 @@ def boot_epochs(root, files, cache=None):
                           or (last_marker_kind in ('Boot ROM', 'U-Boot SPL', 'U-Boot')
                               and kind == 'Linux'))
             if candidates and close_chain and same_chain:
+                # Advance the phase even when it belongs to the same boot;
+                # a later Linux-only restart must not chain to stale firmware.
+                last_marker_kind, last_marker_time = kind, marker_time
                 continue
             candidates.append({'file_index': index, 'offset': offset,
                                'started': stamp, 'marker': kind})

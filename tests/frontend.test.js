@@ -822,6 +822,35 @@ test('late all-boot search responses cannot replace a newer search or device', a
   assert.equal(h.get('boot-search-matches').children.length, 0);
 });
 
+test('board command chips remain usable after switching sessions without a prompt', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/commands').resolve({ key: 'A', commands: [{ command: 'uname -a' }] }); await drain();
+  const chip = h.get('d-commands').children[0];
+  h.take('/api/sessions').resolve({ key: 'A', sessions: [
+    { sid: 'serial', kind: 'serial' }, { sid: 'ssh1', kind: 'ssh' },
+  ] }); await drain(); chooseSSH(h);
+  assert.equal(h.terminals.at(-1).parsed, '');
+  chip.click();
+  assert.equal(h.get('d-in').value, 'uname -a');
+  assert.equal(h.sends().length, 0);
+  h.select('B'); h.get('d-in').value = '';
+  chip.click(); assert.equal(h.get('d-in').value, '');
+});
+
+test('command chips respect the current read-only agent session after a tab switch', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/commands').resolve({ key: 'A', commands: [{ command: 'uname -a' }] }); await drain();
+  const chip = h.get('d-commands').children[0];
+  h.take('/api/sessions').resolve({ key: 'A', sessions: [
+    { sid: 'serial', kind: 'serial' }, { sid: 'ssh1', kind: 'ssh', actor: 'agent' },
+  ] }); await drain();
+  h.get('d-tabs').children.find(button => button.textContent.includes('只读')).click();
+  chip.click();
+  assert.equal(h.get('d-in').value, '');
+  assert.ok(h.get('d-status').textContent.includes('只读'));
+  assert.equal(h.sends().length, 0);
+});
+
 test('common commands fill the input without executing on click', async () => {
   const h = await setup(); h.select('A');
   h.take('/api/commands').resolve({ key: 'A', commands: [

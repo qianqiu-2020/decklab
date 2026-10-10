@@ -958,6 +958,7 @@
     renderTabs();
     loadSessions();
     loadLogs();
+    loadCommands();
     var selected = sessions.filter(function (s) { return s.sid === sid; })[0];
     if (selected && selected.kind === 'log') loadArchivedLog(ctx, selected);
     else startStream(ctx);
@@ -1359,7 +1360,14 @@
           button.textContent = entry.command + (entry.use_count > 1 ? '  ×' + entry.use_count : '');
           button.title = '填入命令输入框';
           button.addEventListener('click', function () {
-            if (!isCurrent(ctx) || ctx.readonly) return;
+            // Commands belong to the board, not the view that loaded them.
+            // Switching serial/SSH tabs must not invalidate these buttons.
+            if (!isCurrent(view) || view.key !== ctx.key
+                || (view.serial || '') !== (ctx.serial || '')) return;
+            if (view.readonly) {
+              $('d-status').textContent = '当前会话只读；请切换可输入的串口 / SSH 会话，或先介入该会话';
+              return;
+            }
             $('d-in').value = entry.command; $('d-in').focus();
           });
           box.appendChild(button);

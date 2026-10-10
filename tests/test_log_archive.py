@@ -18,6 +18,40 @@ class LogArchiveTests(unittest.TestCase):
                  'date': path.stem[-8:], 'mtime': path.stat().st_mtime}
                 for path in sorted(self.root.glob('serial-*.log'))]
 
+    def test_journal_pager_and_shell_echo_do_not_create_boots(self):
+        path = self.root / 'serial-20261009.log'
+        path.write_bytes(
+            b'2026-10-09 10:00:00  [    0.000000] Linux version 6.18.3 board\n'
+            + b'2026-10-09 15:39:15  Sep 30 17:20:08 riscv-118 kernel: Linux version 6.18.3\n' * 12
+            + b'2026-10-09 15:39:15  root@board:~# echo "Linux version 6.18.3"\n'
+            + b'2026-10-09 15:39:15  root@board:~# grep "U-Boot 2022.10" log\n'
+            + b'2026-10-09 15:39:15  note: U-Boot SPL 2022.10\n')
+        epochs = boot_epochs(str(self.root), self.files())
+        self.assertEqual(len(epochs), 1)
+        self.assertEqual(epochs[0]['started'], '2026-10-09 10:00:00')
+        self.assertEqual(epochs[0]['size'], path.stat().st_size)
+
+    def test_ansi_boot_chain_and_same_second_real_reboot_are_kept(self):
+        path = self.root / 'serial-20261009.log'
+        path.write_bytes(
+            b'2026-10-09 10:00:00  old reboot message\x00sys: 0x10000200\n'
+            b'2026-10-09 10:00:00  \x1b[0mU-Boot SPL 2022.10\n'
+            b'2026-10-09 10:00:00  U-Boot 2022.10\n'
+            b'2026-10-09 10:00:00  [    0.000000] Linux version 6.18.3\n'
+            b'2026-10-09 10:00:00  \x00sys: 0x10000200\n'
+            b'2026-10-09 10:00:00  U-Boot SPL 2022.10\n'
+            b'2026-10-09 10:00:00  U-Boot 2022.10\n'
+            b'2026-10-09 10:00:00  [    0.000000] Linux version 6.18.3\n')
+        self.assertEqual(len(boot_epochs(str(self.root), self.files())), 2)
+
+    def test_linux_restart_soon_after_firmware_chain_is_a_new_boot(self):
+        path = self.root / 'serial-20261009.log'
+        path.write_bytes(
+            b'2026-10-09 10:00:00  U-Boot 2022.10\n'
+            b'2026-10-09 10:00:10  [    0.000000] Linux version 6.18.3\n'
+            b'2026-10-09 10:01:00  [    0.000000] Linux version 6.18.3\n')
+        self.assertEqual(len(boot_epochs(str(self.root), self.files())), 2)
+
     def test_search_reads_full_history_and_cross_day_parts_with_pagination(self):
         (self.root / 'serial-20260920.log').write_bytes(
             b'2026-09-20 10:00:00  U-Boot 2024.10\n'
