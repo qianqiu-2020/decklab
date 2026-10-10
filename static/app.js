@@ -82,7 +82,7 @@
       scrollback: 8000,
       cursorBlink: !ctx.readonly,
       allowProposedApi: true,
-      fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+      fontFamily: 'ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace',
       fontSize: DEFAULT_TERMINAL_FONT_SIZE,
       theme: { background: '#0F151D', foreground: '#DCE5F0', cursor: '#82C5FF',
                selectionBackground: '#E6B45D', selectionForeground: '#0F151D' }

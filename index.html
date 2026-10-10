@@ -11,23 +11,6 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
-  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5m8 0h6"/></symbol>
-  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
-  <symbol id="i-log" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></symbol>
-  <symbol id="i-command" viewBox="0 0 24 24"><path d="m4 6 4 4-4 4m7-8h9m-9 4h9M4 19h16"/></symbol>
-  <symbol id="i-compare" viewBox="0 0 24 24"><path d="M12 3v18M8 6H4v12h4m8-12h4v12h-4"/></symbol>
-  <symbol id="i-transfer" viewBox="0 0 24 24"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4"/></symbol>
-  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 6a8 8 0 0 1 13 2M5 16a8 8 0 0 0 13 2"/></symbol>
-  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></symbol>
-  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
-  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></symbol>
-  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></symbol>
-  <symbol id="i-board" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/></symbol>
-  <symbol id="i-switch" viewBox="0 0 24 24"><path d="M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4"/></symbol>
-  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
-  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="m13 2-9 12h7l-1 8 10-13h-7z"/></symbol>
-</defs></svg>
 <div class="wrap">
 
   <div class="top">
@@ -46,7 +29,7 @@
   </div>
   <div class="workspace" id="workspace">
   <div class="device-pane">
-  <div class="pane-head"><span class="pane-mark"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="pane-title">seriald<small>开发板工作台</small></span></div>
+  <div class="pane-head"><span class="pane-mark"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-terminal"/></svg></span><span class="pane-title">seriald<small>开发板工作台</small></span></div>
   <div class="toolbar">
     <input id="device-search" placeholder="搜索标签、序列号、主机名或串口位置" aria-label="搜索设备">
     <select id="device-filter" aria-label="设备状态"><option value="all">全部设备</option><option value="online">在线</option><option value="offline">历史 / 离线</option><option value="pending">待识别</option></select>
@@ -62,36 +45,36 @@
       <span class="k" id="d-key">—</span>
       </div>
       <span class="sp">
-        <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="#i-board"/></svg>识别设备</button>
-        <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>设备信息</button>
-        <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg>Agent 分享</button>
-        <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录"><svg class="icon" aria-hidden="true"><use href="#i-switch"/></svg>准备换板</button>
+        <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>识别设备</button>
+        <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-info"/></svg>设备信息</button>
+        <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>Agent 分享</button>
+        <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-switch"/></svg>准备换板</button>
         <details class="device-maintenance"><summary>设备维护</summary><div>
           <button id="b-rename" type="button">改标签</button>
           <button id="b-rescue" type="button" title="执行 USB 软解绑与重新绑定，会暂时中断该设备连接">重新连接串口</button>
         </div></details>
-        <button id="b-close" class="icon-button" type="button" aria-label="收起设备终端" title="收起设备终端"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+        <button id="b-close" class="icon-button" type="button" aria-label="收起设备终端" title="收起设备终端"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button>
       </span>
     </div>
     <div class="tabs" id="d-tabs"></div>
     <div class="info" id="d-info" hidden></div>
     <div class="terminal-tools">
       <div class="terminal-search-tools" role="search" aria-label="终端内容搜索">
-        <label for="terminal-search" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg></label>
+        <label for="terminal-search" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg></label>
         <input id="terminal-search" type="text" placeholder="搜索终端 · Ctrl+F" aria-label="搜索终端内容" title="按 Enter 搜索，Esc 清空" autocomplete="off" spellcheck="false">
         <button id="terminal-search-prev" type="button" title="上一个匹配（Shift+Enter）" aria-label="上一个匹配">↑</button>
         <button id="terminal-search-next" type="button" title="下一个匹配（Enter）" aria-label="下一个匹配">↓</button>
       </div>
       <span id="terminal-search-status"></span>
       <div class="terminal-nav-tools" aria-label="侧栏导航">
-        <button id="b-records" type="button" aria-expanded="false" aria-pressed="false" title="打开串口日志归档"><svg class="icon" aria-hidden="true"><use href="#i-log"/></svg>串口日志</button>
-        <button id="b-command-nav" type="button" aria-pressed="false" title="在当前终端缓冲中按 shell 命令跳转"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg>输入导航</button>
+        <button id="b-records" type="button" aria-expanded="false" aria-pressed="false" title="打开串口日志归档"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-log"/></svg>串口日志</button>
+        <button id="b-command-nav" type="button" aria-pressed="false" title="在当前终端缓冲中按 shell 命令跳转"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>输入导航</button>
       </div>
       <div class="terminal-extra-tools" aria-label="终端工具">
-        <button id="b-boot-compare" type="button" title="比较同一块或不同开发板的两次启动日志"><svg class="icon" aria-hidden="true"><use href="#i-compare"/></svg>启动对比</button>
-        <button id="b-file-transfer" type="button" title="通过串口上传、下载或在开发板之间复制文件"><svg class="icon" aria-hidden="true"><use href="#i-transfer"/></svg>文件传输</button>
-        <button id="b-redraw" type="button" title="从采集缓冲重绘全屏终端"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>重绘</button>
-        <button id="b-expand" type="button" aria-pressed="false" title="放大终端"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg><span id="b-expand-label">放大</span></button>
+        <button id="b-boot-compare" type="button" title="比较同一块或不同开发板的两次启动日志"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-compare"/></svg>启动对比</button>
+        <button id="b-file-transfer" type="button" title="通过串口上传、下载或在开发板之间复制文件"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-transfer"/></svg>文件传输</button>
+        <button id="b-redraw" type="button" title="从采集缓冲重绘全屏终端"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>重绘</button>
+        <button id="b-expand" type="button" aria-pressed="false" title="放大终端"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-expand"/></svg><span id="b-expand-label">放大</span></button>
       </div>
     </div>
     <div id="d-status" class="terminal-status" role="status"></div>
@@ -111,13 +94,13 @@
       <div class="hint" id="d-hint" hidden></div>
     </div>
     <section class="records" id="d-records" hidden>
-      <div class="records-title"><strong>记录与归档</strong><button id="b-records-close" class="icon-button" type="button" title="关闭侧栏" aria-label="关闭侧栏"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="records-title"><strong>记录与归档</strong><button id="b-records-close" class="icon-button" type="button" title="关闭侧栏" aria-label="关闭侧栏"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button></div>
       <div class="records-tabs" role="tablist" aria-label="记录分类">
-        <button id="record-tab-logs" type="button" role="tab" aria-controls="record-panel-logs"><svg class="icon" aria-hidden="true"><use href="#i-log"/></svg>串口归档</button>
-        <button id="record-tab-inputs" type="button" role="tab" aria-controls="record-panel-inputs"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg>输入导航</button>
-        <button id="record-tab-sessions" type="button" role="tab" aria-controls="record-panel-sessions"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg>SSH 会话</button>
-        <button id="record-tab-events" type="button" role="tab" aria-controls="record-panel-events"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>关键操作</button>
-        <button id="record-tab-commands" type="button" role="tab" aria-controls="record-panel-commands"><svg class="icon" aria-hidden="true"><use href="#i-bolt"/></svg>常用命令</button>
+        <button id="record-tab-logs" type="button" role="tab" aria-controls="record-panel-logs"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-log"/></svg>串口归档</button>
+        <button id="record-tab-inputs" type="button" role="tab" aria-controls="record-panel-inputs"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>输入导航</button>
+        <button id="record-tab-sessions" type="button" role="tab" aria-controls="record-panel-sessions"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-terminal"/></svg>SSH 会话</button>
+        <button id="record-tab-events" type="button" role="tab" aria-controls="record-panel-events"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-clock"/></svg>关键操作</button>
+        <button id="record-tab-commands" type="button" role="tab" aria-controls="record-panel-commands"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>常用命令</button>
       </div>
       <div class="records-panel" id="record-panel-logs" role="tabpanel">
         <div class="section-head"><h2>串口日志归档</h2><span id="log-location"></span></div>

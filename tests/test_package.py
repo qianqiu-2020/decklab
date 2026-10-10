@@ -180,6 +180,12 @@ class PackageTests(unittest.TestCase):
                 with urlopen(url + '/static/terminal-policy.js') as response:
                     self.assertIn('no-cache', response.headers['Cache-Control'])
                     self.assertIn(b'registerCsiHandler', response.read())
+                with urlopen(url + '/static/icons.svg') as response:
+                    self.assertIn('image/svg+xml', response.headers['Content-Type'])
+                    self.assertIn('no-cache', response.headers['Cache-Control'])
+                    sprite = response.read()
+                    self.assertIn(b'id="i-terminal"', sprite)
+                    self.assertIn(b'id="i-transfer"', sprite)
                 for route in ('/registry.sqlite3', '/vendor/%2e%2e/seriald.py'):
                     with self.assertRaises(HTTPError) as error:
                         urlopen(url + route)

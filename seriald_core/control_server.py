@@ -67,7 +67,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     trust_loopback = False
     share_seconds = 24 * 60 * 60
     allowed_static = frozenset(('/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js',
-                                '/static/app.css', '/vendor/xterm.js',
+                                '/static/app.css', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
     public_agent_files = frozenset(('/serialctl.py', '/skills/seriald-board/SKILL.md'))
     agent_denied_posts = frozenset(('/api/label', '/api/switch-mode', '/api/rescue',
@@ -425,7 +425,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         if urlparse(self.path).path in ('/', '', '/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
-                                        '/static/terminal-policy.js', '/static/app.css'):
+                                        '/static/terminal-policy.js', '/static/app.css', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()
 
