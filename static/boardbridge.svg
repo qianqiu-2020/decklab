@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>BoardBridge · 板桥</title>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#17292c"/>
+  <g fill="none" stroke="#85e0c2" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M34 64V35M94 35V64M34 64C34 41 94 41 94 64"/>
+    <path d="M25 35H103"/>
+  </g>
+  <g fill="none" stroke="#f3faf7" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M36 82L48 92L36 102"/>
+    <path d="M64 102H86"/>
+  </g>
+</svg>

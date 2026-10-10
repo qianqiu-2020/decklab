@@ -38,6 +38,7 @@ try {
 
     & $pyinstaller --noconfirm --clean --onedir --name seriald `
         --hidden-import serialctl `
+        --icon packaging/boardbridge.ico `
         --add-data 'index.html;.' `
         --add-data 'static;static' `
         --add-data 'vendor;vendor' `

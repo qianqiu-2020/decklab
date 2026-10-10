@@ -186,6 +186,12 @@ class PackageTests(unittest.TestCase):
                     sprite = response.read()
                     self.assertIn(b'id="i-terminal"', sprite)
                     self.assertIn(b'id="i-transfer"', sprite)
+                for asset, mime, signature in (('boardbridge.svg', 'image/svg+xml', b'<svg'),
+                                                ('boardbridge.png', 'image/png', b'\x89PNG')):
+                    with urlopen(url + '/static/' + asset) as response:
+                        self.assertIn(mime, response.headers['Content-Type'])
+                        self.assertIn('no-cache', response.headers['Cache-Control'])
+                        self.assertTrue(response.read().startswith(signature))
                 for route in ('/registry.sqlite3', '/vendor/%2e%2e/seriald.py'):
                     with self.assertRaises(HTTPError) as error:
                         urlopen(url + route)

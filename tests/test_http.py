@@ -126,7 +126,8 @@ class HandlerTests(unittest.TestCase):
 
     def test_page_responses_forbid_heuristic_caching(self):
         # end_headers 里的判断按 self.path 走,两个入口都必须带上 no-cache。
-        for path in ('/', '', '/index.html', '/static/icons.svg'):
+        for path in ('/', '', '/index.html', '/static/icons.svg',
+                     '/static/boardbridge.svg', '/static/boardbridge.png'):
             handler = self.control_handler(path)
             # self.handler() 把 end_headers 换成了 Mock,这里要显式调类上的真实现。
             with mock.patch.object(control.http.server.BaseHTTPRequestHandler, 'end_headers') as parent:

@@ -14,6 +14,7 @@ on:
       - 'tools/install_inno_build_tool.ps1'
       - 'tools/windows-launchers/**'
       - 'packaging/seriald-windows.iss'
+      - 'packaging/boardbridge.ico'
       - 'packaging/inno-languages/**'
       - 'docs/WINDOWS.md'
       - '.github/workflows/windows-portable.yml'
