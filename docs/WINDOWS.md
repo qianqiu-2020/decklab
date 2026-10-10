@@ -25,6 +25,14 @@ winget install --id JRSoftware.InnoSetup -e -s winget -i
 
 仅需 ZIP 时运行 `.\Build-seriald.cmd -PortableOnly`，无需 Inno Setup。`Install-seriald.cmd` 保留为 **ZIP 安装脚本**：默认装到源码旁的 `seriald-installed/`，保留 `data/`，备份旧程序，替换失败时回滚；也支持 `tools/install_windows.ps1 -InstallDir D:\seriald`。它可复制旧 `%LOCALAPPDATA%\seriald\data`，但不会删除旧目录。IT 可传 `-ExpectedSha256 <批准的程序EXE摘要>` 进行校验。常规用户直接使用 Setup。
 
+如果 Inno Setup 已安装但无法找到，构建脚本会从 PATH、用户/系统安装注册表及常见目录查找 `ISCC.exe`。也可显式指定实际路径。ZIP 已生成时，仅重跑安装器步骤，无需重新执行 PyInstaller：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows_installer.ps1
+# 自选编译器目录时：
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows_installer.ps1 -Compiler 'D:\Tools\Inno Setup 6\ISCC.exe'
+```
+
 Windows 11 Pro/Enterprise 的 Docker Desktop 切换到 **Windows containers** 后，也可双击 `Build-seriald-Docker.cmd`，生成同样的 Setup 和 ZIP。容器使用 Windows Server Core、Python 3.12 及已校验发布者签名的 Inno Setup 编译器。Docker 只参与构建，程序在 Windows 主机运行；Linux/WSL2 容器不能交叉生成该 PyInstaller 程序。宿主机需与镜像兼容，首次构建下载较大。[Windows 容器兼容性](https://learn.microsoft.com/en-us/virtualization/windowscontainers/deploy-containers/version-compatibility)
 
 Windows CI 还会验证：迁移已有目录、二次升级记住路径、数据保留及卸载保留数据。可在没有注册 seriald 安装的干净 Windows 测试账户运行 `tools/test_windows_installer.ps1`；测试不打开 COM 口。

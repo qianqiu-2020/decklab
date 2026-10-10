@@ -22,23 +22,12 @@ if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw 'Executable 
 $expected = (Get-Content -LiteralPath $manifest -Raw).Trim()
 $actual = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
 if ($expected -notmatch '^[0-9A-Fa-f]{64}$' -or $actual -ne $expected) { throw 'Executable checksum mismatch.' }
+. (Join-Path $PSScriptRoot 'windows_installer_compiler.ps1')
+$Compiler = Find-InnoSetupCompiler -ExplicitPath $Compiler
 if (-not $Compiler) {
-    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($command) { $Compiler = $command.Source }
-    else {
-        foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, $env:LOCALAPPDATA)) {
-            if (-not $base) { continue }
-            foreach ($subdir in @('Inno Setup 6', 'Programs\Inno Setup 6')) {
-                $candidate = Join-Path $base "$subdir\ISCC.exe"
-                if (Test-Path -LiteralPath $candidate -PathType Leaf) { $Compiler = $candidate; break }
-            }
-            if ($Compiler) { break }
-        }
-    }
+    throw 'ISCC.exe was not found in PATH, installation registry or standard directories. Pass -Compiler "D:\path\to\Inno Setup 6\ISCC.exe" to this script. The portable ZIP has already been built.'
 }
-if (-not $Compiler -or -not (Test-Path -LiteralPath $Compiler -PathType Leaf)) {
-    throw 'Install Inno Setup 6 first: winget install --id JRSoftware.InnoSetup -e -s winget -i. For ZIP only, use Build-seriald.cmd -PortableOnly.'
-}
+Write-Host "Installer compiler: $Compiler"
 if (-not (Test-Path -LiteralPath (Join-Path (Split-Path $Compiler) 'Languages\ChineseSimplified.isl'))) {
     throw 'Inno Setup 6.5 or later with the bundled Chinese language is required.'
 }

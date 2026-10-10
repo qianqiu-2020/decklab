@@ -9,6 +9,7 @@ if ($env:OS -ne 'Windows_NT') {
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Push-Location $root
 try {
+    & (Join-Path $PSScriptRoot 'test_windows_compiler_discovery.ps1')
     $bundle = Join-Path $root 'dist\seriald'
     if (Test-Path (Join-Path $bundle 'data')) {
         throw 'dist\seriald\data contains runtime data. Move the running installation elsewhere before rebuilding; the build must not erase it.'
