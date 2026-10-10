@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>板桥 BoardBridge · 开发板工作台</title>
-<link rel="icon" href="/static/boardbridge.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/static/boardbridge.png">
+<title>DeckLab · 开发板工作台</title>
+<link rel="icon" href="/static/decklab.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/decklab.png">
 <!-- 终端模拟器:本地托管,内网不依赖公网 CDN。
      串口/SSH 上跑 vim、htop、menuconfig 这类全屏程序时会用光标定位重画屏幕,
      必须由真正的 VT 模拟器渲染,不能"剥掉 ANSI 再线性追加"(那样会糊成一团)。 -->
@@ -16,7 +16,7 @@
 <div class="wrap">
 
   <div class="top">
-    <h1><img class="brand-logo" src="/static/boardbridge.svg" width="32" height="32" alt="">板桥 <span class="brand-en">BoardBridge</span></h1>
+    <h1><img class="brand-logo" src="/static/decklab.svg" width="32" height="32" alt="">DeckLab</h1>
     <span class="mono" style="color:var(--ink-3);font-size:12px">开发板工作台</span>
     <button id="b-share" type="button" hidden title="创建可撤销的网页访问链接">分享访问</button>
     <button id="b-agent-share-all" type="button" disabled title="生成可撤销的 Agent 接入令牌与指引">Agent 接入</button>
@@ -31,7 +31,7 @@
   </div>
   <div class="workspace" id="workspace">
   <div class="device-pane">
-  <div class="pane-head"><span class="pane-mark"><img src="/static/boardbridge.svg" width="34" height="34" alt=""></span><span class="pane-title">板桥<small>BoardBridge · 开发板工作台</small></span></div>
+  <div class="pane-head"><span class="pane-mark"><img src="/static/decklab.svg" width="34" height="34" alt=""></span><span class="pane-title">DeckLab<small>开发板工作台</small></span></div>
   <div class="toolbar">
     <input id="device-search" placeholder="搜索标签、序列号、主机名或串口位置" aria-label="搜索设备">
     <select id="device-filter" aria-label="设备状态"><option value="all">全部设备</option><option value="online">在线</option><option value="offline">历史 / 离线</option><option value="pending">待识别</option></select>

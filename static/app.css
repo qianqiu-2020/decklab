@@ -47,7 +47,6 @@
   h1{display:flex;align-items:center;gap:9px;font-family:inherit;font-weight:700;font-size:27px;
     letter-spacing:-.005em;margin:0}
   .brand-logo{display:block;flex:none}
-  .brand-en{font-size:15px;font-weight:500;color:var(--ink-2);letter-spacing:-.02em}
   .sub{color:var(--ink-2);font-size:14px;margin:0 0 20px;max-width:78ch}
   .mono{font-family:var(--font-mono)}
   .conn{margin-left:auto;font-family:var(--font-mono);font-size:11.5px;

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>DeckLab</title>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#3158df"/>
+  <path fill="#fff" fill-rule="evenodd" d="M30 29H61C87 29 103 43 103 64S87 99 61 99H30V29ZM48 46V82H60C76 82 85 76 85 64S76 46 60 46H48Z"/>
+  <path d="M23 64H49" stroke="#3158df" stroke-width="7"/>
+  <rect x="24" y="60.5" width="14" height="7" rx="3.5" fill="#b4c8ff"/>
+</svg>

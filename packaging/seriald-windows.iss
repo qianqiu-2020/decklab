@@ -9,13 +9,17 @@
   #error "OutputDir must be supplied by the builder"
 #endif
 
+#ifndef AppIcon
+  #error "AppIcon must be supplied by the builder"
+#endif
+
 [Setup]
 AppId={{51AB737C-BCEF-4C09-98EE-47ACD6A2CBBA}
-AppName=BoardBridge 板桥
+AppName=DeckLab
 AppVersion={#AppVersion}
 AppPublisher=seriald contributors
 DefaultDirName={code:DefaultInstallDir}
-DefaultGroupName=BoardBridge
+DefaultGroupName=DeckLab
 UsePreviousAppDir=yes
 DisableDirPage=no
 DisableProgramGroupPage=yes
@@ -28,8 +32,8 @@ SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
-SetupIconFile=boardbridge.ico
-UninstallDisplayIcon={app}\seriald.exe
+SetupIconFile=decklab.ico
+UninstallDisplayIcon={app}\{#AppIcon}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -46,11 +50,11 @@ Source: "{#BundleDir}\*"; DestDir: "{app}"; Excludes: "data\*"; Flags: ignorever
 Name: "{app}\data"; Flags: uninsneveruninstall
 
 [Icons]
-Name: "{group}\BoardBridge - 本机访问"; Filename: "{app}\Start-seriald.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\seriald.exe"
-Name: "{group}\BoardBridge - 局域网无密码"; Filename: "{app}\Start-seriald-LAN-Open.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\seriald.exe"
-Name: "{group}\BoardBridge - 局域网有密码"; Filename: "{app}\Start-seriald-LAN.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\seriald.exe"
-Name: "{group}\卸载 BoardBridge"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\BoardBridge"; Filename: "{app}\Start-seriald.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\seriald.exe"; Tasks: desktopicon
+Name: "{group}\DeckLab - 本机访问"; Filename: "{app}\Start-seriald.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"
+Name: "{group}\DeckLab - 局域网无密码"; Filename: "{app}\Start-seriald-LAN-Open.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"
+Name: "{group}\DeckLab - 局域网有密码"; Filename: "{app}\Start-seriald-LAN.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"
+Name: "{group}\卸载 DeckLab"; Filename: "{uninstallexe}"
+Name: "{userdesktop}\DeckLab"; Filename: "{app}\Start-seriald.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"; Tasks: desktopicon
 
 [Code]
 function DefaultInstallDir(Param: String): String;

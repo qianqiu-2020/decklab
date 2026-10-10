@@ -38,7 +38,7 @@ try {
 
     & $pyinstaller --noconfirm --clean --onedir --name seriald `
         --hidden-import serialctl `
-        --icon packaging/boardbridge.ico `
+        --icon packaging/decklab.ico `
         --add-data 'index.html;.' `
         --add-data 'static;static' `
         --add-data 'vendor;vendor' `
@@ -57,6 +57,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }
     & (Join-Path $bundle 'seriald.exe') ctl --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI launcher failed.' }
+
+    # A content-specific ICO path makes shortcuts independent of the EXE icon cache.
+    $iconSource = Join-Path $root 'packaging\decklab.ico'
+    $iconHash = (Get-FileHash -LiteralPath $iconSource -Algorithm SHA256).Hash.ToLowerInvariant()
+    $iconName = 'app-icon-' + $iconHash.Substring(0, 12) + '.ico'
+    Copy-Item -LiteralPath $iconSource -Destination (Join-Path $bundle $iconName)
+    Set-Content -LiteralPath (Join-Path $bundle 'app-icon-name.txt') -Value $iconName -Encoding ASCII
 
     $exeHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'seriald.exe') -Algorithm SHA256).Hash
     Set-Content -LiteralPath (Join-Path $bundle 'seriald.exe.sha256') -Value $exeHash -Encoding ASCII

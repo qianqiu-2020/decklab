@@ -1,10 +1,10 @@
-# 板桥 BoardBridge：Windows 构建、安装与访问
+# DeckLab：Windows 构建、安装与访问
 
 Windows 版直接接管本机 COM 串口，提供网页终端与 Agent API。推荐分发 **Setup 安装包**：使用者不需要安装 Python，双击即可选择目录并安装。安装不要求管理员权限；局域网防火墙仍由 IT 单独审批。
 
 ## 安装与升级
 
-首次运行 `seriald-1.4.49-windows-x64-setup.exe`，选择一个可写的安装目录。默认在安装包所在位置创建可见的 `seriald-installed/`；若安装包位于源码的 `dist/`，默认改用源码目录下的 `seriald-installed/`，与构建目录分开。首次从解压版迁移时，**选择原安装目录**，无需搬运数据。
+首次运行 `seriald-1.4.50-windows-x64-setup.exe`，选择一个可写的安装目录。默认在安装包所在位置创建可见的 `seriald-installed/`；若安装包位于源码的 `dist/`，默认改用源码目录下的 `seriald-installed/`，与构建目录分开。首次从解压版迁移时，**选择原安装目录**，无需搬运数据。
 
 后续双击新版本 Setup，安装器记住上次目录并覆盖程序文件，保留 `data/` 中的日志、设备档案和认证配置。升级前关闭 seriald 窗口以释放 COM 口；安装器也会检测占用的文件并提示关闭程序。安装完成从开始菜单或安装目录重新启动，三种模式任选其一。卸载仅移除安装的程序与快捷方式，保留运行数据。
 
@@ -19,7 +19,7 @@ winget install --id JRSoftware.InnoSetup -e -s winget -i
 
 构建会创建 `.venv/`、运行回归测试并输出：
 
-- `dist/seriald-1.4.49-windows-x64-setup.exe`：常规安装与升级。
+- `dist/seriald-1.4.50-windows-x64-setup.exe`：常规安装与升级。
 - 对应 `.exe.sha256`：安装包摘要，供可信渠道核对。
 - `dist/seriald-windows-portable.zip`：便携备选。
 
@@ -32,6 +32,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows_instal
 # 自选编译器目录时：
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows_installer.ps1 -Compiler 'D:\Tools\Inno Setup 6\ISCC.exe'
 ```
+
+桌面和开始菜单快捷方式使用安装目录里的独立 `app-icon-<内容摘要>.ico`，升级时新图标有新路径，不依赖 `seriald.exe` 的旧图标缓存。构建会校验 ICO 是否匹配源码。图标更新后必须运行 `Build-seriald.cmd` 完整重建；仅重跑安装器脚本不会更新已有程序包的图标。然后运行新的 Setup，保留原安装目录，并选中“创建桌面快捷方式”。
 
 Windows 11 Pro/Enterprise 的 Docker Desktop 切换到 **Windows containers** 后，也可双击 `Build-seriald-Docker.cmd`，生成同样的 Setup 和 ZIP。容器使用 Windows Server Core、Python 3.12 及已校验发布者签名的 Inno Setup 编译器。Docker 只参与构建，程序在 Windows 主机运行；Linux/WSL2 容器不能交叉生成该 PyInstaller 程序。宿主机需与镜像兼容，首次构建下载较大。[Windows 容器兼容性](https://learn.microsoft.com/en-us/virtualization/windowscontainers/deploy-containers/version-compatibility)
 

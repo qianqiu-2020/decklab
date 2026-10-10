@@ -28,8 +28,21 @@ if (-not $Compiler) {
     throw 'ISCC.exe was not found in PATH, installation registry or standard directories. Pass -Compiler "D:\path\to\Inno Setup 6\ISCC.exe" to this script. The portable ZIP has already been built.'
 }
 Write-Host "Installer compiler: $Compiler"
+$iconManifest = Join-Path $bundle 'app-icon-name.txt'
+if (-not (Test-Path -LiteralPath $iconManifest -PathType Leaf)) {
+    throw 'The bundle has no shortcut icon. Rebuild the program with Build-seriald.cmd, then install the new setup EXE.'
+}
+$iconName = (Get-Content -LiteralPath $iconManifest -Raw).Trim()
+if ($iconName -notmatch '^app-icon-[0-9a-f]{12}\.ico$') { throw 'Invalid shortcut icon manifest.' }
+$bundleIcon = Join-Path $bundle $iconName
+$sourceIcon = Join-Path $root 'packaging\decklab.ico'
+if (-not (Test-Path -LiteralPath $bundleIcon -PathType Leaf) -or
+    (Get-FileHash -LiteralPath $bundleIcon -Algorithm SHA256).Hash -ne
+    (Get-FileHash -LiteralPath $sourceIcon -Algorithm SHA256).Hash) {
+    throw 'The bundle icon is missing or outdated. Rebuild with Build-seriald.cmd.'
+}
 $output = Join-Path $root 'dist'
-& $Compiler "/DAppVersion=$version" "/DBundleDir=$bundle" "/DOutputDir=$output" (Join-Path $root 'packaging\seriald-windows.iss')
+& $Compiler "/DAppVersion=$version" "/DBundleDir=$bundle" "/DOutputDir=$output" "/DAppIcon=$iconName" (Join-Path $root 'packaging\seriald-windows.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Windows installer compilation failed.' }
 $setup = Join-Path $output "seriald-$version-windows-x64-setup.exe"
 if (-not (Test-Path -LiteralPath $setup -PathType Leaf)) { throw 'Installer output is missing.' }

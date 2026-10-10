@@ -10,6 +10,8 @@ if ($versionSource -notmatch "__version__\s*=\s*'([0-9]+\.[0-9]+\.[0-9]+)'") { t
 $setup = Join-Path $root "dist\seriald-$($Matches[1])-windows-x64-setup.exe"
 $target = Join-Path $env:TEMP ('seriald installer test ' + [guid]::NewGuid().ToString('N'))
 $uninstaller = Join-Path $target 'unins000.exe'
+$desktopLink = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'DeckLab.lnk'
+if (Test-Path -LiteralPath $desktopLink) { throw 'Use a clean test account; a DeckLab desktop shortcut already exists.' }
 function Run-Setup([string[]]$Options) {
     $process = Start-Process -FilePath $setup -ArgumentList $Options -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw "Setup failed: $($process.ExitCode)" }
@@ -23,7 +25,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $target 'data') | Out-Null
     $sentinel = Join-Path $target 'data\preserve-me.txt'
     Set-Content -LiteralPath $sentinel -Value 'logs and configuration must survive' -Encoding ASCII
-    Run-Setup -Options @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$target`"")
+    Run-Setup -Options @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=desktopicon', "/DIR=`"$target`"")
     if (-not (Test-Path -LiteralPath $uninstaller)) { throw 'Uninstaller missing.' }
     $programFile = Join-Path $target 'README.md'
     Set-Content -LiteralPath $programFile -Value 'old program file' -Encoding ASCII
@@ -38,10 +40,26 @@ try {
     foreach ($name in @('Start-seriald.cmd', 'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN.cmd')) {
         if (-not (Test-Path -LiteralPath (Join-Path $target $name))) { throw "Missing launcher: $name" }
     }
+    $iconName = (Get-Content -LiteralPath (Join-Path $target 'app-icon-name.txt') -Raw).Trim()
+    $iconPath = Join-Path $target $iconName
+    $sourceIcon = Join-Path $root 'packaging\decklab.ico'
+    if ((Get-FileHash -LiteralPath $iconPath).Hash -ne (Get-FileHash -LiteralPath $sourceIcon).Hash) { throw 'Installed shortcut icon is wrong.' }
+    $shell = New-Object -ComObject WScript.Shell
+    $group = Join-Path ([Environment]::GetFolderPath('Programs')) 'DeckLab'
+    $launchLinks = @(Get-ChildItem -LiteralPath $group -Filter '*.lnk' | ForEach-Object {
+        $shortcut = $shell.CreateShortcut($_.FullName)
+        if ($shortcut.TargetPath -like '*Start-seriald*.cmd') { $shortcut }
+    })
+    if ($launchLinks.Count -ne 3) { throw 'Expected three start-menu launch shortcuts.' }
+    if (-not (Test-Path -LiteralPath $desktopLink)) { throw 'Desktop shortcut is missing.' }
+    $launchLinks += $shell.CreateShortcut($desktopLink)
+    foreach ($shortcut in $launchLinks) {
+        if ($shortcut.IconLocation -ne "$iconPath,0") { throw "Shortcut still references a program/default icon: $($shortcut.IconLocation)" }
+    }
     $process = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw 'Uninstall failed.' }
     if (-not (Test-Path -LiteralPath $sentinel)) { throw 'Uninstall removed user data.' }
-    Write-Host 'Installer migration, remembered upgrade directory, runtime preservation and uninstall passed.'
+    Write-Host 'Installer migration, remembered upgrade directory, runtime preservation, shortcut icons and uninstall passed.'
 } finally {
     if (Test-Path -LiteralPath $uninstaller) {
         Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait | Out-Null
