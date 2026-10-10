@@ -82,6 +82,19 @@ Ubuntu 等禁用 root SSH 的板子可按请求指定账户：设置 `SERIALD_SS
 默认不覆盖现有文件；明确需要替换时加 `--overwrite`。先确认板子在 Linux shell，具备
 `base64`、`sha256sum`、`dd` 等工具。传输按连接 ID 固定设备并逐块校验；网页也有“文件传输”面板。
 
+## 精确读取启动日志
+
+```sh
+serialctl --device <标签> boot-log --latest
+serialctl --device <标签> logs
+serialctl --device <标签> boot-log --id <boot-ID>
+serialctl --device <标签> boot-search --query 'panic'
+```
+
+`boot-log` 返回该次启动已采集的完整 `data` / `data_b64`，不受实时缓冲或末尾 64 KiB 限制；跨天的日志合并在同一启动 ID 中。`--latest` 是最新检测到启动标记的记录，不保证板子目前在线；诊断时先核对启动时间，并保存 ID，后续用 `--id` 避免重启后读到另一轮。采集开始之前的输出无法补回，没有启动标记时会明确报错。
+
+`boot-search` 在当前设备全部启动归档中搜索文字，不区分大小写；结果含启动 ID、时间和匹配行。`more=true` 时用 `--offset <next_offset>` 继续读取。先搜索确定 ID，再读完整启动日志；不用在每日文件中猜测启动边界。
+
 ## 启动差异排查
 
 `logs` 列出 `boots` 和每次启动的 ID。用 `boot-compare --baseline-id <ID> --target-id <ID>`

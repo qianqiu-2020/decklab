@@ -126,7 +126,7 @@ function harness(options = {}) {
       fit() { this.fitted = true; }
       proposeDimensions() { return { cols: 140, rows: 42 }; }
     } },
-    Uint8Array, AbortController, console,
+    Uint8Array, AbortController, console, location: { hash: options.hash || '' },
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     setTimeout: (fn, delay) => { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
     clearTimeout: id => timers.delete(id),
@@ -184,6 +184,17 @@ function chooseSSH(h, sid = 'ssh1') {
 
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
+
+test('device share bookmarks select the stable serial even after a label change', async () => {
+  const h = harness({ hash: '#device=SN%20A' });
+  h.take('/api/devices').resolve({ devices: [{ key: 'renamed', label: 'renamed', serial: 'SN A',
+    dev: '/mock/tty', alive: true }] }); await drain();
+  assert.equal(h.get('detail').hidden, false);
+  assert.equal(h.get('d-name').textContent, 'renamed');
+  assert.ok(h.take('/api/session').url.includes('key=renamed'));
+  const invalid = await setup({ hash: '#device=%ZZ' });
+  assert.equal(invalid.terminals.length, 0);
+});
 
 test('queued old xterm output and CSI 6n cannot reach the new device', async () => {
   const h = await setup();
@@ -772,6 +783,43 @@ test('dates and boot numbers navigate in both directions across midnight', async
   assert.equal(h.get('archive-mode-date').attributes['aria-pressed'], 'true');
   assert.equal(h.get('archive-picker').children[0].value, '2026-09-20');
   assert.ok(h.get('archive-picker').children[1].textContent.includes('当天启动 2 次'));
+});
+
+test('all-boot search pages results and opens a complete read-only boot', async () => {
+  const h = await setup(); h.select('A');
+  h.get('terminal-search-scope').value = 'boots';
+  h.get('terminal-search').value = 'panic';
+  h.get('terminal-search-next').click();
+  const result = { id: 'boot-old', number: 4, started: '2026-09-20 10:00:00', line: 8,
+    excerpt: 'kernel panic' };
+  h.take('/api/boot-search').resolve({ results: [result], more: true }); await drain();
+  assert.equal(h.get('boot-search-results').hidden, false);
+  assert.equal(h.get('d-records').hidden, false);
+  h.get('boot-search-next').click();
+  const page = h.take('/api/boot-search'); assert.ok(page.url.includes('offset=20'));
+  page.resolve({ results: [result], more: false }); await drain();
+  h.get('boot-search-matches').children[0].click();
+  const read = h.take('/api/boot-log'); assert.ok(read.url.includes('id=boot-old'));
+  read.resolve({ data: 'kernel panic\n', start_off: 0, off: 13, size: 13 }); await drain();
+  h.terminals.at(-1).flush(); await drain();
+  assert.equal(h.get('terminal-search-scope').value, 'terminal');
+  assert.equal(h.get('terminal-search').value, 'panic');
+  assert.equal(h.get('d-in').disabled, true);
+  assert.equal(h.sends().length, 0);
+});
+
+test('late all-boot search responses cannot replace a newer search or device', async () => {
+  const h = await setup(); h.select('A');
+  h.get('terminal-search-scope').value = 'boots'; h.get('terminal-search').value = 'old';
+  h.get('terminal-search-next').click(); const old = h.take('/api/boot-search');
+  h.get('terminal-search').value = 'new'; h.get('terminal-search-next').click();
+  h.take('/api/boot-search').resolve({ results: [], more: false }); await drain();
+  old.resolve({ results: [{ id: 'old', excerpt: 'old' }], more: false }); await drain();
+  assert.equal(h.get('boot-search-matches').children.length, 0);
+  h.get('terminal-search-next').click(); const pending = h.take('/api/boot-search');
+  h.select('B'); pending.resolve({ results: [{ id: 'wrong' }], more: false }); await drain();
+  assert.equal(h.get('boot-search-results').hidden, true);
+  assert.equal(h.get('boot-search-matches').children.length, 0);
 });
 
 test('common commands fill the input without executing on click', async () => {

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.log_archive import boot_epochs, read_epoch
+from seriald_core.log_archive import boot_epochs, read_epoch, search_epochs
 
 
 class LogArchiveTests(unittest.TestCase):
@@ -17,6 +17,36 @@ class LogArchiveTests(unittest.TestCase):
         return [{'name': path.name, 'kind': 'serial',
                  'date': path.stem[-8:], 'mtime': path.stat().st_mtime}
                 for path in sorted(self.root.glob('serial-*.log'))]
+
+    def test_search_reads_full_history_and_cross_day_parts_with_pagination(self):
+        (self.root / 'serial-20260920.log').write_bytes(
+            b'2026-09-20 10:00:00  U-Boot 2024.10\n'
+            + b'x' * 70000 + b'\n'
+            + b'2026-09-20 23:59:00  PA\x1b[31mNIC old\x1b[0m\n')
+        (self.root / 'serial-20260921.log').write_bytes(
+            b'2026-09-21 00:01:00  panic across midnight\n'
+            b'2026-09-21 10:00:00  U-Boot 2024.10\n'
+            b'2026-09-21 10:00:02  panic new\n')
+        epochs = boot_epochs(str(self.root), self.files())
+        page = search_epochs(str(self.root), epochs, 'panic', limit=2)
+        self.assertEqual([row['number'] for row in page['results']], [2, 1])
+        self.assertTrue(page['more'])
+        self.assertNotIn('\x1b', page['results'][1]['excerpt'])
+        rest = search_epochs(str(self.root), epochs, 'panic', offset=page['next_offset'], limit=2)
+        self.assertEqual(len(rest['results']), 1)
+        self.assertEqual(rest['results'][0]['date'], '2026-09-21')
+        self.assertEqual(rest['results'][0]['id'], page['results'][1]['id'])
+        self.assertFalse(rest['more'])
+
+    def test_search_is_literal_and_unicode_and_stays_in_boot_ranges(self):
+        (self.root / 'serial-20260920.log').write_text(
+            '启动失败 before collection marker\n'
+            '2026-09-20 10:00:00  U-Boot 2024.10\n'
+            '2026-09-20 10:00:01  启动失败 foo.bar\n')
+        epochs = boot_epochs(str(self.root), self.files())
+        self.assertEqual(len(search_epochs(str(self.root), epochs, '启动失败')['results']), 1)
+        self.assertEqual(len(search_epochs(str(self.root), epochs, 'foo.bar')['results']), 1)
+        self.assertFalse(search_epochs(str(self.root), epochs, 'foo.*')['results'])
 
     def test_multiple_boots_per_day_and_one_boot_across_midnight(self):
         (self.root / 'serial-20260920.log').write_bytes(

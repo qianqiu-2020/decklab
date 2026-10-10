@@ -28,7 +28,7 @@ async function main() {
     calls.push({ route, options });
     let body = {};
     if (route === '/api/access') body = { share_enabled: true, agent_share_enabled: true,
-      open_access: true, lan_hosts: ['10.0.120.161'] };
+      open_access: false, lan_hosts: ['10.0.120.161'] };
     else if (route === '/api/agent-grants') body = { grants: active.slice() };
     else if (route === '/api/share-link') {
       if (rejectPageShare) throw new Error('network unavailable');
@@ -84,7 +84,7 @@ async function main() {
   assert.match(text, /\nexport SERIALD_URL='http:\/\/10\.0\.120\.161:8898'\n/);
   assert.match(text, /skills\/seriald-board\/SKILL\.md/);
   assert.ok(text.indexOf(' exec --command ') < text.indexOf(' read --sid serial'));
-  assert.match(text, /其他客户端仍可无令牌访问/);
+  assert.doesNotMatch(text, /其他客户端仍可无令牌访问/);
   rejectClipboard = true;
   await byId('agent-share-copy').click();
   assert.equal(legacyCopies, 1);
@@ -97,7 +97,7 @@ async function main() {
   assert.equal(byId('b-device-share').disabled, true);
   assert.equal(byId('b-share').disabled, true);
   await sharing;
-  assert.equal(clipboard.at(-1), 'http://10.0.120.161:8898/share/browser-token');
+  assert.equal(clipboard.at(-1), 'http://10.0.120.161:8898/share/browser-token#device=SN1');
   assert.equal(byId('device-share-status').textContent, '链接已复制，24 小时有效');
   assert.equal(byId('b-device-share').disabled, false);
   assert.equal(byId('b-share').disabled, false);
@@ -112,6 +112,25 @@ async function main() {
   await row.children[1].click();
   assert.equal(active[0].revoked, 2);
   assert.equal(byId('agent-share-grants').children[0].children.length, 1);
+  const openElements = {};
+  const openById = id => openElements[id] ||= new Element();
+  const openCalls = [];
+  const openContext = { ...context,
+    document: { ...context.document, getElementById: openById },
+    fetch: async route => {
+      openCalls.push(route);
+      assert.equal(route, '/api/access');
+      return { ok: true, json: async () => ({ open_access: true, share_enabled: false,
+        agent_share_enabled: false, lan_hosts: ['10.0.120.161'] }) };
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'static/share.js'), 'utf8'), openContext);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(openById('b-device-share').hidden, false);
+  assert.equal(openById('b-device-share').disabled, false);
+  await openById('b-device-share').click();
+  assert.equal(clipboard.at(-1), 'http://10.0.120.161:8898/#device=SN1');
+  assert.deepEqual(openCalls, ['/api/access']);
   console.log('ok - scoped agent handoff, self-hosted skill and revocation UI');
 }
 

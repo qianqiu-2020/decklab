@@ -155,3 +155,21 @@ serialctl --device riscv-118 ssh-close --sid 返回的sid
 
 不要绕过服务运行 `cat /dev/ttyUSB*`、`stty`、`screen` 或 `minicom`，不要启动第二个采集器。
 多个 SSH 会话共享板子的文件和系统状态，修改同一资源仍需协调。
+
+
+## 按启动读取与搜索
+
+```sh
+serialctl --device deb1 boot-log --latest
+serialctl --device deb1 logs
+serialctl --device deb1 boot-log --id boot-<ID>
+serialctl --device deb1 boot-search --query 'panic'
+```
+
+`boot-log` 读取该启动已采集的完整内容，包括跨日的各段日志。`--latest` 从列表取最新启动 ID；固定一次故障现场时保存 ID，之后用 `--id`，防止重启后切换到另一轮。
+
+`boot-search` 只搜索所选设备的全部启动归档，支持中文、不区分大小写，按最新启动优先返回匹配行。每页 20 条；`more=true` 时用 `--offset <next_offset>` 继续搜索。分页限制响应大小，不限制历史搜索范围。
+
+对应 API：`GET /api/boot-search?key=<标签>&q=<关键词>&offset=0`、`GET /api/boot-log?key=<标签>&id=<启动ID>`。单设备分享令牌继续由服务端绑定序列号。开始采集之前的输出无法补回；无启动标记时不会猜测启动次数。
+
+通过有效网页分享链接进入的同事也可以在“Agent 分享”中创建、查看和撤销 Agent 令牌；设备页默认选择当前设备。Agent 令牌自身不能创建或撤销其他令牌。网页设备链接按序列号定位，但网页分享的访问授权仍覆盖整个平台。

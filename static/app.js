@@ -1,12 +1,18 @@
 (function () {
   'use strict';
   var UI = window.SerialdUI, $ = UI.byId, fmt = UI.formatBytes, ago = UI.age, copyText = UI.copyText;
+  var requestedDevice = '';
+  try {
+    var sharedMatch = /^#device=(.*)$/.exec(window.location && window.location.hash || '');
+    if (sharedMatch) requestedDevice = decodeURIComponent(sharedMatch[1]);
+  } catch (_) { /* A malformed bookmark must not break device discovery. */ }
   var selKey = null, lastDevices = [], loopGen = 0, lastInfoTs = 0, lastInfoIdentity = '';
   var curSid = 'serial';              // serial、sshN 或本地只读 log:* 标签
   var sessions = [{ sid: 'serial', kind: 'serial' }];
   var view = null, term = null;
   var sessionPage = 0, eventPage = 0;
   var recordsTab = 'logs';
+  var bootSearch = { seq: 0, key: '', serial: '', query: '', offset: 0 };
   var archiveState = { key: '', mode: 'date', date: '', bootId: '' };
   var ARCHIVE_REFRESH_MS = 15000;
   var ACTIVITY_PAGE_SIZE = 10;
@@ -151,7 +157,64 @@
     return matches;
   }
 
+  function clearBootSearch() {
+    bootSearch.seq++;
+    bootSearch.query = '';
+    $('boot-search-results').hidden = true;
+    $('boot-search-matches').textContent = '';
+  }
+
+  function searchBootLogs(offset) {
+    var ctx = view, query = $('terminal-search').value.trim();
+    if (!isCurrent(ctx)) return;
+    if (!query) { clearBootSearch(); return; }
+    var seq = ++bootSearch.seq;
+    bootSearch.key = ctx.key; bootSearch.serial = ctx.serial || '';
+    bootSearch.query = query; bootSearch.offset = offset || 0;
+    recordsTab = 'logs'; setRecordsOpen(true);
+    $('boot-search-results').hidden = false;
+    $('boot-search-summary').textContent = '正在搜索当前设备的全部启动日志…';
+    $('boot-search-matches').textContent = '';
+    $('boot-search-prev').disabled = $('boot-search-next').disabled = true;
+    fetch('/api/boot-search?key=' + encodeURIComponent(ctx.key)
+      + '&serial=' + encodeURIComponent(ctx.serial || '') + '&q=' + encodeURIComponent(query)
+      + '&offset=' + bootSearch.offset + '&limit=20', { cache: 'no-store' })
+      .then(function (response) { return response.json(); }).then(function (data) {
+        if (seq !== bootSearch.seq || !view || view.key !== ctx.key
+            || (view.serial || '') !== bootSearch.serial) return;
+        if (data.error) throw new Error(data.error);
+        var matches = data.results || [];
+        $('boot-search-summary').textContent = matches.length
+          ? '全部启动日志 · 结果 ' + (bootSearch.offset + 1) + '–' + (bootSearch.offset + matches.length)
+            + (data.more ? ' · 还有更多' : '') : '全部启动日志 · 无匹配';
+        $('boot-search-prev').disabled = bootSearch.offset === 0;
+        $('boot-search-next').disabled = !data.more;
+        matches.forEach(function (match) {
+          var button = document.createElement('button'); button.type = 'button';
+          button.className = 'boot-search-match';
+          var title = document.createElement('strong');
+          title.textContent = '启动 #' + match.number + ' · ' + match.started + ' · 第 ' + match.line + ' 行';
+          var excerpt = document.createElement('span'); excerpt.textContent = match.excerpt;
+          button.appendChild(title); button.appendChild(excerpt);
+          button.addEventListener('click', function () {
+            if (!view || view.key !== ctx.key || (view.serial || '') !== bootSearch.serial) return;
+            openBootLog(view, match);
+            $('terminal-search-scope').value = 'terminal';
+            $('terminal-search').placeholder = '搜索终端 · Ctrl+F';
+            $('terminal-search').value = query;
+            view.archiveSearchQuery = query;
+            if (view.initialRendered) searchTerminal(1);
+          });
+          $('boot-search-matches').appendChild(button);
+        });
+      }).catch(function (error) {
+        if (seq === bootSearch.seq && view && view.key === ctx.key)
+          $('boot-search-summary').textContent = '搜索失败：' + error.message;
+      });
+  }
+
   function searchTerminal(direction) {
+    if ($('terminal-search-scope').value === 'boots') { searchBootLogs(0); return; }
     var ctx = view;
     if (!isCurrent(ctx)) return;
     var query = $('terminal-search').value;
@@ -609,6 +672,12 @@
           + new Date().toLocaleTimeString('zh-CN');
         lastDevices = d.devices || [];
         renderDevices(lastDevices);
+        if (requestedDevice) {
+          var sharedBoard = lastDevices.find(function (board) {
+            return board.serial === requestedDevice || board.key === requestedDevice;
+          });
+          if (sharedBoard) select(sharedBoard.key);
+        }
         // 轮询里同步选中设备的识别结果,但只在**结果真的变了**时重绘 ——
         // 否则每 3 秒重建一次 DOM 会打断用户选中文本
         if (selKey) {
@@ -655,9 +724,10 @@
   }
 
   function select(key) {
+    requestedDevice = '';
     // Slow paste is a workaround for one firmware input path, not a board-wide
     // default.  Keep it only while staying on the same selected board.
-    if (key !== selKey) $('d-slow-paste').checked = false;
+    if (key !== selKey) { $('d-slow-paste').checked = false; clearBootSearch(); }
     var ctx = createView(key, 'serial');
     // 切设备时立即清掉旧会话标签；迟到的列表/动作响应不能借用新 selKey。
     sessions = [{ sid: 'serial', kind: 'serial' }];
@@ -768,7 +838,12 @@
       }
     }
     function written() {
+      if (!isCurrent(ctx)) return;
       ctx.initialRendered = true;
+      if (ctx.archiveSearchQuery) {
+        $('terminal-search').value = ctx.archiveSearchQuery;
+        ctx.archiveSearchQuery = ''; searchTerminal(1);
+      }
       if (redraw) scheduleFullRefresh(ctx);
       scheduleCommandNav(ctx);
     }
@@ -1391,6 +1466,18 @@
     $('b-expand').setAttribute('aria-pressed', expanded ? 'true' : 'false');
     setTimeout(resizeTerm, 0);
   });
+  $('terminal-search-scope').addEventListener('change', function () {
+    $('terminal-search').placeholder = $('terminal-search-scope').value === 'boots'
+      ? '搜索全部启动日志 · Enter' : '搜索终端 · Ctrl+F';
+    $('terminal-search-status').textContent = '';
+  });
+  $('boot-search-prev').addEventListener('click', function () {
+    $('terminal-search').value = bootSearch.query; searchBootLogs(Math.max(0, bootSearch.offset - 20));
+  });
+  $('boot-search-next').addEventListener('click', function () {
+    $('terminal-search').value = bootSearch.query; searchBootLogs(bootSearch.offset + 20);
+  });
+  $('boot-search-close').addEventListener('click', clearBootSearch);
   $('terminal-search').addEventListener('input', function () {
     if (view) { view.searchQuery = ''; view.searchMatch = -1; view.term.clearSelection(); }
     $('terminal-search-status').textContent = '';

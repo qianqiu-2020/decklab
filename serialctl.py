@@ -469,7 +469,15 @@ def parser():
     commands.add_parser('ssh-open', help='open or reuse your persistent interactive SSH session')
     close = commands.add_parser('ssh-close', help='close only your own SSH session')
     close.add_argument('--sid', required=True)
-    commands.add_parser('logs', help='list stored log files')
+    commands.add_parser('logs', help='list stored log files and boot IDs')
+    boot_log = commands.add_parser('boot-log', help='read one complete archived boot, including across days')
+    boot_choice = boot_log.add_mutually_exclusive_group(required=True)
+    boot_choice.add_argument('--latest', action='store_true', help='read the newest detected boot')
+    boot_choice.add_argument('--id', help='stable boot ID from logs')
+    boot_search = commands.add_parser('boot-search', help='search all archived boots on this device')
+    boot_search.add_argument('--query', required=True)
+    boot_search.add_argument('--offset', type=nonnegative, default=0)
+
     compare = commands.add_parser('boot-compare', help='compare two archived boots, possibly across boards')
     compare.add_argument('--baseline-id', required=True, help='boot ID from logs on baseline device')
     compare.add_argument('--target-id', required=True, help='boot ID from logs on --device')
@@ -518,6 +526,16 @@ def main(argv=None):
                               truncated_bytes=dropped, start_off=result['off'] - len(data))
             elif args.action == 'rename':
                 result = client.post('/api/label', label=args.label)
+            elif args.action == 'boot-log':
+                boot_id = args.id
+                if args.latest:
+                    boots = client.get('/api/logs').get('boots', [])
+                    if not boots:
+                        raise ClientError('No detected boot is archived; collection may have started after boot')
+                    boot_id = boots[0]['id']
+                result = client.get('/api/boot-log', id=boot_id)
+            elif args.action == 'boot-search':
+                result = client.get('/api/boot-search', q=args.query, offset=args.offset)
             elif args.action == 'log':
                 result = client.get('/api/log', file=args.file, **({} if args.off is None else {'off': args.off}))
             elif args.action == 'send':

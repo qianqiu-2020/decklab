@@ -135,6 +135,23 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             session = None
         return bool(session and self._valid_share(session.value))
 
+    def _agent_share_authorized(self):
+        """Human browser collaborators may delegate board access to agents."""
+        if self.headers.get('Authorization', '').startswith('Bearer seriald-ag-'):
+            return False
+        if self._owner_authorized():
+            return True
+        value = self.headers.get('Authorization', '')
+        if value.startswith('Bearer '):
+            return self._valid_share(value[7:])
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get('Cookie', ''))
+            session = cookie.get('seriald_share')
+        except Exception:
+            session = None
+        return bool(session and self._valid_share(session.value))
+
     def _agent_actor(self):
         value = self.headers.get('Authorization', '')
         if not self.auth_token or not value.startswith('Bearer '):
@@ -360,13 +377,13 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return
         if route == '/api/access':
             return self._json(200, {'share_enabled': bool(self.auth_token and self._owner_authorized()),
-                                    'agent_share_enabled': bool(self._owner_authorized() and self.grant_store),
+                                    'agent_share_enabled': bool(self._agent_share_authorized() and self.grant_store),
                                     'open_access': not bool(self.auth_token),
                                     'loopback_open': bool(self.trust_loopback),
                                     'lan_hosts': lan_hosts()})
         if route == '/api/agent-grants':
-            if not self._owner_authorized() or not self.grant_store:
-                return self._json(403, {'error': '只有主访问凭证可以管理 Agent 授权'})
+            if not self._agent_share_authorized() or not self.grant_store:
+                return self._json(403, {'error': '需要有效的网页访问凭证才能管理 Agent 授权'})
             return self._json(200, {'grants': self.grant_store.list()})
         if route == '/healthz':
             return self._json(200, {'ok': True, 'role': 'control', 'pid': os.getpid(),
@@ -386,8 +403,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return
         route = urlparse(self.path).path
         if route in ('/api/agent-share', '/api/agent-revoke'):
-            if not self._owner_authorized() or not self.grant_store:
-                return self._json(403, {'error': '只有主访问凭证可以管理 Agent 授权'})
+            if not self._agent_share_authorized() or not self.grant_store:
+                return self._json(403, {'error': '需要有效的网页访问凭证才能管理 Agent 授权'})
             try:
                 payload = self._small_json_body()
             except (ValueError, UnicodeDecodeError):

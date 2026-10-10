@@ -55,6 +55,20 @@ class HandlerTests(unittest.TestCase):
         handler.static_root = str(ROOT)
         return handler
 
+    def test_boot_search_validates_query_and_pagination(self):
+        self.device.label = 'board-key'
+        for query in ('q=', 'q=' + 'x' * 201, 'q=panic&offset=-1', 'q=panic&limit=51'):
+            handler = self.handler('/api/boot-search?key=board-key&' + query)
+            handler.do_GET()
+            self.assertEqual(self.result(handler)[0], 400)
+        handler = self.handler('/api/boot-search?key=board-key&q=panic&offset=20')
+        self.device.boot_epochs.return_value = []
+        with mock.patch.object(sd, 'search_epochs', return_value={'results': [], 'more': False}) as search:
+            handler.do_GET()
+        self.assertEqual(self.result(handler)[0], 200)
+        self.assertEqual(self.result(handler)[1]['serial'], 'SN1')
+        search.assert_called_once_with(self.device.stable_dir.return_value, [], 'panic', 20, 20)
+
     def test_boot_compare_reads_two_archived_epochs(self):
         boot = {'id': 'boot-one', 'size': 16, 'started': '2026-09-20 08:00:00',
                 'parts': [{'file': 'serial.log', 'start': 0, 'end': 16}]}
@@ -241,6 +255,46 @@ class HandlerTests(unittest.TestCase):
             handler.trust_loopback = True
             handler.client_address = ('127.0.0.1', 12345)
             self.assertFalse(handler._authorized())
+
+    def test_shared_browser_can_delegate_agent_access_and_revoke_it(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = AgentGrantStore(str(pathlib.Path(folder) / 'grants.sqlite3'))
+            self.addCleanup(store.close)
+            owner = self.control_handler('/api/access')
+            owner.auth_token = 'secret'
+            share = owner._new_share()
+            headers = {'Cookie': 'seriald_share=' + share}
+            access = self.control_handler('/api/access')
+            access.auth_token, access.grant_store, access.headers = 'secret', store, headers
+            access.do_GET()
+            self.assertTrue(self.result(access)[1]['agent_share_enabled'])
+            self.assertFalse(self.result(access)[1]['share_enabled'])
+            issue = self.control_handler('/api/agent-share')
+            issue.auth_token, issue.grant_store = 'secret', store
+            raw = json.dumps({'scope': 'device', 'serial': 'SN1'}).encode()
+            issue.headers = dict(headers, **{'Content-Length': str(len(raw))})
+            issue.rfile = io.BytesIO(raw)
+            issue.do_POST()
+            status, grant = self.result(issue)
+            self.assertEqual(status, 200)
+            self.assertEqual(store.lookup(grant['token'])['serial'], 'SN1')
+            listing = self.control_handler('/api/agent-grants')
+            listing.auth_token, listing.grant_store, listing.headers = 'secret', store, headers
+            listing.do_GET()
+            self.assertEqual(self.result(listing)[1]['grants'][0]['id'], grant['grant']['id'])
+            revoke = self.control_handler('/api/agent-revoke')
+            revoke.auth_token, revoke.grant_store = 'secret', store
+            raw = json.dumps({'id': grant['grant']['id']}).encode()
+            revoke.headers = dict(headers, **{'Content-Length': str(len(raw))})
+            revoke.rfile = io.BytesIO(raw)
+            with mock.patch.object(revoke, '_close_revoked_sessions', return_value=0):
+                revoke.do_POST()
+            self.assertEqual(self.result(revoke)[0], 200)
+            self.assertIsNone(store.lookup(grant['token']))
+            expired = self.control_handler('/api/access')
+            expired.auth_token, expired.grant_store, expired.headers = 'secret', store, headers
+            with mock.patch.object(control.time, 'time', return_value=10**12):
+                self.assertFalse(expired._agent_share_authorized())
 
     def test_shared_agent_cannot_mint_or_revoke_grants_or_rename_board(self):
         with tempfile.TemporaryDirectory() as folder:

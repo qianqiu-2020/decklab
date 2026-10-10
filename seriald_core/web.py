@@ -12,7 +12,7 @@ from .transport import try_rescue
 from .devices import Manager
 from .storage import IdentityError
 from .httpd import BoundedThreadingTCPServer as BoundedThreadingServer
-from .log_archive import read_epoch
+from .log_archive import read_epoch, search_epochs
 from .boot_compare import MAX_BOOT_BYTES, compare_boots
 from .file_transfer import TransferError
 from . import __version__
@@ -226,7 +226,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             out += d.list_sessions()
             return self._json(200, {'sessions': out, 'label': d.label})
 
-        if route in ('/api/logs', '/api/log', '/api/boot-log', '/api/activity', '/api/commands'):
+        if route in ('/api/logs', '/api/log', '/api/boot-log', '/api/boot-search', '/api/activity', '/api/commands'):
             d = self._dev(q)
             if not d:
                 return self._json(404, {'error': 'no such device'})
@@ -260,6 +260,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     boot.pop('parts', None)
                 return self._json(200, {'label': d.label, 'serial': d.serial,
                                         'archive': archive, 'files': files, 'boots': boots})
+            if route == '/api/boot-search':
+                query = (q.get('q') or [''])[0].strip()
+                try:
+                    offset = int((q.get('offset') or ['0'])[0])
+                    limit = int((q.get('limit') or ['20'])[0])
+                    if not query or len(query) > 200 or offset < 0 or not 1 <= limit <= 50:
+                        raise ValueError
+                except ValueError:
+                    return self._json(400, {'error': '请输入 1–200 字符的关键词，分页参数必须有效'})
+                try:
+                    result = search_epochs(d.stable_dir(), d.boot_epochs(files), query, offset, limit)
+                except OSError:
+                    return self._json(404, {'error': '启动日志不可用，请刷新后重试'})
+                result.update({'query': query, 'serial': d.serial, 'label': d.label})
+                return self._json(200, result)
             if route == '/api/boot-log':
                 boot_id = (q.get('id') or [''])[0]
                 boot = next((item for item in d.boot_epochs(files) if item['id'] == boot_id), None)

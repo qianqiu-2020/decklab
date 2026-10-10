@@ -21,6 +21,7 @@
   var copyButton = document.getElementById('agent-share-copy');
   var grants = document.getElementById('agent-share-grants');
   var openAccess = false;
+  var canPageShare = false;
   var selected = null;
   var lanHosts = [];
 
@@ -28,7 +29,13 @@
     .then(function (access) {
       openAccess = !!access.open_access;
       lanHosts = Array.isArray(access.lan_hosts) ? access.lan_hosts : [];
-      shareButtons.forEach(function (element) { element.hidden = !access.share_enabled; });
+      canPageShare = openAccess || !!access.share_enabled;
+      button.hidden = !canPageShare;
+      deviceShare.hidden = false;
+      shareButtons.forEach(function (element) { element.disabled = !canPageShare; });
+      deviceShare.title = canPageShare
+        ? '分享链接直接打开当前设备；网页访问授权覆盖整个平台'
+        : '当前凭证无权创建网页分享链接';
       [topAgent, deviceAgent].forEach(function (element) {
         element.disabled = !access.agent_share_enabled;
         element.title = access.agent_share_enabled ? '生成可撤销的 Agent 接入令牌'
@@ -212,23 +219,33 @@
     catch (_) { output.focus(); output.select(); agentStatus.textContent = '请手动复制选中的接入文本'; }
   });
 
-  async function sharePage() {
+  async function sharePage(source) {
     shareButtons.forEach(function (element) { element.disabled = true; });
     shareStatus('正在创建分享链接…');
     try {
       var lan = lanUrl();
       if (!lan) throw new Error('未发现局域网 IP，请先确认上位机已连接局域网');
-      var response = await fetch('/api/share-link', { method: 'POST' });
-      var result = await response.json();
-      if (!response.ok || !result.path) throw new Error(result.error || '创建失败');
-      var url = new URL(result.path, lan);
-      try { await copy(url.href); shareStatus('链接已复制，24 小时有效'); }
+      var url = new URL('/', lan);
+      if (!openAccess) {
+        var response = await fetch('/api/share-link', { method: 'POST' });
+        var result = await response.json();
+        if (!response.ok || !result.path) throw new Error(result.error || '创建失败');
+        url = new URL(result.path, lan);
+      }
+      if (source === deviceShare) {
+        var board = selectedDevice();
+        if (board) url.hash = 'device=' + encodeURIComponent(board.serial || board.key);
+      }
+      var copied = openAccess ? '局域网链接已复制' : '链接已复制，24 小时有效';
+      try { await copy(url.href); shareStatus(copied); }
       catch (_) {
-        window.prompt('复制分享链接（24 小时有效）：', url.href);
-        shareStatus('链接已生成，24 小时有效');
+        window.prompt(openAccess ? '复制局域网链接：' : '复制分享链接（24 小时有效）：', url.href);
+        shareStatus(openAccess ? '局域网链接已生成' : '链接已生成，24 小时有效');
       }
     } catch (error) { shareStatus('分享失败：' + error.message); }
-    finally { shareButtons.forEach(function (element) { element.disabled = false; }); }
+    finally { shareButtons.forEach(function (element) { element.disabled = !canPageShare; }); }
   }
-  shareButtons.forEach(function (element) { element.addEventListener('click', sharePage); });
+  shareButtons.forEach(function (element) {
+    element.addEventListener('click', function () { return sharePage(element); });
+  });
 })();

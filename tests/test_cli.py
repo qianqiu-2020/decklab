@@ -19,6 +19,31 @@ def response(data):
 
 
 class ClientTests(unittest.TestCase):
+    def test_boot_log_latest_resolves_id_then_reads_complete_epoch(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            client = factory.return_value
+            client.get.side_effect = [{'boots': [{'id': 'boot-stable'}]}, {'data': 'full boot'}]
+            self.assertEqual(ctl.main(['--device', 'board', 'boot-log', '--latest']), 0)
+        self.assertEqual(client.get.call_args_list,
+                         [mock.call('/api/logs'), mock.call('/api/boot-log', id='boot-stable')])
+
+    def test_boot_log_id_does_not_reselect_latest_and_empty_latest_fails(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            factory.return_value.get.return_value = {'data': 'complete'}
+            self.assertEqual(ctl.main(['--device', 'board', 'boot-log', '--id', 'boot-old']), 0)
+            factory.return_value.get.assert_called_once_with('/api/boot-log', id='boot-old')
+        with mock.patch.object(ctl, 'Client') as factory, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            factory.return_value.get.return_value = {'boots': []}
+            self.assertNotEqual(ctl.main(['--device', 'board', 'boot-log', '--latest']), 0)
+
+    def test_boot_search_passes_literal_query_and_page_offset(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            factory.return_value.get.return_value = {'results': []}
+            self.assertEqual(ctl.main(['--device', 'board', 'boot-search', '--query', 'panic',
+                                       '--offset', '20']), 0)
+            factory.return_value.get.assert_called_once_with('/api/boot-search', q='panic', offset=20)
+
     def test_health_does_not_require_a_device_selector(self):
         out = io.StringIO()
         with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(out):

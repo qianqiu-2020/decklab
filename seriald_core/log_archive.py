@@ -152,3 +152,49 @@ def read_epoch(root, epoch):
                 data += chunk
                 remaining -= len(chunk)
     return bytes(data)
+
+
+ANSI = re.compile(r'\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))')
+
+
+def search_epochs(root, epochs, query, offset=0, limit=20):
+    """Search complete boot ranges newest first, streaming lines with bounded results.
+
+    Pagination limits the response, never the amount of history searched. Each
+    result represents one matching line, with a short excerpt around the match.
+    """
+    needle = query.casefold()
+    results = []
+    skipped = 0
+    for epoch in epochs:
+        line_number = 0
+        for part in epoch['parts']:
+            fd = os.open(os.path.join(root, part['file']),
+                         os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+            with os.fdopen(fd, 'rb') as source:
+                source.seek(part['start'])
+                remaining = part['end'] - part['start']
+                while remaining > 0:
+                    raw = source.readline(remaining)
+                    if not raw:
+                        break
+                    remaining -= len(raw)
+                    line_number += 1
+                    text = ANSI.sub('', raw.decode('utf-8', 'replace')).rstrip('\r\n')
+                    position = text.casefold().find(needle)
+                    if position < 0:
+                        continue
+                    if skipped < offset:
+                        skipped += 1
+                        continue
+                    if len(results) == limit:
+                        return {'results': results, 'offset': offset,
+                                'next_offset': offset + limit, 'more': True}
+                    start = max(0, position - 80)
+                    excerpt = text[start:start + 320]
+                    results.append({'id': epoch['id'], 'number': epoch['number'],
+                                    'started': epoch['started'], 'date': part.get('date', ''),
+                                    'file': part['file'], 'line': line_number,
+                                    'excerpt': ('…' if start else '') + excerpt
+                                    + ('…' if start + 320 < len(text) else '')})
+    return {'results': results, 'offset': offset, 'next_offset': None, 'more': False}

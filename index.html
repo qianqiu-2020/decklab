@@ -47,13 +47,11 @@
       <span class="sp">
         <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>识别设备</button>
         <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-info"/></svg>设备信息</button>
-        <button id="b-device-share" type="button" hidden title="创建平台网页访问链接，发给同事后无需再次登录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>网页分享</button>
+        <button id="b-device-share" type="button" hidden title="分享链接直接打开当前设备；网页访问授权覆盖整个平台"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>分享设备</button>
         <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>Agent 分享</button>
         <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-switch"/></svg>准备换板</button>
-        <details class="device-maintenance"><summary>设备维护</summary><div>
-          <button id="b-rename" type="button">改标签</button>
-          <button id="b-rescue" type="button" title="执行 USB 软解绑与重新绑定，会暂时中断该设备连接">重新连接串口</button>
-        </div></details>
+        <button id="b-rename" type="button">改标签</button>
+        <button id="b-rescue" type="button" title="执行 USB 软解绑与重新绑定，会暂时中断该设备连接"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>重新连接串口</button>
         <button id="b-close" class="icon-button" type="button" aria-label="收起设备终端" title="收起设备终端"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button>
       </span>
     </div>
@@ -63,6 +61,7 @@
     <div class="terminal-tools">
       <div class="terminal-search-tools" role="search" aria-label="终端内容搜索">
         <label for="terminal-search" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg></label>
+        <select id="terminal-search-scope" aria-label="搜索范围"><option value="terminal">当前终端</option><option value="boots">全部启动日志</option></select>
         <input id="terminal-search" type="text" placeholder="搜索终端 · Ctrl+F" aria-label="搜索终端内容" title="按 Enter 搜索，Esc 清空" autocomplete="off" spellcheck="false">
         <button id="terminal-search-prev" type="button" title="上一个匹配（Shift+Enter）" aria-label="上一个匹配">↑</button>
         <button id="terminal-search-next" type="button" title="下一个匹配（Enter）" aria-label="下一个匹配">↓</button>
@@ -106,6 +105,7 @@
       </div>
       <div class="records-panel" id="record-panel-logs" role="tabpanel">
         <div class="section-head"><h2>串口日志归档</h2><span id="log-location"></span></div>
+        <section id="boot-search-results" class="boot-search-results" hidden aria-label="全部启动日志搜索结果"><div id="boot-search-summary" role="status"></div><div id="boot-search-matches"></div><div class="pager"><button id="boot-search-prev" type="button">上一页</button><button id="boot-search-next" type="button">下一页</button><button id="boot-search-close" type="button">关闭搜索</button></div></section>
         <div class="archive-tabs">
           <button id="archive-mode-date" type="button">按日期</button>
           <button id="archive-mode-boot" type="button">按启动</button>
