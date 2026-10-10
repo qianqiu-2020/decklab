@@ -188,7 +188,17 @@
   .info .v.hi{color:var(--accent);font-weight:500}
   .termhost .xterm{height:100%}
   .termhost .xterm,.termhost .xterm-viewport{overscroll-behavior:contain}
-  .termhost .xterm-viewport{background:transparent!important}
+  .termhost .xterm-viewport{background:transparent!important;color-scheme:dark}
+  /* Style the native scrollbar only; keep its hit area and xterm's layer order. */
+  .termhost .xterm-viewport::-webkit-scrollbar{width:14px;background:var(--term)}
+  .termhost .xterm-viewport::-webkit-scrollbar-track{background:var(--term)}
+  .termhost .xterm-viewport::-webkit-scrollbar-thumb{background:#60758C;border:3px solid var(--term);border-radius:8px}
+  .termhost .xterm-viewport::-webkit-scrollbar-thumb:hover{background:#8293AB}
+  .termhost .xterm-viewport::-webkit-scrollbar-button{display:none;width:0;height:0}
+  .termhost .xterm-viewport::-webkit-scrollbar-corner{background:var(--term)}
+  @supports not selector(::-webkit-scrollbar){
+    .termhost .xterm-viewport{scrollbar-color:#60758C var(--term);scrollbar-width:auto}
+  }
   .termhost .xterm-screen{overflow:hidden}
   .chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2);white-space:nowrap}
   .chk input{accent-color:var(--accent)}

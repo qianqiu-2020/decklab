@@ -30,7 +30,10 @@ async function main() {
     if (route === '/api/access') body = { share_enabled: true, agent_share_enabled: true,
       open_access: true, lan_hosts: ['10.0.120.161'] };
     else if (route === '/api/agent-grants') body = { grants: active.slice() };
-    else if (route === '/api/share-link') body = { path: '/share/browser-token' };
+    else if (route === '/api/share-link') {
+      if (rejectPageShare) throw new Error('network unavailable');
+      body = { path: '/share/browser-token' };
+    }
     else if (route === '/api/agent-share') {
       const request = JSON.parse(options.body);
       const grant = { id: 'abc123', actor: 'shared-agent/abc123', scope: request.scope,
@@ -44,6 +47,7 @@ async function main() {
     return { ok: true, json: async () => body };
   };
   let rejectClipboard = false;
+  let rejectPageShare = false;
   let legacyCopies = 0;
   const context = {
     document: { getElementById: byId, createElement: () => new Element(), body: new Element(),
@@ -60,6 +64,8 @@ async function main() {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'static/share.js'), 'utf8'), context);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(byId('b-agent-share').disabled, false);
+  assert.equal(byId('b-share').hidden, false);
+  assert.equal(byId('b-device-share').hidden, false);
 
   byId('b-agent-share').click();
   assert.equal(byId('agent-share-scope').value, 'device');
@@ -87,6 +93,20 @@ async function main() {
   assert.equal(clipboard[0], text);
   await byId('b-share').click();
   assert.equal(clipboard.at(-1), 'http://10.0.120.161:8898/share/browser-token');
+  const sharing = byId('b-device-share').click();
+  assert.equal(byId('b-device-share').disabled, true);
+  assert.equal(byId('b-share').disabled, true);
+  await sharing;
+  assert.equal(clipboard.at(-1), 'http://10.0.120.161:8898/share/browser-token');
+  assert.equal(byId('device-share-status').textContent, '链接已复制，24 小时有效');
+  assert.equal(byId('b-device-share').disabled, false);
+  assert.equal(byId('b-share').disabled, false);
+  rejectPageShare = true;
+  await byId('b-device-share').click();
+  assert.match(byId('device-share-status').textContent, /分享失败/);
+  assert.equal(byId('b-device-share').disabled, false);
+  assert.equal(byId('b-share').disabled, false);
+
 
   const row = byId('agent-share-grants').children[0];
   await row.children[1].click();

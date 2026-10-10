@@ -2,6 +2,12 @@
   'use strict';
   var button = document.getElementById('b-share');
   var status = document.getElementById('share-status');
+  var deviceShare = document.getElementById('b-device-share');
+  var deviceShareStatus = document.getElementById('device-share-status');
+  var shareButtons = [button, deviceShare];
+  function shareStatus(text) {
+    status.textContent = deviceShareStatus.textContent = text;
+  }
   var dialog = document.getElementById('agent-share-dialog');
   var topAgent = document.getElementById('b-agent-share-all');
   var deviceAgent = document.getElementById('b-agent-share');
@@ -22,14 +28,14 @@
     .then(function (access) {
       openAccess = !!access.open_access;
       lanHosts = Array.isArray(access.lan_hosts) ? access.lan_hosts : [];
-      button.hidden = !access.share_enabled;
+      shareButtons.forEach(function (element) { element.hidden = !access.share_enabled; });
       [topAgent, deviceAgent].forEach(function (element) {
         element.disabled = !access.agent_share_enabled;
         element.title = access.agent_share_enabled ? '生成可撤销的 Agent 接入令牌'
           : '当前访问凭证无权生成 Agent 授权';
       });
     }).catch(function () {
-      button.hidden = true;
+      shareButtons.forEach(function (element) { element.hidden = true; });
       topAgent.disabled = deviceAgent.disabled = true;
     });
 
@@ -206,9 +212,9 @@
     catch (_) { output.focus(); output.select(); agentStatus.textContent = '请手动复制选中的接入文本'; }
   });
 
-  button.addEventListener('click', async function () {
-    button.disabled = true;
-    status.textContent = '正在创建分享链接…';
+  async function sharePage() {
+    shareButtons.forEach(function (element) { element.disabled = true; });
+    shareStatus('正在创建分享链接…');
     try {
       var lan = lanUrl();
       if (!lan) throw new Error('未发现局域网 IP，请先确认上位机已连接局域网');
@@ -216,12 +222,13 @@
       var result = await response.json();
       if (!response.ok || !result.path) throw new Error(result.error || '创建失败');
       var url = new URL(result.path, lan);
-      try { await copy(url.href); status.textContent = '链接已复制，24 小时有效'; }
+      try { await copy(url.href); shareStatus('链接已复制，24 小时有效'); }
       catch (_) {
         window.prompt('复制分享链接（24 小时有效）：', url.href);
-        status.textContent = '链接已生成，24 小时有效';
+        shareStatus('链接已生成，24 小时有效');
       }
-    } catch (error) { status.textContent = '分享失败：' + error.message; }
-    finally { button.disabled = false; }
-  });
+    } catch (error) { shareStatus('分享失败：' + error.message); }
+    finally { shareButtons.forEach(function (element) { element.disabled = false; }); }
+  }
+  shareButtons.forEach(function (element) { element.addEventListener('click', sharePage); });
 })();
