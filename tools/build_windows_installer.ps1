@@ -28,9 +28,6 @@ if (-not $Compiler) {
     throw 'ISCC.exe was not found in PATH, installation registry or standard directories. Pass -Compiler "D:\path\to\Inno Setup 6\ISCC.exe" to this script. The portable ZIP has already been built.'
 }
 Write-Host "Installer compiler: $Compiler"
-if (-not (Test-Path -LiteralPath (Join-Path (Split-Path $Compiler) 'Languages\ChineseSimplified.isl'))) {
-    throw 'Inno Setup 6.5 or later with the bundled Chinese language is required.'
-}
 $output = Join-Path $root 'dist'
 & $Compiler "/DAppVersion=$version" "/DBundleDir=$bundle" "/DOutputDir=$output" (Join-Path $root 'packaging\seriald-windows.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Windows installer compilation failed.' }

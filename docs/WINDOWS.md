@@ -10,7 +10,7 @@ Windows 版直接接管本机 COM 串口，提供网页终端与 Agent API。推
 
 ## 构建安装包
 
-原生构建需要 Git、**64 位 Python 3.12**（含 `py` 启动器）和 **Inno Setup 6.5 或更新版本**。先安装编译器，再在源码目录构建：
+原生构建需要 Git、**64 位 Python 3.12**（含 `py` 启动器）和 **Inno Setup 6.5 或更新版本**。简体中文安装界面的翻译随仓库提供，不要求安装 Inno Setup 的额外语言文件。先安装编译器，再在源码目录构建：
 
 ```powershell
 winget install --id JRSoftware.InnoSetup -e -s winget -i
