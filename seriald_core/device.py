@@ -547,7 +547,9 @@ class Device:
             user = ssh_user if ssh_user is not None else profile.ssh_user
             password = (ssh_password if ssh_password is not None
                         else profile.ssh_password)
-            auto_configure = profile.auto_configure_ssh and user == 'root' and password == 'bianbu'
+            auto_configure = (profile.auto_configure_ssh and user == 'root'
+                              and profile.ssh_user == 'root' and bool(password)
+                              and password == profile.ssh_password)
             if auto_configure:
                 authenticated, denied, detail = check_password_login(ip, user, password)
                 if denied:

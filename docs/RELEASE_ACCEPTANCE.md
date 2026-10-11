@@ -40,6 +40,16 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+SSH provisioning now writes the selected profile's root password, rather than
+hardcoding the development default. Automatic authentication-denial recovery
+requires an enabled root profile and credentials matching that profile; different
+per-request credentials do not change the board. Explicit provisioning rejects
+non-root or empty-password profiles before console interaction. Hardware-free
+tests verify both password prompts, no password in generated config commands or
+status messages, configured-password retry and override isolation. All 548
+backend tests pass (three native Windows tests skipped). Configuration and agent
+documentation describe these conditions; real-board policy remains profile-owned.
+
 Collector API imports no longer instantiate a Manager or read board profile and
 hardware configuration. Linux, Windows and demo entrypoints inject their manager
 into the HTTP server; requests use that instance. Real loopback HTTP fixtures

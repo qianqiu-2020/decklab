@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- SSH root provisioning uses the configured board-profile password instead of a
+  hardcoded password. Non-root/empty-password profiles and different per-request
+  credentials cannot trigger root provisioning.
 - Remove import-time collector Manager initialization. Linux, Windows and demo
   entry points inject one manager into each HTTP server, isolating device state
   and mutations; unconfigured servers return unavailable without lazy startup.

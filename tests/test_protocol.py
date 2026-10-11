@@ -278,6 +278,35 @@ class ShellLoginTests(DeviceFixture):
 
 
 class RootSshSetupTests(DeviceFixture):
+    def test_custom_root_password_is_written_only_at_password_prompts(self):
+        from seriald_core.profiles import BoardProfile
+        profile = BoardProfile(ssh_password='custom-root-password')
+        with mock.patch.object(sd.Device, 'profile', new_callable=mock.PropertyMock,
+                               return_value=profile), \
+                mock.patch.object(self.device, 'ensure_shell', return_value=(True, 0)), \
+                mock.patch.object(self.device, '_write', return_value=(True, '')) as write, \
+                mock.patch.object(self.device, '_wait', return_value=True), \
+                mock.patch.object(self.device, '_run_cmd_locked',
+                                  return_value=(True, 'SSH_CONFIG_OK=1\n')) as config, \
+                mock.patch.object(self.device, '_say') as say:
+            self.assertEqual(self.device.configure_root_ssh(), (True, ''))
+        self.assertEqual([call.args[0] for call in write.call_args_list][1:],
+                         ['custom-root-password\r', 'custom-root-password\r'])
+        self.assertNotIn(profile.ssh_password, config.call_args.args[0])
+        self.assertNotIn(profile.ssh_password, str(say.call_args_list))
+
+    def test_non_root_or_empty_password_profile_never_starts_provisioning(self):
+        from seriald_core.profiles import BoardProfile
+        for profile in (BoardProfile(ssh_user='ubuntu'), BoardProfile(ssh_password='')):
+            with self.subTest(user=profile.ssh_user), \
+                    mock.patch.object(sd.Device, 'profile', new_callable=mock.PropertyMock,
+                                      return_value=profile), \
+                    mock.patch.object(self.device, '_write') as write, \
+                    mock.patch.object(self.device, 'ensure_shell') as shell:
+                self.assertFalse(self.device.configure_root_ssh()[0])
+                shell.assert_not_called()
+                write.assert_not_called()
+
     def test_passwd_warning_still_reaches_retype_and_config(self):
         responses = iter(['New password:',
                           'BAD PASSWORD: The password is shorter than 8 characters\nRetype new password:',

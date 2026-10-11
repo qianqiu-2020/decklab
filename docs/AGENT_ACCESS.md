@@ -112,7 +112,7 @@ stdin 为 EOF，stdout/stderr 合并，返回文本去除 ANSI；命令限 2048 
 `session_persistent` 表示服务是否保留了这个 actor 的 SSH 会话；持久会话不会返回
 `session_closed: true`，应使用 `ssh-close` 关闭。CLI 成功退出 0，访问/命令失败退出 1，参数错误退出 2。
 非零退出码、输出缺失、超时不能报告为成功。
-设备 profile 允许自动配置且默认 root/bianbu 认证被拒绝时，已登录且可免密码 sudo 的串口 shell 会自动配置 root 密码
+设备 profile 允许自动配置且使用 profile 中的 root 密码认证被拒绝时，已登录且可免密码 sudo 的串口 shell 会自动配置该 root 密码
 和 sshd 后重试；该操作留有串口日志与操作历史。自定义账户、网络错误和需输入 sudo 密码的
 情况不会自动修改板子。
 

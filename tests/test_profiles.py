@@ -186,6 +186,36 @@ class ProfileTests(unittest.TestCase):
         check.assert_not_called()
         provision.assert_not_called()
 
+    def test_configured_root_password_provisions_but_request_override_does_not(self):
+        with mock.patch.object(Device, 'preload'):
+            device = Device('fake', '/fake')
+        device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
+        with mock.patch.dict(os.environ, {'SERIALD_SSH_USER': 'root',
+                                         'SERIALD_SSH_PASSWORD': 'configured-root'}), \
+                mock.patch.object(device, 'stable_dir', return_value='/unused'), \
+                mock.patch('seriald_core.device.SshSession') as session_class, \
+                mock.patch('seriald_core.device.check_password_login',
+                           side_effect=[(False, True, 'denied'), (True, False, '')]) as check, \
+                mock.patch.object(device, 'configure_root_ssh',
+                                  return_value=(True, '')) as provision, \
+                mock.patch.object(device, '_say'):
+            session_class.return_value.ensure.return_value = True
+            session, error = device.ssh_connect()
+            self.assertEqual(error, '')
+            self.assertTrue(session.auto_configured)
+            provision.assert_called_once_with()
+            self.assertEqual(check.call_args_list,
+                             [mock.call('192.0.2.1', 'root', 'configured-root')] * 2)
+            self.assertEqual(session_class.call_args.kwargs['password'], 'configured-root')
+            provision.reset_mock()
+            check.reset_mock()
+            session, error = device.ssh_connect(ssh_password='request-only')
+            self.assertEqual(error, '')
+            self.assertFalse(session.auto_configured)
+            self.assertEqual(session_class.call_args.kwargs['password'], 'request-only')
+            provision.assert_not_called()
+            check.assert_not_called()
+
     def test_shipped_profile_example_is_valid(self):
         path = Path(__file__).resolve().parents[1] / 'examples' / 'profiles.json'
         book = ProfileBook(json.loads(path.read_text()))

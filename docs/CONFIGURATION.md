@@ -48,10 +48,13 @@ that bypass. See [installation](INSTALL.md) and [Windows launchers](WINDOWS.md).
 | `SERIALD_PROFILES` | unset | UTF-8 JSON profile file path; at most 64 KiB |
 
 The existing development workflow retains root/bianbu defaults. After explicit
-root/bianbu authentication denial, automatic provisioning can change root's
+root authentication denial using the configured profile password, automatic provisioning can change root's
 password, enable root/password SSH login and restart sshd through serial.
 Set `SERIALD_AUTO_CONFIGURE_SSH=0` to preserve board policy. Custom SSH credentials
-are used directly and do not trigger this provisioning.
+for a non-root user are used directly. A configured root password is also used
+for serial provisioning when enabled. A per-request password different from
+the profile password never triggers provisioning. Empty passwords cannot be
+provisioned; explicit root setup requires a root SSH profile.
 
 `manual` provides raw terminal input/output and logging without shell login,
 identity probes or automatic SSH configuration. Use it for firmware-only targets

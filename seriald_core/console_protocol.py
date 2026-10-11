@@ -189,6 +189,9 @@ class ConsoleProtocol:
         device = self.connection
         if not device.profile.auto_configure_ssh:
             return False, '当前设备配置未允许自动修改 root 密码或 sshd 配置'
+        profile = device.profile
+        if profile.ssh_user != 'root' or not profile.ssh_password:
+            return False, 'SSH 自动配置需要配置非空的 root 密码'
         if device.file_transfer.active:
             return False, '串口文件传输中，请完成或取消后再配置 SSH'
         try:
@@ -212,13 +215,13 @@ class ConsoleProtocol:
                     if not device._wait(base, first, 15):
                         return False, '无法通过串口运行 passwd（sudo 可能需要普通用户密码）'
                     base = device.now_off()
-                    ok, error = device._write('bianbu' + device.newline)
+                    ok, error = device._write(profile.ssh_password + device.newline)
                     if not ok:
                         return False, error
                     if not device._wait(base, second, 15):
                         return False, 'passwd 没有请求再次输入密码'
                     base = device.now_off()
-                    ok, error = device._write('bianbu' + device.newline)
+                    ok, error = device._write(profile.ssh_password + device.newline)
                     if not ok:
                         return False, error
                     success = r'(?i)(?:password updated successfully|all authentication tokens updated successfully)'
@@ -237,4 +240,3 @@ class ConsoleProtocol:
                     device.probing = False
         except TransactionError as error:
             return False, str(error)
-
