@@ -277,6 +277,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     payload['serial'] = grant['serial']
                 if grant and route == '/api/identify' and payload.get('init_boot_marker'):
                     return self._json(403, {'error': 'Agent 分享令牌不能创建板端身份标记'})
+                if grant and route == '/api/task-start' and (
+                        payload.get('kind') == 'ssh-enable' or payload.get('init_boot_marker')):
+                    return self._json(403, {'error': 'Agent 分享令牌不能执行此平台管理任务'})
                 payload['actor'] = agent_actor
                 body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
                 length = len(body)
@@ -298,6 +301,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     target_path = urlunparse(parsed._replace(query=urlencode(query)))
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
+            if route in ('/api/tasks', '/api/task'):
+                headers['X-Seriald-Actor'] = agent_actor or 'web'
             events = self.command == 'GET' and urlparse(self.path).path == '/api/session-events'
             if events and self.headers.get('Last-Event-ID'):
                 headers['Last-Event-ID'] = self.headers['Last-Event-ID']

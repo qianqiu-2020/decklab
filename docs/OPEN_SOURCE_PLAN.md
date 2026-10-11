@@ -19,7 +19,7 @@ Do not change an installed service or use live boards during regression tests.
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Durable storage/worker foundation implemented; operation/API/UI integration pending |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH adapters and task API/CLI implemented; file transfer/browser integration pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
@@ -182,3 +182,14 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   regression passes 379 tests; final focused task checks pass all nine tests,
   including nested credential-result rejection. See TASKS.md for the internal
   contract. Live operation adapters, HTTP/CLI and browser recovery remain required.
+- Task operation/API integration: collector owns a task manager; identify,
+  SSH-enable and SSH-connect run through DeviceActions with retained actor/client
+  identity and original connection/stop generation. Cancellation wakes serial
+  waits and prevents later leases; newly connected SSH sessions are cleaned up
+  on cancellation while reused sessions remain. Task API/CLI expose start,
+  history, status and cancel. Control pins agent actor/board scope, blocks
+  privileged task kinds for shared agents and revocation cancels active work
+  independently of history pagination. All 389 backend tests, 60 frontend checks,
+  sharing and demo browser checks pass; real demo HTTP/CLI rediscovers an async
+  identify result through a separate invocation. Browser recovery and server-owned
+  file-transfer tasks remain pending; native Windows validation remains pending.

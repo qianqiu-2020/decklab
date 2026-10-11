@@ -24,9 +24,10 @@ class ConsoleLease:
         self.deadline = self.start_clock + timeout
         self.require_open = require_open
         self.cancelled = threading.Event()
+        self.external_cancel = None
 
     def check(self):
-        if self.cancelled.is_set():
+        if self.cancelled.is_set() or self.external_cancel is not None and self.external_cancel.is_set():
             raise TransactionError('cancelled', '控制台操作已取消')
         if self.device.connection_id != self.connection_id or self.device.stop is not self.stop:
             raise TransactionError('stale', '设备连接已变化，取消旧操作')
@@ -149,6 +150,15 @@ class SerialTransactions:
             self._local.client_id = previous_client
 
     @contextmanager
+    def task_scope(self, cancelled, connection_id, stop):
+        previous = getattr(self._local, 'task', None)
+        self._local.task = (cancelled, connection_id, stop)
+        try:
+            yield
+        finally:
+            self._local.task = previous
+
+    @contextmanager
     def begin(self, kind, timeout, actor=None, allow_transfer=False,
               expected_connection=None, require_open=True, client_id=None):
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
@@ -157,6 +167,12 @@ class SerialTransactions:
             raise TransactionError('busy', '已有控制台操作在进行中，稍后重试')
         lease = None
         try:
+            task = getattr(self._local, 'task', None)
+            if task is not None:
+                if task[0].is_set():
+                    raise TransactionError('cancelled', '控制台任务已取消')
+                if self.device.connection_id != task[1] or self.device.stop is not task[2]:
+                    raise TransactionError('stale', '设备连接已变化，取消旧任务')
             if expected_connection is not None and expected_connection != self.device.connection_id:
                 raise TransactionError('stale', '设备连接已变化，取消旧操作')
             if not allow_transfer and self.device.file_transfer.active:
@@ -164,6 +180,7 @@ class SerialTransactions:
             lease = ConsoleLease(self.device, kind, timeout,
                                  actor if actor is not None else getattr(self._local, 'actor', 'service'),
                                  require_open, self.client_id if client_id is None else client_id)
+            lease.external_cancel = task[0] if task is not None else None
             lease.check()
             with self._state_lock:
                 self._active = lease

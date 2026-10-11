@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Expose durable identify/SSH tasks through API and CLI with connection/client
+  guards, actor/board filtering, revocation cancellation and retained results.
+  Browser recovery and server-owned file-transfer tasks remain pending.
+
 - Add the internal durable-task storage and bounded-worker foundation. Registry
   schema 3 preserves progress/results and marks unfinished work interrupted on
   restart without replay; operation/API/browser integration remains pending.

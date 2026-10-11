@@ -88,6 +88,22 @@ class ClientTests(unittest.TestCase):
         factory.return_value.request.assert_called_once_with('/api/health')
         self.assertEqual(json.loads(out.getvalue())['pid'], 123)
 
+    def test_task_commands_preserve_id_pagination_and_connection(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            client = factory.return_value
+            client.get.return_value = {'tasks': []}
+            self.assertEqual(ctl.main(['tasks', '--offset', '20']), 0)
+            client.select.assert_not_called()
+            client.get.assert_called_with('/api/tasks', limit=20, offset=20)
+            self.assertEqual(ctl.main(['--device', 'board', 'task', 'task-id']), 0)
+            client.get.assert_called_with('/api/task', id='task-id')
+            client.post.return_value = {'ok': True, 'task': {'id': 'task-id'}}
+            client.connection_id = 'connection'
+            self.assertEqual(ctl.main(['--device', 'board', 'task-start', 'identify']), 0)
+            client.post.assert_called_with('/api/task-start', kind='identify', connection_id='connection')
+            self.assertEqual(ctl.main(['--device', 'board', 'task-cancel', 'task-id']), 0)
+            client.post.assert_called_with('/api/task-cancel', id='task-id')
+
     def test_boot_marker_write_requires_explicit_cli_flag(self):
         for flag in ([], ['--init-boot-marker']):
             with self.subTest(flag=flag), mock.patch.object(ctl, 'Client') as factory, \

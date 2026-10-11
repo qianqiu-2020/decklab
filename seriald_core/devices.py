@@ -23,6 +23,7 @@ from .profiles import ProfileBook
 from .models import Board
 from .session_base import relocate_session_logs
 from .maintenance import LogMaintenance, MaintenancePolicy
+from .tasks import TaskManager
 
 class Manager:
     """设备发现 + 每个实际 tty 一个采集线程;旧线程退出后才转移所有权。"""
@@ -31,6 +32,7 @@ class Manager:
         self.profiles = profiles if profiles is not None else ProfileBook.from_env()
         self.maintenance = LogMaintenance(MaintenancePolicy.from_env())
         self.store = store
+        self.tasks = TaskManager(store) if store is not None else None
         self.devices = {}                 # physical by-path -> current connection
         self.boards = {}                  # immutable serial -> persistent Board
         self.lock = threading.RLock()
@@ -425,6 +427,8 @@ class Manager:
                        if d.present and d.serial and d.identity]
         for d in devices:
             d.stop.set()
+        if self.tasks is not None and not self.tasks.close():
+            raise RuntimeError('task workers are still stopping; keep the registry open')
         for d in devices:
             if d.thread:
                 d.thread.join(timeout=6)

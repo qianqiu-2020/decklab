@@ -228,6 +228,16 @@ class TaskManager:
             entry[0].cancel()
         return self.store.get(task_id)
 
+    def cancel_actor(self, actor):
+        with self._lock:
+            ids = list(self._active)
+        count = 0
+        for task_id in ids:
+            if self.store.get(task_id)['actor'] == actor:
+                self.cancel(task_id, actor)
+                count += 1
+        return count
+
     def close(self, timeout=5):
         with self._lock:
             self._closing = True

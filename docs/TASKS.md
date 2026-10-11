@@ -1,9 +1,39 @@
 # Durable tasks: implementation contract
 
-The task foundation currently provides internal storage and worker services.
-It is not yet exposed as a user-facing task API or refresh-recovery UI. Existing
-file-transfer requests keep their current behavior until operation integration
-is complete.
+Durable tasks currently support `identify`, `ssh-enable` and `ssh-connect` through
+the collector API and CLI. Browser task recovery and server-owned file transfer
+are still pending. Existing file-transfer requests keep their current behavior.
+
+## API and CLI
+
+`POST /api/task-start` accepts `key`, expected `serial`, `connection_id`, `kind`,
+actor and optional human `client_id`; it returns HTTP 202 with a task record.
+`GET /api/tasks` lists history with `limit` (1–100) and `offset`;
+`GET /api/task?id=…` reads one record. `POST /api/task-cancel` requests cancellation
+by `id`. These endpoints return normal JSON errors and retain task IDs after the
+initiating HTTP connection closes.
+
+```sh
+python3 serialctl.py --device riscv-118 task-start identify
+python3 serialctl.py --device riscv-118 tasks
+python3 serialctl.py --device riscv-118 task <task-id>
+python3 serialctl.py --device riscv-118 task-cancel <task-id>
+```
+
+Full-platform callers can list/query without selecting a board. Single-board
+grants must supply a device key; control pins the serial and task actor, ignoring
+caller-supplied actor headers. They cannot see/cancel another actor's tasks or
+tasks with any other board target. Shared agents cannot start privileged
+`ssh-enable` or boot-marker creation tasks. Revocation cancels active tasks
+directly, without relying on a bounded history page.
+
+Task adapters retain the original client, connection ID and stop-event generation
+across background execution. Their cancellation event reaches every serial lease,
+including leases acquired after an earlier interaction. A cancelled SSH-connect
+task closes a newly created session; an existing reused session remains available.
+Final results contain selected operation metadata, not raw probe dumps.
+
+## Storage and execution
 
 `TaskStore` uses registry schema 3. It persists a random task ID, operation kind,
 actor and human client ID, historical serial/connection targets, state, timestamps,
@@ -32,10 +62,10 @@ Cancellation is a request, not rollback. If an operation finishes despite a
 concurrent request, the task remains completed with `cancel_requested=true`.
 Only an observed cancellation becomes cancelled. The human web actor may cancel
 any visible task; agents may cancel their own. HTTP authorization and serial
-transaction/connection guards remain responsibilities of operation integration.
+transaction/connection guards also apply inside task adapters.
 
 On collector startup, unfinished records become interrupted with their last
-progress retained. No board command is automatically replayed. Clients will be
-able to rediscover history after reconnect through the task API once integrated.
+progress retained. No board command is automatically replayed. Clients can
+rediscover history after reconnect through the task API; browser UI is pending.
 Scoped history excludes a multi-board task when any target is outside the grant;
 actor and pagination filters are applied in SQLite before returning records.

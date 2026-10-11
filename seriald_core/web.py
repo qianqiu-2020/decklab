@@ -20,6 +20,7 @@ from . import __version__
 from .results import response as api_response
 from .transactions import transactions_for, TransactionError
 from .maintenance import disk_status, diagnostic_summary
+from .task_actions import TaskActions
 
 MGR = Manager()
 STARTED = time.time()
@@ -133,6 +134,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if route == '/api/diagnostics':
             return self._json(200, diagnostic_summary(MGR, LOG_ROOT, STARTED))
 
+        if route in ('/api/tasks', '/api/task'):
+            try:
+                limit = int((q.get('limit') or ['20'])[0])
+                offset = int((q.get('offset') or ['0'])[0])
+            except ValueError:
+                return self._json(400, {'error': 'invalid task pagination'})
+            task_id = (q.get('id') or [''])[0] if route == '/api/task' else None
+            if route == '/api/task' and not task_id:
+                return self._json(400, {'error': 'task id required'})
+            result = TaskActions(MGR).query(task_id, self.headers.get('X-Seriald-Actor', 'web'),
+                                           (q.get('serial') or [None])[0], limit, offset)
+            return self._json(result.status, result.payload)
+
         if route == '/api/health':
             disk = shutil.disk_usage(LOG_ROOT)
             devices = MGR.all_devices()
@@ -223,6 +237,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not isinstance(actor, str) or not actor.startswith('shared-agent/'):
                 return self._json(400, {'error': 'invalid agent actor'})
             closed = 0
+            tasks = getattr(MGR, 'tasks', None)
+            if tasks is not None:
+                tasks.cancel_actor(actor)
             for device in MGR.all_devices():
                 transactions = transactions_for(device)
                 owner = transactions.ownership()
@@ -240,6 +257,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if (ids or owner and owner['actor'] == actor) and device.serial:
                     MGR.store.event(device.serial, 'service', 'agent-revoke', actor)
             return self._json(200, {'ok': True, 'closed_sessions': closed})
+        if route == '/api/task-cancel':
+            result = TaskActions(MGR).cancel(str(payload.get('id') or ''),
+                                            str(payload.get('actor') or 'web'), payload.get('serial'))
+            return self._json(result.status, result.payload)
         q = {'key': [str(payload.get('key') or '')]}
         if payload.get('serial'):
             q['serial'] = [str(payload['serial'])]
@@ -248,6 +269,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(404, {'error': 'no such device'})
 
         actor = str(payload.get('actor') or 'web')[:80]
+        if route == '/api/task-start':
+            result = TaskActions(MGR).start(payload, d, actor)
+            return self._json(result.status, result.payload)
         return self._device_post(route, payload, d, actor)
 
     def _device_post(self, route, payload, d, actor):

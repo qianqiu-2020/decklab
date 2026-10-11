@@ -145,6 +145,14 @@ class DemoHttpTests(unittest.TestCase):
                     return result.stdout
 
                 self.assertIn('hello-agent', run_cli('demo-k1', 'exec', '--command', 'echo hello-agent'))
+                task = json.loads(run_cli('demo-k1', 'task-start', 'identify'))['task']
+                # A real HTTP/CLI task can be discovered again by a separate client invocation.
+                for _ in range(20):
+                    record = json.loads(run_cli('demo-k1', 'task', task['id']))['task']
+                    if record['state'] not in ('queued', 'running'):
+                        break
+                self.assertEqual(record['state'], 'completed')
+                self.assertEqual(record['result']['serial'], 'DEMO-001')
                 run_cli('demo-k1', 'file-copy', '--remote', '/root/log.txt',
                         '--to-device', 'demo-k3', '--to-path', '/tmp/copied.log')
                 with tempfile.TemporaryDirectory() as download:

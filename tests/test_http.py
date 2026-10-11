@@ -251,6 +251,23 @@ class HandlerTests(unittest.TestCase):
             diagnostics.do_GET()
             self.assertEqual(self.result(diagnostics)[0], 403)
 
+            task_query = self.control_handler('/api/task?key=A&serial=SN2&id=task-id&actor=web')
+            task_query.auth_token, task_query.grant_store = 'owner', store
+            task_query.headers = dict(headers, **{'X-Seriald-Actor': 'web'})
+            task_query.command = 'GET'
+            with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                task_query.do_GET()
+            forwarded = connection.request.call_args
+            self.assertIn('serial=SN1', forwarded.args[1])
+            self.assertEqual(forwarded.kwargs['headers']['X-Seriald-Actor'], grant['actor'])
+            body = json.dumps({'key': 'A', 'kind': 'ssh-enable'}).encode()
+            privileged = self.control_handler('/api/task-start')
+            privileged.auth_token, privileged.grant_store = 'owner', store
+            privileged.headers = dict(headers, **{'Content-Length': str(len(body))})
+            privileged.rfile, privileged.command = io.BytesIO(body), 'POST'
+            privileged.do_POST()
+            self.assertEqual(self.result(privileged)[0], 403)
+
             features = self.control_handler('/api/capabilities')
             features.auth_token, features.grant_store, features.headers = 'owner', store, headers
             features.command = 'GET'

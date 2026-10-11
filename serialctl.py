@@ -456,6 +456,15 @@ def parser():
     commands.add_parser('devices', help='list devices without probing them')
     commands.add_parser('capabilities', help='show supported protocol features without accessing boards')
     commands.add_parser('diagnostics', help='export a sanitized platform summary without logs or credentials')
+    tasks = commands.add_parser('tasks', help='list durable tasks; optionally select a device')
+    tasks.add_argument('--limit', type=nonnegative, default=20)
+    tasks.add_argument('--offset', type=nonnegative, default=0)
+    task = commands.add_parser('task', help='read a durable task by ID')
+    task.add_argument('id')
+    task_cancel = commands.add_parser('task-cancel', help='request cancellation of a durable task')
+    task_cancel.add_argument('id')
+    task_start = commands.add_parser('task-start', help='start a background device operation')
+    task_start.add_argument('kind', choices=('identify', 'ssh-enable', 'ssh-connect'))
     commands.add_parser('operation', help='show the active serial operation and cancellation ID')
     cancel = commands.add_parser('operation-cancel', help='cancel your active serial operation by ID')
     cancel.add_argument('id', help='operation ID returned by operation')
@@ -527,11 +536,22 @@ def main(argv=None):
         client.ssh_user, client.ssh_password = args.ssh_user, args.ssh_password
         if args.action in ('devices', 'health', 'capabilities', 'diagnostics'):
             result = client.request('/api/' + args.action)
+        elif args.action in ('tasks', 'task', 'task-cancel'):
+            if args.device:
+                client.select(args.device)
+            if args.action == 'tasks':
+                result = client.get('/api/tasks', limit=args.limit, offset=args.offset)
+            elif args.action == 'task':
+                result = client.get('/api/task', id=args.id)
+            else:
+                result = client.post('/api/task-cancel', id=args.id)
         else:
             if not args.device:
                 raise ClientError('--device is required; run devices to find the full key')
             client.select(args.device)
-            if args.action == 'read':
+            if args.action == 'task-start':
+                result = client.post('/api/task-start', kind=args.kind, connection_id=client.connection_id)
+            elif args.action == 'read':
                 result, data = client.read(args.sid, args.off)
                 dropped = max(0, len(data) - args.tail) if args.tail else 0
                 data = data[dropped:]
