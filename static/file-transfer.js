@@ -4,9 +4,8 @@
   var byId = function (id) { return document.getElementById(id); };
   var dialog = byId('file-transfer-dialog');
   var board = null, devices = [], busy = false, cancelled = false;
-  var meter = null, drag = null, copyTask = null, copyStarting = false;
+  var meter = null, drag = null, activeTask = null, taskStarting = false;
   var taskClient = global.SerialdTasks.createClient(fetch);
-  var MAX_BLOB_DOWNLOAD = 128 * 1024 * 1024;
 
   function status(text) { byId('ft-status').textContent = text; }
   function rateText(value) { return SerialdUI.formatBytes(Math.round(value)) + '/s'; }
@@ -15,11 +14,6 @@
     var binary = '';
     for (var i = 0; i < raw.length; i++) binary += String.fromCharCode(raw[i]);
     return btoa(binary);
-  }
-  function decode(encoded) {
-    var binary = atob(encoded), raw = new Uint8Array(binary.length);
-    for (var i = 0; i < binary.length; i++) raw[i] = binary.charCodeAt(i);
-    return raw;
   }
   function duration(seconds) {
     if (!Number.isFinite(seconds)) return '计算中';
@@ -51,158 +45,109 @@
       + ' · 预计剩余 ' + duration(remaining) + (detail ? ' · ' + detail : ''));
     meter.shown = now;
   }
-  async function api(device, action, payload) {
-    var response = await fetch('/api/file-transfer/' + action, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.assign({ key: device.key, serial: device.serial || '',
-        connection_id: device.connection_id, actor: 'web' }, payload))
-    });
-    var result = await response.json();
-    if (!response.ok || !result.ok) {
-      var error = new Error(result.error || '传输请求失败');
-      error.status = response.status;
-      throw error;
-    }
-    return result;
-  }
-  async function writeBlock(device, transfer, offset, raw) {
-    var started = performance.now(), sent = 0;
-    if (transfer.batch_size && raw.length <= transfer.batch_size) {
-      var batch = await api(device, 'batch', { id: transfer.id, offset: offset,
-        data_b64: bytes(raw) });
-      if (batch.offset !== offset + raw.length) throw new Error('目标板批量传输偏移不匹配');
-      return { result: batch, seconds: (performance.now() - started) / 1000 };
-    }
-    while (sent < raw.length) {
-      var length = raw.length - sent;
-      for (;;) {
-        try {
-          var result = await api(device, 'chunk', { id: transfer.id, offset: offset + sent,
-            data_b64: bytes(raw.subarray(sent, sent + length)) });
-          if (result.offset !== offset + sent + length) throw new Error('目标板传输偏移不匹配');
-          sent += length;
-          break;
-        } catch (error) {
-          if (error.status !== 413 || length === 1) throw error;
-          length = Math.max(1, Math.floor(length / 2));
-        }
-      }
-    }
-    return { result: { offset: offset + sent }, seconds: (performance.now() - started) / 1000 };
-  }
   function checkCancelled() { if (cancelled) throw new Error('已取消传输'); }
+  function scope(selected) { return { key: selected.key, serial: selected.serial || '', actor: 'web' }; }
 
   async function upload(file, target, overwrite) {
-    var transfer = null;
+    var selected = board, artifact = null, submitted = false;
     try {
-      transfer = await api(board, 'start', { direction: 'upload', path: target,
-        size: file.size, overwrite: overwrite });
+      status('正在暂存文件；提交任务前请保持页面打开，串口仍可使用。');
+      artifact = (await taskClient.request('/api/artifact-create', Object.assign(scope(selected),
+        { name: file.name, size: file.size }))).artifact;
       beginProgress();
       for (var offset = 0; offset < file.size;) {
         checkCancelled();
-        var chunk = new Uint8Array(await file.slice(offset,
-          offset + (transfer.batch_size || transfer.chunk_size)).arrayBuffer());
-        var written = await writeBlock(board, transfer, offset, chunk);
-        offset = written.result.offset;
-        progress(offset, file.size);
+        var chunk = new Uint8Array(await file.slice(offset, offset + 1024 * 1024).arrayBuffer());
+        checkCancelled();
+        if (!chunk.length) throw new Error('本地文件读取失败');
+        var staged = (await taskClient.request('/api/artifact-append', Object.assign(scope(selected),
+          { id: artifact.id, offset: offset, data_b64: bytes(chunk) }))).artifact;
+        offset += chunk.length;
+        if (staged.received !== offset) throw new Error('暂存偏移不匹配');
+        progress(offset, file.size, '上传到上位机，尚未写入开发板');
       }
       checkCancelled();
-      var done = await api(board, 'finish', { id: transfer.id });
-      transfer = null;
+      var sealed = (await taskClient.request('/api/artifact-seal', Object.assign(scope(selected),
+        { id: artifact.id }))).artifact;
+      if (sealed.size !== file.size || !/^[a-f0-9]{64}$/.test(sealed.sha256))
+        throw new Error('暂存文件校验失败');
+      checkCancelled();
+      submitted = true;
+      var done = await runTask(Object.assign(scope(selected), { kind: 'file-upload',
+        connection_id: selected.connection_id, path: target, overwrite: overwrite, artifact_id: artifact.id }),
+        { key: selected.key, serial: selected.serial || '' });
       byId('ft-progress').value = 100;
       status('上传完成 · 平均 ' + rateText(averageRate(done.size))
         + ' · ' + done.path + ' · SHA-256 ' + done.sha256);
     } finally {
-      if (transfer) await api(board, 'abort', { id: transfer.id }).catch(function () {});
+      if (artifact && !submitted) await taskClient.request('/api/artifact-delete',
+        Object.assign(scope(selected), { id: artifact.id })).catch(function () {});
     }
   }
 
   async function download(source) {
-    var transfer = null, writable = null, parts = [];
-    try {
-      if (typeof global.showSaveFilePicker === 'function') {
-        var handle = await global.showSaveFilePicker({ suggestedName: basename(source) });
-        writable = await handle.createWritable();
-      }
-      transfer = await api(board, 'start', { direction: 'download', path: source });
-      beginProgress();
-      if (!writable && transfer.size > MAX_BLOB_DOWNLOAD) {
-        throw new Error('浏览器下载超过 128 MiB，请用 serialctl file-get，或在支持文件流保存的浏览器中打开');
-      }
-      for (var offset = 0; offset < transfer.size;) {
-        checkCancelled();
-        var chunk = await api(board, 'chunk', { id: transfer.id, offset: offset });
-        var data = decode(chunk.data_b64);
-        if (chunk.offset !== offset + data.length) throw new Error('下载偏移不匹配');
-        if (writable) await writable.write(data); else parts.push(data);
-        offset = chunk.offset;
-        progress(offset, transfer.size);
-      }
-      checkCancelled();
-      var done = await api(board, 'finish', { id: transfer.id });
-      transfer = null;
-      if (writable) {
-        await writable.close(); writable = null;
-      } else {
-        var url = URL.createObjectURL(new Blob(parts, { type: 'application/octet-stream' }));
-        var anchor = document.createElement('a');
-        anchor.href = url; anchor.download = basename(source);
-        document.body.appendChild(anchor); anchor.click(); anchor.remove();
-        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
-      }
-      byId('ft-progress').value = 100;
-      status('下载完成 · ' + SerialdUI.formatBytes(done.size) + ' · 平均 '
-        + rateText(averageRate(done.size)) + ' · SHA-256 ' + done.sha256);
-    } finally {
-      if (transfer) await api(board, 'abort', { id: transfer.id }).catch(function () {});
-      if (writable) await writable.abort().catch(function () {});
-    }
+    var selected = board;
+    var done = await runTask(Object.assign(scope(selected), { kind: 'file-download',
+      connection_id: selected.connection_id, path: source }),
+      { key: selected.key, serial: selected.serial || '' });
+    byId('ft-progress').value = 100;
+    status('下载已校验 · ' + SerialdUI.formatBytes(done.size) + ' · 平均 '
+      + rateText(averageRate(done.size)) + ' · SHA-256 ' + done.sha256 + ' · ');
+    var link = document.createElement('a'); link.className = 'log-download';
+    link.textContent = '保存到本地'; link.download = done.name || basename(source);
+    link.href = '/api/artifact-download?id=' + encodeURIComponent(done.artifact_id)
+      + '&key=' + encodeURIComponent(selected.key)
+      + (selected.serial ? '&serial=' + encodeURIComponent(selected.serial) : '');
+    byId('ft-status').appendChild(link);
   }
 
-  function cancelCopy() {
-    var entry = copyTask;
+  function cancelTask() {
+    var entry = activeTask;
     if (!entry || entry.cancelPending) return;
     entry.cancelPending = true;
     taskClient.request('/api/task-cancel', { id: entry.id, key: entry.key, actor: 'web' })
       .then(function () {
-        if (copyTask === entry) status('已请求取消；请在后台任务中确认最终结果。');
+        if (activeTask === entry) status('已请求取消；请在后台任务中确认最终结果。');
       })
       .catch(function (error) {
-        if (copyTask === entry) status('取消请求失败：' + error.message + '；可在后台任务中重试。');
+        if (activeTask === entry) status('取消请求失败：' + error.message + '；可在后台任务中重试。');
       })
       .finally(function () { entry.cancelPending = false; });
   }
-  async function copy(source, destination, target, overwrite) {
-    var selected = board;
-    copyStarting = true; copyTask = null; beginProgress();
-    status('正在提交后台复制；关闭面板或刷新页面不会取消。');
+  async function runTask(payload, ctx) {
+    taskStarting = true; activeTask = null; beginProgress();
+    status('正在提交后台传输；提交后关闭面板或刷新页面不会取消。');
     try {
-      var done = await taskClient.start({ kind: 'file-copy', key: selected.key, serial: selected.serial || '',
-        connection_id: selected.connection_id, actor: 'web', path: source, to_key: destination.key,
-        to_serial: destination.serial || '', to_connection_id: destination.connection_id,
-        to_path: target, overwrite: overwrite }, function (task) {
-        var first = !copyTask;
-        if (first) copyTask = { id: task.id, key: selected.key };
-        copyStarting = false;
-        if (first && cancelled) cancelCopy();
+      return await taskClient.start(payload, function (task) {
+        var first = !activeTask;
+        if (first) activeTask = { id: task.id, key: payload.key };
+        taskStarting = false;
+        if (first && cancelled) cancelTask();
         var p = task.progress || {};
         if (p.total !== undefined) progress(p.done || 0, p.total,
           '任务 ' + task.id + (p.phase === 'verifying' ? ' · 正在校验' : ''));
-        else status('后台复制 ' + task.id + ' · 可关闭面板，在任务列表中查看。');
-      }, { key: selected.key });
-      byId('ft-progress').value = 100;
-      var rates = done.rate_diagnostics || {};
-      status('板间复制完成 · 平均 ' + rateText((rates.effective_kib_s || 0) * 1024)
-        + ' · 源读取 ' + rateText((rates.source_kib_s || 0) * 1024)
-        + ' · 目标写入 ' + rateText((rates.destination_kib_s || 0) * 1024)
-        + ' · ' + destination.key + ':' + target + ' · SHA-256 ' + done.sha256);
+        else status('后台传输 ' + task.id + ' · 可关闭面板，在任务列表中查看。');
+      }, ctx);
     } catch (error) {
-      if (!copyTask && (!error.status || error.status >= 500))
+      if (!activeTask && (!error.status || error.status >= 500))
         throw new Error(error.message + '；提交结果未确认，请在任务列表中核实后再重试。');
       throw error;
     } finally {
-      copyStarting = false; copyTask = null;
+      taskStarting = false; activeTask = null;
     }
+  }
+  async function copy(source, destination, target, overwrite) {
+    var selected = board;
+    var done = await runTask(Object.assign(scope(selected), { kind: 'file-copy',
+      connection_id: selected.connection_id, path: source, to_key: destination.key,
+      to_serial: destination.serial || '', to_connection_id: destination.connection_id,
+      to_path: target, overwrite: overwrite }), { key: selected.key });
+    byId('ft-progress').value = 100;
+    var rates = done.rate_diagnostics || {};
+    status('板间复制完成 · 平均 ' + rateText((rates.effective_kib_s || 0) * 1024)
+      + ' · 源读取 ' + rateText((rates.source_kib_s || 0) * 1024)
+      + ' · 目标写入 ' + rateText((rates.destination_kib_s || 0) * 1024)
+      + ' · ' + destination.key + ':' + target + ' · SHA-256 ' + done.sha256);
   }
 
   function updateMode() {
@@ -281,18 +226,12 @@
     if (file && !byId('ft-target').value) byId('ft-target').value = '/tmp/' + file.name;
   });
   byId('ft-close').addEventListener('click', function () {
-    if (copyTask || copyStarting) dialog.close();
-    else if (busy) { cancelled = true; status('正在取消，等待当前分块结束…'); }
-    else dialog.close();
+    dialog.close();
   });
   byId('ft-cancel').addEventListener('click', function () {
     cancelled = true;
-    if (copyTask || copyStarting) { status('正在请求取消后台复制…'); cancelCopy(); }
+    if (activeTask || taskStarting) { status('正在请求取消后台传输…'); cancelTask(); }
     else status('正在取消，等待当前分块结束…');
-  });
-  dialog.addEventListener('cancel', function (event) {
-    if (copyTask || copyStarting) return;
-    if (busy) { event.preventDefault(); cancelled = true; status('正在取消，等待当前分块结束…'); }
   });
   byId('ft-start').addEventListener('click', async function () {
     if (busy || !board) return;

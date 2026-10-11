@@ -219,28 +219,26 @@ let chrome, ws;
     const output=document.querySelector('#ft-status');
     const observer=new MutationObserver(()=>values.push(output.textContent));
     observer.observe(output,{childList:true});
+    const polls={upload:0,copy:0};
     window.fetch=async (url,options) => {
-      if (phase==='copy' && String(url)==='/api/task-start') {
+      if (String(url)==='/api/task-start') {
         starts++;
-        return {ok:true,json:async()=>({task:{id:'browser-copy',state:'running',progress:{done:0,total:4096}}})};
+        return {ok:true,json:async()=>({task:{id:'browser-'+phase,state:'running',progress:{done:0,total:4096}}})};
       }
-      if (phase==='copy' && String(url).startsWith('/api/task?')) {
-        taskPolls++;
-        const task=taskPolls===1 ? {id:'browser-copy',state:'running',progress:{done:2048,total:4096}}
-          : {id:'browser-copy',state:'completed',progress:{done:4096,total:4096},result:{ok:true,size:4096,
+      if (String(url).startsWith('/api/task?')) {
+        taskPolls++; polls[phase]++;
+        const task=polls[phase]===1 ? {id:'browser-'+phase,state:'running',progress:{done:2048,total:4096}}
+          : {id:'browser-'+phase,state:'completed',progress:{done:4096,total:4096},result:{ok:true,size:4096,
               path:'/tmp/target.bin',sha256:'mock-sha',rate_diagnostics:{effective_kib_s:8,source_kib_s:13,destination_kib_s:8}}};
         return {ok:true,json:async()=>({task})};
       }
-      if (!String(url).startsWith('/api/file-transfer/')) return original(url,options);
-      const action=String(url).split('/').pop(), body=JSON.parse(options.body);
-      if (action==='chunk') await new Promise(resolve=>setTimeout(resolve,120));
-      const result=action==='start'
-        ? {ok:true,id:body.direction==='download'?'fake-source':'fake-upload',chunk_size:2048,size:4096,sha256:'mock-sha'}
-        : action==='chunk'
-          ? {ok:true,offset:body.offset+2048,...(body.direction==='download'||body.id==='fake-source'
-            ? {data_b64:btoa('x'.repeat(2048))}: {})}
-          : {ok:true,path:'/tmp/demo.bin',size:4096,sha256:'mock-sha'};
-      return {ok:true,json:async()=>result};
+      if (String(url).startsWith('/api/artifact-')) {
+        const action=String(url).split('-').pop();
+        return {ok:true,json:async()=>({artifact: action==='create' ? {id:'stage'}
+          : action==='append' ? {received:4096} : {size:4096,sha256:'a'.repeat(64)}})};
+      }
+      if (String(url).startsWith('/api/file-transfer/')) throw new Error('foreground UART API called');
+      return original(url,options);
     };
     try {
       document.querySelector('#b-file-transfer').click();
@@ -267,7 +265,7 @@ let chrome, ws;
   assert.ok(transferMetrics.values.some(value=>value.includes('/s') && value.includes('预计剩余')),
     'active transfer should show estimated rate and remaining time');
   assert.ok(transferMetrics.final.includes('平均') && transferMetrics.final.includes('/s'));
-  assert.equal(transferMetrics.starts, 1, 'browser copy must start exactly one collector task');
+  assert.equal(transferMetrics.starts, 2, 'upload and copy must each start exactly one collector task');
   assert.ok(transferMetrics.taskPolls >= 2, 'browser must follow collector progress');
   assert.ok(transferMetrics.copyFinal.includes('板间复制完成'));
   await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});

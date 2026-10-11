@@ -133,6 +133,7 @@ function harness(options = {}) {
     performance: { now: () => Date.now() },
     Uint8Array, AbortController, console, location: { hash: options.hash || '' },
     atob: value => Buffer.from(value, 'base64').toString('binary'),
+    btoa: value => Buffer.from(value, 'binary').toString('base64'),
     setTimeout: (fn, delay) => { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
     clearTimeout: id => timers.delete(id),
     setInterval: (fn, delay) => { intervals.push({ fn, delay }); return intervals.length; },
@@ -1268,6 +1269,76 @@ function completedCopy() {
   return {id: 'copy-task', state: 'completed', progress: {done: 100, total: 100},
     result: {ok: true, size: 100, sha256: 'digest', rate_diagnostics: {effective_kib_s: 8, source_kib_s: 13, destination_kib_s: 8}}};
 }
+
+function uploadHarness() {
+  const h = copyHarness();
+  h.get('ft-mode').value = 'upload'; h.get('ft-mode').emit('change');
+  h.get('ft-file').files = [{name: 'image.bin', size: 3,
+    slice: () => ({arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer})}];
+  return h;
+}
+async function stageBrowserUpload(h) {
+  h.take('/api/artifact-create').resolve({artifact: {id: 'stage'}}); await drain();
+  const append = h.take('/api/artifact-append');
+  assert.equal(append.body.serial, 'SN-A');
+  assert.equal(append.body.offset, 0);
+  assert.equal(append.body.data_b64, 'AQID');
+  append.resolve({artifact: {received: 3}}); await drain();
+  h.take('/api/artifact-seal').resolve({artifact: {size: 3, sha256: 'a'.repeat(64)}}); await drain();
+}
+
+test('browser upload stages before leasing UART and survives closing with its original scope', async () => {
+  const h = uploadHarness(); h.get('ft-start').click();
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 0);
+  h.get('ft-close').click();
+  assert.equal(h.get('file-transfer-dialog').open, false);
+  await stageBrowserUpload(h);
+  const start = h.take('/api/task-start');
+  assert.equal(start.body.kind, 'file-upload');
+  assert.equal(start.body.artifact_id, 'stage');
+  assert.equal(start.body.connection_id, 'connection-A');
+  assert.equal(start.body.serial, 'SN-A');
+  start.resolve({task: runningCopy()}); await drain();
+  h.transfer.open({key: 'B'}, []);
+  assert.ok(h.get('ft-board').textContent.startsWith('A'));
+  h.take('/api/task').resolve({task: completedCopy()}); await drain();
+  assert.ok(h.get('ft-status').textContent.includes('上传完成'));
+  assert.equal(h.requests.filter(r => r.url.startsWith('/api/file-transfer/')).length, 0);
+});
+
+test('browser upload cancellation during staging deletes staging without writing UART', async () => {
+  const h = uploadHarness(); h.get('ft-start').click();
+  h.take('/api/artifact-create').resolve({artifact: {id: 'stage'}}); await drain();
+  h.get('ft-cancel').click();
+  h.take('/api/artifact-append').resolve({artifact: {received: 3}}); await drain();
+  const cleanup = h.take('/api/artifact-delete');
+  assert.equal(cleanup.body.id, 'stage'); cleanup.resolve({ok: true}); await drain();
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 0);
+  assert.ok(h.get('ft-status').textContent.includes('已取消'));
+});
+
+test('lost upload submission is neither replayed nor allowed to delete a potentially claimed file', async () => {
+  const h = uploadHarness(); h.get('ft-start').click(); await stageBrowserUpload(h);
+  h.take('/api/task-start').reject(new Error('offline')); await drain();
+  assert.ok(h.get('ft-status').textContent.includes('提交结果未确认'));
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 1);
+  assert.equal(h.requests.filter(r => r.url === '/api/artifact-delete').length, 0);
+});
+
+test('browser download uses a durable task and streams a scoped save link without a Blob limit', async () => {
+  const h = copyHarness(); h.get('ft-mode').value = 'download'; h.get('ft-mode').emit('change');
+  h.get('ft-start').click(); const start = h.take('/api/task-start');
+  assert.equal(start.body.kind, 'file-download');
+  start.resolve({task: runningCopy()}); await drain();
+  h.get('ft-close').click();
+  h.take('/api/task').resolve({task: {id: 'copy-task', state: 'completed',
+    result: {size: 200 * 1024 * 1024, artifact_id: 'opaque', name: 'image.bin', sha256: 'digest'}}}); await drain();
+  const link = h.get('ft-status').children[0];
+  assert.equal(link.download, 'image.bin');
+  const query = new URL(link.href, 'http://fixture').searchParams;
+  assert.equal(query.get('serial'), 'SN-A'); assert.equal(query.get('id'), 'opaque');
+  assert.equal(h.requests.filter(r => r.url === '/api/task-cancel').length, 0);
+});
 
 test('browser copy submits once, survives closing/reopening and polls without a single-board scope', async () => {
   const h = copyHarness(); h.get('ft-start').click();

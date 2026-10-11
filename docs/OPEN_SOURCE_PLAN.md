@@ -19,7 +19,7 @@ Do not change an installed service or use live boards during regression tests.
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI implemented; browser initiation pending |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI and browser transfers implemented; local CLI artifact retrieval/final audit pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
@@ -275,3 +275,21 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   tests submit upload/download from exiting CLI processes, query their task
   results from new processes and verify downloaded bytes/checksum. Syntax and
   whitespace checks pass. No installed service or real board was touched.
+
+- Browser upload/download task integration: removed per-request UART transfer
+  loops from the dialog. Uploads stage bounded 1 MiB host chunks before submission;
+  closing the panel keeps staging/monitoring, while explicit cancellation cleans
+  incomplete staging or cancels the submitted task. Downloads publish scoped
+  streamed save links, removing the browser Blob/128 MiB limit. Uncertain task
+  submission never replays or deletes potentially claimed uploads. Original
+  board/generation remains pinned when the dialog reopens from another device.
+  Verification: 443 backend and 74 frontend isolation tests plus sharing tests
+  pass. Real demo browser submits copy/upload/download through the dialog, closes
+  the running download, reloads history and verifies file size and SHA-256.
+  CLI artifact retrieval, legacy orchestration consolidation, identity-history
+  audit, hardware extensions and native Windows/hosted release gates remain.
+
+  Desktop/mobile smoke passes on rerun. Its desktop scrollbar assertion failed
+  once after mobile-to-desktop emulation; the unchanged rerun passed. This is
+  retained as an unresolved browser-test timing concern, rather than claiming
+  that one successful run proves the assertion deterministic.

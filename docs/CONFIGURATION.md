@@ -78,5 +78,4 @@ can be exported with `serialctl diagnostics` without board credentials or logs.
 The collector's artifact storage foundation reserves disk space and recovers
 temporary files alongside its registry. Limits and temporary-file lifetimes are
 documented in [TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). Collector-owned upload/download tasks and
-HTTP staging use these limits; browser/CLI transfer initiation integration remains
-pending. These settings do not change agent grant expiry or serial/SSH log retention.
+HTTP staging use these limits; browser and background CLI file transfers are integrated. These settings do not change agent grant expiry or serial/SSH log retention.

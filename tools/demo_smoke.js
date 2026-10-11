@@ -127,15 +127,30 @@ async function until(check, description) {
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("/tmp/browser-copy.log")'), 'copy history after reload');
   await evaluate('document.querySelector(\'[data-key="demo-k3"]\').click()');
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("/tmp/browser-copy.log")'), 'copy visible under destination board');
-  const destination = (await (await fetch(address + 'api/devices')).json()).devices.find(board => board.key === 'demo-k3');
-  const downloadTask = (await (await fetch(address + 'api/task-start', {method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({kind:'file-download',key:destination.key,serial:destination.serial,
-      connection_id:destination.connection_id,path:'/tmp/browser-copy.log',actor:'web'})})).json()).task;
+  // Submit upload/download through the real dialog, never the foreground UART API.
+  const uploadedBytes = Buffer.from('browser upload verified\n'.repeat(8192));
+  await evaluate('document.querySelector("#b-file-transfer").click()');
+  await evaluate(`const input=document.querySelector('#ft-file'); const dt=new DataTransfer();
+    dt.items.add(new File([${JSON.stringify(uploadedBytes.toString())}], 'browser-upload.bin'));
+    input.files=dt.files; input.dispatchEvent(new Event('change'));
+    document.querySelector('#ft-target').value='/tmp/browser-upload.bin';
+    document.querySelector('#ft-start').click();`);
+  await until(() => evaluate('document.querySelector("#ft-status").textContent.includes("上传完成")'), 'browser staged upload');
+  const uploaded=(await (await fetch(address+'api/tasks')).json()).tasks.find(task=>task.kind==='file-upload');
+  assert.equal(uploaded.state,'completed');
+  await evaluate(`document.querySelector('#ft-mode').value='download';
+    document.querySelector('#ft-mode').dispatchEvent(new Event('change'));
+    document.querySelector('#ft-source').value='/tmp/browser-upload.bin';
+    document.querySelector('#ft-start').click(); document.querySelector('#ft-close').click();`);
   await until(async () => {
-    const task=(await (await fetch(address+'api/task?id='+downloadTask.id)).json()).task;
-    if (task.state==='failed') throw new Error(task.error);
-    return task.state==='completed';
-  }, 'background download');
+    const task=(await (await fetch(address+'api/tasks')).json()).tasks.find(task=>task.kind==='file-download');
+    if (task && task.state==='failed') throw new Error(task.error);
+    return task && task.state==='completed';
+  }, 'browser background download after closing');
+  await rpc('Page.reload');
+  await until(() => evaluate(`!!document.querySelector('[data-key="demo-k3"]')`), 'reload downloaded board');
+  await evaluate(`document.querySelector('[data-key="demo-k3"]').click()`);
+  await evaluate('document.querySelector("#b-tasks").click()');
   await evaluate('document.querySelector("#task-refresh").click()');
   await until(() => evaluate('!!document.querySelector("#d-tasks a[download]")'), 'recovered download link');
   const downloaded = await evaluate(`(async () => {
@@ -145,14 +160,14 @@ async function until(check, description) {
     return {size:data.byteLength,header:response.headers.get('X-Checksum-SHA256'),
       sha:Array.from(new Uint8Array(hash),value=>value.toString(16).padStart(2,'0')).join('')};
   })()`);
-  assert.equal(downloaded.size, expected.length);
-  assert.equal(downloaded.sha, copied.result.sha256);
-  assert.equal(downloaded.header, copied.result.sha256);
+  assert.equal(downloaded.size, uploadedBytes.length);
+  assert.equal(downloaded.sha, uploaded.result.sha256);
+  assert.equal(downloaded.header, uploaded.result.sha256);
   const shot = await rpc('Page.captureScreenshot', {format: 'png'});
   fs.mkdirSync(path.join(root, 'dist'), {recursive: true});
   fs.writeFileSync(path.join(root, 'dist', 'demo-ui.png'), Buffer.from(shot.data, 'base64'));
   assert.deepEqual(errors, []);
-  console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover, copy via UI, task result after reload, verified download link');
+  console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover, copy/upload/download via UI, task results after reload, verified download link');
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   if (ws) ws.close();
   for (const child of [chrome, demo]) {

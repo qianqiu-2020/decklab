@@ -6,8 +6,8 @@ through the task API, browser and CLI `file-copy --background`. Collector-owned
 upload/download are available through the task API and HTTP artifact staging. The browser task panel can retrieve completed downloads.
 CLI `file-put --background` stages and verifies a local file before submitting an
 upload; `file-get --background` stores a download on the host for later retrieval.
-Without this flag, CLI transfers retain their foreground behavior. Browser-dialog
-upload/download task initiation remains pending.
+Without this flag, CLI transfers retain their foreground behavior. The browser
+file-transfer dialog uses collector-owned tasks for upload, download and copy.
 
 ## API and CLI
 
@@ -126,14 +126,17 @@ overwrite a later transfer's status. A lost submission response is never
 automatically replayed: inspect task history before retrying. Completed copy
 results remain visible under both source and destination boards after reload.
 
-The shared browser task client serves copy, identification and SSH creation. It
+The shared browser task client serves all file transfers, identification and SSH creation. It
 retries reads on network outages, stops on revoked/missing access and rejects
-mismatched task responses. Browser upload/download still require the initiating
-page to remain connected until their future staging/task integration is finished.
+mismatched task responses. Uploads first stage bounded chunks on the host without reserving UART; this
+staging phase requires the page to remain open. After task submission, upload
+and download continue across page reloads. Completed downloads provide ordinary
+streamed save links instead of browser-held Blobs, without the former 128 MiB
+limit. Closing the dialog hides it; only its cancel button requests cancellation.
 
 The host-side artifact foundation is implemented separately in
-[TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). HTTP staging and upload/download worker adapters are implemented. Browser transfer initiation remains pending; foreground transfers still depend
-on the initiating client. Direct task-API transfers run in the collector after
+[TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). HTTP staging and upload/download worker adapters are implemented. Only legacy foreground CLI transfers depend on the initiating client. Browser
+and background CLI transfers use the collector-owned task runners. Direct task-API transfers run in the collector after
 the submitting connection closes.
 
 ## Upload/download task API

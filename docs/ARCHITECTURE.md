@@ -73,7 +73,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/artifact_actions.py` | 范围校验后的主机暂存写操作、元数据查询及下载流；不接受主机路径 |
 | `seriald_core/transfer_artifacts.py` | 主机暂存文件、身份与 actor 范围、分块写入、任务占用、配额及重启恢复；上传／下载任务与 HTTP 暂存已接入 |
 | `seriald_core/transfer_tasks.py` | 采集器执行板间复制任务、有限缓冲与并行预读、双连接取消及临时文件清理 |
-| `seriald_core/task_actions.py` | 后台识别／SSH 操作适配、连接代次与 actor/client 保护；任务 API／CLI／网页已接入，上传／下载任务已接入，CLI 后台发起已接入，网页上传／下载发起待完成 |
+| `seriald_core/task_actions.py` | 后台识别／SSH 操作适配、连接代次与 actor/client 保护；任务 API／CLI／网页已接入，上传／下载任务已接入，CLI 后台发起和网页传输均已接入 |
 | `seriald_core/web.py` | HTTP 参数校验、API、静态文件 |
 | `seriald_core/actions.py` | 注入 Manager 的设备写操作应用服务、错误码与能力查询 |
 | `seriald_core/queries.py` | 会话游标、归档、启动搜索/对比与历史查询服务 |
@@ -85,7 +85,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `static/terminal-navigation.js` | 终端缓冲搜索、已回显命令导航和高亮；通过注入当前视图检查隔离旧回调 |
 | `static/terminal-view.js` | 当前 xterm 视图及连接代次、销毁、SSE／长轮询、输入队列、尺寸协商和固件屏幕重绘 |
 | `static/archives.js` | 日期／启动选择、归档列表刷新和跨启动搜索；以标签及序列号隔离选择状态，通过注入回调打开终端标签 |
-| `static/tasks.js` | 共用后台任务提交／查询客户端、分页历史与取消；用于识别、SSH 和网页板间复制 |
+| `static/tasks.js` | 共用后台任务提交／查询客户端、分页历史与取消；用于识别、SSH 和网页上传／下载／板间复制 |
 | `static/devices.js` | 设备目录、选中身份、搜索筛选、轮询顺序和重连／改名对应；输入占用修订号阻止旧轮询覆盖新操作 |
 | `serialctl.py` | 无第三方依赖的 agent 客户端 |
 
