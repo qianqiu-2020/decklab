@@ -185,6 +185,16 @@ function chooseSSH(h, sid = 'ssh1') {
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
+test('low log-disk space is visible without disabling terminal access', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: [{key: 'A', label: 'A', alive: true}],
+    storage: {available: true, warning: true}});
+  await drain();
+  assert.ok(h.get('conn-txt').textContent.includes('日志磁盘空间不足'));
+  h.select('A');
+  assert.equal(h.get('d-in').disabled, false);
+});
+
 test('serial ownership keeps spectators read-only and human takeover restores input', async () => {
   const h = harness();
   h.take('/api/devices').resolve({ devices: [{key: 'A', label: 'A', alive: true,

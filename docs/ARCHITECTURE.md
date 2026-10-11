@@ -74,6 +74,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/queries.py` | 会话游标、归档、启动搜索/对比与历史查询服务 |
 | `seriald_core/results.py` | HTTP/直接调用共用的结果结构与稳定错误码 |
 | `seriald_core/archive_io.py` | 普通日志文件校验、符号链接与替换竞态防护 |
+| `seriald_core/maintenance.py` | 可选日志保留、活动写入/跨天启动保护、磁盘提示与白名单诊断导出 |
 | `seriald_core/admin.py` | 显式迁移旧目录，不访问硬件 |
 | `static/app.js` / `static/app.css` | 网页行为和样式；`index.html` 仅布局 |
 | `serialctl.py` | 无第三方依赖的 agent 客户端 |
@@ -161,4 +162,6 @@ control 层仍负责认证、授权范围和 actor 重写。独立 CLI 调用相
 板端可用 gzip 且压缩后不超过原块 80% 时，对上传块自动压缩；下载按前一块压缩率选择下一块的
 传输方式。API 对浏览器和 CLI 始终返回原始字节，最终校验覆盖完整解压后的文件。
 
-串口多轮交互仍需协调唯一操作者；独立 SSH 会话也共享板子的系统状态。日志仅做日期轮转，未配置自动删除或总容量限制。
+串口多轮交互由统一事务协调，可选输入占用用于避免不同操作者交错输入；独立 SSH 会话仍共享板子的系统状态。
+日志按日期轮转，默认永久保留。可选保留期限跳过活动文件和当前跨天启动涉及的串口档案；
+磁盘空间提示及脱敏诊断导出见 [日志运维](LOG_OPERATIONS.md)。目前没有总容量配额。

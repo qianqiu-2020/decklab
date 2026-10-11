@@ -245,6 +245,12 @@ class HandlerTests(unittest.TestCase):
             denied.do_GET()
             self.assertEqual(self.result(denied)[0], 403)
 
+            diagnostics = self.control_handler('/api/diagnostics')
+            diagnostics.auth_token, diagnostics.grant_store, diagnostics.headers = 'owner', store, headers
+            diagnostics.command = 'GET'
+            diagnostics.do_GET()
+            self.assertEqual(self.result(diagnostics)[0], 403)
+
             features = self.control_handler('/api/capabilities')
             features.auth_token, features.grant_store, features.headers = 'owner', store, headers
             features.command = 'GET'

@@ -22,12 +22,14 @@ from .boot_marker import marker_serial
 from .profiles import ProfileBook
 from .models import Board
 from .session_base import relocate_session_logs
+from .maintenance import LogMaintenance, MaintenancePolicy
 
 class Manager:
     """设备发现 + 每个实际 tty 一个采集线程;旧线程退出后才转移所有权。"""
 
     def __init__(self, store=None, handoff=None, profiles=None):
         self.profiles = profiles if profiles is not None else ProfileBook.from_env()
+        self.maintenance = LogMaintenance(MaintenancePolicy.from_env())
         self.store = store
         self.devices = {}                 # physical by-path -> current connection
         self.boards = {}                  # immutable serial -> persistent Board
@@ -439,6 +441,7 @@ class Manager:
                     d.reap_sessions()
                     if self.store and d.serial and d.present:
                         d.record['last_seen'] = self.store.touch(d.serial)
+                self.maintenance.run_due(self, LOG_ROOT)
                 # 启动/重连只被动采集;自动回车或 USB 软拔插会干扰正在使用的控制台。
             except Exception as e:
                 print('seriald scan: %s' % e, file=sys.stderr, flush=True)

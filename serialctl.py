@@ -455,6 +455,7 @@ def parser():
     commands.add_parser('health', help='show collector process health and uptime')
     commands.add_parser('devices', help='list devices without probing them')
     commands.add_parser('capabilities', help='show supported protocol features without accessing boards')
+    commands.add_parser('diagnostics', help='export a sanitized platform summary without logs or credentials')
     commands.add_parser('operation', help='show the active serial operation and cancellation ID')
     cancel = commands.add_parser('operation-cancel', help='cancel your active serial operation by ID')
     cancel.add_argument('id', help='operation ID returned by operation')
@@ -524,7 +525,7 @@ def main(argv=None):
         client = Client(args.url, args.http_timeout, args.token)
         client.actor = args.actor
         client.ssh_user, client.ssh_password = args.ssh_user, args.ssh_password
-        if args.action in ('devices', 'health', 'capabilities'):
+        if args.action in ('devices', 'health', 'capabilities', 'diagnostics'):
             result = client.request('/api/' + args.action)
         else:
             if not args.device:

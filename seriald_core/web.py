@@ -19,6 +19,7 @@ from .queries import ArchiveQueries, ArchiveDownload, SessionQueries, open_archi
 from . import __version__
 from .results import response as api_response
 from .transactions import transactions_for, TransactionError
+from .maintenance import disk_status, diagnostic_summary
 
 MGR = Manager()
 STARTED = time.time()
@@ -129,6 +130,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             result = capabilities()
             return self._json(result.status, result.payload)
 
+        if route == '/api/diagnostics':
+            return self._json(200, diagnostic_summary(MGR, LOG_ROOT, STARTED))
+
         if route == '/api/health':
             disk = shutil.disk_usage(LOG_ROOT)
             devices = MGR.all_devices()
@@ -149,6 +153,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     'pending': sum(bool(not d.serial and d.present) for d in devices),
                                     'offline': sum(not d.present for d in devices),
                                     'disk_total': disk.total, 'disk_free': disk.free,
+                                    'storage': disk_status(LOG_ROOT, MGR.maintenance.policy),
+                                    'retention': MGR.maintenance.snapshot(),
                                     'logging_ok': not log_errors, 'log_errors': log_errors})
 
         if route == '/api/devices':
@@ -156,6 +162,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             devs = [d.snapshot() for d in devices]
             devs.sort(key=lambda x: x['key'])
             return self._json(200, {'devices': devs, 'by_path': BY_PATH,
+                                    'storage': disk_status(LOG_ROOT, MGR.maintenance.policy),
                                     'server_time': time.time()})
 
         if route == '/api/operation':

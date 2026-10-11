@@ -697,6 +697,10 @@
         $('conn-dot').className = 'dot';
         $('conn-txt').textContent = '已连接 · ' + (d.devices || []).length + ' 台设备 · '
           + new Date().toLocaleTimeString('zh-CN');
+        if (d.storage && d.storage.warning) {
+          $('conn-txt').textContent += d.storage.available ? ' · 日志磁盘空间不足' : ' · 日志磁盘状态不可用';
+          $('conn-dot').className = 'dot bad';
+        }
         lastDevices = d.devices || [];
         renderDevices(lastDevices);
         if (requestedDevice) {

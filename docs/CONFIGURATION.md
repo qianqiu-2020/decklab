@@ -68,3 +68,7 @@ awaits reconnect. Assign a port profile when framing is needed before identity
 discovery. Editing profiles requires a collector restart; restarting control/UI
 does not reload them. Linux accepts termios-supported speeds and rejects other
 rates before opening a port; Windows delegates supported rates to pySerial.
+
+Optional archive retention and free-space warning thresholds are documented in
+[log operations](LOG_OPERATIONS.md). Retention defaults to disabled; diagnostics
+can be exported with `serialctl diagnostics` without board credentials or logs.

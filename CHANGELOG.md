@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add opt-in daily archive retention with active-writer/running-boot protection,
+  disk-space warnings and allowlisted diagnostic exports. Retention is disabled
+  by default; metadata and database backups are never pruned by this policy.
+
 - Distinguish human input reservations by page client ID while keeping the web
   audit actor. Separate clients must explicitly take over; transfer commands keep
   their originating client identity across background work.

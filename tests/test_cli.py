@@ -38,6 +38,10 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(ctl.main(['capabilities']), 0)
             client.request.assert_called_once_with('/api/capabilities')
             client.select.assert_not_called()
+            client.request.reset_mock()
+            self.assertEqual(ctl.main(['diagnostics']), 0)
+            client.request.assert_called_once_with('/api/diagnostics')
+            client.select.assert_not_called()
             client.get.return_value = {'operation': None}
             self.assertEqual(ctl.main(['--device', 'board', 'operation']), 0)
             client.get.assert_called_once_with('/api/operation')

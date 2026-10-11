@@ -18,7 +18,7 @@ Do not change an installed service or use live boards during regression tests.
 | Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Pending |
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
-| Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Pending |
+| Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
 | Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
@@ -132,3 +132,11 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   desktop/mobile browser smoke. A real two-page demo check proves input rejection,
   takeover, spectator transition and restoration of shared input. Native Windows
   execution remains pending.
+- Log operations: opt-in daily archive retention protects active serial/SSH
+  writers, current cross-day boot parts, unknown boot boundaries and replaced
+  files. An unknown active archive location aborts cleanup conservatively.
+  Disk warnings do not disable terminal input; CLI/API diagnostic exports use
+  an allowlist and single-board grants cannot access platform diagnostics.
+  All 369 backend tests, 55 frontend isolation checks and sharing checks pass.
+  The real demo browser verifies terminal input/SSE, archives and independent
+  client takeover. Native Windows execution remains pending.

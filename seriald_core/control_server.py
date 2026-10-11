@@ -252,7 +252,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             grant = self._agent_grant()
             if grant and self.command == 'POST' and route in self.agent_denied_posts:
                 return self._json(403, {'error': 'Agent 分享令牌不能执行平台管理操作'})
-            if grant and grant['scope'] == 'device' and route == '/api/health':
+            if grant and grant['scope'] == 'device' and route in ('/api/health', '/api/diagnostics'):
                 return self._json(403, {'error': '此令牌仅允许访问指定设备'})
             if self.headers.get('Transfer-Encoding'):
                 return self._json(400, {'error': 'transfer encoding unsupported'})
