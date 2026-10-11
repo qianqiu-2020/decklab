@@ -91,6 +91,18 @@ class PackageTests(unittest.TestCase):
             self.assertTrue((extracted / 'usr/share/doc/seriald/TRANSFER_ARTIFACTS.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/HARDWARE_EXTENSIONS.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/API.md').is_file())
+            from tools.package_docs import LINK
+            from urllib.parse import urlsplit, unquote
+            doc_root = extracted / 'usr/share/doc/seriald'
+            links_checked = 0
+            for guide in doc_root.rglob('*.md'):
+                for match in LINK.finditer(guide.read_text(encoding='utf-8')):
+                    link = urlsplit(match[2])
+                    if link.scheme or link.netloc or not link.path or link.path.startswith('/'):
+                        continue
+                    self.assertTrue((guide.parent / unquote(link.path)).is_file(), (guide, link.path))
+                    links_checked += 1
+            self.assertGreater(links_checked, 25)
             self.assertTrue((extracted / 'usr/share/doc/seriald/examples/hardware.json').is_file())
             self.assertTrue((code / 'seriald_core/hardware.py').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/examples/profiles.json').is_file())

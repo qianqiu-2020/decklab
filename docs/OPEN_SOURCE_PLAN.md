@@ -434,3 +434,20 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   passes. No real board, serial device or installed service was accessed.
   Native Windows package execution, binary attribution and hosted release gates
   remain unverified; the overall optimization goal is still active.
+
+- Installed documentation layout: one offline publisher selects release guides,
+  licenses, examples and skill documentation, and rewrites local links to actual
+  destinations. Debian preserves its flat installed guide names; Windows keeps
+  docs/ and a Windows-focused root README, with README-project.md for the English
+  project overview. Links/images must target packaged files before any guide is
+  written. UTF-8 files and URL-encoded relative paths are preserved; runtime data
+  directories are rejected. Both platforms ship all selected linked guides.
+  Windows build runs layout tests and CI path filters include shipped docs/tools.
+
+  Verification: 508 backend checks pass (three native Windows tests skipped),
+  74 frontend isolation and sharing checks pass. Layout fixtures inspect every
+  relative Markdown link/image in both layouts, validate UTF-8 escaped paths,
+  preserve external URLs/fragments and reject missing targets/runtime installs.
+  The extracted Debian package is independently checked for all guide links.
+  Syntax/whitespace checks pass. This validates document publication, not native
+  Windows installation or hosted release execution. Services were unchanged.

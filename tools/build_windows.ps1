@@ -39,6 +39,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Windows helper Job Object tests failed.' }
     & $python -m unittest discover -s tests -p test_serial_handoff.py
     if ($LASTEXITCODE -ne 0) { throw 'Serial handoff regression tests failed' }
+    & $python -m unittest discover -s tests -p test_package_docs.py
+    if ($LASTEXITCODE -ne 0) { throw 'Installed documentation tests failed.' }
     & $python -m unittest discover -s tests -p test_windows_notices.py
     if ($LASTEXITCODE -ne 0) { throw 'Windows distribution notice tests failed.' }
     & $python -m unittest discover -s tests -p test_hardware.py
@@ -71,23 +73,8 @@ try {
                        'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN-Open.ps1', 'serialctl.cmd')) {
         Copy-Item -LiteralPath (Join-Path $launchers $name) -Destination $bundle
     }
-    foreach ($notice in @('LICENSE', 'NOTICE', 'THIRD_PARTY.md')) {
-        Copy-Item -LiteralPath (Join-Path $root $notice) -Destination $bundle
-    }
-    Copy-Item docs\WINDOWS.md -Destination (Join-Path $bundle 'README.md')
-    New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'docs'), (Join-Path $bundle 'examples') | Out-Null
-    Copy-Item docs\CONFIGURATION.md -Destination (Join-Path $bundle 'docs\CONFIGURATION.md')
-    Copy-Item docs\DEMO.md -Destination (Join-Path $bundle 'docs\DEMO.md')
-    Copy-Item docs\CONSOLE_TRANSACTIONS.md -Destination (Join-Path $bundle 'docs\CONSOLE_TRANSACTIONS.md')
-    Copy-Item docs\STORAGE_UPGRADES.md -Destination (Join-Path $bundle 'docs\STORAGE_UPGRADES.md')
-    Copy-Item docs\LOG_OPERATIONS.md -Destination (Join-Path $bundle 'docs\LOG_OPERATIONS.md')
-    Copy-Item docs\AGENT_ACCESS.md -Destination (Join-Path $bundle 'docs\AGENT_ACCESS.md')
-    Copy-Item docs\API.md -Destination (Join-Path $bundle 'docs\API.md')
-    Copy-Item docs\TASKS.md -Destination (Join-Path $bundle 'docs\TASKS.md')
-    Copy-Item docs\TRANSFER_ARTIFACTS.md -Destination (Join-Path $bundle 'docs\TRANSFER_ARTIFACTS.md')
-    Copy-Item docs\HARDWARE_EXTENSIONS.md -Destination (Join-Path $bundle 'docs\HARDWARE_EXTENSIONS.md')
-    Copy-Item examples\profiles.json -Destination (Join-Path $bundle 'examples\profiles.json')
-    Copy-Item examples\hardware.json -Destination (Join-Path $bundle 'examples\hardware.json')
+    & $python tools/package_docs.py $bundle --platform windows
+    if ($LASTEXITCODE -ne 0) { throw 'Installed documentation links failed validation.' }
     & (Join-Path $bundle 'seriald.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }
     & (Join-Path $bundle 'seriald.exe') ctl --help | Out-Null
