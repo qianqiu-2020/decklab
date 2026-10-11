@@ -68,6 +68,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/session_base.py` | 共用 SSH 生命周期、输出缓冲、UTF-8/按日日志、审计和日志迁移 |
 | `seriald_core/windows_manager.py` / `sessions_windows.py` | Windows COM 采集与 SSH channel 适配 |
 | `seriald_core/storage.py` | SQLite 注册表和持久化操作历史 |
+| `seriald_core/schema.py` | 数据库版本、升级前 WAL 快照、事务迁移与回滚 |
 | `seriald_core/web.py` | HTTP 参数校验、API、静态文件 |
 | `seriald_core/admin.py` | 显式迁移旧目录，不访问硬件 |
 | `static/app.js` / `static/app.css` | 网页行为和样式；`index.html` 仅布局 |

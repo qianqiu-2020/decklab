@@ -16,7 +16,7 @@ Do not change an installed service or use live boards during regression tests.
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Pending |
 | Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Pending |
-| Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Pending |
+| Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Pending |
 | Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Pending |
@@ -88,3 +88,11 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   pass, plus 51 frontend isolation checks, sharing checks and real-browser demo
   input/SSE/archive checks. Windows build-script syntax parses locally; native
   Windows execution and hosted CI remain unverified.
+- Storage upgrades: registry and grant databases have independent schema versions
+  and application IDs. Legacy adoption and forward DDL/data/version changes are
+  atomic, with pre-upgrade SQLite snapshots including committed WAL data. Twelve
+  focused tests prove preservation, rollback, backup/publish failure, concurrent
+  startup, future-version rejection and grant semantics. Full backend regression
+  passed 326 tests before the final two test-only additions; package and demo
+  browser checks pass. STORAGE_UPGRADES.md is bundled in both distributions.
+  Native Windows execution remains pending.

@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import time
 from urllib.parse import quote
+from .schema import initialize
 
 
 class IdentityError(ValueError):
@@ -53,36 +54,12 @@ class Store:
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA foreign_keys=ON')
-        self.db.execute('PRAGMA journal_mode=WAL')
-        self.db.executescript('''
-            CREATE TABLE IF NOT EXISTS boards (
-                serial TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE,
-                info TEXT NOT NULL, first_seen REAL NOT NULL, last_seen REAL NOT NULL,
-                last_path TEXT NOT NULL, last_dev TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS sessions (
-                sid TEXT PRIMARY KEY, serial TEXT NOT NULL REFERENCES boards(serial),
-                actor TEXT NOT NULL, title TEXT NOT NULL, ip TEXT NOT NULL,
-                started REAL NOT NULL, ended REAL, status TEXT NOT NULL,
-                completed INTEGER, exit_code INTEGER
-            );
-            CREATE INDEX IF NOT EXISTS session_board ON sessions(serial, started DESC);
-            CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY, serial TEXT NOT NULL REFERENCES boards(serial),
-                ts REAL NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS event_board ON events(serial, id DESC);
-            CREATE TABLE IF NOT EXISTS identity_conflicts (
-                serial TEXT PRIMARY KEY, detected REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS commands (
-                serial TEXT NOT NULL REFERENCES boards(serial), command TEXT NOT NULL,
-                first_used REAL NOT NULL, last_used REAL NOT NULL, use_count INTEGER NOT NULL,
-                PRIMARY KEY(serial, command)
-            );
-            CREATE INDEX IF NOT EXISTS command_board ON commands(serial, use_count DESC, last_used DESC);
-        ''')
-        self.db.commit()
+        try:
+            self.schema_backup = initialize(self.db, path, 'registry')
+            self.db.execute('PRAGMA journal_mode=WAL')
+        except Exception:
+            self.db.close()
+            raise
 
     def close(self):
         self.db.close()

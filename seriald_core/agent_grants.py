@@ -5,20 +5,22 @@ import secrets
 import sqlite3
 import threading
 import time
+from .schema import initialize
 
 
 class AgentGrantStore:
     def __init__(self, path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if path != ':memory:':
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self.lock = threading.RLock()
         self.db = sqlite3.connect(path, check_same_thread=False, timeout=10)
         self.db.row_factory = sqlite3.Row
-        self.db.execute('PRAGMA journal_mode=WAL')
-        self.db.execute('''CREATE TABLE IF NOT EXISTS grants (
-            id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL,
-            actor TEXT NOT NULL, scope TEXT NOT NULL, serial TEXT NOT NULL,
-            created INTEGER NOT NULL, expires INTEGER, revoked INTEGER)''')
-        self.db.commit()
+        try:
+            self.schema_backup = initialize(self.db, path, 'grants')
+            self.db.execute('PRAGMA journal_mode=WAL')
+        except Exception:
+            self.db.close()
+            raise
 
     def issue(self, scope, serial='', ttl=None):
         if scope not in ('all', 'device') or (scope == 'device' and not serial):

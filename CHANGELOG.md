@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Version registry and agent-grant schemas; preserve legacy data with automatic
+  pre-upgrade WAL-aware backups, atomic migrations and future-version rejection.
+
 - Release transfer expiry timers immediately after completion, abort or expiry,
   so repeated transfers do not accumulate ten-minute timer threads.
 
