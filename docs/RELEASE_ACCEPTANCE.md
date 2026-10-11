@@ -40,6 +40,18 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+The API/configuration review now includes all 34 host variable names and 54
+public route names found in the runtime sources. `check_public_docs.py` checks
+that inventory offline without importing hardware modules and is required by
+Linux CI/releases and Windows builds. It does not verify defaults, parameters or
+authorization semantics. This review also corrected boot-comparison selectors,
+documented web-issued grant restrictions and profile-controlled automatic SSH
+configuration, and specified Linux/Windows host/authentication differences.
+Full content review remains a separate requirement.
+Verification for this checkpoint: 514 backend tests pass (three native Windows
+tests skipped), 74 frontend isolation checks and sharing checks pass. The Windows
+build script parses on PowerShell; native execution remains unverified.
+
 1. Audit documentation against every public route/configuration and supported
    platform, including installation, upgrade and recovery behavior.
 2. Review the actual frozen Windows files and embedded native-library notices.

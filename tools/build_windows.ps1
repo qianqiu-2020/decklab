@@ -25,6 +25,8 @@ try {
 
     & $python -m pip install -r requirements-windows.txt
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+    & $python tools/check_public_docs.py
+    if ($LASTEXITCODE -ne 0) { throw 'Public API/configuration documentation inventory failed.' }
     & $python -m unittest discover -s tests -p test_windows_build_env.py
     if ($LASTEXITCODE -ne 0) { throw 'Packaging environment isolation tests failed.' }
     & $python -m unittest discover -s tests -p test_windows_portable.py

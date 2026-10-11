@@ -9,6 +9,30 @@ from two collectors.
 
 ## Environment defaults
 
+### Host paths, listening and authentication
+
+| Variable | Default / behavior |
+| --- | --- |
+| `SERIALD_BASE` | Source Linux checkout root; Windows entry point uses adjacent `data/`; installed Ubuntu uses `/data/seriald-data` |
+| `SERIALD_STATIC` | Source assets or frozen executable assets; normally leave unchanged |
+| `SERIALD_PORT` | 8898; explicit launcher arguments override it |
+| `SERIALD_BIND` | Source/control default `127.0.0.1`; Ubuntu package and Windows LAN launchers select `0.0.0.0` |
+| `SERIALD_SOCKET` | Linux source `<base>/seriald.sock`; Ubuntu `/run/seriald/collector.sock`; ignored by Windows loopback collector |
+| `SERIALD_HANDOFF` | `<base>/collector-handoff.json`; short-lived same-host connection handoff |
+| `SERIALD_BY_PATH` | Linux `/dev/serial/by-path`; Windows `Windows COM` display value, discovery uses pySerial |
+| `SERIALD_RESCUE_BIN` | Linux source `/usr/local/sbin/seriald-rescue.sh`; Ubuntu `/usr/libexec/seriald/rescue.sh`; no Windows USB helper |
+| `SERIALD_AUTH_TOKEN` | Empty: open access. Nonempty: primary Basic/Bearer credential; browser Basic username is `seriald` |
+| `SERIALD_AGENT_TOKENS_FILE` | Linux control-only optional JSON actor/token map; requires primary authentication; not loaded by Windows entry point |
+| `SERIALD_TRUST_LOOPBACK` | Windows-only, exact value `1` allows credential-free loopback access; LAN authenticated launcher enables it. Linux control does not read it |
+
+Set host/auth variables before starting the entry point. Restart control to apply
+Linux listener/auth changes; restart collector for collector configuration.
+Windows uses one host process and requires restart. Authenticated-loopback mode
+trusts the direct peer address, so do not route untrusted proxy traffic through
+that bypass. See [installation](INSTALL.md) and [Windows launchers](WINDOWS.md).
+
+### Serial and board defaults
+
 | Variable | Default | Values / purpose |
 | --- | --- | --- |
 | `SERIALD_BAUD` | 115200 | Integer 50–4000000; host adapter must support it |
@@ -86,4 +110,4 @@ HTTP staging use these limits; browser and background CLI file transfers are int
 per-serial power/reset/flashing argv. Default is disabled; no automatic action or
 sudo is used. Agent access is disabled per action unless explicitly configured.
 See [hardware extensions](HARDWARE_EXTENSIONS.md) for configuration, offline
-power commands, cancellation and current platform/exclusive-flasher limits.
+power commands, cancellation and exclusive UART handoff.

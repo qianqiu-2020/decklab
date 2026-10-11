@@ -68,7 +68,8 @@ vendor 内核暴露的原始 at24 NVMEM。有效的设备树 `serial-number` 直
 没有 EEPROM 编号时优先使用有效 DT 编号，再尝试 SoC/eFuse 或旧 `/boot` 标记；
 已登记的软件标记兜底会保留其候选身份，直到 EEPROM 确认或管理员明确更正；
 检查 `serial_source`、`identity_status` 和 `reported_serial`。候选身份日志位于
-`logs/_provisional/<serial_source>/<serial>/`，正式确认后由管理员迁入 `logs/<serial>/`。
+`logs/_provisional/<serial_source>/<serial>/`。同一候选编号经 EEPROM 证实后，系统自动迁入
+`logs/<serial>/`；编号发生变化或需要人工确认时，使用管理员更正/确认工具迁移。
 用户选择软件身份兜底后，可运行 `identify --init-boot-marker` 创建一次；后续普通识别只读它。
 标记随系统文件保留，克隆到另一块板前移除标记；不按 USB 插口猜身份。详见 [身份说明](HARDWARE_ID.md)。
 未 provision 设备换插口后临时 key 会变化，同一插口的每次连接日志仍分开保存。写入 EEPROM 编号后，

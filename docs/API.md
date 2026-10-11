@@ -29,7 +29,7 @@ not authentication. Avoid putting credentials in URLs, screenshots or issues.
 
 Errors contain `error` and `code`. Generic codes include `invalid-argument`,
 `unauthorized`, `forbidden`, `not-found`, `conflict`, `too-large`, `input-owned`,
-`remote-failure`, `unavailable` and `timeout`; transaction-specific codes also
+`internal-error`, `operation-failed`, `remote-failure`, `unavailable` and `timeout`; transaction-specific codes also
 include `cancelled`, `stale`, `disconnected` and `transfer-busy`. Inspect HTTP
 status as well as JSON: success of an input request does not prove command
 completion, and cancellation is not rollback.
@@ -59,7 +59,9 @@ Use archives for earlier output that no longer fits the live buffer.
 
 ## Archives and history
 
-All routes below require `key` and expected `serial`.
+Archive/history routes take `key`; include expected `serial` to protect against
+label reassignment. Boot comparison instead requires both explicit key/serial/ID
+triples, without a separate top-level `key`.
 
 | GET route | Additional parameters / result |
 | --- | --- |
@@ -116,8 +118,9 @@ staging through `/api/artifact-create`, `/api/artifact-append`,
 `/api/artifact-download`. Downloads include `Content-Length` and
 `X-Checksum-SHA256`; verify both before publishing a local file.
 
-Low-level POST `/api/file-transfer/start`, `/chunk`, `/batch`, `/finish` and
-`/abort` remain available under the `/api/file-transfer/` prefix. They use a
+Low-level POST `/api/file-transfer/start`, `/api/file-transfer/chunk`,
+`/api/file-transfer/batch`, `/api/file-transfer/finish` and
+`/api/file-transfer/abort` remain available. They use a
 transfer ID, connection ID and byte offsets; new clients should prefer tasks to
 avoid coordinating serial chunks themselves. Hardware task configuration and
 exclusive UART ownership are documented in [HARDWARE_EXTENSIONS.md](HARDWARE_EXTENSIONS.md).
@@ -129,3 +132,27 @@ browser share requires the primary credential. A browser device URL locates a
 board but does not restrict platform authorization. Agent tokens can restrict
 access to one serial. See [AGENT_ACCESS.md](AGENT_ACCESS.md) for sharing, revocation
 and command examples; do not call the collector's internal revocation endpoint.
+
+## Agent grant restrictions
+
+Web-issued agent grants, including all-board grants, cannot call `/api/label`,
+`/api/switch-mode`, `/api/rescue`, `/api/ssh-enable` or `/api/session-takeover`.
+They cannot start `kind=ssh-enable` tasks or create board identity markers through
+either identify interface. They can create SSH sessions; profile-controlled
+automatic SSH provisioning after authentication denial still applies to that
+connection workflow. Disable it in the profile when board configuration must
+remain unchanged. Configured hardware actions require their explicit agent policy.
+
+A single-board grant additionally cannot copy between boards, read global health
+or diagnostics, or compare another board. Its device-scoped requests require
+`key`, including task and artifact queries/cancellation; control pins `serial`
+to the grant. Ordinary full-platform task/artifact requests can use IDs without
+device selection. Environment-configured agent credentials identify an actor but
+do not receive these web-issued grant restrictions. Open anonymous access also
+retains full platform access; issuing a grant does not restrict other clients.
+
+The hosted client `/serialctl.py` and skill `/skills/seriald-board/SKILL.md` are
+public downloads. `/healthz` and API routes require the selected access mode's
+credential. Browser share links last 24 hours; agent grants default to no expiry
+and remain revocable. Query parameters are URL-encoded; POST JSON uses actual
+booleans, not strings such as `"true"`.

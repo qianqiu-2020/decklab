@@ -30,6 +30,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install pyserial paramiko
 python -m unittest discover -s tests
+python tools/check_public_docs.py
 node tests/frontend.test.js
 node tests/share.test.js
 python -m compileall -q seriald_core serialctl.py seriald.py

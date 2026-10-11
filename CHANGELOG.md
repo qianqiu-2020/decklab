@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Document host/authentication settings and web-issued agent restrictions,
+  including SSH provisioning behavior. Check public route/environment name
+  coverage offline during CI and Windows builds without importing collectors.
+
 - Recreate a dedicated Windows packaging environment on every build, keeping
   development environments untouched and excluding leftover development packages
   from dependency and license collection. Installer verification uses the same
