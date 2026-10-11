@@ -9,7 +9,7 @@ from .storage import IdentityError
 from .file_transfer import TransferError
 from .transactions import transactions_for, TransactionError
 from . import __version__
-from .hardware import ACTIONS
+from .hardware import ACTIONS, host_adapter
 
 
 def capabilities():
@@ -28,7 +28,7 @@ def capabilities():
         'ssh_provisioning': 'profile-controlled',
         'input_ownership': 'optional-client',
         'hardware': {'actions': list(ACTIONS), 'configuration': 'explicit-serial',
-                     'host_adapter': 'linux-process-group', 'default': 'disabled'},
+                     'host_adapter': host_adapter(), 'default': 'disabled'},
     })
 
 

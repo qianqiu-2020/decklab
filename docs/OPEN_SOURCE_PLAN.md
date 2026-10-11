@@ -20,7 +20,7 @@ Do not change an installed service or use live boards during regression tests.
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
 | Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI and browser transfers implemented; CLI result retrieval implemented; CLI orchestration consolidated; final audit pending |
-| Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Linux task adapter implemented; Windows process-tree and exclusive-serial handoff pending |
+| Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Linux/Windows task adapters implemented; native Windows and exclusive-serial handoff pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
 Implementation order: release foundations and configuration, demo, core/service
@@ -363,3 +363,21 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   confirm the adapter, guide and example ship. Windows packaging lists include
   them but native execution remains unverified. No real hardware command or
   installed service was used or modified.
+
+- Windows hardware process ownership: Unicode CreateProcessW uses atomic Job
+  assignment and an explicit NUL-handle inheritance list, with a non-inherited
+  kill-on-close Job handle. Cleanup verifies no active Job members remain, waits
+  for the root and releases handles; failed setup never launches a fallback
+  uncontained process. Hardware discovery/capabilities select the platform
+  adapter. Windows build now runs the shared task fixtures and native Job tests.
+  Local contract tests verify x64 ABI/handle widths, quoted Unicode arguments,
+  ownership ordering, setup/cleanup failures and cancellation/timeout cleanup.
+  Three actual Windows tests cover arguments, lingering descendants and owner
+  crash; these are skipped here, so native execution is explicitly unverified.
+
+  Verification: 487 backend checks pass with exactly three native Windows Job
+  tests skipped on this Linux host; 74 frontend isolation and sharing tests pass.
+  Native Windows tests are now mandatory in the Windows build, not silently
+  omitted. Syntax/whitespace checks pass. No installed service or real helper
+  was invoked. Exclusive UART flashing handoff and actual Windows/release
+  verification remain required.

@@ -14,6 +14,39 @@ from .transactions import transactions_for, TransactionError
 ACTIONS = ('power-on', 'power-off', 'reset', 'flash')
 
 
+def host_adapter():
+    return 'windows-job-object' if os.name == 'nt' else 'linux-process-group'
+
+
+class PosixProcess:
+    def __init__(self, argv):
+        self.process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+
+    def poll(self):
+        return self.process.poll()
+
+    @property
+    def returncode(self):
+        return self.process.returncode
+
+    def close(self):
+        try:
+            os.killpg(self.process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        self.process.wait()
+
+
+def helper_process(argv):
+    if os.name == 'nt':
+        from .process_windows import WindowsProcess
+        return WindowsProcess(argv)
+    if os.name == 'posix':
+        return PosixProcess(argv)
+    raise TaskError('unsupported helper process platform', 503)
+
+
 @dataclass(frozen=True)
 class HardwareCommand:
     argv: tuple
@@ -78,22 +111,21 @@ class HardwareBook:
             raise TaskError('hardware action is not configured for this board', 404)
         if actor != 'web' and not command.allow_agent:
             raise TaskError('this hardware action is not enabled for agents', 403)
-        if os.name != 'posix':
-            raise TaskError('host-command hardware adapter currently requires Linux process groups', 503)
+        if os.name not in ('posix', 'nt'):
+            raise TaskError('unsupported helper process platform', 503)
         return command
 
     def available(self, serial, actor):
         return {'actions': [action for action, command in self.boards.get(serial, {}).items()
                             if actor == 'web' or command.allow_agent],
-                'supported': os.name == 'posix', 'adapter': 'linux-process-group'}
+                'supported': os.name in ('posix', 'nt'), 'adapter': host_adapter()}
 
 
 def run_command(argv, timeout, check):
     """Bound execution and terminate the whole owned group, including descendants."""
     check()
     started = time.monotonic()
-    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    process = helper_process(argv)
     try:
         while process.poll() is None:
             check()
@@ -105,13 +137,7 @@ def run_command(argv, timeout, check):
             raise TaskError('hardware helper exited with status %s; operation may be partial' % process.returncode, 502)
         return {'exit_code': process.returncode, 'duration_ms': round((time.monotonic() - started) * 1000)}
     finally:
-        # Kill remaining children even if the helper exited first. No shell or
-        # client-supplied executable is involved; this process owns its session.
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.wait()
+        process.close()
 
 
 class HardwareOperation:

@@ -35,6 +35,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Configuration tests failed.' }
     & $python -m unittest discover -s tests -p test_demo.py
     if ($LASTEXITCODE -ne 0) { throw 'Hardware-free demo tests failed.' }
+    & $python -m unittest discover -s tests -p test_process_windows.py
+    if ($LASTEXITCODE -ne 0) { throw 'Windows helper Job Object tests failed.' }
+    & $python -m unittest discover -s tests -p test_hardware.py
+    if ($LASTEXITCODE -ne 0) { throw 'Configured hardware task tests failed.' }
     if (Get-Command node -ErrorAction SilentlyContinue) {
         & node tests/frontend.test.js
         if ($LASTEXITCODE -ne 0) { throw 'Frontend regression tests failed.' }

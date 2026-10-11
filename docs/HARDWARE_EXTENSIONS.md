@@ -3,8 +3,10 @@
 Hardware actions are disabled by default. A host administrator can configure
 power-on, power-off, reset and an external flashing tool for specific board
 serials. This is an adapter interface, not a bundled relay or board flasher.
-Linux/POSIX process-group execution is implemented; native Windows execution
-is currently rejected until its process-tree adapter is available.
+Linux/POSIX uses an owned process group; Windows 10+ uses a Job Object.
+Native Windows runtime validation is a separate release gate, not proven by
+Linux mocks. Windows helpers should be EXEs (or an explicit interpreter plus
+script), with absolute paths; no implicit cmd.exe or PowerShell wrapper is used.
 
 Set `SERIALD_HARDWARE=/path/to/hardware.json` in the collector environment and
 restart the collector when changing configuration. Start with
@@ -48,8 +50,8 @@ Tasks record progress and exit status/duration. Operation history records start,
 completion or stop. Helper stdout/stderr is discarded rather than exposing host
 secrets in board history; consult the helper's configured external logging for
 its detailed diagnostics. No passwords or argv are persisted in task results.
-Timeout, cancellation or identity/connection change kills the owned Linux
-process group, including descendants. Even successful helper exit cleans up
+Timeout, cancellation or identity/connection change terminates the owned Linux
+process group or Windows Job, including descendants. Even successful helper exit cleans up
 remaining children. A nonzero exit, disconnect during execution or timeout is
 reported as failed; cancellation is a request and cannot undo power changes or
 a partially written image. Service restart interrupts tasks without replay.
@@ -57,3 +59,21 @@ a partially written image. Service restart interrupts tasks without replay.
 Validate with simulation first. The regression suite launches only local Python
 fixtures in temporary directories; it does not invoke relays, real flashers,
 serial readers or recovery helpers.
+
+## Windows process ownership
+
+The Windows adapter uses native Unicode `CreateProcessW` with
+`PROC_THREAD_ATTRIBUTE_JOB_LIST`, assigning the process before its first thread
+can run. A second attribute restricts handle inheritance to a NUL standard-IO
+handle; the Job handle is not inherited. `KILL_ON_JOB_CLOSE` provides cleanup if
+the collector dies. Normal cleanup terminates the Job, verifies its active
+process count reaches zero, waits for the root, and releases handles. If Job
+creation/assignment fails, there is no fallback to an uncontained helper. The
+Windows command line is limited to fewer than 32767 UTF-16 code units.
+
+See [Microsoft’s atomic Job assignment explanation](https://devblogs.microsoft.com/oldnewthing/20230209-00/?p=107812/)
+and [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
+Cross-platform tests check ABI widths, attribute/handle ownership, quoting,
+failure cleanup, timeout and cancellation. Native Windows tests also exercise
+Unicode arguments, root-before-child exit and abrupt collector-helper-owner
+termination; the Windows build must run these tests before packaging.

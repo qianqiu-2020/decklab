@@ -82,3 +82,11 @@ py serialctl.py devices
 不要在安装目录开发或直接在 `dist\seriald` 下运行测试；安装数据只保存在安装目录 `data\`。COM 口不能同时被其他串口软件占用；换板前在网页点击“准备换板”。
 
 开发者可独立使用源码与临时 `SERIALD_BASE` 运行 `seriald_windows.py --no-browser`，但日常实机验收应先构建并安装，再通过安装目录的三个入口测试。PyInstaller 必须在 Windows 上生成 Windows 可执行文件；GitLab 不运行仓库中的 GitHub Actions 工作流。
+
+## 可选硬件命令
+
+Windows 10+ 可用 `SERIALD_HARDWARE` 配置按板子序列号绑定的电源、复位及外部刷机 EXE。
+默认关闭，不自动提权。使用绝对 Windows 路径；具体配置、agent 权限及串口占用限制见
+[硬件扩展](HARDWARE_EXTENSIONS.md)。命令创建时绑定 Job Object，超时、取消及
+宿主进程异常退出都会清理关联进程。构建脚本包含原生 Job Object 及模拟任务测试；
+未运行原生 Windows 测试的 Linux 验证结果不能代替此项发布验收。

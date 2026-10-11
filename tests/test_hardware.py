@@ -56,7 +56,7 @@ class HardwareConfigTests(unittest.TestCase):
                 self.assertEqual(HardwareBook.from_env().boards, {})
 
 
-@unittest.skipUnless(os.name == 'posix', 'Linux helper adapter; native Windows adapter pending')
+@unittest.skipUnless(os.name in ('posix', 'nt'), 'requires a supported process-tree adapter')
 class HardwareTaskTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
