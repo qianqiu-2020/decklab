@@ -22,6 +22,21 @@ constraint used by scoped grants, separate from the involvement filter;
 by `id`. These endpoints return normal JSON errors and retain task IDs after the
 initiating HTTP connection closes.
 
+Task IDs are opaque 24-character lowercase hexadecimal strings. A start response
+contains `{"ok":true,"task":{...}}`; a query/cancel response contains `task`, and
+a history response contains `tasks`. The returned record may already be running
+or terminal when the start response arrives. `GET /api/tasks` defaults to 20
+records with `offset=0`, newest first; there is no total-count field. Human
+`web` queries include all actors; agent queries include only that agent's tasks.
+
+The default collector permits four active workers and returns HTTP 429 when
+capacity is exhausted, without creating another task. HTTP 202 confirms
+submission, not successful execution. A lost submission response must not be
+automatically replayed: consult history first. Task polling and artifact downloads
+do not occupy a worker. Cancelling an already terminal task returns its existing
+record without changing its outcome. `cancel_requested=true` is a request flag,
+not evidence that execution stopped; inspect `state`.
+
 ```sh
 python3 serialctl.py --device riscv-118 task-start identify
 python3 serialctl.py --device riscv-118 tasks
@@ -181,6 +196,23 @@ keeping their local file. The task panel offers the same download after reload.
 Control pins scoped tokens to their actor/serial, strips untrusted actor headers
 and stops forwarding a file after revocation. A single-board grant can stage
 and transfer its own board files; cross-board copies still require all-board access.
+
+Artifact operations return `{"artifact":{...}}`, with `ok=true` on successful
+POSTs. IDs are separate opaque 24-character hex strings, even when an artifact
+belongs to a task. Create requires a display filename (1–255 UTF-8 bytes, no
+path separators or control characters) and a nonnegative integer size. Append
+requires a nonempty chunk, integer offset and valid base64. Retrying already
+committed bytes is accepted only if the entire chunk is within committed data
+and identical; a partially overlapping retry is rejected. Seal is idempotent
+for an already ready, unclaimed upload. Delete returns the retained metadata
+with `state=deleted`, rather than making metadata queries return 404.
+
+Metadata remains readable after expiry, failure or consumption; it does not
+imply file availability. Download requires direction `download` and state
+`available`; unavailable states return HTTP 409. Active task-owned files and
+open download readers cannot be deleted. A completed download task stays in
+history after its artifact expires, so fetch can fail even though the task is
+still `completed`. Tasks themselves have no automatic history expiry.
 
 ## Background CLI file transfers
 

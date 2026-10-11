@@ -19,14 +19,14 @@ for source/test evidence and the unresolved release gates.
 | Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented and locally verified |
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API/task/UI implemented and locally verified |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
-| Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Device/read services implemented; final API audit pending |
+| Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Implemented; manager injection and 54-route source/contract review verified locally |
 | Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Implemented; native Windows package execution pending |
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI and browser transfers implemented; CLI result retrieval implemented; CLI orchestration consolidated; final audit pending |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Implemented across API/CLI/browser; task/artifact source and local contract review complete; native Windows gate pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Linux/Windows task adapters and exclusive-serial handoff implemented; native Windows verification pending |
-| Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
+| Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | API/config source content and packaged links reviewed locally; native installation/release and binary-notice evidence pending |
 
 Implementation order: release foundations and configuration, demo, core/service
 boundaries, collaboration and operations, then hardware extensions. Use existing

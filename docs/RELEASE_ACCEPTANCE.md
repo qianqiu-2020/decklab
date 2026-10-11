@@ -16,14 +16,14 @@ installed Windows behavior. Earlier checkpoint counts are historical.
 | Board/connection/session separation | models.py, devices.py, session_base.py; model, registry and session-contract tests | Local reconnect and migration contracts verified |
 | Console coordination | transactions.py, console_protocol.py; transaction, protocol, handoff and input-ownership tests | Local timeout/cancel/generation contracts verified |
 | Platform adapters | sessions.py, sessions_windows.py, windows_manager.py; shared session and fake Windows tests | Local fixtures verified; native Windows tests pending |
-| Application services/API | actions.py, queries.py, results.py, API.md; action/query/HTTP/CLI tests | Implemented; full documented-route review still required |
+| Application services/API | actions.py, queries.py, results.py, API.md; action/query/HTTP/CLI tests | Implemented; 54-route source/contract content review complete locally |
 | Frontend ownership | devices.js, terminal-view.js, archives.js, terminal-navigation.js; frontend.test.js | Isolation checks verified; desktop/mobile browser fixture passes five consecutive runs after synchronization fix |
 | Schema upgrades | schema.py registry migrations through version 5; test_schema.py checks WAL backups, rollback, concurrent openers and future versions | Local SQLite fixtures verified; Windows upgrade pending |
 | Collaboration | transactions.py, agent_grants.py, control_server.py; input-ownership, grants and sharing tests | Local reservation/revocation/takeover verified |
 | Log operations | maintenance.py; maintenance/archive/identity tests cover active writers, cross-day boots, disk warnings and allowlisted diagnostics | Local fixtures verified; native Windows file semantics pending |
 | Long operations | tasks.py, task_actions.py, transfer_tasks.py, transfer_artifacts.py; task/file/CLI tests and demo browser upload/download/copy/reload | Local task and artifact workflows verified |
 | Hardware extensions | hardware.py, process_windows.py, exclusive_serial handoff; helper and handoff tests | Local/fake contracts verified; native Windows process-tree gate pending |
-| Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | Layout verified; complete content audit still required |
+| Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | API/config source review and layouts verified; native install/release and binary notices outstanding |
 
 ## Evidence from this audit
 
@@ -39,6 +39,21 @@ a bounded wait. Five consecutive complete fixture runs pass; no application
 scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
+
+The local API content review now includes task and artifact contracts, completing
+the six groups covering all 54 public routes in API.md. TASKS.md and
+TRANSFER_ARTIFACTS.md describe start/query response wrappers, opaque IDs,
+worker capacity and HTTP 429, actor visibility, history pagination, cancellation
+races, exact append-retry rules, retained deleted metadata, unavailable-file
+responses and task history outliving artifacts. Artifact timestamps refresh on
+stream open, not metadata reads or identical append retries; expiry runs on a
+maintenance pass. Quota settings include their integer bounds and zero reserve.
+Review sources were task_actions.py, tasks.py, artifact_actions.py,
+transfer_artifacts.py, transfer_tasks.py and collector maintenance. The 39
+task/file/copy tests, ten task-action tests, 23 artifact tests and three packaged
+document tests pass, as does the 34-variable/54-route inventory check. This is
+source and local contract evidence, not proof of native Windows behavior or
+hosted release execution. Earlier review notes below are checkpoint evidence.
 
 API content review now covers captured-output cursors, archive/history limits,
 SSH session actor permissions, low-level transfer payloads and control sharing
@@ -142,10 +157,9 @@ Verification for this checkpoint: 514 backend tests pass (three native Windows
 tests skipped), 74 frontend isolation checks and sharing checks pass. The Windows
 build script parses on PowerShell; native execution remains unverified.
 
-1. Complete the public-route content review and verify supported-platform
-   installation, upgrade and recovery behavior. Configuration defaults and
-   lifecycle have a local source/fixture review above; native installation
-   evidence is still required.
+1. Verify supported-platform installation, upgrade and recovery behavior.
+   API/configuration content has a local source/fixture review above; native
+   installation evidence is still required.
 2. Review the actual frozen Windows files and embedded native-library notices.
    The installed-Python distribution inventory is not a complete binary SBOM.
 3. Execute native Windows tests, frozen demo/host checks and installer upgrades

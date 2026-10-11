@@ -210,3 +210,22 @@ public downloads. `/healthz` and API routes require the selected access mode's
 credential. Browser share links last 24 hours; agent grants default to no expiry
 and remain revocable. Query parameters are URL-encoded; POST JSON uses actual
 booleans, not strings such as `"true"`.
+
+## Source review coverage
+
+The 54 public route names have been reviewed in these groups. This is a source
+and local-contract review, distinct from hosted release or native platform tests.
+
+| Group | Routes | Contract sources / regression fixtures |
+| --- | ---: | --- |
+| Discovery, health, streams | 11 | `web.py`, `queries.py`, `control_server.py`; HTTP, SSE, session-contract and collector-isolation tests |
+| Archives and history | 7 | `queries.py`, `log_archive.py`, `boot_compare.py`; query, archive, boot comparison and HTTP tests |
+| Device input and sessions | 16 | `actions.py`, `transactions.py`, `device.py`; action, protocol, ownership, registry and HTTP tests |
+| Tasks and artifacts | 10 | `task_actions.py`, `tasks.py`, `artifact_actions.py`, `transfer_artifacts.py`; task, file-task and artifact tests; detailed payloads in [tasks](TASKS.md) |
+| Low-level serial transfers | 5 | `actions.py`, `file_transfer.py`; transfer and transaction tests |
+| Control access and sharing | 5 | `control_server.py`, `agent_grants.py`; HTTP, grants and sharing tests |
+
+The route-name inventory check catches missing names; it does not prove payload,
+authorization, cancellation or platform semantics. Those require source review
+and the relevant contract tests above. Installer and real COM behavior remain
+native Windows acceptance requirements.

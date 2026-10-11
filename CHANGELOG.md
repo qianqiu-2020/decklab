@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Complete the local API/configuration content review. Document task capacity,
+  cancellation outcomes, artifact retries and expiry separately from retained
+  task history; distinguish local contract checks from native release evidence.
 - Keep collector health readable when disk status is unavailable, and snapshot
   SSH sessions under their registry lock before collecting logging errors.
 - Snapshot board-profile environment defaults and configuration at collector

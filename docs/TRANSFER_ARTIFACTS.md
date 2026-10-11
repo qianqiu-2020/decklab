@@ -35,8 +35,11 @@ or exposing a download. Host hash verification checks cancellation between chunk
 
 Declared sizes reserve quota and available disk space before creating files.
 Each append rechecks free space. Collector maintenance checks expiry every minute;
-active claims, download writers and open readers are excluded. Reading a sealed artifact refreshes
-its expiry timestamp. Metadata remains after file deletion for task diagnosis.
+active claims, download writers and open readers are excluded. Opening a sealed
+artifact stream refreshes its expiry timestamp; metadata queries and identical
+append retries do not. Lifetimes are measured from `updated`, with cleanup on the
+next expiry pass rather than precisely at the deadline. Metadata remains after
+file deletion for task diagnosis, and completed task history can outlive its file.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -47,7 +50,8 @@ its expiry timestamp. Metadata remains after file deletion for task diagnosis.
 | `SERIALD_TRANSFER_IDLE_SECONDS` | 3600 | Idle partial-upload expiry |
 | `SERIALD_TRANSFER_RETENTION_SECONDS` | 604800 | Ready upload/download expiry (7 days) |
 
-Values must be integer byte/second counts. File/expiry limits are positive and
+Values must be nonnegative integers at most `2^63-1`. The free-space reserve may
+be zero. File/count/expiry limits are positive and
 total quota must accommodate one maximum-size file. Invalid settings stop startup.
 These lifetimes govern temporary transfer files, not agent grants or board logs.
 
