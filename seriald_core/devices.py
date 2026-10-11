@@ -186,9 +186,11 @@ class Manager:
                                              'serial-' + device.connection_id + '-')
                     if promotion_record:
                         record = self.store.promote_eeprom_identity(
-                            promotion_record['serial'], selected, device.by_path, device.dev)
+                            promotion_record['serial'], selected, device.by_path, device.dev,
+                            connection_id=device.connection_id)
                     else:
-                        record = self.store.bind(selected, device.by_path, device.dev)
+                        record = self.store.bind(selected, device.by_path, device.dev,
+                                                 connection_id=device.connection_id)
                     relocation.commit()  # Later cleanup failure cannot revert committed log ownership.
                     board = previous_board or device.board or Board(record)
                     board.update(record)

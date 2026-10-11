@@ -66,3 +66,12 @@ and sealed uploads survive restarts until deletion or expiry.
 Recovery snapshots cover database metadata, not artifact bytes. Do not start a
 second collector on the same spool or restore only metadata while another process
 is writing files. Native Windows artifact/installer validation remains outstanding.
+
+## Identity confirmation
+
+Schema 5 resolves task history by proven connection generation. When a pending
+connection is identified, task-owned single-board artifacts follow its serial
+in the same identity transaction. Unsubmitted staging is left unchanged because
+it has no connection proof. Explicit identity correction and validated EEPROM
+promotion migrate artifact scopes with the board record; file IDs and hashes
+remain unchanged. Actor ownership and per-target grant checks still apply.

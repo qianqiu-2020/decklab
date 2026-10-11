@@ -43,6 +43,89 @@ class TaskTests(unittest.TestCase):
         finally:
             reopened.close()
 
+    def test_connection_identification_resolves_all_history_without_changing_snapshots(self):
+        history = self.tasks.store
+        wanted = history.create('file-download', 'agent', '', [{'serial': '', 'connection_id': 'pending'}])
+        history.update(wanted, state='failed', error='before identification')
+        for number in range(4):
+            history.create('identify', 'web', '', [{'serial': '', 'connection_id': 'other-' + str(number)}])
+        self.store.bind({'serial': 'SN-NEW'}, 'usb', 'tty', connection_id='pending')
+        task = history.get(wanted)
+        self.assertEqual(task['targets'], [{'serial': '', 'connection_id': 'pending', 'resolved_serial': 'SN-NEW'}])
+        self.assertTrue(history.visible_serial(task, 'SN-NEW'))
+        self.assertEqual([row['id'] for row in history.list(target_serial='SN-NEW', limit=1)], [wanted])
+        self.assertEqual([row['id'] for row in history.list(serials=['SN-NEW'], actor='agent')], [wanted])
+        self.assertEqual(history.list(serials=['SN-OTHER']), [])
+        reopened = Store(self.path)
+        try:
+            self.assertEqual(TaskStore(reopened).get(wanted)['targets'], task['targets'])
+        finally:
+            reopened.close()
+
+    def test_multi_board_pending_history_is_resolved_per_target_without_widening_scope(self):
+        history = self.tasks.store
+        task_id = history.create('file-copy', 'agent', '', [
+            {'serial': '', 'connection_id': 'one'}, {'serial': '', 'connection_id': 'two'}])
+        self.store.bind({'serial': 'SN-A'}, 'usb-one', 'tty', connection_id='one')
+        self.store.bind({'serial': 'SN-B'}, 'usb-two', 'tty', connection_id='two')
+        for serial in ('SN-A', 'SN-B'):
+            self.assertEqual([row['id'] for row in history.list(target_serial=serial)], [task_id])
+            self.assertEqual(history.list(serials=[serial]), [])
+            self.assertFalse(history.visible_serial(history.get(task_id), serial))
+        self.assertEqual([row['id'] for row in history.list(serials=['SN-A', 'SN-B'])], [task_id])
+
+    def test_arbitrary_result_serial_cannot_replace_connection_proof(self):
+        history = self.tasks.store
+        task_id = history.create('file-download', 'agent', '', [{'serial': '', 'connection_id': 'pending'}])
+        history.update(task_id, state='completed', result={'serial': 'UNPROVEN'})
+        self.assertFalse(history.visible_serial(history.get(task_id), 'UNPROVEN'))
+        self.assertEqual(history.list(serials=['UNPROVEN']), [])
+        self.store.bind({'serial': 'PROVEN'}, 'usb', 'tty', connection_id='pending')
+        self.assertTrue(history.visible_serial(history.get(task_id), 'PROVEN'))
+        self.assertFalse(history.visible_serial(history.get(task_id), 'UNPROVEN'))
+        self.assertEqual(history.list(target_serial='UNPROVEN'), [])
+
+    def test_connection_cannot_be_reassigned_and_new_generation_does_not_steal_history(self):
+        from seriald_core.storage import IdentityError
+        task_id = self.tasks.store.create('file-upload', 'agent', '', [{'serial': '', 'connection_id': 'old'}])
+        self.store.bind({'serial': 'SN-A'}, 'usb', 'tty', connection_id='old')
+        with self.assertRaises(IdentityError):
+            self.store.bind({'serial': 'SN-B'}, 'usb', 'tty', connection_id='old')
+        self.assertIsNone(self.store.get('SN-B'))  # Board insert and mapping roll back together.
+        self.store.bind({'serial': 'SN-B'}, 'usb', 'tty', connection_id='new')
+        self.assertTrue(self.tasks.store.visible_serial(self.tasks.store.get(task_id), 'SN-A'))
+        self.assertEqual(self.tasks.store.list(target_serial='SN-B'), [])
+
+    def test_explicit_serial_correction_migrates_resolution_without_rewriting_task_snapshot(self):
+        self.store.bind({'serial': 'SN-OLD'}, 'usb', 'tty')
+        task_id = self.tasks.store.create('file-download', 'agent', '', [
+            {'serial': 'SN-OLD', 'connection_id': 'legacy-known'}])
+        self.store.correct_serial('SN-OLD', 'SN-NEW')
+        task = self.tasks.store.get(task_id)
+        self.assertEqual(task['targets'][0]['serial'], 'SN-OLD')
+        self.assertEqual(task['targets'][0]['resolved_serial'], 'SN-NEW')
+        self.assertTrue(self.tasks.store.visible_serial(task, 'SN-NEW'))
+        self.assertEqual(self.tasks.store.list(target_serial='SN-OLD'), [])
+
+    def test_eeprom_promotion_updates_resolved_history_and_artifact_identity(self):
+        import time
+        old = {'serial': 'MARKER', 'serial_source': 'boot-marker', 'identity_status': 'provisional'}
+        self.store.bind(old, 'usb', 'tty', connection_id='connection')
+        task_id = self.tasks.store.create('file-download', 'agent', '', [
+            {'serial': 'MARKER', 'connection_id': 'connection'}])
+        with self.store.lock, self.store.db:
+            self.store.db.execute('INSERT INTO transfer_artifacts VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                ('artifact', 'agent', 'MARKER', 'download', 'file', 0, 0, '', 'failed', task_id, time.time(), time.time()))
+        self.store.promote_eeprom_identity('MARKER', {'serial': 'EEPROM',
+            'serial_source': 'eeprom-onie', 'identity_status': 'confirmed'}, 'usb', 'tty',
+            connection_id='connection')
+        task = self.tasks.store.get(task_id)
+        self.assertEqual(task['targets'][0]['serial'], 'MARKER')
+        self.assertEqual(task['targets'][0]['resolved_serial'], 'EEPROM')
+        self.assertTrue(self.tasks.store.visible_serial(task, 'EEPROM'))
+        self.assertEqual(self.store.db.execute('SELECT serial FROM transfer_artifacts').fetchone()[0], 'EEPROM')
+        self.assertEqual(self.store.db.execute('PRAGMA foreign_key_check').fetchall(), [])
+
     def test_restart_interrupts_unfinished_records_without_replaying(self):
         history = self.tasks.store
         task_id = history.create('identify', 'web', 'page-one', [TARGET])

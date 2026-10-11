@@ -44,7 +44,7 @@ Final results contain selected operation metadata, not raw probe dumps.
 
 ## Storage and execution
 
-`TaskStore` was introduced in registry schema 3; schema 4 adds transfer artifact metadata. It persists a random task ID, operation kind,
+`TaskStore` was introduced in registry schema 3; schema 4 adds transfer artifact metadata; schema 5 adds proven connection identity. It persists a random task ID, operation kind,
 actor and human client ID, historical serial/connection targets, state, timestamps,
 progress, cancellation request and final result/error. Original request payloads
 and executable callbacks remain in memory. Results are bounded to 64 KiB and
@@ -55,10 +55,21 @@ States are `queued`, `running`, `completed`, `failed`, `cancelled` and
 `interrupted`. Only queued/running rows accept progress or final-state updates.
 Terminal rows cannot be overwritten by late callbacks. Progress has `done`,
 `total` and `phase`; individual operation adapters choose units and phases.
-Historical targets are snapshots, not live board bindings, and do not silently
-follow an identity correction to another serial. A single-target task submitted
-without a serial can also be found under its final discovered serial; the original
-blank target snapshot is retained. This exception cannot widen multi-board access.
+Historical `targets[].serial` and connection IDs remain immutable submission
+snapshots. Registry schema 5 separately records a proven connection-to-board
+association. Task targets include `resolved_serial` when such proof exists;
+queries use it for board involvement and all-target scope checks. Identification
+resolves earlier tasks on that exact generation, including failed tasks and
+multi-board transfers, without relying on USB paths or labels. A replacement
+board requires a new generation and cannot inherit the old history. Explicit
+serial correction or validated EEPROM promotion migrates resolved associations
+and task-owned artifact scopes together with board history.
+
+Legacy single-target identify results remain readable through their returned
+serial when no association exists. Upgrade does not guess bindings for other
+old tasks. Each target of a multi-board task must independently be inside the
+grant; resolving one endpoint never grants access to the other. Unsubmitted
+upload staging has no proven generation and is not silently reassigned.
 
 One `TaskManager` owns execution in a collector, with four active workers by
 default. Capacity exhaustion refuses a new task before creating its record.

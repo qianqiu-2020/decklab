@@ -68,8 +68,13 @@ class TaskStore:
                 raise TaskError('task not found', 404)
             record = dict(row)
             record['targets'] = [dict(target) for target in self.store.db.execute(
-                'SELECT serial,connection_id FROM task_targets WHERE task_id=? ORDER BY serial,connection_id',
+                'SELECT t.serial,t.connection_id,c.serial AS resolved_serial FROM task_targets t '
+                'LEFT JOIN connection_identities c ON c.connection_id=t.connection_id '
+                'WHERE task_id=? ORDER BY t.serial,t.connection_id',
                 (task_id,))]
+        for target in record['targets']:
+            if target['resolved_serial'] is None:
+                del target['resolved_serial']
         record['progress'] = json.loads(record['progress'])
         record['result'] = json.loads(record['result']) if record['result'] is not None else None
         record['cancel_requested'] = bool(record['cancel_requested'])
@@ -82,24 +87,26 @@ class TaskStore:
         if actor is not None:
             clauses.append('actor=?')
             arguments.append(actor)
+        # Resolved identity is separate from immutable submission snapshots.
+        # Legacy one-target identify results remain readable without inventing a
+        # connection mapping during upgrade; multi-target results never widen scope.
+        effective = ("COALESCE((SELECT serial FROM connection_identities c WHERE c.connection_id=t.connection_id),"
+                     "NULLIF(t.serial,''),CASE WHEN tasks.kind='identify' AND "
+                     "(SELECT COUNT(*) FROM task_targets WHERE task_id=tasks.id)=1 "
+                     "THEN json_extract(tasks.result,'$.serial') END,'')")
         if serials is not None:
             if not serials:
                 return []
             placeholders = ','.join('?' for _ in serials)
-            # A single-board grant must not see a two-board copy involving another board.
-            clauses.append('NOT EXISTS (SELECT 1 FROM task_targets WHERE task_id=tasks.id '
-                           'AND serial NOT IN (' + placeholders + ') '
-                           "AND NOT (serial='' AND (SELECT COUNT(*) FROM task_targets WHERE task_id=tasks.id)=1 "
-                           "AND COALESCE(json_extract(tasks.result,'$.serial'),'') IN (" + placeholders + ')))')
-            arguments.extend(serials)
+            clauses.append('NOT EXISTS (SELECT 1 FROM task_targets t WHERE t.task_id=tasks.id AND '
+                           + effective + ' NOT IN (' + placeholders + '))')
             arguments.extend(serials)
         if target_serial is not None:
             if not isinstance(target_serial, str) or not target_serial or len(target_serial.encode()) > 100:
                 raise TaskError('invalid task target serial')
-            clauses.append('EXISTS (SELECT 1 FROM task_targets WHERE task_id=tasks.id AND '
-                           "(serial=? OR (serial='' AND (SELECT COUNT(*) FROM task_targets WHERE task_id=tasks.id)=1 "
-                           "AND json_extract(tasks.result,'$.serial')=?)))")
-            arguments.extend((target_serial, target_serial))
+            clauses.append('EXISTS (SELECT 1 FROM task_targets t WHERE t.task_id=tasks.id AND '
+                           + effective + '=?)')
+            arguments.append(target_serial)
         if connection_id is not None:
             if not isinstance(connection_id, str) or not connection_id or len(connection_id) > 80:
                 raise TaskError('invalid task connection')
@@ -115,9 +122,9 @@ class TaskStore:
     @staticmethod
     def visible_serial(task, serial):
         targets = task['targets']
-        if len(targets) == 1 and not targets[0]['serial']:
-            return (task.get('result') or {}).get('serial') == serial
-        return all(target['serial'] == serial for target in targets)
+        if len(targets) == 1 and not targets[0]['serial'] and 'resolved_serial' not in targets[0]:
+            return task['kind'] == 'identify' and (task.get('result') or {}).get('serial') == serial
+        return all(target.get('resolved_serial', target['serial']) == serial for target in targets)
 
     def update(self, task_id, state=None, progress=None, result=None, error=''):
         if state is not None and state not in ('running', 'completed', 'failed', 'cancelled'):

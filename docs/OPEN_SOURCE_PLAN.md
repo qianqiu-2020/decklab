@@ -324,3 +324,23 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   default upload/copy/download end-to-end byte/hash checks. Real demo browser
   validates all transfer modes and reload retrieval. Syntax/whitespace checks
   pass; no installed service or live board was changed.
+
+- Task identity-history audit: schema 5 stores proven generation-to-board
+  associations atomically with identity binding. Original task snapshots remain
+  immutable; resolved identities drive pagination/involvement and all-target
+  authorization, including earlier pending file tasks and multi-board copies.
+  Reusing a generation for another board rolls back; replacement generations
+  cannot steal history. Explicit correction and validated EEPROM promotion
+  migrate resolved associations and artifact scope. Unsubmitted staging is not
+  guessed. Schema-4 upgrade creates a WAL snapshot without fabricating bindings.
+  The new pending-download fixture initially exposed an incomplete LOG_ROOT
+  override; both manager and device roots now stay patched for its lifetime,
+  and its identified simulation-only log was removed. Live hardware/services
+  were not accessed or changed. Hardware extensions and release audits remain.
+
+  Verification: 463 backend regression tests, 74 frontend isolation tests and
+  sharing tests pass. Real demo browser checks task history, every transfer mode
+  and verified file retrieval after reload. Schema-4 snapshots, mapping rollback,
+  unchanged submission snapshots, per-endpoint scope, actor isolation, corrected
+  identity, EEPROM promotion and pending-download file scope have regression
+  evidence. Syntax/whitespace checks pass. Production services were unchanged.

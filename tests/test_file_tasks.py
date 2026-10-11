@@ -26,6 +26,10 @@ class FileTaskTests(unittest.TestCase):
         self.path = Path(self.tmp.name)
         self.store = Store(str(self.path / 'registry.sqlite3'))
         self.addCleanup(self.store.close)
+        for module in ('device', 'devices'):
+            patcher = mock.patch('seriald_core.' + module + '.LOG_ROOT', str(self.path / 'logs'))
+            patcher.start()
+            self.addCleanup(patcher.stop)
         with mock.patch('seriald_core.device.LOG_ROOT', str(self.path / 'logs')):
             self.manager = DemoManager(self.store)
         self.addCleanup(self.manager.close)
@@ -120,6 +124,25 @@ class FileTaskTests(unittest.TestCase):
         self.assertEqual(self.http('/api/artifact-download?id=' + artifact_id + '&serial=other', actor='agent-one')[0], 404)
         self.assertEqual(self.http('/api/artifact-download?id=' + artifact_id)[0], 200)
         self.assertEqual(self.artifacts.get(artifact_id)['state'], 'available')
+
+    def test_pending_download_follows_confirmed_connection_and_remains_actor_scoped(self):
+        self.device.record = None
+        task = self.finish(self.start(actor='agent-one'))
+        self.assertEqual(task['state'], 'completed', task)
+        artifact_id = task['result']['artifact_id']
+        unstaged = self.artifacts.create('upload', 'unsubmitted', 0, 'agent-one', '')
+        self.manager.identify(self.device, {'serial': 'NEW-EEPROM', 'hostname': 'new-board'})
+        self.assertEqual(self.device.serial, 'NEW-EEPROM')
+        resolved = self.manager.tasks.store.get(task['id'])
+        self.assertEqual(resolved['targets'][0]['serial'], '')
+        self.assertEqual(resolved['targets'][0]['resolved_serial'], 'NEW-EEPROM')
+        self.assertEqual(self.actions.query(task['id'], 'agent-one', 'NEW-EEPROM').status, 200)
+        self.assertEqual(self.actions.query(task['id'], 'agent-two', 'NEW-EEPROM').status, 404)
+        self.assertEqual(self.http('/api/artifact-download?id=' + artifact_id + '&serial=NEW-EEPROM',
+                                   actor='agent-one')[0], 200)
+        self.assertEqual(self.http('/api/artifact-download?id=' + artifact_id + '&serial=OTHER',
+                                   actor='agent-one')[0], 404)
+        self.assertEqual(self.artifacts.get(unstaged['id'])['serial'], '')
 
     def test_identity_rebinding_without_tty_change_cannot_target_the_replacement_board(self):
         row = self.stage()

@@ -86,7 +86,7 @@ class Store:
         with self.lock:
             return self._board(self.db.execute('SELECT * FROM boards WHERE label=?', (label,)).fetchone())
 
-    def bind(self, info, path, dev, label=None):
+    def bind(self, info, path, dev, label=None, connection_id=None):
         serial = str(info.get('serial') or '').strip()
         serial_component(serial)
         explicit_label = label is not None
@@ -115,7 +115,26 @@ class Store:
                      old['first_seen'] if old else now, now, path, dev))
             except sqlite3.IntegrityError as e:
                 raise IdentityError('标签已被其他设备使用') from e
+            if connection_id is not None:
+                self._bind_connection(connection_id, serial)
             return self.get(serial)
+
+    def _bind_connection(self, connection_id, serial):
+        """Called inside the identity transaction; a generation cannot change boards."""
+        if not isinstance(connection_id, str) or not connection_id or len(connection_id) > 80:
+            raise IdentityError('invalid connection identity')
+        current = self.db.execute('SELECT serial FROM connection_identities WHERE connection_id=?',
+                                  (connection_id,)).fetchone()
+        if current and current[0] != serial:
+            raise IdentityError('connection already belongs to another board; prepare a board switch first')
+        self.db.execute('INSERT OR IGNORE INTO connection_identities VALUES(?,?,?)',
+                        (connection_id, serial, time.time()))
+        # Only task-owned artifacts have a proven generation. Unsubmitted staging
+        # has no connection proof and must never be guessed from its USB path.
+        self.db.execute("UPDATE transfer_artifacts SET serial=? WHERE serial='' AND task_id IN "
+                        '(SELECT task_id FROM task_targets WHERE connection_id=? GROUP BY task_id '
+                        'HAVING (SELECT COUNT(*) FROM task_targets t WHERE t.task_id=task_targets.task_id)=1)',
+                        (serial, connection_id))
 
     def rename(self, serial, label):
         label = validate_label(label)
@@ -134,6 +153,15 @@ class Store:
             self.db.execute('UPDATE boards SET last_seen=? WHERE serial=?', (now, serial))
             return now
 
+    def _migrate_identity_references(self, old_serial, new_serial):
+        """Migrate proven ownership inside the caller's identity transaction."""
+        self.db.execute('INSERT OR IGNORE INTO connection_identities '
+                        'SELECT DISTINCT connection_id,serial,? FROM task_targets WHERE serial=?',
+                        (time.time(), old_serial))
+        for table in ('sessions', 'events', 'commands', 'connection_identities', 'transfer_artifacts'):
+            self.db.execute('UPDATE ' + table + ' SET serial=? WHERE serial=?',
+                            (new_serial, old_serial))
+
     def correct_serial(self, old_serial, new_serial):
         """Explicit offline correction after verifying a board's real identity."""
         serial_component(new_serial)
@@ -148,13 +176,12 @@ class Store:
             self.db.execute('PRAGMA defer_foreign_keys=ON')
             self.db.execute('UPDATE boards SET serial=?, info=? WHERE serial=?',
                             (new_serial, json.dumps(info, ensure_ascii=False), old_serial))
-            for table in ('sessions', 'events', 'commands'):
-                self.db.execute('UPDATE ' + table + ' SET serial=? WHERE serial=?', (new_serial, old_serial))
+            self._migrate_identity_references(old_serial, new_serial)
             self.db.execute('INSERT INTO events(serial,ts,actor,action,detail) VALUES(?,?,?,?,?)',
                             (new_serial, time.time(), 'admin', 'identity-corrected', old_serial))
         return self.get(new_serial)
 
-    def promote_eeprom_identity(self, old_serial, info, path, dev):
+    def promote_eeprom_identity(self, old_serial, info, path, dev, connection_id=None):
         """Replace a provisional identity with the EEPROM identity, preserving history."""
         new_serial = str(info.get('serial') or '').strip()
         serial_component(new_serial)
@@ -171,9 +198,9 @@ class Store:
                 last_path=?, last_dev=? WHERE serial=?''',
                 (new_serial, json.dumps(info, ensure_ascii=False), time.time(), path, dev,
                  old_serial))
-            for table in ('sessions', 'events', 'commands'):
-                self.db.execute('UPDATE ' + table + ' SET serial=? WHERE serial=?',
-                                (new_serial, old_serial))
+            self._migrate_identity_references(old_serial, new_serial)
+            if connection_id is not None:
+                self._bind_connection(connection_id, new_serial)
             self.db.execute('INSERT INTO events(serial,ts,actor,action,detail) VALUES(?,?,?,?,?)',
                             (new_serial, time.time(), 'service', 'identity-promoted', old_serial))
         return self.get(new_serial)

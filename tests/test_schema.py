@@ -122,6 +122,25 @@ class SchemaTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_version_four_adds_connection_identity_without_guessing_old_task_ownership(self):
+        db = self.legacy()
+        for migrate in schema.REGISTRY_MIGRATIONS[1:4]:
+            migrate(db)
+        db.execute('INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                   ('pending', 'file-copy', 'agent', '', 'completed', '{}', '{}', '', 1, 2, 0))
+        db.execute('INSERT INTO task_targets VALUES (?,?,?)', ('pending', '', 'unidentified'))
+        db.execute('PRAGMA user_version=4')
+        db.commit()
+        store = Store(str(self.path))
+        try:
+            self.assertEqual(store.db.execute('SELECT COUNT(*) FROM connection_identities').fetchone()[0], 0)
+            self.assertEqual(store.db.execute('SELECT serial FROM task_targets').fetchone()[0], '')
+            with sqlite3.connect(store.schema_backup) as backup:
+                self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 4)
+                self.assertIsNone(backup.execute("SELECT name FROM sqlite_master WHERE name='connection_identities'").fetchone())
+        finally:
+            store.close()
+
     def test_failed_migration_rolls_back_ddl_data_and_version(self):
         db = self.legacy()
         owner, migrations, expected = schema._SCHEMAS['registry']
