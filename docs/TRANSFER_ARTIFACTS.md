@@ -4,7 +4,9 @@ This storage layer supports collector-owned upload/download tasks and scoped HTT
 staging/download endpoints described in [TASKS.md](TASKS.md). Browser task history
 can retrieve completed downloads. The browser transfer dialog and CLI `--background` transfers use collector-owned
 tasks. Browser uploads require the page during staging only; submitted tasks
-survive reload. Legacy foreground CLI transfers still depend on their client.
+survive reload. Default CLI transfers submit the same tasks and wait; no CLI UART transfer loop
+remains. Staging and local retrieval require the client, but collector execution
+continues independently.
 
 ## Files and ownership
 

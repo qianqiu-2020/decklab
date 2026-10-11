@@ -11,7 +11,6 @@ from unittest import mock
 
 from seriald_core.file_transfer import (BATCH_SIZE, CHUNK_SIZE, MAX_CONSOLE_LINE,
                                         SerialFileTransfer, TransferError, _field)
-from serialctl import ClientError, file_put, file_get, file_copy
 
 
 class ShellDevice:
@@ -363,99 +362,6 @@ class SerialFileTransferTests(unittest.TestCase):
             self.transfer.finish(state['id'], self.device.connection_id)
         self.assertFalse(target.exists())
         self.transfer.abort(state['id'], self.device.connection_id)
-
-
-class TransferClient:
-    def __init__(self, key):
-        self.key = key
-        self.device = ShellDevice()
-        self.device.connection_id = key + '-connection'
-        self.connection_id = self.device.connection_id
-        self.transfer = SerialFileTransfer(self.device)
-
-    def post(self, route, **payload):
-        action = route.rsplit('/', 1)[-1]
-        try:
-            if action == 'start':
-                return self.transfer.start(payload['direction'], payload['path'], self.connection_id,
-                                           size=payload.get('size'), overwrite=payload.get('overwrite', False))
-            if action == 'chunk':
-                return self.transfer.chunk(payload['id'], self.connection_id, payload['offset'],
-                                           payload.get('data_b64'))
-            if action == 'batch':
-                return self.transfer.batch(payload['id'], self.connection_id, payload['offset'],
-                                           payload.get('data_b64'))
-            if action == 'finish':
-                return self.transfer.finish(payload['id'], self.connection_id)
-            if action == 'abort':
-                return self.transfer.abort(payload['id'], self.connection_id)
-        except TransferError as error:
-            raise ClientError(str(error), status=error.status) from error
-        raise AssertionError(route)
-
-
-class CliFileTransferTests(unittest.TestCase):
-    def test_incompressible_upload_splits_without_losing_bytes(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            data = os.urandom(CHUNK_SIZE + 3072)
-            source_path, target_path = root / 'source.bin', root / 'target.bin'
-            source_path.write_bytes(data)
-            target = TransferClient('target')
-            target.device.gzip_available = False
-            file_put(target, str(source_path), str(target_path))
-            self.assertEqual(target_path.read_bytes(), data)
-            self.assertGreater(sum(command.count('base64 -d')
-                                   for command in target.device.commands), 2)
-
-    def test_board_copy_overlaps_two_independent_serial_ports(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            data = bytes(range(256)) * 64
-            source_path, target_path = root / 'source.bin', root / 'target.bin'
-            source_path.write_bytes(data)
-            source, target = TransferClient('source'), TransferClient('target')
-            next_read_started = threading.Event()
-            original_source, original_target = source.post, target.post
-            source_chunks = 0
-            def source_post(route, **payload):
-                nonlocal source_chunks
-                if route.endswith('/chunk'):
-                    source_chunks += 1
-                    if source_chunks == 2:
-                        next_read_started.set()
-                return original_source(route, **payload)
-            def target_post(route, **payload):
-                if route.endswith('/batch') and payload['offset'] == 0:
-                    self.assertTrue(next_read_started.wait(1), 'source prefetch did not overlap destination write')
-                return original_target(route, **payload)
-            source.post, target.post = source_post, target_post
-            result = file_copy(source, target, str(source_path), str(target_path))
-            self.assertEqual(target_path.read_bytes(), data)
-            rates = result['rate_diagnostics']
-            self.assertGreater(rates['source_kib_s'], 0)
-            self.assertGreater(rates['destination_kib_s'], 0)
-            self.assertGreater(rates['effective_kib_s'], 0)
-
-    def test_local_upload_download_and_board_copy(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            source = root / 'local.bin'
-            data = bytes(range(256)) * 19
-            source.write_bytes(data)
-            first, second = TransferClient('first'), TransferClient('second')
-            first_path, second_path = root / 'first.bin', root / 'second.bin'
-            file_put(first, str(source), str(first_path))
-            self.assertEqual(first_path.read_bytes(), data)
-            copy_result = file_copy(first, second, str(first_path), str(second_path))
-            self.assertEqual(second_path.read_bytes(), data)
-            self.assertEqual(copy_result['sha256'], hashlib.sha256(data).hexdigest())
-            download = root / 'download.bin'
-            file_get(second, str(second_path), str(download))
-            self.assertEqual(download.read_bytes(), data)
-            with self.assertRaisesRegex(ClientError, 'already exists'):
-                file_get(second, str(second_path), str(download))
-            self.assertFalse(list(root.glob('.seriald-*')))
 
 
 if __name__ == '__main__':

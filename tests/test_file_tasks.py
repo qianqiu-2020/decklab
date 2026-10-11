@@ -3,6 +3,8 @@ import base64
 import hashlib
 import io
 import json
+import os
+import subprocess
 from pathlib import Path
 import tempfile
 import threading
@@ -74,6 +76,24 @@ class FileTaskTests(unittest.TestCase):
         self.assertEqual(list(self.artifacts.root.iterdir()), [])
         self.assertFalse(self.device.file_transfer.active)
         self.assertNotIn('data_b64', json.dumps(task))
+
+    @unittest.skipUnless(os.name == 'posix', 'actual board shell fixture requires /bin/sh')
+    def test_collector_upload_splits_incompressible_data_with_no_board_gzip(self):
+        data = os.urandom(13312)
+        row = self.stage(data)
+        destination = self.path / 'uploaded.bin'
+        commands = []
+        def shell(command, timeout, ensure_shell=True):
+            commands.append(command)
+            command = command.replace('command -v gzip >/dev/null 2>&1', 'false')
+            result = subprocess.run(['/bin/sh', '-c', command], capture_output=True,
+                                    text=True, timeout=timeout)
+            return True, result.stdout + result.stderr
+        with mock.patch.object(self.device, '_run_cmd_locked', side_effect=shell):
+            task = self.finish(self.start('file-upload', artifact_id=row['id'], path=str(destination)))
+        self.assertEqual(task['state'], 'completed', task)
+        self.assertEqual(destination.read_bytes(), data)
+        self.assertGreater(sum(command.count('base64 -d') for command in commands), 2)
 
     def test_corrupted_staging_never_promotes_or_overwrites_target(self):
         row = self.stage(b'correct')

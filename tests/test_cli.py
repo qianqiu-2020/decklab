@@ -22,6 +22,60 @@ def response(data):
 
 
 class ClientTests(unittest.TestCase):
+    def test_foreground_task_wait_polls_one_id_and_returns_collector_result(self):
+        client = mock.Mock()
+        client.get.side_effect = [{'task': {'id': 'copy', 'state': 'running'}},
+            {'task': {'id': 'copy', 'state': 'completed', 'result': {'size': 3, 'sha256': 'digest'}}}]
+        with mock.patch.object(ctl.time, 'sleep'):
+            result = ctl.wait_task(client, {'task': {'id': 'copy', 'state': 'queued'}})
+        self.assertEqual(result, {'size': 3, 'sha256': 'digest', 'task_id': 'copy'})
+        self.assertEqual(client.get.call_args_list, [mock.call('/api/task', id='copy')] * 2)
+        client.post.assert_not_called()
+
+    def test_wait_failure_reports_id_without_replaying_or_cancelling_task(self):
+        for failure in (ctl.ClientError('offline'), {'task': {'id': 'different', 'state': 'completed'}}):
+            client = mock.Mock()
+            if isinstance(failure, Exception):
+                client.get.side_effect = failure
+            else:
+                client.get.return_value = failure
+            with mock.patch.object(ctl.time, 'sleep'), self.assertRaisesRegex(ctl.ClientError, 'Task original:'):
+                ctl.wait_task(client, {'task': {'id': 'original', 'state': 'running'}})
+            client.post.assert_not_called()
+
+    def test_interrupt_requests_cancel_for_original_task_and_reports_uncertain_result(self):
+        for failed in (False, True):
+            client = mock.Mock()
+            if failed:
+                client.post.side_effect = ctl.ClientError('offline')
+            with mock.patch.object(ctl.time, 'sleep', side_effect=KeyboardInterrupt), \
+                    self.assertRaisesRegex(ctl.ClientError, 'Interrupted task original:') as error:
+                ctl.wait_task(client, {'task': {'id': 'original', 'state': 'running'}})
+            client.post.assert_called_once_with('/api/task-cancel', id='original')
+            self.assertIn('unconfirmed' if failed else 'requested', str(error.exception))
+
+    def test_foreground_upload_and_copy_share_background_submission(self):
+        client, destination = mock.Mock(), mock.Mock()
+        destination.key, destination.serial, destination.connection_id = 'other', 'SN-2', 'other-generation'
+        with mock.patch.object(ctl, 'wait_task', return_value={'ok': True}) as wait, \
+                mock.patch.object(ctl, 'stage_upload_task', return_value={'task': {'id': 'upload'}}) as stage:
+            ctl.file_put(client, 'local', '/target', True)
+            stage.assert_called_once_with(client, 'local', '/target', True)
+            wait.assert_called_once_with(client, {'task': {'id': 'upload'}})
+        with mock.patch.object(ctl, 'wait_task', return_value={'ok': True}):
+            ctl.file_copy(client, destination, '/source', '/target')
+        client.post.assert_called_once_with('/api/task-start', kind='file-copy',
+            connection_id=client.connection_id, to_key='other', to_serial='SN-2',
+            to_connection_id='other-generation', path='/source', to_path='/target', overwrite=False)
+
+    def test_foreground_download_rejects_existing_local_target_before_submitting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'existing'; target.write_bytes(b'original')
+            client = mock.Mock()
+            with self.assertRaisesRegex(ctl.ClientError, 'already exists'):
+                ctl.file_get(client, '/source', target)
+            client.post.assert_not_called()
+
     def test_background_upload_stages_bounded_chunks_before_task_and_never_replays_lost_start(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'source.bin'

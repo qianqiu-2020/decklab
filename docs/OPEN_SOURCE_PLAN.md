@@ -19,7 +19,7 @@ Do not change an installed service or use live boards during regression tests.
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI and browser transfers implemented; CLI result retrieval implemented; orchestration consolidation/final audit pending |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI and browser transfers implemented; CLI result retrieval implemented; CLI orchestration consolidated; final audit pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
@@ -308,3 +308,19 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   pass; syntax/whitespace checks pass. The production demo HTTP test retrieves
   a completed download with an independent CLI process and checks its bytes and
   SHA-256. No installed service or real board was changed.
+
+- CLI transfer orchestration consolidation: removed duplicate upload/download
+  chunk loops, client-side copy prefetch and abort helpers. Default commands
+  submit the same collector task as `--background`, wait for its ID and retrieve
+  completed download artifacts. Ctrl-C requests task cancellation and reports
+  confirmed/unconfirmed status; polling failures report the original ID without
+  replay or implicit cancellation. Retired CLI-local shell tests are replaced by
+  collector-owned incompressible/no-gzip shell coverage, existing task prefetch
+  overlap tests, and actual demo HTTP/CLI upload/copy/download checks. Pending
+  identity-history, hardware-extension and platform/release audits remain.
+
+  Verification: 455 backend regression tests, 74 frontend isolation tests and
+  sharing tests pass. Extended real demo HTTP/CLI tests also pass after adding
+  default upload/copy/download end-to-end byte/hash checks. Real demo browser
+  validates all transfer modes and reload retrieval. Syntax/whitespace checks
+  pass; no installed service or live board was changed.

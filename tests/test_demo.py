@@ -173,6 +173,15 @@ class DemoHttpTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as staging:
                     source = Path(staging) / 'stage.bin'
                     source.write_bytes(staged_data)
+                    foreground = json.loads(run_cli('demo-k1', 'file-put', '--local', str(source),
+                        '--remote', '/tmp/foreground.bin'))
+                    self.assertEqual(foreground['sha256'], hashlib.sha256(staged_data).hexdigest())
+                    copy_result = json.loads(run_cli('demo-k1', 'file-copy', '--remote', '/tmp/foreground.bin',
+                        '--to-device', 'demo-k3', '--to-path', '/tmp/foreground-copy.bin'))
+                    self.assertEqual(copy_result['sha256'], foreground['sha256'])
+                    local_copy = Path(staging) / 'foreground-copy.bin'
+                    run_cli('demo-k3', 'file-get', '--remote', '/tmp/foreground-copy.bin', '--local', str(local_copy))
+                    self.assertEqual(local_copy.read_bytes(), staged_data)
                     uploaded = json.loads(run_cli('demo-k1', 'file-put', '--local', str(source),
                         '--remote', '/tmp/background.bin', '--background'))['task']
                 for _ in range(30):

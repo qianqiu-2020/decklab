@@ -6,7 +6,8 @@ through the task API, browser and CLI `file-copy --background`. Collector-owned
 upload/download are available through the task API and HTTP artifact staging. The browser task panel can retrieve completed downloads.
 CLI `file-put --background` stages and verifies a local file before submitting an
 upload; `file-get --background` stores a download on the host for later retrieval.
-Without this flag, CLI transfers retain their foreground behavior. The browser
+Without this flag, CLI transfers submit the same collector task and wait for its
+result; downloads then stream the artifact into the requested local path. The browser
 file-transfer dialog uses collector-owned tasks for upload, download and copy.
 
 ## API and CLI
@@ -135,8 +136,8 @@ streamed save links instead of browser-held Blobs, without the former 128 MiB
 limit. Closing the dialog hides it; only its cancel button requests cancellation.
 
 The host-side artifact foundation is implemented separately in
-[TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). HTTP staging and upload/download worker adapters are implemented. Only legacy foreground CLI transfers depend on the initiating client. Browser
-and background CLI transfers use the collector-owned task runners. Direct task-API transfers run in the collector after
+[TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). HTTP staging and upload/download worker adapters are implemented. Browser and all CLI file transfers use the collector-owned task runners.
+Only upload staging and local file retrieval require their client to remain online. Direct task-API transfers run in the collector after
 the submitting connection closes.
 
 ## Upload/download task API
@@ -202,3 +203,13 @@ creation is also protected. Corrupt/truncated responses, revoked access and
 interrupted retrieval leave no partial destination and remove the temporary
 file. Retrieval never writes UART and does not delete the host artifact; it can
 be repeated until the configured artifact expiry.
+
+## Default CLI waiting and cancellation
+
+`file-put`, `file-get` and `file-copy` use the same task submission as their
+`--background` counterparts; the default command polls the returned ID every
+500 ms. The CLI no longer coordinates UART chunks or board-copy prefetch.
+Ctrl-C requests cancellation of that ID and reports whether the request was
+confirmed; it does not promise rollback. A polling failure reports the task ID
+without resubmission or implicit cancellation. Use `task <id>` to check its
+final state and `file-fetch` to retrieve completed downloads later.

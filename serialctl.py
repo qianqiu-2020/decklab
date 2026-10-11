@@ -3,7 +3,6 @@
 import argparse
 import base64
 import binascii
-from concurrent.futures import ThreadPoolExecutor
 import http.client
 import json
 import math
@@ -247,31 +246,6 @@ def positive_timeout(value):
     return value
 
 
-def _abort_transfer(client, transfer_id):
-    if transfer_id:
-        try:
-            client.post('/api/file-transfer/abort', id=transfer_id)
-        except ClientError:
-            pass
-
-
-def _upload_slice(client, transfer_id, offset, data):
-    """Fit a raw slice under the board's canonical tty line limit."""
-    length = len(data)
-    while length:
-        try:
-            result = client.post('/api/file-transfer/chunk', id=transfer_id, offset=offset,
-                                 data_b64=base64.b64encode(data[:length]).decode('ascii'))
-            if result.get('offset') != offset + length:
-                raise ClientError('Upload offset mismatch')
-            return result
-        except ClientError as error:
-            if error.status != 413 or length == 1:
-                raise
-            length = max(1, length // 2)
-    raise ClientError('Empty upload slice')
-
-
 def stage_upload_task(client, local, remote, overwrite=False):
     """Send a bounded host artifact, then let the collector own UART transfer."""
     path = Path(local).expanduser()
@@ -308,40 +282,39 @@ def stage_upload_task(client, local, remote, overwrite=False):
                 pass  # Idle artifact expiry handles unreachable staging services.
 
 
-def file_put(client, local, remote, overwrite=False):
-    path = Path(local).expanduser()
-    if not path.is_file():
-        raise ClientError('Local source must be a regular file')
-    size = path.stat().st_size
-    transfer_id = None
+def wait_task(client, response):
+    task = response.get('task')
+    if not isinstance(task, dict) or not isinstance(task.get('id'), str) or not task['id']:
+        raise ClientError('Invalid task submission; inspect task history before retrying')
+    task_id = task['id']
     try:
-        started = client.post('/api/file-transfer/start', direction='upload', path=remote,
-                              size=size, overwrite=overwrite)
-        transfer_id = started['id']
-        batch_size = started.get('batch_size', started['chunk_size'])
-        offset = 0
-        with path.open('rb') as source:
-            while offset < size:
-                data = source.read(min(batch_size, size - offset))
-                if not data:
-                    raise ClientError('Local file shrank during upload')
-                if started.get('batch_size'):
-                    response = client.post('/api/file-transfer/batch', id=transfer_id, offset=offset,
-                                           data_b64=base64.b64encode(data).decode('ascii'))
-                    if response.get('offset') != offset + len(data):
-                        raise ClientError('Upload batch offset mismatch')
-                    offset = response['offset']
-                else:
-                    sent = 0
-                    while sent < len(data):
-                        response = _upload_slice(client, transfer_id, offset, data[sent:])
-                        sent += response['offset'] - offset
-                        offset = response['offset']
-        result = client.post('/api/file-transfer/finish', id=transfer_id)
-        transfer_id = None
-        return result
-    finally:
-        _abort_transfer(client, transfer_id)
+        while True:
+            if not isinstance(task, dict) or task.get('id') != task_id:
+                raise ClientError('Task response belongs to a different operation')
+            state = task.get('state')
+            if state == 'completed':
+                if not isinstance(task.get('result'), dict):
+                    raise ClientError('Invalid task result')
+                return dict(task['result'], task_id=task_id)
+            if state in ('failed', 'cancelled', 'interrupted'):
+                raise ClientError(task.get('error') or state)
+            if state not in ('queued', 'running'):
+                raise ClientError('Invalid task state')
+            time.sleep(0.5)
+            task = client.get('/api/task', id=task_id).get('task')
+    except KeyboardInterrupt:
+        try:
+            client.post('/api/task-cancel', id=task_id)
+            detail = 'cancellation requested; check final state'
+        except ClientError:
+            detail = 'cancellation unconfirmed; check final state'
+        raise ClientError('Interrupted task %s: %s' % (task_id, detail)) from None
+    except ClientError as error:
+        raise ClientError('Task %s: %s' % (task_id, error), status=error.status, code=error.code) from error
+
+
+def file_put(client, local, remote, overwrite=False):
+    return wait_task(client, stage_upload_task(client, local, remote, overwrite))
 
 
 def fetch_task_file(client, task_id, local, overwrite=False):
@@ -415,122 +388,21 @@ def file_get(client, remote, local, overwrite=False):
         raise ClientError('Local destination directory does not exist')
     if not overwrite and os.path.lexists(target):
         raise ClientError('Local destination already exists; pass --overwrite to replace it')
-    transfer_id = None
-    temp = None
-    try:
-        started = client.post('/api/file-transfer/start', direction='download', path=remote)
-        transfer_id = started['id']
-        expected_size = started['size']
-        digest = hashlib.sha256()
-        with tempfile.NamedTemporaryFile(dir=target.parent, prefix='.seriald-', delete=False) as sink:
-            temp = sink.name
-            offset = 0
-            while offset < expected_size:
-                response = client.post('/api/file-transfer/chunk', id=transfer_id, offset=offset)
-                data = base64.b64decode(response['data_b64'], validate=True)
-                if not data or response.get('offset') != offset + len(data):
-                    raise ClientError('Download offset mismatch')
-                sink.write(data)
-                digest.update(data)
-                offset += len(data)
-        result = client.post('/api/file-transfer/finish', id=transfer_id)
-        transfer_id = None
-        if offset != expected_size or digest.hexdigest() != result.get('sha256'):
-            raise ClientError('Downloaded file SHA-256 mismatch')
-        if overwrite:
-            os.replace(temp, target)
-        else:
-            os.link(temp, target)
-            os.unlink(temp)
-        temp = None
-        return dict(result, local=str(target))
-    finally:
-        _abort_transfer(client, transfer_id)
-        if temp and os.path.exists(temp):
-            os.unlink(temp)
+    completed = wait_task(client, client.post('/api/task-start', kind='file-download',
+        path=remote, connection_id=client.connection_id))
+    return fetch_task_file(client, completed['task_id'], target, overwrite)
+
+
+def start_copy_task(source, destination, remote, to_path, overwrite=False):
+    if source.connection_id == destination.connection_id and source.key == destination.key:
+        raise ClientError('Source and destination must be different devices')
+    return source.post('/api/task-start', kind='file-copy', connection_id=source.connection_id,
+        to_key=destination.key, to_serial=destination.serial or '',
+        to_connection_id=destination.connection_id, path=remote, to_path=to_path, overwrite=overwrite)
 
 
 def file_copy(source, destination, remote, to_path, overwrite=False):
-    if source.connection_id == destination.connection_id and source.key == destination.key:
-        raise ClientError('Source and destination must be different devices')
-    source_id = destination_id = None
-    source_seconds = destination_seconds = 0.0
-    def timed_post(client, route, **payload):
-        started = time.monotonic()
-        result = client.post(route, **payload)
-        return result, time.monotonic() - started
-    try:
-        incoming = source.post('/api/file-transfer/start', direction='download', path=remote)
-        source_id = incoming['id']
-        outgoing = destination.post('/api/file-transfer/start', direction='upload', path=to_path,
-                                    size=incoming['size'], overwrite=overwrite)
-        destination_id = outgoing['id']
-        offset = 0
-        started = time.monotonic()
-        # Each board owns a different serial port. Prefetch the next source
-        # batch while the current one is being written to the destination.
-        batch_size = outgoing.get('batch_size', incoming['chunk_size'])
-        def read_batch(first_offset):
-            data = bytearray()
-            seconds = 0.0
-            while (first_offset + len(data) < incoming['size']
-                   and len(data) < batch_size):
-                position = first_offset + len(data)
-                chunk, elapsed = timed_post(source, '/api/file-transfer/chunk',
-                                            id=source_id, offset=position)
-                part = base64.b64decode(chunk['data_b64'], validate=True)
-                if not part or chunk.get('offset') != position + len(part):
-                    raise ClientError('Source transfer offset mismatch')
-                data.extend(part)
-                seconds += elapsed
-            return bytes(data), seconds
-        with ThreadPoolExecutor(max_workers=1) as reader:
-            pending = reader.submit(read_batch, 0) if incoming['size'] else None
-            while offset < incoming['size']:
-                data, read_seconds = pending.result()
-                source_seconds += read_seconds
-                next_offset = offset + len(data)
-                if not data or next_offset > incoming['size']:
-                    raise ClientError('Source transfer offset mismatch')
-                pending = (reader.submit(read_batch, next_offset)
-                           if next_offset < incoming['size'] else None)
-                write_started = time.monotonic()
-                if outgoing.get('batch_size'):
-                    sent = destination.post('/api/file-transfer/batch', id=destination_id,
-                                            offset=offset,
-                                            data_b64=base64.b64encode(data).decode('ascii'))
-                else:
-                    sent_offset = offset
-                    while sent_offset < next_offset:
-                        sent = _upload_slice(destination, destination_id, sent_offset,
-                                             data[sent_offset - offset:])
-                        sent_offset = sent['offset']
-                write_seconds = time.monotonic() - write_started
-                destination_seconds += write_seconds
-                if sent.get('offset') != next_offset:
-                    raise ClientError('Destination transfer offset mismatch')
-                offset = next_offset
-        verified = source.post('/api/file-transfer/finish', id=source_id)
-        source_id = None
-        if verified.get('sha256') != incoming['sha256']:
-            raise ClientError('Source file changed during transfer')
-        result = destination.post('/api/file-transfer/finish', id=destination_id)
-        destination_id = None
-        if result.get('sha256') != verified['sha256']:
-            raise ClientError('Destination SHA-256 mismatch')
-        elapsed = time.monotonic() - started
-        size = incoming['size']
-        return dict(result, source_device=source.key, destination_device=destination.key,
-                    rate_diagnostics={
-                        'source_kib_s': round(size / max(source_seconds, 0.001) / 1024, 2),
-                        'destination_kib_s': round(size / max(destination_seconds, 0.001) / 1024, 2),
-                        'effective_kib_s': round(size / max(elapsed, 0.001) / 1024, 2),
-                        'source_request_s': round(source_seconds, 3),
-                        'destination_request_s': round(destination_seconds, 3),
-                        'total_s': round(elapsed, 3)})
-    finally:
-        _abort_transfer(source, source_id)
-        _abort_transfer(destination, destination_id)
+    return wait_task(source, start_copy_task(source, destination, remote, to_path, overwrite))
 
 
 def nonnegative(value):
@@ -719,10 +591,7 @@ def main(argv=None):
                 destination.actor = args.actor
                 destination.select(args.to_device)
                 if args.background:
-                    result = client.post('/api/task-start', kind='file-copy',
-                        connection_id=client.connection_id, to_key=destination.key,
-                        to_serial=destination.serial or '', to_connection_id=destination.connection_id,
-                        path=args.remote, to_path=args.to_path, overwrite=args.overwrite)
+                    result = start_copy_task(client, destination, args.remote, args.to_path, args.overwrite)
                 else:
                     result = file_copy(client, destination, args.remote, args.to_path, args.overwrite)
             elif args.action == 'boot-compare':
