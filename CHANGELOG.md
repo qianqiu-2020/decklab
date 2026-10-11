@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Share SSH lifecycle, streaming, log rotation and audit across Linux/Windows IO
+  adapters. Relocate live SSH log writers during identity promotion, preserving
+  partial UTF-8 and resuming the correct directory after migration failures.
+
 - Separate persistent board identities and SSH ownership from replaceable UART
   connections. Preserve session registries across re-enumeration and release
   in-flight SSH reservations against their original board after a swap.

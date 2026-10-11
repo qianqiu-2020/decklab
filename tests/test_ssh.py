@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 
 from seriald_core import sessions as seriald
+from seriald_core import session_base
 
 REAL_OPEN_LOG = seriald.SshSession._open_log
 
@@ -27,6 +28,7 @@ class SshSessionTests(unittest.TestCase):
             mock.patch.object(seriald.subprocess, 'Popen', side_effect=AssertionError('real SSH forbidden')),
             mock.patch.object(seriald.os, 'set_blocking'),
             mock.patch.object(seriald.fcntl, 'ioctl'),
+            mock.patch.object(seriald.os, 'makedirs'),
         ]
         self.mocks = [p.start() for p in self.patches]
 
@@ -106,7 +108,7 @@ class SshSessionTests(unittest.TestCase):
         old_log = session.logf
         new_log = MemoryLog()
         session._logday = '20260101'
-        with mock.patch.object(seriald.time, 'strftime', return_value='20260102'), \
+        with mock.patch.object(session_base.time, 'strftime', return_value='20260102'), \
                 mock.patch('builtins.open', return_value=new_log) as opened, \
                 mock.patch.object(session, '_open_log',
                                   side_effect=lambda path: REAL_OPEN_LOG(session, path)):
@@ -232,7 +234,7 @@ class SshSessionTests(unittest.TestCase):
 
         with mock.patch.object(seriald, 'write_all', side_effect=blocked_write), \
                 mock.patch.object(seriald.select, 'select', side_effect=idle_select):
-            session._thread = threading.Thread(target=session._reader, args=(101, proc))
+            session._thread = threading.Thread(target=session._reader, args=(101,))
             session._thread.start()
             writer = threading.Thread(target=lambda: results.append(session.write('A')))
             writer.start()
@@ -247,12 +249,20 @@ class SshSessionTests(unittest.TestCase):
 
     def test_idle_uses_monotonic_activity_and_closed_state(self):
         session = self.session()
-        with mock.patch.object(seriald.time, 'monotonic', return_value=100):
+        with mock.patch.object(session_base.time, 'monotonic', return_value=100):
             session.read(0)
         self.assertFalse(session.is_idle(109, 10))
         self.assertTrue(session.is_idle(110, 10))
         session.close()
         self.assertTrue(session.is_idle(100, 10))
+
+
+    def test_linux_pty_eio_is_clean_eof(self):
+        session = self.session()
+        with mock.patch.object(seriald.select, 'select', return_value=([101], [], [])), \
+                mock.patch.object(seriald.os, 'read', side_effect=OSError(errno.EIO, 'PTY EOF')):
+            self.assertEqual(session._receive(101), b'')
+        self.assertEqual(session.transport_error, '')
 
 
 if __name__ == '__main__':

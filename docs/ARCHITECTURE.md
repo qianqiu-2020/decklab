@@ -64,6 +64,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/models.py` | 持久 Board 身份、可替换连接绑定与独立会话所有权 |
 | `seriald_core/devices.py` | 串口发现、单读者采集生命周期、身份绑定与在线设备 |
 | `seriald_core/sessions.py` | SSH PTY、独立日志、会话回收 |
+| `seriald_core/session_base.py` | 共用 SSH 生命周期、输出缓冲、UTF-8/按日日志、审计和日志迁移 |
 | `seriald_core/windows_manager.py` / `sessions_windows.py` | Windows COM 采集与 SSH channel 适配 |
 | `seriald_core/storage.py` | SQLite 注册表和持久化操作历史 |
 | `seriald_core/web.py` | HTTP 参数校验、API、静态文件 |
@@ -101,6 +102,12 @@ logs/
 
 每个 SSH 会话采用唯一 sid 和独立 `ssh-<sid>-<日期>.log`。非 `web` actor 在同一设备上复用持久
 PTY，直到显式关闭；网页创建的会话仍受闲置回收。关闭、掉线及服务重启不会删除记录。
+
+Linux 与 Windows 共用 `SessionBase` 的启动、关闭、读游标、日志和结束审计。
+平台适配器只负责 PTY/子进程组或 Paramiko channel 的打开、收发、尺寸调整和资源清理。
+身份确认迁移目录时，先固定会话注册表并关闭需移动的日志句柄，再复制日志和提交注册表。
+数据库提交前失败恢复原目录；提交后即使清理源目录失败，也向新目录继续写入。
+解码器与半行缓冲跨迁移保留，SSH 连接保持打开；已在目标目录的日志不重复开关。
 CLI `--actor`、命令标题、结果和退出码会显示在网页操作记录中；actor 是调用方自报名称，并非认证身份。
 SSH 不使用上位机的持久 `known_hosts`；开发板刷机更换 host key 后可重新连接，连接记录仍按板卡身份归档。
 agent 会话在网页中默认只读，操作者可显式点击“介入此会话”获得输入权；接管事件以及之后的输入请求

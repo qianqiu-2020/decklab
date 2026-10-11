@@ -11,9 +11,9 @@ Do not change an installed service or use live boards during regression tests.
 | Release pipeline | Linux/Windows PR checks; tagged Setup, ZIP, Debian package, checksums and release notes | CI definitions plus validated release outputs; actual platform checks reported separately | In progress |
 | Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | In progress |
 | Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Implemented; native Windows package gate pending |
-| Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | In progress |
+| Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented; broader transaction integration continues |
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Pending |
-| Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Pending |
+| Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Pending |
 | Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Pending |
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Pending |
@@ -66,5 +66,13 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   discovery/replacement, new-port identification/archive preservation, immutable
   identity, rename, conflicting attachments, swap isolation and late SSH creation
   reservation release. Existing identity/archive suites remain part of validation.
-  Remaining integration: shared transaction coordination and platform session/log
-  lifecycle, including relocation of live SSH logs during archive promotion.
+  Shared transaction coordination remains a separate workstream.
+- SSH adapters share SessionBase lifecycle, output offsets, logging, date rotation
+  and exactly-once end audit. PTY/process and Paramiko IO stay in platform modules.
+  Shared contracts use real temporary log files and fake transports to verify
+  UTF-8 fragments, bounded independent read cursors, EOF/no-restart, migration
+  during concurrent output and rollback. Registry integration checks committed
+  promotion, database failure, cleanup failure and pending-opener exclusion.
+  Native Paramiko adapter fixtures cover shell/timeout failures, interrupt races
+  and client cleanup. The Windows package job includes these checks; its hosted
+  execution is still unverified.

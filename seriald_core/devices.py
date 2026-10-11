@@ -1,5 +1,6 @@
 """Device discovery, collector ownership and persistent identity binding."""
 import errno
+from contextlib import ExitStack
 import os
 import select
 import stat
@@ -20,6 +21,7 @@ from .transport import open_serial
 from .boot_marker import marker_serial
 from .profiles import ProfileBook
 from .models import Board
+from .session_base import relocate_session_logs
 
 class Manager:
     """设备发现 + 每个实际 tty 一个采集线程;旧线程退出后才转移所有权。"""
@@ -116,22 +118,31 @@ class Manager:
                 raise IdentityError('该序列号已确认不唯一，需核实真实板载唯一编号后再绑定')
             if device.serial and device.serial != serial:
                 raise IdentityError('当前连接的序列号改变，请重新连接后识别')
-            previous_record = self.store.get(serial)
-            # Ownership must be transferable before committing a registry/log
-            # migration. A pending SSH opener still owns its original registry.
-            target_board = previous_board or device.board
-            if target_board and device._sessions is not target_board.sessions:
-                with device.sessions_lock:
-                    if device.ssh_pending:
-                        raise IdentityError('SSH 会话正在建立，稍后再识别设备')
-            promoted_board = self.boards.get(promotion_record['serial']) if promotion_record else None
-            if promoted_board and promoted_board is not target_board:
-                with promoted_board.sessions.lock:
-                    if promoted_board.sessions.pending:
-                        raise IdentityError('旧身份仍有 SSH 会话正在建立，稍后再迁移')
+            board = self._bind_identity_archive(device, selected, previous_board, promotion_record)
+            if promotion_record:
+                self.boards.pop(promotion_record['serial'], None)
+            self.boards[serial] = board
+            self.armed_paths.pop(device.by_path, None)
+            device.auto_identify = False
+            info.update(selected)
+            self.store.event(serial, 'service', 'identified', device.by_path)
+
+    def _bind_identity_archive(self, device, selected, previous_board, promotion_record):
+        """Commit identity and relocate all live log writers under stable ownership."""
+        serial = selected['serial']
+        previous_record = self.store.get(serial)
+        promoted_board = self.boards.get(promotion_record['serial']) if promotion_record else None
+        registries = {device._sessions}
+        for board in (previous_board, promoted_board):
+            if board:
+                registries.add(board.sessions)
+        # Same ordering as SessionRegistry.transfer_to; SSH creation cannot reserve
+        # an old catalog while identity binding switches it to a different board.
+        with ExitStack() as ownership:
+            for registry in sorted(registries, key=id):
+                ownership.enter_context(registry.lock)
             with device.log_lock:
                 pending_dir = device.stable_dir()
-                device.close_log()
                 target = os.path.join(LOG_ROOT, archive_component(serial, selected.get('serial_source', '')))
                 previous_dir = (os.path.join(LOG_ROOT, archive_component(
                     serial, previous_record['info'].get('serial_source', '')))
@@ -140,10 +151,20 @@ class Manager:
                     promotion_record['serial'], promotion_record['info'].get('serial_source', '')))
                     if promotion_record else '')
                 sources = list(dict.fromkeys(path for path in (
-                    previous_dir, promotion_dir, pending_dir)
-                                             if path and path != target))
-                staged = []
-                try:
+                    previous_dir, promotion_dir, pending_dir) if path and path != target))
+                target_registry = previous_board.sessions if previous_board else device._sessions
+                if (sources or device._sessions is not target_registry) and any(
+                        registry.pending for registry in registries):
+                    raise IdentityError('SSH 会话正在建立，稍后再迁移身份档案')
+                ids = []
+                for registry in registries:
+                    ids.extend(registry.sessions)
+                if len(ids) != len(set(ids)):
+                    raise IdentityError('SSH session ID collision; refusing identity migration')
+                sessions = [session for registry in registries for session in registry.sessions.values()]
+                device.close_log()
+                with relocate_session_logs(sessions, target) as relocation:
+                    staged = []
                     if previous_dir and previous_dir != target:
                         staged += stage_logs(previous_dir, target)
                     if promotion_dir and promotion_dir not in (target, previous_dir):
@@ -156,22 +177,14 @@ class Manager:
                             promotion_record['serial'], selected, device.by_path, device.dev)
                     else:
                         record = self.store.bind(selected, device.by_path, device.dev)
-                except Exception:
-                    # Staged copies are safe to reuse on retry; source files remain authoritative.
-                    raise
-                board = previous_board or device.board or Board(record)
-                board.update(record)
-                board.attach(device)
-                finish_staged(staged, sources)
-            promoted = (self.boards.pop(promotion_record['serial'], None)
-                        if promotion_record else None)
-            if promoted is not None and promoted is not board:
-                promoted.sessions.transfer_to(board.sessions)
-            self.boards[serial] = board
-            self.armed_paths.pop(device.by_path, None)
-            device.auto_identify = False
-            info.update(selected)
-            self.store.event(serial, 'service', 'identified', device.by_path)
+                    relocation.commit()  # Later cleanup failure cannot revert committed log ownership.
+                    board = previous_board or device.board or Board(record)
+                    board.update(record)
+                    board.attach(device)
+                    if promoted_board is not None and promoted_board is not board:
+                        promoted_board.sessions.transfer_to(board.sessions)
+                    finish_staged(staged, sources)
+                return board
 
     def rename(self, device, label):
         if not device.serial:
