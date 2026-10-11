@@ -56,6 +56,9 @@ try {
         Copy-Item -LiteralPath (Join-Path $root $notice) -Destination $bundle
     }
     Copy-Item docs\WINDOWS.md -Destination (Join-Path $bundle 'README.md')
+    New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'docs'), (Join-Path $bundle 'examples') | Out-Null
+    Copy-Item docs\CONFIGURATION.md -Destination (Join-Path $bundle 'docs\CONFIGURATION.md')
+    Copy-Item examples\profiles.json -Destination (Join-Path $bundle 'examples\profiles.json')
     & (Join-Path $bundle 'seriald.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }
     & (Join-Path $bundle 'seriald.exe') ctl --help | Out-Null

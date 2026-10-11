@@ -45,3 +45,11 @@ CONTRIBUTING.md documents the current modular repository and test commands.
 - Real Chrome smoke passes on desktop and mobile after fixing the firmware font
   floor and reserving mobile terminal space when records are open. Desktop native
   scrollbar clicks and mobile history scrolling are exercised separately.
+- Configuration implementation: validated environment/JSON profiles select by
+  board serial or physical port. Linux termios and Windows pySerial use the
+  selected framing only when the reader opens. Manual profiles disable shell
+  probes and SSH provisioning; separate console/SSH credentials are supported.
+  Thirteen focused tests cover invalid configuration, secret omission, actual
+  Windows collector calls, Linux framing and SSH credential propagation.
+  CONFIGURATION.md and an editable example are included in both packages.
+  Native Windows execution remains part of the platform/release gate.

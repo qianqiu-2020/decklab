@@ -11,24 +11,41 @@ except ImportError:  # Windows uses the single pySerial COM handle in WindowsMan
 import time
 
 from .config import RESCUE_BIN
+from .profiles import SerialSettings
 
-def open_serial(dev, flush=False, identity=None):
-    """115200 8N1,无流控,raw,不回显。只有采集器调这个(唯一读者)。
+def open_serial(dev, flush=False, identity=None, settings=None):
+    """Configured framing, raw and no echo; only the collector opens a reader.
 
     默认保留内核里已经排队的字节;重连时 flush 会截断板子的启动现场。
     """
+    settings = settings or SerialSettings.from_env()
+    speed = getattr(termios, 'B' + str(settings.baud), None)
+    if speed is None:
+        raise OSError(errno.EINVAL, 'baud rate is not supported by this host termios')
+    if settings.flow_control == 'rtscts' and not hasattr(termios, 'CRTSCTS'):
+        raise OSError(errno.EINVAL, 'hardware flow control is not supported by this host')
     fd = os.open(dev, os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK)
     try:
         s = os.fstat(fd)
         if identity is not None and (s.st_dev, s.st_ino, s.st_rdev) != identity:
             raise OSError(errno.ENODEV, '串口已重新枚举')
         a = termios.tcgetattr(fd)
-        a[0] = 0
+        a[0] = termios.IXON | termios.IXOFF if settings.flow_control == 'xonxoff' else 0
+        if settings.parity != 'N':
+            a[0] |= termios.INPCK
         a[1] = 0
-        a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+        a[2] = getattr(termios, 'CS' + str(settings.data_bits)) | termios.CREAD | termios.CLOCAL
+        if settings.parity != 'N':
+            a[2] |= termios.PARENB
+        if settings.parity == 'O':
+            a[2] |= termios.PARODD
+        if settings.stop_bits == 2:
+            a[2] |= termios.CSTOPB
+        if settings.flow_control == 'rtscts':
+            a[2] |= termios.CRTSCTS
         a[3] = 0
-        a[4] = termios.B115200
-        a[5] = termios.B115200
+        a[4] = speed
+        a[5] = speed
         a[6][termios.VMIN] = 0
         a[6][termios.VTIME] = 0
         # Manager 在旧采集器彻底退出后才允许进入这里;运行中的读者绝不重新配置。

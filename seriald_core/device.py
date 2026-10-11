@@ -1,5 +1,6 @@
 """One board connection: console stream, probe transactions and SSH sessions."""
 import codecs
+from dataclasses import asdict
 import hashlib
 import os
 import re
@@ -22,6 +23,7 @@ from .identity import eeprom_serial, usable_serial
 from .boot_marker import init_command
 from .log_archive import boot_epochs
 from .file_transfer import SerialFileTransfer
+from .profiles import ProfileBook
 
 
 def root_ssh_config_command():
@@ -68,6 +70,7 @@ class Device:
         self.buf = bytearray()
         self.base = 0
         self.fd = None
+        self.serial_settings = None
         self.bytes = 0
         self.last_rx = 0.0
         self.last_health_check = 0.0   # host-side UART check; does not probe the board
@@ -110,6 +113,13 @@ class Device:
         self.history_loaded = record is None
         self.input_lines = {}
         self.input_sensitive = set()
+
+    @property
+    def profile(self):
+        book = getattr(self.manager, 'profiles', None)
+        if not isinstance(book, ProfileBook):
+            book = ProfileBook.from_env()
+        return book.resolve(self.serial, self.by_path)
 
     def preload(self):
         """启动时把最近一份串口日志的尾部装回内存缓冲。
@@ -166,6 +176,7 @@ class Device:
     def detach_identity(self):
         """Start a new logical connection on the same UART before a physical board swap."""
         self.record = None
+        self.newline = self.profile.line_ending
         self.connection_id = secrets.token_hex(12)
         self.hostname = ''
         self.probe_info = {}
@@ -378,7 +389,7 @@ class Device:
 
     def _maybe_auto_identify(self, text):
         """Run one armed probe after the replacement board reaches login or a shell."""
-        if (not self.auto_identify or self.auto_identify_started or self.serial
+        if (self.profile.probe != 'linux' or not self.auto_identify or self.auto_identify_started or self.serial
                 or not self.manager or self.stop.is_set()):
             return
         if time.monotonic() > self.auto_identify_until:
@@ -456,6 +467,8 @@ class Device:
 
     def ensure_shell(self, base):
         """仅从现场输出判断登录状态,兼容 ANSI、免密码登录以及 CR/LF。"""
+        if self.profile.probe != 'linux':
+            return False, base
         with self.cv:
             tail = ANSI.sub('', self.console_tail).rstrip()[-120:]
         if self.newline is not None and re.search(RE_PROMPT, tail):
@@ -464,8 +477,10 @@ class Device:
         if not at_login or self.newline is None:
             at_login = False
             # 有的板子只认 LF;先试本连接成功过的换行,只在没收到提示符时尝试另一种。
-            preferred = self.newline or '\r'
-            for newline in (preferred, '\n' if preferred == '\r' else '\r'):
+            configured = self.profile.line_ending
+            preferred = configured or self.newline or '\r'
+            endings = (configured,) if configured else (preferred, '\n' if preferred == '\r' else '\r')
+            for newline in endings:
                 base = self.now_off()
                 if not self._write(newline)[0]:
                     return False, base
@@ -480,7 +495,7 @@ class Device:
             return False, base
         self._say('停在登录提示符,使用配置的账户自动登录')
         base = self.now_off()
-        if not self._write(os.environ.get('SERIALD_SSH_USER', 'root') + self.newline)[0]:
+        if not self._write(self.profile.console_user + self.newline)[0]:
             return False, base
         failure = r'(?:[Ll]ogin incorrect|登录错误|认证失败|Authentication failure)'
         match = self._wait(base, RE_PASSWD + r'\s*$|' + RE_PROMPT + '|' + failure, 12)
@@ -489,7 +504,7 @@ class Device:
         if re.search(RE_PROMPT, match.group(0)):
             return True, self.now_off()       # 免密码登录不能继续盲发默认密码
         base = self.now_off()
-        if not self._write(os.environ.get('SERIALD_SSH_PASSWORD', 'bianbu') + self.newline)[0]:
+        if not self._write(self.profile.console_password + self.newline)[0]:
             return False, base
         match = self._wait(base, RE_PROMPT + '|' + failure, 20)
         return (bool(match and re.search(RE_PROMPT, match.group(0))), self.now_off())
@@ -552,6 +567,8 @@ class Device:
 
     def run_probe(self, init_boot_marker=False):
         """Read identity metadata; create a /boot marker only on explicit request."""
+        if self.profile.probe != 'linux':
+            return {'ok': False, 'error': '当前配置仅提供原始串口，未启用 Linux shell 探测'}
         if init_boot_marker and self.serial and self.probe_info.get('serial_source') != 'boot-marker':
             return {'ok': False, 'error': '设备已有身份，无需创建 /boot 软件标记'}
         origin = self.stop
@@ -592,6 +609,8 @@ class Device:
 
     def configure_root_ssh(self):
         """Use the already collected serial stream to set root's SSH password."""
+        if not self.profile.auto_configure_ssh:
+            return False, '当前设备配置未允许自动修改 root 密码或 sshd 配置'
         if self.file_transfer.active:
             return False, '串口文件传输中，请完成或取消后再配置 SSH'
         if not self.operation_lock.acquire(blocking=False):
@@ -687,10 +706,11 @@ class Device:
         try:
             if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
                 return None, '设备已重新枚举,请重新识别 IP'
-            user = ssh_user if ssh_user is not None else os.environ.get('SERIALD_SSH_USER', 'root')
+            profile = self.profile
+            user = ssh_user if ssh_user is not None else profile.ssh_user
             password = (ssh_password if ssh_password is not None
-                        else os.environ.get('SERIALD_SSH_PASSWORD', 'bianbu'))
-            auto_configure = user == 'root' and password == 'bianbu'
+                        else profile.ssh_password)
+            auto_configure = profile.auto_configure_ssh and user == 'root' and password == 'bianbu'
             if auto_configure:
                 authenticated, denied, detail = check_password_login(ip, user, password)
                 if denied:
@@ -709,11 +729,7 @@ class Device:
                     authenticated, _, detail = check_password_login(ip, user, password)
                 if not authenticated:
                     return None, detail
-            session_args = {}
-            if ssh_user is not None:
-                session_args['user'] = ssh_user
-            if ssh_password is not None:
-                session_args['password'] = ssh_password
+            session_args = {'user': user, 'password': password}
             session = SshSession(sid, ip, self.label, self.stable_dir(), **session_args)
             session.auto_configured = bool(auto_configure and denied)
             session.actor, session.title = actor, title
@@ -797,7 +813,11 @@ class Device:
             if s:
                 tail = s[:160]
                 break
-        return {'key': self.key, 'serial': self.serial, 'connection_id': self.connection_id, 'dev': self.dev if self.present else '',
+        profile = self.profile
+        return {'profile': profile.name,
+                'serial_settings': asdict(self.serial_settings or profile.serial),
+                'settings_pending': self.serial_settings is not None and self.serial_settings != profile.serial,
+                'key': self.key, 'serial': self.serial, 'connection_id': self.connection_id, 'dev': self.dev if self.present else '',
                 'by_path': self.by_path if self.present else '',
                 'last_dev': self.record['last_dev'] if self.record else self.dev,
                 'last_path': self.record['last_path'] if self.record else self.by_path,

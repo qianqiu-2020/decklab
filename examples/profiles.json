@@ -1,0 +1,24 @@
+{
+  "default": "linux",
+  "profiles": {
+    "linux": {"auto_configure_ssh": false},
+    "ubuntu": {
+      "console_user": "ubuntu",
+      "ssh_user": "ubuntu",
+      "auto_configure_ssh": false
+    },
+    "firmware": {
+      "probe": "manual",
+      "newline": "crlf",
+      "serial": {
+        "baud": 9600,
+        "data_bits": 8,
+        "parity": "N",
+        "stop_bits": 1,
+        "flow_control": "none"
+      }
+    }
+  },
+  "boards": {"EXAMPLE-BOARD-SERIAL": "ubuntu"},
+  "ports": {"EXAMPLE-PHYSICAL-PORT-KEY": "firmware"}
+}

@@ -85,6 +85,9 @@ class PackageTests(unittest.TestCase):
             code = extracted / 'usr/lib/seriald'
             self.assertTrue((extracted / 'usr/share/doc/seriald/DEVICE_IDENTITY_MATRIX.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/REFACTOR_PLAN.md').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/seriald/CONFIGURATION.md').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/seriald/examples/profiles.json').is_file())
+            self.assertTrue((code / 'seriald_core/profiles.py').is_file())
             self.assertTrue((extracted / 'usr/lib/seriald/skills/seriald-board/SKILL.md').is_file())
             package_env = (extracted / 'etc/seriald/seriald.env').read_text()
             self.assertIn('SERIALD_BASE=/data/seriald-data', package_env)

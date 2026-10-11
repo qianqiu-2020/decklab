@@ -18,11 +18,13 @@ from .identity import eeprom_serial, hardware_serial, select_identity
 from .storage import IdentityError, archive_component
 from .transport import open_serial
 from .boot_marker import marker_serial
+from .profiles import ProfileBook
 
 class Manager:
     """设备发现 + 每个实际 tty 一个采集线程;旧线程退出后才转移所有权。"""
 
-    def __init__(self, store=None, handoff=None):
+    def __init__(self, store=None, handoff=None, profiles=None):
+        self.profiles = profiles if profiles is not None else ProfileBook.from_env()
         self.store = store
         self.devices = {}                 # physical by-path -> current connection
         self.boards = {}                  # immutable serial -> known board / last connection
@@ -330,9 +332,11 @@ class Manager:
                                 break
                             with d.cv:
                                 d.console_tail = ''
-                                d.newline = None
+                                d.newline = d.profile.line_ending
+                            settings = d.profile.serial
                             d.fd = open_serial(os.path.join(BY_PATH, d.by_path),
-                                               flush=False, identity=d.identity)
+                                               flush=False, identity=d.identity, settings=settings)
+                            d.serial_settings = settings
                             # 重连也可能已有启动日志排队,flush 会直接丢掉这些字节。
                         d.fail_count = 0
                         d._say('seriald 已接入 %s' % d.dev)

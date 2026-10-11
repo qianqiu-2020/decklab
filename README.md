@@ -47,8 +47,9 @@ links. Serial input is shared; coordinate interactive work with other users.
 The strongest tested workflows currently use Ubuntu hosts, Windows COM adapters
 and Linux development boards, including SpacemiT K1/K3 vendor and upstream
 kernels. See the [identity matrix](docs/DEVICE_IDENTITY_MATRIX.md) for verified
-board identities. Firmware-only targets and additional serial configurations are
-being generalized; unsupported identity sources remain provisional.
+board identities. Serial framing, credentials and board profiles are configurable;
+see [configuration](docs/CONFIGURATION.md). Firmware-only targets can use manual
+mode without Linux shell probes; unsupported identities remain provisional.
 
 The service is intended for local or trusted-LAN development. Authentication is
 optional. SSH root provisioning can modify a development board, and SSH host

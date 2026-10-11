@@ -68,8 +68,8 @@ class SessionRegistryTests(unittest.TestCase):
         results, errors, constructed = [], [], []
         start = threading.Barrier(10)
 
-        def factory(*args):
-            session = FakeSession(*args)
+        def factory(*args, **kwargs):
+            session = FakeSession(*args, **kwargs)
             with state:
                 constructed.append(session)
                 state.notify_all()

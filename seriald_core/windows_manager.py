@@ -76,13 +76,11 @@ class WindowsManager(Manager):
                         return
                     with device.cv:
                         device.console_tail = ''
-                        device.newline = None
-                    device.fd = serial.Serial(device.dev, baudrate=115200,
-                                              bytesize=serial.EIGHTBITS,
-                                              parity=serial.PARITY_NONE,
-                                              stopbits=serial.STOPBITS_ONE,
-                                              timeout=0.25, write_timeout=5,
-                                              xonxoff=False, rtscts=False, dsrdtr=False)
+                        device.newline = device.profile.line_ending
+                    settings = device.profile.serial
+                    device.fd = serial.Serial(device.dev, timeout=0.25, write_timeout=5,
+                                              **settings.pyserial_options())
+                    device.serial_settings = settings
                 device.fail_count = 0
                 device._say('seriald 已接入 %s' % device.dev)
             except (OSError, serial.SerialException) as error:

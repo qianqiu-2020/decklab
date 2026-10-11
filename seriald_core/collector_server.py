@@ -11,12 +11,14 @@ from .handoff import consume as consume_handoff, write as write_handoff
 from .httpd import BoundedThreadingUnixServer
 from .storage import Store
 from . import web
+from .profiles import ProfileBook
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--socket', default=SOCKET)
     args = parser.parse_args()
+    profiles = ProfileBook.from_env()
     os.makedirs(BASE, exist_ok=True)
     os.makedirs(LOG_ROOT, exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(args.socket)), exist_ok=True)
@@ -35,7 +37,7 @@ def main():
     with BoundedThreadingUnixServer(args.socket, web.Handler) as httpd:
         store = Store(os.path.join(BASE, 'registry.sqlite3'))
         store.recover_sessions()
-        web.MGR = Manager(store, consume_handoff(HANDOFF))
+        web.MGR = Manager(store, consume_handoff(HANDOFF), profiles=profiles)
         scanner = threading.Thread(target=web.MGR.loop, daemon=True)
         scanner.start()
         signal.signal(signal.SIGTERM,

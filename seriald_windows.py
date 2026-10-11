@@ -24,6 +24,7 @@ from seriald_core.handoff import consume as consume_handoff, write as write_hand
 from seriald_core.httpd import BoundedThreadingTCPServer
 from seriald_core.storage import Store
 from seriald_core.windows_manager import WindowsManager
+from seriald_core.profiles import ProfileBook
 
 
 def main():
@@ -36,6 +37,7 @@ def main():
     parser.add_argument('--bind', default=os.environ.get('SERIALD_BIND', '127.0.0.1'))
     parser.add_argument('--no-browser', action='store_true')
     args = parser.parse_args()
+    profiles = ProfileBook.from_env()
     # Bind the public port first, so a second copy never takes ownership of COM ports.
     with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as control:
         os.makedirs(LOG_ROOT, exist_ok=True)
@@ -44,7 +46,7 @@ def main():
         store.recover_sessions()
         try:
             with BoundedThreadingTCPServer(('127.0.0.1', 0), web.Handler) as collector:
-                web.MGR = WindowsManager(store, consume_handoff(HANDOFF))
+                web.MGR = WindowsManager(store, consume_handoff(HANDOFF), profiles=profiles)
                 ControlHandler.collector_socket = ('127.0.0.1', collector.server_address[1])
                 ControlHandler.static_root = STATIC
                 ControlHandler.auth_token = AUTH_TOKEN

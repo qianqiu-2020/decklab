@@ -66,10 +66,11 @@ def build(output, version):
                 write('usr/share/seriald/skills/seriald-board/' + str(path.relative_to(ROOT / 'skills/seriald-board')), text)
         put('LICENSE', 'usr/share/doc/seriald/copyright')
         for name in ('README.md', 'README.zh-CN.md', 'NOTICE', 'THIRD_PARTY.md', 'CONTRIBUTING.md', 'SECURITY.md', 'CHANGELOG.md', 'docs/BRAND.md', 'docs/OPEN_SOURCE_PLAN.md', 'docs/AGENT_ACCESS.md', 'docs/ARCHITECTURE.md', 'docs/INSTALL.md',
-                     'docs/HARDWARE_ID.md', 'docs/DEVICE_IDENTITY_MATRIX.md',
+                     'docs/HARDWARE_ID.md', 'docs/DEVICE_IDENTITY_MATRIX.md', 'docs/CONFIGURATION.md',
                      'docs/REFACTOR_PLAN.md', 'docs/WINDOWS.md', 'docs/TRANSFER_PERFORMANCE.md',
                      'docs/seriald-architecture.png', 'docs/seriald-architecture.svg'):
             put(name, 'usr/share/doc/seriald/' + Path(name).name)
+        put('examples/profiles.json', 'usr/share/doc/seriald/examples/profiles.json')
         preinst = (ROOT / 'packaging/preinst').read_text().replace('@COLLECTOR_BUILD_ID@', build_id)
         write('DEBIAN/preinst', preinst, 0o755)
         for name in ('postinst', 'prerm', 'postrm'):
