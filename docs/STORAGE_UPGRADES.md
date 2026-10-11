@@ -11,13 +11,14 @@ When the collector opens `registry.sqlite3`, or the control service opens
 `agent-grants.sqlite3`, it checks the schema before using the data. Existing
 unversioned DeckLab databases are adopted. Older registries gain missing session
 completion fields, command history and identity-conflict tables; existing rows,
-labels, serials and grant hashes remain intact. New empty databases need no backup.
+labels, serials and grant hashes remain intact. Registry schema 3 adds durable
+task history and historical connection targets. New empty databases need no backup.
 
 Before modifying an existing database, DeckLab creates a snapshot under:
 
 ```text
 <data-directory>/backups/
-  registry.sqlite3.v0-to-v2.<timestamp>.<random-id>.sqlite3
+  registry.sqlite3.v2-to-v3.<timestamp>.<random-id>.sqlite3
   agent-grants.sqlite3.v0-to-v1.<timestamp>.<random-id>.sqlite3
 ```
 

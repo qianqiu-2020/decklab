@@ -65,7 +65,7 @@ class SchemaTests(unittest.TestCase):
                 self.assertEqual(backup.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
             finally:
                 backup.close()
-            self.assertEqual(legacy.execute('PRAGMA user_version').fetchone()[0], 2)
+            self.assertEqual(legacy.execute('PRAGMA user_version').fetchone()[0], len(schema.REGISTRY_MIGRATIONS))
         finally:
             store.close()
         reopened = Store(str(self.path))
@@ -84,6 +84,21 @@ class SchemaTests(unittest.TestCase):
             self.assertEqual(store.get('SN1')['last_dev'], '/dev/ttyUSB1')
             store.record_command('SN1', 'uname -a')
             self.assertEqual(store.commands('SN1')[0]['command'], 'uname -a')
+        finally:
+            store.close()
+
+    def test_version_two_adds_tasks_and_snapshot_preserves_old_schema(self):
+        db = self.legacy()
+        schema._registry_history(db)
+        db.execute('PRAGMA user_version=2')
+        db.commit()
+        store = Store(str(self.path))
+        try:
+            self.assertEqual(store.get('SN1')['label'], 'board-one')
+            self.assertEqual(store.db.execute('SELECT count(*) FROM tasks').fetchone()[0], 0)
+            with sqlite3.connect(store.schema_backup) as backup:
+                self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 2)
+                self.assertIsNone(backup.execute("SELECT name FROM sqlite_master WHERE name='tasks'").fetchone())
         finally:
             store.close()
 

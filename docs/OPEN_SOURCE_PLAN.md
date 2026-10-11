@@ -19,7 +19,7 @@ Do not change an installed service or use live boards during regression tests.
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Pending |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Durable storage/worker foundation implemented; operation/API/UI integration pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
@@ -173,3 +173,12 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   demo and desktop/mobile browser smoke pass. Extracted-package HTTP checks verify
   all new modules and cache headers. The four requested frontend boundaries are
   implemented; native Windows package execution and durable task/UI work remain.
+- Durable task foundation: registry schema 3 adds task records and historical
+  targets with pre-upgrade snapshots. Bounded workers persist progress/results;
+  restart marks unfinished work interrupted rather than replaying commands.
+  Cancellation hooks wake cooperative runners without holding coordinator locks;
+  completed work can win a cancellation race without claiming rollback. Scoped
+  history rejects cross-board tasks involving any unshared target. Full backend
+  regression passes 379 tests; final focused task checks pass all nine tests,
+  including nested credential-result rejection. See TASKS.md for the internal
+  contract. Live operation adapters, HTTP/CLI and browser recovery remain required.

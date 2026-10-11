@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add the internal durable-task storage and bounded-worker foundation. Registry
+  schema 3 preserves progress/results and marks unfinished work interrupted on
+  restart without replay; operation/API/browser integration remains pending.
+
 - Extract device directory, selection and identity transitions into a controller.
   Out-of-order device responses and failures cannot replace newer directory or
   connection status; ownership revision protection remains intact.

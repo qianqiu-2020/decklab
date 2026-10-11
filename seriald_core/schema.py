@@ -48,7 +48,20 @@ def _grants_initial(db):
                'created INTEGER NOT NULL, expires INTEGER, revoked INTEGER)')
 
 
-REGISTRY_MIGRATIONS = (_registry_initial, _registry_history)
+def _registry_tasks(db):
+    db.execute('CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, kind TEXT NOT NULL, actor TEXT NOT NULL, '
+               'client_id TEXT NOT NULL, state TEXT NOT NULL, progress TEXT NOT NULL, result TEXT, '
+               'error TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL, '
+               'cancel_requested INTEGER NOT NULL DEFAULT 0)')
+    # Historical targets survive board identity corrections; they are not live bindings.
+    db.execute('CREATE TABLE IF NOT EXISTS task_targets (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, '
+               'serial TEXT NOT NULL, connection_id TEXT NOT NULL, '
+               'PRIMARY KEY(task_id, serial, connection_id))')
+    db.execute('CREATE INDEX IF NOT EXISTS task_history ON tasks(created DESC, id DESC)')
+    db.execute('CREATE INDEX IF NOT EXISTS task_board ON task_targets(serial, task_id)')
+
+
+REGISTRY_MIGRATIONS = (_registry_initial, _registry_history, _registry_tasks)
 GRANT_MIGRATIONS = (_grants_initial,)
 _SCHEMAS = {
     'registry': (0x444C5247, REGISTRY_MIGRATIONS, {
@@ -57,6 +70,8 @@ _SCHEMAS = {
         'events': 'id serial ts actor action detail',
         'identity_conflicts': 'serial detected',
         'commands': 'serial command first_used last_used use_count',
+        'tasks': 'id kind actor client_id state progress result error created updated cancel_requested',
+        'task_targets': 'task_id serial connection_id',
     }),
     'grants': (0x444C4147, GRANT_MIGRATIONS, {
         'grants': 'id token_hash actor scope serial created expires revoked',
