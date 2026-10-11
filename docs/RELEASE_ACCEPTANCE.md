@@ -40,6 +40,18 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+Windows packaging now creates `bundle-manifest.json` after all executable,
+library, UI, launcher, documentation and notice files are ready. ZIP creation
+and standalone installer compilation verify the complete file set, sizes and
+SHA-256 values. Local fixtures reject same-size changes, missing/extra files,
+runtime data, redirected paths and invalid manifests; subprocess tests verify
+the actual CLI returns failure for a modified DLL. Full regression passes 539
+backend tests (three native Windows tests skipped), 74 frontend checks and
+sharing checks; all seven manifest tests pass, including the subsequently added
+CLI check. Both builder scripts parse on local PowerShell. This inventory gives
+native-binary review a file list, but does not identify embedded libraries or
+resolve their notices; actual frozen Windows files still require review.
+
 Public request parsing is shared by control and collector. Contract checks
 verify HTTP 400 before device access for duplicate fields, non-finite numbers,
 lone surrogates and excessive nesting, while normal Unicode remains intact.

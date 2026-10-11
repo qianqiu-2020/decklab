@@ -18,6 +18,8 @@ $noticePython = Join-Path $root 'build\windows-venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $noticePython -PathType Leaf)) {
     throw 'The packaging interpreter is missing. Rebuild with Build-seriald.cmd.'
 }
+& $noticePython (Join-Path $PSScriptRoot 'bundle_manifest.py') $bundle --verify
+if ($LASTEXITCODE -ne 0) { throw 'Complete bundle changed or its manifest is missing. Rebuild with Build-seriald.cmd.' }
 & $noticePython (Join-Path $PSScriptRoot 'collect_windows_notices.py') (Join-Path $bundle 'third-party') --verify
 if ($LASTEXITCODE -ne 0) { throw 'Third-party notice inventory validation failed.' }
 $versionSource = Get-Content -LiteralPath (Join-Path $root 'seriald_core\version.py') -Raw

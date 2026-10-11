@@ -51,6 +51,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Installed documentation tests failed.' }
     & $python -m unittest discover -s tests -p test_windows_notices.py
     if ($LASTEXITCODE -ne 0) { throw 'Windows distribution notice tests failed.' }
+    & $python -m unittest discover -s tests -p test_bundle_manifest.py
+    if ($LASTEXITCODE -ne 0) { throw 'Complete bundle integrity tests failed.' }
     & $python -m unittest discover -s tests -p test_hardware.py
     if ($LASTEXITCODE -ne 0) { throw 'Configured hardware task tests failed.' }
     if (Get-Command node -ErrorAction SilentlyContinue) {
@@ -101,6 +103,11 @@ try {
     $version = (& $python -c 'from seriald_core.version import __version__; print(__version__)').Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Could not read the bundle version.' }
     Set-Content -LiteralPath (Join-Path $bundle 'package-version.txt') -Value $version -Encoding ASCII
+
+    & $python tools/bundle_manifest.py $bundle
+    if ($LASTEXITCODE -ne 0) { throw 'Complete bundle inventory failed.' }
+    & $python tools/bundle_manifest.py $bundle --verify
+    if ($LASTEXITCODE -ne 0) { throw 'Complete bundle integrity validation failed.' }
 
     $archive = Join-Path $root 'dist\seriald-windows-portable.zip'
     Compress-Archive -Path $bundle -DestinationPath $archive -Force

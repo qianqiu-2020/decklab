@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Inventory and verify all Windows distribution files before ZIP/installer
+  packaging, including native libraries, resources, scripts and notices. Reject
+  changed, missing or extra files and refuse runtime data or redirected paths.
 - Share request JSON validation between control and collector. Reject duplicate
   fields, non-finite numbers, invalid Unicode and excessive nesting before board
   operations; direct task/artifact services also reject non-object submissions.

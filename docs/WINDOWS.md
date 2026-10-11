@@ -23,6 +23,10 @@ winget install --id JRSoftware.InnoSetup -e -s winget -i
 - 对应 `.exe.sha256`：安装包摘要，供可信渠道核对。
 - `dist/seriald-windows-portable.zip`：便携备选。
 
+分发目录中的 `bundle-manifest.json` 记录全部程序、DLL/PYD、网页、脚本和文档的大小及
+SHA-256。生成 ZIP 前以及单独构建安装器时都会校验；缺文件、多余旧文件或内容变化均要求重建。
+该清单用于构建完整性检查，不是签名或许可证清单，不适用于包含运行数据的安装目录。
+
 仅需 ZIP 时运行 `.\Build-seriald.cmd -PortableOnly`，无需 Inno Setup。`Install-seriald.cmd` 保留为 **ZIP 安装脚本**：默认装到源码旁的 `seriald-installed/`，保留 `data/`，备份旧程序，替换失败时回滚；也支持 `tools/install_windows.ps1 -InstallDir D:\seriald`。它可复制旧 `%LOCALAPPDATA%\seriald\data`，但不会删除旧目录。IT 可传 `-ExpectedSha256 <批准的程序EXE摘要>` 进行校验。常规用户直接使用 Setup。
 
 如果 Inno Setup 已安装但无法找到，构建脚本会从 PATH、用户/系统安装注册表及常见目录查找 `ISCC.exe`。也可显式指定实际路径。ZIP 已生成时，仅重跑安装器步骤，无需重新执行 PyInstaller：

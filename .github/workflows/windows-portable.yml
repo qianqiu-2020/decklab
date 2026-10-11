@@ -28,6 +28,7 @@ on:
       - 'tools/collect_windows_notices.py'
       - 'tools/prepare_windows_build.py'
       - 'tools/check_public_docs.py'
+      - 'tools/bundle_manifest.py'
       - 'tools/windows-launchers/**'
       - 'packaging/seriald-windows.iss'
       - 'packaging/decklab.ico'

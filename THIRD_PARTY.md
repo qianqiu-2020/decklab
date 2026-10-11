@@ -30,3 +30,10 @@ This inventory does not replace review of native libraries embedded in Python
 or dependency wheels (for example crypto libraries), PyInstaller's frozen output,
 or bundled frontend assets. Such binary attribution remains a release gate;
 this table and Python metadata alone are not a complete native-library SBOM.
+
+Windows distributions also include `bundle-manifest.json`: relative paths,
+sizes and SHA-256 for every distribution file, with EXE/DLL/PYD files marked
+`native` to aid frozen-output review. This is the actual file inventory, separate
+from the installed-Python distribution inventory. It does not identify embedded
+libraries, determine licenses or authenticate the publisher; those still need
+review and trusted release checksums/signatures.
