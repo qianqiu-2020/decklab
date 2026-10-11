@@ -57,7 +57,7 @@ agent 使用其专用令牌时，control 会覆盖请求中的 `actor`，操作�
 | `/etc/seriald/seriald.env` | 可修改的服务配置 |
 | `/data/seriald-data/registry.sqlite3` | 设备与会话档案 |
 | `/data/seriald-data/logs/<serial>/` | 已确认身份的串口及独立 SSH 日志 |
-| `/data/seriald-data/logs/_provisional/<source>/<serial>/` | 尚待正式确认的 DT、SoC/eFuse 或 `/boot` 身份日志 |
+| `/data/seriald-data/logs/_provisional/<source>/<serial>/` | SoC/eFuse 或 `/boot` 候选身份日志；旧版本 DT 候选目录在确认后迁移，有效 DT 编号现直接确认 |
 | `/data/seriald-data/logs/_unprovisioned/<path-hash>/<connection-id>/` | 没有可用编号时按连接隔离的临时日志 |
 | `/usr/share/seriald/skills/seriald-board` | 可复用 skill |
 | `/usr/share/doc/seriald` | 操作和架构说明 |

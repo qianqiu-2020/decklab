@@ -2,7 +2,7 @@
 
 DeckLab versions both SQLite databases with `PRAGMA user_version` and identifies
 their purpose with `PRAGMA application_id`. The registry currently uses schema
-version 4; the agent-grant database uses version 1. These versions are independent
+version 5; the agent-grant database uses version 1. These versions are independent
 of the application release number.
 
 ## Automatic upgrade
@@ -13,7 +13,10 @@ unversioned DeckLab databases are adopted. Older registries gain missing session
 completion fields, command history and identity-conflict tables; existing rows,
 labels, serials and grant hashes remain intact. Registry schema 3 adds durable
 task history and historical connection targets. Schema 4 adds host-side transfer
-artifact metadata and task ownership. New empty databases need no backup.
+artifact metadata and task ownership. Schema 5 adds proven connection-to-board
+associations so pre-identification tasks can follow confirmed identity without
+guessing the owner of historical connections. Existing task snapshots are retained;
+connections without evidence are not backfilled. New empty databases need no backup.
 
 Before modifying an existing database, DeckLab creates a snapshot under:
 

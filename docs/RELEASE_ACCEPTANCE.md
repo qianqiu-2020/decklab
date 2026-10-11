@@ -1,0 +1,54 @@
+# Release acceptance audit
+
+Audit baseline: source version 1.4.50, reviewed 2026-10-12. This separates
+implemented behavior from platform/release evidence. Local tests use temporary
+storage, simulated boards and fake transports; they do not prove real COM or
+installed Windows behavior. Earlier checkpoint counts are historical.
+
+## Requirement evidence
+
+| Requirement | Implementation and focused evidence | Current assessment |
+| --- | --- | --- |
+| Public project | LICENSE, NOTICE, THIRD_PARTY.md, bilingual README, CONTRIBUTING.md, SECURITY.md and issue/PR templates; package tests | Present; native binary attribution incomplete |
+| Releases | CI, Windows package and tagged release workflows; version-tag validator; Debian extraction fixtures | Local tooling checked; hosted jobs and Windows outputs unverified |
+| Configurable hosts/boards | profiles.py, transport.py, windows_manager.py; test_profiles.py validates framing, profiles, manual mode and credentials | Local contracts verified |
+| Hardware-free demo | demo.py, seriald_demo.py; test_demo.py and demo_smoke.js exercise normal HTTP/CLI/browser paths | Verified on Linux; frozen Windows execution unverified |
+| Board/connection/session separation | models.py, devices.py, session_base.py; model, registry and session-contract tests | Local reconnect and migration contracts verified |
+| Console coordination | transactions.py, console_protocol.py; transaction, protocol, handoff and input-ownership tests | Local timeout/cancel/generation contracts verified |
+| Platform adapters | sessions.py, sessions_windows.py, windows_manager.py; shared session and fake Windows tests | Local fixtures verified; native Windows tests pending |
+| Application services/API | actions.py, queries.py, results.py, API.md; action/query/HTTP/CLI tests | Implemented; full documented-route review still required |
+| Frontend ownership | devices.js, terminal-view.js, archives.js, terminal-navigation.js; frontend.test.js | Isolation checks verified; desktop/mobile browser fixture passes five consecutive runs after synchronization fix |
+| Schema upgrades | schema.py registry migrations through version 5; test_schema.py checks WAL backups, rollback, concurrent openers and future versions | Local SQLite fixtures verified; Windows upgrade pending |
+| Collaboration | transactions.py, agent_grants.py, control_server.py; input-ownership, grants and sharing tests | Local reservation/revocation/takeover verified |
+| Log operations | maintenance.py; maintenance/archive/identity tests cover active writers, cross-day boots, disk warnings and allowlisted diagnostics | Local fixtures verified; native Windows file semantics pending |
+| Long operations | tasks.py, task_actions.py, transfer_tasks.py, transfer_artifacts.py; task/file/CLI tests and demo browser upload/download/copy/reload | Local task and artifact workflows verified |
+| Hardware extensions | hardware.py, process_windows.py, exclusive_serial handoff; helper and handoff tests | Local/fake contracts verified; native Windows process-tree gate pending |
+| Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | Layout verified; complete content audit still required |
+
+## Evidence from this audit
+
+The preceding code checkpoint passed 511 backend tests (three Windows-native
+tests skipped), 74 frontend isolation checks, sharing checks and PowerShell
+syntax parsing. The current real demo browser check passes input/SSE, archives,
+independent-client takeover, UI copy/upload/download, page reload and a verified
+download link. Desktop/mobile fixture smoke initially reproduced a scrollbar-click
+failure. Its setup directly changed DOM scroll position, which could conflict
+with asynchronous xterm viewport synchronization. The fixture now resets through xterm, waits for rendering,
+asserts overflow and native track hit-testing, then requires actual movement within
+a bounded wait. Five consecutive complete fixture runs pass; no application
+scrollbar behavior was changed. Five package/documentation tests also pass.
+
+## Remaining gates
+
+1. Audit documentation against every public route/configuration and supported
+   platform, including installation, upgrade and recovery behavior.
+2. Review the actual frozen Windows files and embedded native-library notices.
+   The installed-Python distribution inventory is not a complete binary SBOM.
+3. Execute native Windows tests, frozen demo/host checks and installer upgrades
+   in a clean Windows account. Retain job output and generated package hashes.
+4. Execute the tagged release pipeline on an authorized GitHub repository and
+   review Setup, ZIP, Debian packages, checksums and release notes. Workflow
+   definitions alone do not prove a usable release.
+
+No native Windows or hosted GitHub results were available at this audit. The
+overall optimization goal remains incomplete until these gates have evidence.

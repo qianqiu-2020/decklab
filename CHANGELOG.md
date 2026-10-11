@@ -7,13 +7,26 @@
   from dependency and license collection. Installer verification uses the same
   packaging interpreter.
 
-- Expose durable identify/SSH tasks through API and CLI with connection/client
-  guards, actor/board filtering, revocation cancellation and retained results.
-  Browser recovery and server-owned file-transfer tasks remain pending.
+- Run identify, SSH and copy/upload/download as collector-owned durable tasks
+  through API, CLI and browser. Preserve progress/results across page reloads;
+  check actor, board, client and connection generations before writes. CLI
+  foreground commands wait on the same tasks as background commands, and later
+  clients can retrieve verified download artifacts.
 
-- Add the internal durable-task storage and bounded-worker foundation. Registry
-  schema 3 preserves progress/results and marks unfinished work interrupted on
-  restart without replay; operation/API/browser integration remains pending.
+- Registry schema 5 includes task history, scoped transfer artifacts and proven
+  connection-to-board associations. Interrupted work is recorded without replay;
+  identity promotion preserves earlier task visibility without guessing ownership.
+
+- Add configured power/reset/flash helpers with fixed argument lists, task
+  cancellation and process cleanup. Exclusive helpers pause only their UART;
+  capture resumes after cleanup, with unproven cleanup keeping that UART paused.
+
+- Extract console login, command framing and SSH provisioning into a protocol
+  service that uses the connection's existing reader and guarded writes.
+
+- Ship API/configuration guides with validated links in both package layouts.
+  Windows builds collect and verify dependency license files; native binary
+  attribution and actual Windows/GitHub release execution remain release gates.
 
 - Extract device directory, selection and identity transitions into a controller.
   Out-of-order device responses and failures cannot replace newer directory or

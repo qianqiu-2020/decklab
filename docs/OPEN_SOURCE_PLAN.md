@@ -5,14 +5,19 @@ feature is not sufficient evidence for a new requirement. Keep the collector's
 single-reader invariant, board/connection distinction and archive continuity.
 Do not change an installed service or use live boards during regression tests.
 
+The table below is the current status. The checkpoint log records earlier
+milestones: its test counts and outstanding items describe that checkpoint,
+not today's remaining work. See [current acceptance audit](RELEASE_ACCEPTANCE.md)
+for source/test evidence and the unresolved release gates.
+
 | Workstream | Required result | Acceptance evidence | Status |
 | --- | --- | --- | --- |
 | Public project | Application license, third-party inventory, English/Chinese README, contribution and issue guidance | Files present; distribution notices included; inventory matches shipped dependencies | In progress |
 | Release pipeline | Linux/Windows PR checks; tagged Setup, ZIP, Debian package, checksums and release notes | CI definitions plus validated release outputs; actual platform checks reported separately | In progress |
-| Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | In progress |
+| Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | Implemented and locally verified; native Windows gate pending |
 | Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Implemented; native Windows package gate pending |
-| Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented; broader transaction integration continues |
-| Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API implemented; task/UI integration pending |
+| Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented and locally verified |
+| Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API/task/UI implemented and locally verified |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Device/read services implemented; final API audit pending |
 | Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Implemented; native Windows package execution pending |
@@ -32,7 +37,7 @@ the Linux collector/control deployment.
 The existing AGENTS.md is preserved under the owner's no-overwrite instruction;
 CONTRIBUTING.md documents the current modular repository and test commands.
 
-## Verified checkpoints
+## Historical verification checkpoints
 
 - Windows build isolation: packaging now recreates `build/windows-venv` rather
   than reusing the contributor's `.venv`. Tests create a real virtual environment,

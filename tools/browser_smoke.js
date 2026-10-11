@@ -327,12 +327,22 @@ let chrome, ws;
   // uses an overlay scroll indicator rather than a clickable desktop track.
   await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
   await delay(300);
-  const track = await evaluate(`(() => {const v=document.querySelector('#d-term .xterm-viewport');v.scrollTop=0;const r=v.getBoundingClientRect();return {x:r.right-5,y:r.bottom-12}})()`);
+  // Reset through xterm so its logical position and the DOM viewport agree.
+  // A direct scrollTop assignment races xterm's queued viewport synchronization
+  // after the mobile/desktop resize and can be undone during the native click.
+  await evaluate('new Promise(resolve => { testTerm.scrollToTop(); requestAnimationFrame(() => requestAnimationFrame(resolve)); })');
+  const track = await evaluate(`(() => {const v=document.querySelector('#d-term .xterm-viewport');const r=v.getBoundingClientRect();return {x:r.right-5,y:r.bottom-12,top:v.scrollTop,height:v.clientHeight,scrollHeight:v.scrollHeight,width:v.offsetWidth,clientWidth:v.clientWidth,hit:document.elementFromPoint(r.right-5,r.bottom-12)?.className}})()`);
+  assert.equal(track.top, 0, 'desktop scrollbar fixture must start at the top');
+  assert.ok(track.scrollHeight > track.height, 'desktop scrollbar fixture must have scrollable history');
+  assert.ok(track.width > track.clientWidth, 'desktop fixture must expose a native scrollbar track');
+  assert.equal(track.hit, 'xterm-viewport', 'desktop scrollbar track must receive mouse input');
   await rpc('Input.dispatchMouseEvent',{type:'mousePressed',x:track.x,y:track.y,button:'left',clickCount:1});
   await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',x:track.x,y:track.y,button:'left',clickCount:1});
-  await delay(100); // Native scrollbar scrolling is applied on the browser's next frame.
+  // Native scroll application is asynchronous; require observable movement,
+  // with a bounded wait rather than assuming a particular frame duration.
+  for (let n = 0; n < 20 && !await evaluate('document.querySelector("#d-term .xterm-viewport").scrollTop > 0'); n++) await delay(50);
   assert.ok(await evaluate('document.querySelector("#d-term .xterm-viewport").scrollTop > 0'),
-    'clicking the visible serial scrollbar must move through history');
+    'clicking the visible serial scrollbar must move through history: ' + JSON.stringify(track));
   assert.deepEqual(errors,[]);
   console.log('Browser smoke passed: real xterm query suppression, read-only agent/archive tabs, desktop/mobile layout.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
