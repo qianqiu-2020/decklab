@@ -280,7 +280,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 length = len(body)
                 if length > 65536:
                     return self._json(413, {'error': 'body must be at most 65536 bytes'})
-            elif grant and grant['scope'] == 'device' and route != '/api/devices':
+            elif grant and grant['scope'] == 'device' and route not in ('/api/devices', '/api/capabilities'):
                 parsed = urlparse(self.path)
                 query = parse_qsl(parsed.query, keep_blank_values=True)
                 if route == '/api/boot-compare':

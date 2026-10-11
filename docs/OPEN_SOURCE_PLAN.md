@@ -14,7 +14,7 @@ Do not change an installed service or use live boards during regression tests.
 | Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented; broader transaction integration continues |
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API implemented; task/UI integration pending |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
-| Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Pending |
+| Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Write actions implemented; read/archive services pending |
 | Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Pending |
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Pending |
@@ -96,3 +96,12 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   passed 326 tests before the final two test-only additions; package and demo
   browser checks pass. STORAGE_UPGRADES.md is bundled in both distributions.
   Native Windows execution remains pending.
+- Application actions: all device POST operations use an injected DeviceActions
+  service returning transport-independent results. HTTP retains parsing/selection,
+  control retains authorization and scoped serial/actor pinning. Direct and HTTP
+  contract tests cover input auditing, actor scope, SSH permissions and cancellation.
+  Capabilities require no board lookup and are available to scoped agents; CLI
+  exposes capabilities, operation status/cancellation and stable error codes.
+  Full regression passed 334 tests before one final CLI test-only addition; the
+  final 26-test CLI suite, frontend/share suites and demo browser pass. Read/archive
+  application services and task/UI integration remain pending.

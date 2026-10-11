@@ -19,6 +19,32 @@ def response(data):
 
 
 class ClientTests(unittest.TestCase):
+    def test_client_preserves_stable_error_code_from_http_and_success_status_failure(self):
+        client = ctl.Client('http://127.0.0.1:8898')
+        error = ctl.HTTPError(client.url, 409, 'Conflict', {}, response({'code': 'busy', 'error': 'busy'}))
+        with mock.patch.object(ctl, 'urlopen', side_effect=error):
+            with self.assertRaises(ctl.ClientError) as failure:
+                client.request('/api/session-send', {'key': 'board', 'data': 'x'})
+        self.assertEqual((failure.exception.status, failure.exception.code), (409, 'busy'))
+        with mock.patch.object(ctl, 'urlopen', return_value=response({'ok': False, 'code': 'operation-failed'})):
+            with self.assertRaises(ctl.ClientError) as failure:
+                client.request('/api/probe', {'key': 'board'})
+        self.assertEqual(failure.exception.code, 'operation-failed')
+
+    def test_capabilities_and_operation_commands_use_public_endpoints(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            client = factory.return_value
+            client.request.return_value = {'api_version': 1}
+            self.assertEqual(ctl.main(['capabilities']), 0)
+            client.request.assert_called_once_with('/api/capabilities')
+            client.select.assert_not_called()
+            client.get.return_value = {'operation': None}
+            self.assertEqual(ctl.main(['--device', 'board', 'operation']), 0)
+            client.get.assert_called_once_with('/api/operation')
+            client.post.return_value = {'ok': True}
+            self.assertEqual(ctl.main(['--device', 'board', 'operation-cancel', 'operation-id']), 0)
+            client.post.assert_called_once_with('/api/operation-cancel', id='operation-id')
+
     def test_boot_log_latest_resolves_id_then_reads_complete_epoch(self):
         with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
             client = factory.return_value

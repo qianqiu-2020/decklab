@@ -14,8 +14,7 @@ from .storage import IdentityError
 from .httpd import BoundedThreadingTCPServer as BoundedThreadingServer
 from .log_archive import read_epoch, search_epochs
 from .boot_compare import MAX_BOOT_BYTES, compare_boots
-from .file_transfer import TransferError
-from .transactions import transactions_for, TransactionError
+from .actions import DeviceActions, capabilities
 from . import __version__
 
 MGR = Manager()
@@ -119,6 +118,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         u = urlparse(self.path)
         route, q = u.path, parse_qs(u.query)
 
+        if route == '/api/capabilities':
+            result = capabilities()
+            return self._json(result.status, result.payload)
+
         if route == '/api/health':
             disk = shutil.disk_usage(LOG_ROOT)
             devices = MGR.all_devices()
@@ -152,7 +155,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             device = self._dev(q)
             if not device:
                 return self._json(404, {'error': 'no such device'})
-            return self._json(200, {'operation': transactions_for(device).snapshot()})
+            result = DeviceActions(MGR).operation(device)
+            return self._json(result.status, result.payload)
 
         if route == '/api/boot-compare':
             selected = []
@@ -363,215 +367,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(404, {'error': 'no such device'})
 
         actor = str(payload.get('actor') or 'web')[:80]
-        with transactions_for(d).actor_scope(actor):
-            return self._device_post(route, payload, d, actor)
+        return self._device_post(route, payload, d, actor)
 
     def _device_post(self, route, payload, d, actor):
-        if route == '/api/operation-cancel':
-            try:
-                transactions_for(d).cancel(str(payload.get('id') or ''), actor)
-                if d.serial:
-                    MGR.store.event(d.serial, actor, 'operation-cancel', str(payload.get('id') or ''))
-                return self._json(200, {'ok': True})
-            except TransactionError as error:
-                return self._json(error.status, {'ok': False, 'error': str(error), 'code': error.code})
-        if route == '/api/session-result':
-            try:
-                if not d.serial:
-                    raise IdentityError('设备尚未识别')
-                MGR.store.session_result(d.serial, str(payload.get('sid') or ''),
-                                         payload.get('completed'), payload.get('exit_code'), actor=actor)
-                return self._json(200, {'ok': True})
-            except IdentityError as error:
-                return self._json(400, {'ok': False, 'error': str(error)})
-
-        if route == '/api/switch-mode':
-            try:
-                old_serial = d.serial
-                key = MGR.prepare_switch(d, actor)
-                return self._json(200, {'ok': True, 'device_key': key, 'serial': '',
-                                        'old_serial': old_serial})
-            except IdentityError as error:
-                return self._json(409, {'ok': False, 'error': str(error)})
-
-        if route.startswith('/api/file-transfer/'):
-            action = route.rsplit('/', 1)[-1]
-            if action not in ('start', 'chunk', 'batch', 'finish', 'abort'):
-                return self._json(404, {'ok': False, 'error': 'unknown transfer action'})
-            connection_id = str(payload.get('connection_id') or '')
-            try:
-                if action == 'start':
-                    result = d.file_transfer.start(
-                        payload.get('direction'), payload.get('path'), connection_id,
-                        actor=actor, size=payload.get('size'),
-                        overwrite=payload.get('overwrite') is True)
-                    if d.serial:
-                        MGR.store.event(d.serial, actor, 'file-transfer-start',
-                                        '%s %s (%s bytes)' % (result['direction'], result['path'], result['size']))
-                elif action == 'chunk':
-                    result = d.file_transfer.chunk(str(payload.get('id') or ''), connection_id,
-                                                   payload.get('offset'), payload.get('data_b64'))
-                elif action == 'batch':
-                    result = d.file_transfer.batch(str(payload.get('id') or ''), connection_id,
-                                                   payload.get('offset'), payload.get('data_b64'))
-                elif action == 'finish':
-                    result = d.file_transfer.finish(str(payload.get('id') or ''), connection_id)
-                    if d.serial:
-                        MGR.store.event(d.serial, actor, 'file-transfer-finish',
-                                        '%s %s (%s bytes, sha256 %s)' % (
-                                            result['direction'], result['path'], result['size'], result['sha256']))
-                else:
-                    result = d.file_transfer.abort(str(payload.get('id') or ''), connection_id)
-                    if d.serial:
-                        MGR.store.event(d.serial, actor, 'file-transfer-abort', result['id'])
-                return self._json(200, dict(result, ok=True))
-            except TransferError as error:
-                return self._json(error.status, {'ok': False, 'error': str(error)})
-
-        if d.serial and route in ('/api/send', '/api/rescue', '/api/identify', '/api/ssh-enable'):
-            MGR.store.event(d.serial, actor, route.rsplit('/', 1)[-1],
-                            'request: sid=' + str(payload.get('sid') or 'serial'))
-
-        if route == '/api/send':
-            text = str(payload.get('data') or '')
-            if not text:
-                return self._json(400, {'error': 'data required'})
-            ok, err = d.send(text)
-            return self._json(200 if ok else 503, {'ok': ok, 'error': err, 'dev': d.dev})
-
-        if route == '/api/probe':
-            ok, err = d.send('\r')
-            if ok:
-                d.last_probe = time.time()
-                d.probed += 1
-                d._say('手动探测:已发送回车')
-            return self._json(200, {'ok': ok, 'error': err})
-
-        if route == '/api/rescue':
-            if d.file_transfer.active:
-                return self._json(409, {'ok': False, 'error': '串口文件传输中，请先完成或取消'})
-            # 只有用户主动选择才重新绑定 USB，不基于静默时长自动执行。
-            mode = str(payload.get('mode') or 'rebind')
-            if mode != 'rebind':
-                return self._json(400, {'error': 'mode must be rebind'})
-            try:
-                with transactions_for(d).begin('usb-recovery', 35, require_open=False):
-                    with d.write_lock:
-                        if not d.present or not MGR._matches(d):
-                            return self._json(409, {'ok': False, 'error': '设备已重新枚举,请刷新后重试'})
-                        d.last_rescue = time.time()
-                        rx_before = d.bytes
-                        ok, note = try_rescue(d.dev, mode)
-                    d.rescue_note = note
-                    d.fail_count = 0
-                    d._say('手动自愈(%s)%s: %s' % (mode, '步骤完成' if ok else '失败', note))
-            except TransactionError as error:
-                return self._json(error.status, {'ok': False, 'error': str(error), 'code': error.code})
-            # sysfs 写成功只能证明辅助步骤完成;不能据此宣布采集器已恢复。
-            recovered = d.fd is not None and d.bytes > rx_before and MGR._matches(d)
-            requires_setup = not ok and any(x in note.lower() for x in
-                                           ('未安装', 'password', 'not allowed', 'sudo 需要密码'))
-            hint = ''
-            if requires_setup:
-                hint = ('特权 recovery helper 未就绪。检查 %s、'
-                        '/etc/sudoers.d/seriald-rescue 和 collector 日志；'
-                        'Ubuntu 包会自动安装并仅向 seriald 服务账户放行该 helper。' % RESCUE_BIN)
-            return self._json(200, {'ok': ok, 'recovered': recovered, 'requires_setup': requires_setup,
-                                    'note': note, 'hint': hint, 'mode': mode})
-
-        if route == '/api/ssh-connect':
-            # 一键 SSH:起一条与串口并存的独立会话,输出单独落盘
-            ssh_user = payload.get('ssh_user')
-            ssh_password = payload.get('ssh_password')
-            if ssh_user is not None and (not isinstance(ssh_user, str) or not ssh_user.strip()):
-                return self._json(400, {'ok': False, 'error': 'ssh_user must be a non-empty string'})
-            if ssh_password is not None and not isinstance(ssh_password, str):
-                return self._json(400, {'ok': False, 'error': 'ssh_password must be a string'})
-            s, err = d.ssh_connect(actor=actor, title=str(payload.get('title') or '')[:2048],
-                                    ssh_user=ssh_user.strip() if isinstance(ssh_user, str) else None,
-                                    ssh_password=ssh_password)
-            if not s:
-                return self._json(502, {'ok': False, 'error': err})
-            return self._json(200, {'ok': True, 'sid': s.sid, 'ip': s.ip,
-                                    'persistent': bool(getattr(s, 'persistent', False)),
-                                    'auto_configured': bool(getattr(s, 'auto_configured', False)),
-                                    'device_key': d.key, 'serial': d.serial})
-
-        if route == '/api/session-send':
-            sid = str(payload.get('sid') or 'serial')
-            text = str(payload.get('data') or '')
-            if not text:
-                return self._json(400, {'error': 'data required'})
-            if sid == 'serial':
-                ok, err = d.send(text)
-            else:
-                s = d.get_session(sid)
-                if not s:
-                    return self._json(404, {'error': 'no such session'})
-                if actor != s.actor and actor not in s.takeovers:
-                    return self._json(403, {'ok': False, 'error': '先介入该 SSH 会话才能输入'})
-                ok, err = (s.write(text), '')
-            if ok:
-                if d.serial:
-                    MGR.store.event(d.serial, actor, 'session-send', 'request: sid=' + sid)
-                d.record_input(sid, actor, text)
-            return self._json(200 if ok else 503, {'ok': ok, 'error': err})
-
-        if route == '/api/session-takeover':
-            sid = str(payload.get('sid') or '')
-            s = d.get_session(sid)
-            if not d.serial or not s:
-                return self._json(404, {'ok': False, 'error': 'no such active SSH session'})
-            s.takeovers.add(actor)
-            MGR.store.event(d.serial, actor, 'session-takeover', sid)
-            return self._json(200, {'ok': True, 'sid': sid})
-
-        if route == '/api/session-resize':
-            sid = str(payload.get('sid') or '')
-            try:
-                cols = int(payload.get('cols') or 0)
-                rows = int(payload.get('rows') or 0)
-            except (TypeError, ValueError):
-                return self._json(400, {'error': 'bad cols/rows'})
-            s = d.get_session(sid)
-            if not s:
-                return self._json(404, {'error': 'no such session'})
-            if actor != s.actor and actor not in s.takeovers:
-                return self._json(403, {'ok': False, 'error': '先介入该 SSH 会话才能调整终端大小'})
-            return self._json(200, {'ok': s.resize(cols, rows), 'cols': s.cols, 'rows': s.rows})
-
-        if route == '/api/session-close':
-            sid = str(payload.get('sid') or '')
-            s = d.get_session(sid)
-            if not s:
-                return self._json(404, {'error': 'no such session'})
-            if actor != s.actor and actor not in s.takeovers:
-                return self._json(403, {'ok': False, 'error': '先介入该 SSH 会话才能关闭'})
-            if not d.close_session(sid):
-                return self._json(404, {'error': 'no such session'})
-            return self._json(200, {'ok': True})
-
-        if route == '/api/identify':
-            init_marker = payload.get('init_boot_marker', False)
-            if type(init_marker) is not bool:
-                return self._json(400, {'ok': False, 'error': 'init_boot_marker must be a boolean'})
-            info = d.run_probe(init_boot_marker=True) if init_marker else d.run_probe()
-            if init_marker and info.get('ok'):
-                MGR.store.event(d.serial, actor, 'boot-marker-initialized', '/boot/seriald-id')
-            return self._json(200 if info.get('ok') else 502, dict(info, device_key=d.key))
-
-        if route == '/api/ssh-enable':
-            r = d.run_ssh_enable()
-            return self._json(200 if r.get('ok') else 502, r)
-
-        if route == '/api/label':
-            try:
-                key = MGR.rename(d, payload.get('label'))
-                return self._json(200, {'ok': True, 'label': key, 'device_key': key, 'serial': d.serial})
-            except IdentityError as error:
-                return self._json(409, {'ok': False, 'error': str(error)})
-
-        return self._json(404, {'error': 'not found'})
+        result = DeviceActions(MGR, recover=try_rescue, recovery_binary=RESCUE_BIN).execute(
+            route.removeprefix('/api/'), payload, d, actor)
+        return self._json(result.status, result.payload)
 
     def log_message(self, fmt, *args):
         pass

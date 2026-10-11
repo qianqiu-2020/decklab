@@ -21,12 +21,25 @@ export SERIALD_URL=http://127.0.0.1:8898
 export SERIALD_TOKEN=服务端配置的访问令牌   # 服务未启用认证时省略
 serialctl health
 serialctl devices
+serialctl capabilities
 serialctl --actor claude-code/diagnosis --device riscv-118 read
 serialctl --actor claude-code/diagnosis --device riscv-118 exec --command 'uname -a'
 ```
 
 默认 URL 是本机 `http://127.0.0.1:8898`。现有开发主机可显式设置
-`SERIALD_URL=http://10.0.90.177:8898`。全局选项置于子命令之前。
+`SERIALD_URL=http://上位机局域网地址:8898`。全局选项置于子命令之前。
+
+`capabilities` 不探测开发板，返回 API 版本与支持的功能。串口文件传输仍需板端 Linux shell；
+SSH 自动配置是否允许取决于设备 profile，不应根据全局能力查询假定某个板子可执行这些操作。
+控制台操作卡住时，可在另一个会话查看并取消：
+
+```sh
+serialctl --device riscv-118 operation
+serialctl --device riscv-118 operation-cancel 操作ID
+```
+
+取消按操作 ID 定位，只允许该操作的 agent 或人工介入；已发出的板端命令不能撤销。
+取消上传后还须通过传输流程的 abort 释放预留。详见 [串口事务](CONSOLE_TRANSACTIONS.md)。
 
 ## key 是标签，serial 是永久身份
 

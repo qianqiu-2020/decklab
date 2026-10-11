@@ -27,9 +27,10 @@ ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)')
 
 
 class ClientError(Exception):
-    def __init__(self, message, status=None):
+    def __init__(self, message, status=None, code=None):
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 class Client:
@@ -73,13 +74,18 @@ class Client:
         except HTTPError as error:
             with error:
                 detail = error.read(4096).decode('utf-8', 'replace')
-            raise ClientError('HTTP %s: %s' % (error.code, detail), status=error.code) from error
+            try:
+                failure = json.loads(detail)
+                code = failure.get('code') if isinstance(failure, dict) else None
+            except ValueError:
+                code = None
+            raise ClientError('HTTP %s: %s' % (error.code, detail), status=error.code, code=code) from error
         except (URLError, OSError, ValueError, http.client.HTTPException) as error:
             raise ClientError(str(error)) from error
         if not isinstance(result, dict):
             raise ClientError('Expected a JSON object from seriald')
         if result.get('ok') is False:
-            raise ClientError(result.get('error') or 'Service reported failure')
+            raise ClientError(result.get('error') or 'Service reported failure', code=result.get('code'))
         return result
 
     def select(self, selector):
@@ -448,6 +454,10 @@ def parser():
     commands = p.add_subparsers(dest='action', required=True)
     commands.add_parser('health', help='show collector process health and uptime')
     commands.add_parser('devices', help='list devices without probing them')
+    commands.add_parser('capabilities', help='show supported protocol features without accessing boards')
+    commands.add_parser('operation', help='show the active serial operation and cancellation ID')
+    cancel = commands.add_parser('operation-cancel', help='cancel your active serial operation by ID')
+    cancel.add_argument('id', help='operation ID returned by operation')
     read = commands.add_parser('read', help='read captured output; save off for the next call')
     read.add_argument('--sid', default='serial')
     read.add_argument('--off', type=nonnegative, default=0)
@@ -511,7 +521,7 @@ def main(argv=None):
         client = Client(args.url, args.http_timeout, args.token)
         client.actor = args.actor
         client.ssh_user, client.ssh_password = args.ssh_user, args.ssh_password
-        if args.action in ('devices', 'health'):
+        if args.action in ('devices', 'health', 'capabilities'):
             result = client.request('/api/' + args.action)
         else:
             if not args.device:
@@ -526,6 +536,8 @@ def main(argv=None):
                               truncated_bytes=dropped, start_off=result['off'] - len(data))
             elif args.action == 'rename':
                 result = client.post('/api/label', label=args.label)
+            elif args.action == 'operation-cancel':
+                result = client.post('/api/operation-cancel', id=args.id)
             elif args.action == 'boot-log':
                 boot_id = args.id
                 if args.latest:

@@ -114,6 +114,7 @@ class DemoHttpTests(unittest.TestCase):
                         return json.load(response)
 
                 devices = request('/api/devices')['devices']
+                self.assertTrue(request('/api/capabilities')['features']['operation_cancel'])
                 self.assertEqual(len(devices), 3)
                 self.assertEqual(sum(d['state'] == 'online' for d in devices), 2)
                 with urlopen(url + '/', timeout=5) as response:

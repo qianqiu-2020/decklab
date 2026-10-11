@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Separate device write actions from HTTP handling into injected application
+  services. Add protocol capabilities and CLI operation status/cancellation;
+  action errors expose stable codes while preserving existing response fields.
+
 - Version registry and agent-grant schemas; preserve legacy data with automatic
   pre-upgrade WAL-aware backups, atomic migrations and future-version rejection.
 

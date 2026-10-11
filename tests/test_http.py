@@ -245,6 +245,15 @@ class HandlerTests(unittest.TestCase):
             denied.do_GET()
             self.assertEqual(self.result(denied)[0], 403)
 
+            features = self.control_handler('/api/capabilities')
+            features.auth_token, features.grant_store, features.headers = 'owner', store, headers
+            features.command = 'GET'
+            reply.read.side_effect = [b'{"api_version":1}', b'']
+            with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                features.do_GET()
+            self.assertEqual(connection.request.call_args.args[1], '/api/capabilities')
+            self.assertEqual(self.result(features)[0], 200)
+
     def test_revoked_agent_token_cannot_reuse_open_mode_bypass(self):
         with tempfile.TemporaryDirectory() as folder:
             store = AgentGrantStore(str(pathlib.Path(folder) / 'grants.sqlite3'))
