@@ -65,7 +65,7 @@ def build(output, version):
                 text = path.read_text().replace('/data/seriald/serialctl.py', '/usr/lib/seriald/serialctl.py').replace('/data/seriald/docs/AGENT_ACCESS.md', '/usr/share/doc/seriald/AGENT_ACCESS.md')
                 write('usr/share/seriald/skills/seriald-board/' + str(path.relative_to(ROOT / 'skills/seriald-board')), text)
         put('LICENSE', 'usr/share/doc/seriald/copyright')
-        for name in ('README.md', 'README.zh-CN.md', 'NOTICE', 'THIRD_PARTY.md', 'CONTRIBUTING.md', 'SECURITY.md', 'CHANGELOG.md', 'docs/BRAND.md', 'docs/OPEN_SOURCE_PLAN.md', 'docs/AGENT_ACCESS.md', 'docs/ARCHITECTURE.md', 'docs/INSTALL.md',
+        for name in ('README.md', 'README.zh-CN.md', 'NOTICE', 'THIRD_PARTY.md', 'CONTRIBUTING.md', 'SECURITY.md', 'CHANGELOG.md', 'docs/BRAND.md', 'docs/OPEN_SOURCE_PLAN.md', 'docs/AGENT_ACCESS.md', 'docs/API.md', 'docs/ARCHITECTURE.md', 'docs/INSTALL.md',
                      'docs/HARDWARE_ID.md', 'docs/DEVICE_IDENTITY_MATRIX.md', 'docs/CONFIGURATION.md', 'docs/DEMO.md', 'docs/CONSOLE_TRANSACTIONS.md', 'docs/STORAGE_UPGRADES.md', 'docs/LOG_OPERATIONS.md', 'docs/TASKS.md', 'docs/TRANSFER_ARTIFACTS.md', 'docs/HARDWARE_EXTENSIONS.md',
                      'docs/REFACTOR_PLAN.md', 'docs/WINDOWS.md', 'docs/TRANSFER_PERFORMANCE.md',
                      'docs/seriald-architecture.png', 'docs/seriald-architecture.svg'):

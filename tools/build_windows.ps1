@@ -81,6 +81,8 @@ try {
     Copy-Item docs\CONSOLE_TRANSACTIONS.md -Destination (Join-Path $bundle 'docs\CONSOLE_TRANSACTIONS.md')
     Copy-Item docs\STORAGE_UPGRADES.md -Destination (Join-Path $bundle 'docs\STORAGE_UPGRADES.md')
     Copy-Item docs\LOG_OPERATIONS.md -Destination (Join-Path $bundle 'docs\LOG_OPERATIONS.md')
+    Copy-Item docs\AGENT_ACCESS.md -Destination (Join-Path $bundle 'docs\AGENT_ACCESS.md')
+    Copy-Item docs\API.md -Destination (Join-Path $bundle 'docs\API.md')
     Copy-Item docs\TASKS.md -Destination (Join-Path $bundle 'docs\TASKS.md')
     Copy-Item docs\TRANSFER_ARTIFACTS.md -Destination (Join-Path $bundle 'docs\TRANSFER_ARTIFACTS.md')
     Copy-Item docs\HARDWARE_EXTENSIONS.md -Destination (Join-Path $bundle 'docs\HARDWARE_EXTENSIONS.md')

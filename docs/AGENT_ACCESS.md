@@ -3,7 +3,7 @@
 ## 入口
 
 使用 [seriald-board skill](../skills/seriald-board/SKILL.md)，或直接调用 `serialctl`。
-源码环境用 `python3 /data/seriald/serialctl.py` 替代命令名。客户端只需 Python 3 标准库；
+源码环境用 `python3 <源码目录>/serialctl.py` 替代命令名。客户端只需 Python 3 标准库；
 远程机器复制客户端即可，使用 `SERIALD_URL` 指向上位机。
 
 网页选中设备后点击“分享给 Agent”，或在首页点击“Agent 接入”分享全部设备。
@@ -65,7 +65,8 @@ serialctl --device 设备当前标签 rename --label riscv-118
 服务优先读取 EEPROM ONIE `0x23`：支持 upstream 的 `cells/serial-number@*`，也能校验解析
 vendor 内核暴露的原始 at24 NVMEM。有效的设备树 `serial-number` 直接作为正式板卡编号；带
 `/chosen/u-boot,version` provenance 的 U-Boot 注入编号会保留更具体的来源标识；
-没有 EEPROM 编号时才尝试未知 DT、SoC/eFuse 或旧 `/boot` 标记；
+没有 EEPROM 编号时优先使用有效 DT 编号，再尝试 SoC/eFuse 或旧 `/boot` 标记；
+已登记的软件标记兜底会保留其候选身份，直到 EEPROM 确认或管理员明确更正；
 检查 `serial_source`、`identity_status` 和 `reported_serial`。候选身份日志位于
 `logs/_provisional/<serial_source>/<serial>/`，正式确认后由管理员迁入 `logs/<serial>/`。
 用户选择软件身份兜底后，可运行 `identify --init-boot-marker` 创建一次；后续普通识别只读它。
@@ -98,10 +99,11 @@ serialctl --device riscv-118 log --file serial-20260919.log
 人在网页中旁观 agent SSH 时默认只读；点击“介入此会话”后可以向同一 shell 输入，系统会记录
 `session-takeover` 事件。agent 应把这种输入视为人工接管，不要继续并发发送破坏性命令。
 
-`exec` 按 `--actor` 和设备复用持久 SSH 会话，在同一个 shell 中执行多条命令，因此会保留当前目录、
-环境变量等状态。会话会在网页中持续显示并可被人旁观；需要结束时显式运行 `ssh-close --sid <sid>`。
-网页创建的 `web` 会话仍是一次一条的独立会话。
-工作目录和环境不跨调用保持；将 `cd` 和依赖的命令放在一次 `--command` 内。
+`exec` 按 `--actor` 和设备复用持久 SSH 终端，会话会在网页中持续显示并可被人旁观；
+需要结束时显式运行 `ssh-close --sid <sid>`。每次 `--command` 在独立的 `sh -c` 子 shell
+执行：继承父终端的目录和已导出变量，但命令中的 `cd`、`export` 不会改变下一次调用。
+将有依赖的命令放在一次 `--command` 内。需要持续改变交互环境时使用
+`ssh-open` 与 `send --sid`。网页 `web` 每次创建独立会话。
 stdin 为 EOF，stdout/stderr 合并，返回文本去除 ANSI；命令限 2048 UTF-8 字节，输出限 1 MiB，
 高吞吐输出也可能超出服务缓存。使用过滤和取尾限制日志量，不通过它运行交互程序或常驻后台任务。
 
@@ -109,7 +111,7 @@ stdin 为 EOF，stdout/stderr 合并，返回文本去除 ANSI；命令限 2048 
 `session_persistent` 表示服务是否保留了这个 actor 的 SSH 会话；持久会话不会返回
 `session_closed: true`，应使用 `ssh-close` 关闭。CLI 成功退出 0，访问/命令失败退出 1，参数错误退出 2。
 非零退出码、输出缺失、超时不能报告为成功。
-默认 root/bianbu 认证被拒绝时，已登录且可免密码 sudo 的串口 shell 会自动配置 root 密码
+设备 profile 允许自动配置且默认 root/bianbu 认证被拒绝时，已登录且可免密码 sudo 的串口 shell 会自动配置 root 密码
 和 sshd 后重试；该操作留有串口日志与操作历史。自定义账户、网络错误和需输入 sudo 密码的
 情况不会自动修改板子。
 
@@ -206,3 +208,12 @@ serialctl --device riscv-118 file-fetch <下载任务ID> --local ./dmesg.txt
 
 不带 `--background` 时也由采集器执行同一任务，CLI 等待结果，下载随后自动取回本地。
 Ctrl-C 请求取消并报告任务 ID；若查询断网，任务不会被自动重发或取消，可稍后按 ID 查询。
+
+## 配置的硬件操作
+
+`serialctl --device <标签> hardware` 只列出管理员为该板配置的电源、复位和刷机操作，
+不会执行工具。授权范围内可用 `task-start hardware-reset` 等发起后台任务；
+查状态、取消及重连恢复均使用同一任务 ID。操作默认未配置，agent 能否执行由每项
+`allow_agent` 决定。需要独占串口的工具还须设置 `exclusive_serial`；期间只有该串口
+停止采集，日志记录这个空档。工具清理失败时保持暂停，需确认工具已退出后再重启采集器。
+见 [硬件扩展](HARDWARE_EXTENSIONS.md) 和 [HTTP 接口](API.md)。

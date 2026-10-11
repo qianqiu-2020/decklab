@@ -34,8 +34,9 @@ serialctl --device riscv-118 read
 优先读取 EEPROM ONIE `0x23`：upstream 使用 `cells/serial-number@*`，无 cell 的 vendor 内核则
 校验并解析原始 at24 NVMEM；U-Boot 注入的相同 DT serial 也可识别。之后才尝试 SoC/eFuse。
 以返回的 `serial` 为身份，`reported_serial` 是固件原值，`serial_source` 说明来源。直接读取的 ONIE
-编号和带 `/chosen/u-boot,version` provenance 的 U-Boot EEPROM 注入编号会自动确认为正式身份；未知 DT、SoC/eFuse 和
-`/boot` 身份在正式核实前标为 `provisional`。硬件身份不可用时会读取已有的
+编号、有效 DT `serial-number`（包括 U-Boot 注入）会自动确认为正式身份；占位值与已知冲突编号不接受。
+SoC/eFuse 和 `/boot` 身份在正式核实前标为 `provisional`；已登记的软件标记兜底会保留至 EEPROM 确认或人工更正。
+硬件身份不可用时会读取已有的
 `/boot/seriald-id`（来源 `boot-marker`）。用户选择文件标记兜底后，可运行
 `identify --init-boot-marker` 创建一次；已有文件不覆盖，普通识别不创建文件。
 保留文件才能延续档案，克隆到另一块板前移除它。初始化超时先读现场，不盲目换号。
@@ -58,7 +59,8 @@ serialctl --actor claude-code/diagnosis --device riscv-118 exec \
 Agent 分享令牌则由服务端固定为授权标签。
 同一设备和 actor 的 `exec` 会复用持久 SSH 会话，网页会一直显示该标签，直到 agent 执行
 `ssh-close --sid <sid>` 或人在网页中关闭。不要借用其他 agent 或网页的会话。
-每次环境独立，把相关 `cd`、变量设置和命令放在同一次调用，正确引用本机 shell 参数。
+每次命令在独立的 `sh -c` 子 shell 中运行，继承持久终端环境，但本次 `cd`、`export` 不影响下次调用。
+把相关目录切换、变量设置和命令放在同一次调用；需改变父终端环境时用交互式 `send --sid`。
 远端用 POSIX `sh`，stdin 为 EOF，stdout/stderr 合并；不用于交互程序、二进制或常驻任务。
 命令限 2048 UTF-8 字节，累计输出限 1 MiB，服务缓存也有限；大日志先过滤或取尾。
 缺少 IP 时创建 SSH 可能先在串口识别；不要因 SSH 不通擅自安装服务或修改凭据。
@@ -72,7 +74,7 @@ Ubuntu 等禁用 root SSH 的板子可按请求指定账户：设置 `SERIALD_SS
 
 `activity` 查看持久化操作历史，`logs` 列出文件，`log --file <文件名>` 在线读取。
 网页旁观 agent 会话默认只读，关闭后仍有记录。`--timeout` 不包含创建请求，后者受
-`--http-timeout`（默认 90 秒）控制。
+`--http-timeout`（默认 180 秒）控制。
 
 ## 无网络文件传输
 
@@ -102,6 +104,17 @@ serialctl --device <标签> boot-search --query 'panic'
 先看 `clues` 中目标启动新增的错误和超时，再看带行号的 `rows`；归档时间戳与内核计时已过滤。
 网页“启动对比”同样支持历史设备。完整参数见接入指南。
 
+## 后台传输和配置的硬件操作
+
+`file-put`、`file-get`、`file-copy` 默认提交采集器任务并等待结果；`--background` 返回任务 ID。
+上传暂存阶段需要客户端在线，提交后关闭客户端不终止任务；`task <ID>` 查询，
+`task-cancel <ID>` 请求取消，`file-fetch <下载任务ID> --local <路径>` 取回校验后的文件。
+响应丢失时先查 `tasks`，不要盲目重发；取消不能撤销已完成的远端写入。
+
+`hardware` 只列出该板已配置且允许本 actor 执行的操作。用户已授权时才用
+`task-start hardware-reset` 等执行；配置决定工具和参数，agent 不传入任意主机命令。
+独占串口刷机期间无法采集该串口，其他设备和 SSH 不受影响。
+
 ## 串口及交互式 SSH
 
 SSH 多步交互用 `ssh-open` 得到（或复用）自己的持久 sid，随后 `read --sid`、`send --sid`，结束 `ssh-close --sid`。
@@ -114,5 +127,5 @@ SSH 多步交互用 `ssh-open` 得到（或复用）自己的持久 sid，随后
 点击/回放终端不会自动向串口回写位置报告。多个 SSH 会话仍共享板子的文件和系统状态。
 操作范围沿用用户任务授权，skill 本身不授权刷机、重启、USB rebind 或系统配置修改。
 
-完整参数与异常说明见 `/data/seriald/docs/AGENT_ACCESS.md`；包安装环境见
+完整参数与异常说明见源码目录的 `docs/AGENT_ACCESS.md`；Linux 包安装环境见
 `/usr/share/doc/seriald/AGENT_ACCESS.md`，客户端 `--help` 可随时查看可用命令。

@@ -417,3 +417,20 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   wheel environment using requirements-windows.txt collected and verified 15
   installed distributions; this is not native Windows package evidence. Python
   syntax and whitespace checks pass. Installed services remain unchanged.
+
+- Agent/API documentation audit: fixed the skill's stale 90-second HTTP timeout,
+  obsolete unknown-DT provisional rule, and the guide's contradictory claim that
+  CLI exec changes parent-shell cwd/environment. Actual framing uses child sh -c
+  on a reused terminal; a local-shell regression verifies inherited parent state
+  and isolated command changes. Added HTTP reference covering output byte cursors,
+  SSE, errors, identities, archives, input ownership, sessions, durable transfers,
+  configured hardware and sharing boundaries. Debian and Windows ship the API and
+  agent guides; Windows CI path filters include the new notices and API docs.
+  This is a concrete documentation checkpoint, not the final full-scope audit.
+
+  Verification: 505 backend checks pass (three native Windows tests skipped),
+  including the child-shell isolation fixture and extracted Debian API guide;
+  74 frontend isolation and sharing checks pass. skill-creator quick validation
+  passes. No real board, serial device or installed service was accessed.
+  Native Windows package execution, binary attribution and hosted release gates
+  remain unverified; the overall optimization goal is still active.

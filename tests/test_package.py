@@ -90,6 +90,7 @@ class PackageTests(unittest.TestCase):
             self.assertTrue((extracted / 'usr/share/doc/seriald/CONFIGURATION.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/TRANSFER_ARTIFACTS.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/HARDWARE_EXTENSIONS.md').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/seriald/API.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/examples/hardware.json').is_file())
             self.assertTrue((code / 'seriald_core/hardware.py').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/examples/profiles.json').is_file())

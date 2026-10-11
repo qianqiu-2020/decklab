@@ -102,7 +102,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 logs/
 ├── <confirmed-serial>/                         # 已确认的 EEPROM/人工核实身份
 ├── _provisional/
-│   ├── device-tree/<candidate-serial>/         # 固件或 U-Boot 上报，来源待确认
+│   ├── device-tree/<candidate-serial>/         # 旧版本保留的 DT 候选档案；新版有效 DT 直接确认
 │   ├── soc-sysfs/<candidate-serial>/           # SoC/eFuse 芯片指纹
 │   └── boot-marker/<boot-uuid>/                # /boot 软件身份
 └── _unprovisioned/<usb-path-hash>/<connection-id>/

@@ -1,6 +1,6 @@
 # DeckLab
 
-[English](README.md) · [贡献指南](CONTRIBUTING.md) · [完整优化规划](docs/OPEN_SOURCE_PLAN.md)
+[English](README.md) · [贡献指南](CONTRIBUTING.md) · [HTTP 接口](docs/API.md) · [完整优化规划](docs/OPEN_SOURCE_PLAN.md)
 
 DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统一提供网页终端、SSH、历史日志和 Agent 接口。支持 Ubuntu 服务安装及 Windows 上位机。底层项目、命令与服务名保留 `seriald`。
 

@@ -378,6 +378,26 @@ class ClientTests(unittest.TestCase):
 
 
 class FramingTests(unittest.TestCase):
+    @unittest.skipUnless(Path('/bin/sh').is_file(), 'requires a local POSIX shell')
+    def test_reused_parent_shell_keeps_inherited_state_but_exec_changes_are_isolated(self):
+        import shlex
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            changed = root / 'changed'
+            changed.mkdir()
+            first = ctl.frame_command('cd %s; export SD_CHILD=changed; printf first' % shlex.quote(str(changed)), NONCE)
+            second_nonce = 'abcdef0123456789abcdef01'
+            second = ctl.frame_command('printf "%s|%s|%s" "$PWD" "$SD_PARENT" "${SD_CHILD-unset}"', second_nonce)
+            # This parent represents the reused SSH terminal. Both framed
+            # commands inherit it; neither may alter its directory or exports.
+            script = 'export SD_PARENT=inherited\n' + first.rstrip('\r') + '\n' + second.rstrip('\r') + '\n'
+            result = subprocess.run(['/bin/sh'], input=script.encode(), cwd=directory,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    env={'PATH': '/usr/bin:/bin'}, timeout=3, check=True)
+            self.assertEqual(ctl.parse_frame(result.stdout, NONCE), (0, 'first'))
+            self.assertEqual(ctl.parse_frame(result.stdout, second_nonce),
+                             (0, str(root.resolve()) + '|inherited|unset'))
+
     def test_child_shell_status_quotes_multiline_stderr_and_exit(self):
         for command, expected, code in (
                 ("printf '%s' \"a'b\"", "a'b", 0),

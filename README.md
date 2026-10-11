@@ -1,6 +1,6 @@
 # DeckLab
 
-[简体中文](README.zh-CN.md) · [Installation](docs/INSTALL.md) · [Windows](docs/WINDOWS.md) · [Agent access](docs/AGENT_ACCESS.md)
+[简体中文](README.zh-CN.md) · [Installation](docs/INSTALL.md) · [Windows](docs/WINDOWS.md) · [Agent access](docs/AGENT_ACCESS.md) · [HTTP API](docs/API.md)
 
 A shared development-board workbench for OS and BSP developers. Capture serial
 output continuously, access boards through a browser or agent, and keep boot

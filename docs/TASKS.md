@@ -224,3 +224,11 @@ Ctrl-C requests cancellation of that ID and reports whether the request was
 confirmed; it does not promise rollback. A polling failure reports the task ID
 without resubmission or implicit cancellation. Use `task <id>` to check its
 final state and `file-fetch` to retrieve completed downloads later.
+
+## Configured hardware tasks
+
+`hardware-power-on`, `hardware-power-off`, `hardware-reset` and `hardware-flash`
+use the same persistent task API, actor scope, ownership and cancellation rules.
+`GET /api/hardware?key=…` discovers permitted actions without running a tool.
+Configuration fixes argv and optional exclusive UART handoff; clients cannot
+choose host executables or image paths. See [HARDWARE_EXTENSIONS.md](HARDWARE_EXTENSIONS.md).
