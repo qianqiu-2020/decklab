@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Share request JSON validation between control and collector. Reject duplicate
+  fields, non-finite numbers, invalid Unicode and excessive nesting before board
+  operations; direct task/artifact services also reject non-object submissions.
 - Bound POSIX hardware-helper cleanup and verify process-group/thread exit before
   restoring exclusive UART capture, including successful root-before-child exit.
   Failed verification keeps the attachment paused for operator recovery.

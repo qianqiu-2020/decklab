@@ -19,6 +19,13 @@ class ActionTests(unittest.TestCase):
         self.manager = types.SimpleNamespace(store=mock.Mock(), resolve=lambda key: self.device)
         self.actions = DeviceActions(self.manager)
 
+    def test_direct_resize_rejects_infinity_before_session_lookup(self):
+        with mock.patch.object(self.device, 'get_session') as lookup:
+            result = self.actions.execute('session-resize', {'sid': 'ssh1', 'cols': float('inf'),
+                                           'rows': 24}, self.device)
+        self.assertEqual(result.status, 400)
+        lookup.assert_not_called()
+
     def http(self, action, payload):
         handler = web.Handler.__new__(web.Handler)
         body = json.dumps(dict(payload, key='board', serial='SN1')).encode()

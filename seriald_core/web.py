@@ -23,6 +23,7 @@ from .maintenance import disk_status, diagnostic_summary
 from .task_actions import TaskActions
 from .artifact_actions import ArtifactActions, body_limit
 from .tasks import TaskError
+from .request_json import load_object
 
 MGR = Manager()
 STARTED = time.time()
@@ -262,11 +263,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raw = self.rfile.read(n)
             if len(raw) != n:
                 return self._json(400, {'error': 'incomplete body'})
-            payload = json.loads(raw.decode('utf-8')) if n else {}
-            if not isinstance(payload, dict):
-                return self._json(400, {'error': 'JSON object required'})
-        except (ValueError, UnicodeDecodeError):
-            return self._json(400, {'error': 'bad json'})
+            payload = load_object(raw)
+        except (ValueError, UnicodeDecodeError) as error:
+            message = str(error)
+            if message not in ('JSON object required', 'duplicate JSON field',
+                               'JSON nesting too deep', 'non-finite JSON number'):
+                message = 'bad json'
+            return self._json(400, {'error': message})
         except TimeoutError:
             return self._json(408, {'error': 'request body timed out'})
         if route == '/api/agent-revoke':

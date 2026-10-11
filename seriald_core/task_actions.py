@@ -25,6 +25,8 @@ class TaskActions:
 
     def start(self, payload, device, actor):
         try:
+            if not isinstance(payload, dict):
+                raise TaskError('JSON object required')
             kind = payload.get('kind')
             if not isinstance(kind, str) or kind not in self.kinds:
                 raise TaskError('unsupported task kind')

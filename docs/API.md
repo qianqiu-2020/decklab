@@ -12,6 +12,10 @@ GET parameters go in the query string. POST bodies are UTF-8 JSON objects with
 `Content-Length`; chunked request bodies are unsupported. The ordinary body limit
 is 64 KiB; `/api/artifact-append` permits 2 MiB for at most 1 MiB decoded bytes.
 JSON responses use UTF-8. Downloads and SSE use separate streaming formats.
+Request JSON rejects duplicate fields, non-finite numbers (including exponent
+overflow), lone Unicode surrogates and nesting beyond 64 levels. Malformed
+objects return HTTP 400 before device operations; valid Unicode commands and
+escaped surrogate pairs are preserved.
 
 Device operations take `key` (current label) and should include expected `serial`
 to reject label reassignment. Background operations additionally pin the

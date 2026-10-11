@@ -40,6 +40,15 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+Public request parsing is shared by control and collector. Contract checks
+verify HTTP 400 before device access for duplicate fields, non-finite numbers,
+lone surrogates and excessive nesting, while normal Unicode remains intact.
+Agent proxy checks fail before contacting the collector; direct task/artifact
+services reject non-object payloads. The checkpoint passes 533 backend tests
+(three native Windows tests skipped), 74 frontend checks, sharing checks and
+the real simulated-host browser input/SSE/upload/download/copy/reload workflow.
+The Windows builder includes parser tests and passes local PowerShell parsing.
+
 Linux hardware cleanup now waits for the root within a bounded deadline and
 checks remaining owned process/thread states before exclusive UART resume.
 Local tests verify root-before-child exit, unaffected unrelated groups, zombie

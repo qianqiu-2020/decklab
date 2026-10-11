@@ -22,6 +22,7 @@ from .artifact_actions import body_limit
 from .httpd import BoundedThreadingTCPServer
 from . import __version__
 from .results import response as api_response
+from .request_json import load_object
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -222,10 +223,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         body = self.rfile.read(length)
         if len(body) != length:
             raise ValueError('incomplete body')
-        payload = json.loads(body.decode('utf-8')) if body else {}
-        if not isinstance(payload, dict):
-            raise ValueError('JSON object required')
-        return payload
+        return load_object(body)
 
     def _close_revoked_sessions(self, actor):
         body = json.dumps({'actor': actor}).encode()
@@ -268,9 +266,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             target_path = self.path
             if self.command == 'POST' and agent_actor:
                 try:
-                    payload = json.loads(body.decode('utf-8'))
-                    if not isinstance(payload, dict):
-                        raise ValueError('JSON object required')
+                    payload = load_object(body or b'')
                 except (UnicodeDecodeError, ValueError, AttributeError):
                     return self._json(400, {'error': 'bad json'})
                 if grant and grant['scope'] == 'device':

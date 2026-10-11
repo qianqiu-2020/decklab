@@ -79,6 +79,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/actions.py` | 注入 Manager 的设备写操作应用服务、错误码与能力查询 |
 | `seriald_core/queries.py` | 会话游标、归档、启动搜索/对比与历史查询服务 |
 | `seriald_core/results.py` | HTTP/直接调用共用的结果结构与稳定错误码 |
+| `seriald_core/request_json.py` | control/collector 共用的 UTF-8 JSON 请求解析：拒绝重复字段、非法 Unicode、非有限数值和过深嵌套，不导入硬件模块 |
 | `seriald_core/archive_io.py` | 普通日志文件校验、符号链接与替换竞态防护 |
 | `seriald_core/maintenance.py` | 可选日志保留、活动写入/跨天启动保护、磁盘提示与白名单诊断导出 |
 | `seriald_core/admin.py` | 显式迁移旧目录，不访问硬件 |

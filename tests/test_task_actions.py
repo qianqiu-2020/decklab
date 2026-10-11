@@ -28,6 +28,14 @@ class TaskActionTests(unittest.TestCase):
                        client_id='page', key='board', serial='SN1', **kwargs)
         return self.actions.start(payload, self.device, 'web')
 
+    def test_non_object_submission_does_not_create_a_task(self):
+        for payload in (None, [], 'identify', 123):
+            with self.subTest(payload=payload):
+                result = self.actions.start(payload, self.device, 'web')
+                self.assertEqual(result.status, 400)
+                self.assertEqual(result.payload['code'], 'invalid-argument')
+        self.assertEqual(self.manager.tasks.store.list(), [])
+
     def wait_task(self, task_id):
         with self.manager.tasks._lock:
             entry = self.manager.tasks._active.get(task_id)

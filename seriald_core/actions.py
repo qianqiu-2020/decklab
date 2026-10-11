@@ -246,7 +246,7 @@ class DeviceActions:
             try:
                 cols = int(payload.get('cols') or 0)
                 rows = int(payload.get('rows') or 0)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 return response(400, {'error': 'bad cols/rows'})
             s = d.get_session(sid)
             if not s:

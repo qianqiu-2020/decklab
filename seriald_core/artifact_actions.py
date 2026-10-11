@@ -29,6 +29,8 @@ class ArtifactActions:
 
     def execute(self, action, payload, actor='web', device=None):
         try:
+            if not isinstance(payload, dict):
+                raise TaskError('JSON object required')
             if not isinstance(actor, str) or not actor or len(actor) > 80:
                 raise TaskError('invalid artifact actor')
             artifact_id, serial = payload.get('id'), payload.get('serial')

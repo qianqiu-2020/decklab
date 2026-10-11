@@ -653,6 +653,44 @@ class HandlerTests(unittest.TestCase):
                 self.assertEqual(payload['error'], 'JSON object required')
         self.device.send.assert_not_called()
 
+    def test_invalid_json_values_fail_before_console_or_session_access(self):
+        for raw in (b'{"key":"board-key","cols":Infinity,"rows":24}',
+                    b'{"key":"board-key","data":"\\ud800"}',
+                    b'{"key":"board-key","key":"other","data":"reboot"}',
+                    b'{"key":"board-key","nested":' + b'[' * 2000 + b'0' + b']' * 2000 + b'}'):
+            with self.subTest(raw=raw[:80]):
+                handler = self.handler('/api/session-resize', raw)
+                handler.do_POST()
+                status, payload = self.result(handler)
+                self.assertEqual(status, 400)
+                self.assertEqual(payload['code'], 'invalid-argument')
+        self.device.send.assert_not_called()
+        self.device.get_session.assert_not_called()
+
+    def test_control_share_json_uses_the_same_value_validation(self):
+        for raw in (b'{"scope":"all","scope":"device"}', b'{"serial":"\\ud800"}',
+                    b'{"ttl":NaN}', b'{"nested":' + b'[' * 100 + b'0' + b']' * 100 + b'}'):
+            handler = self.control_handler('/api/agent-share')
+            handler.headers = {'Content-Length': str(len(raw))}
+            handler.rfile = io.BytesIO(raw)
+            with self.subTest(raw=raw[:80]), self.assertRaises(ValueError):
+                handler._small_json_body()
+
+    def test_agent_proxy_rejects_invalid_json_before_contacting_collector(self):
+        for raw in (b'{"kind":"identify","kind":"ssh-connect"}',
+                    b'{"path":"\\ud800"}', b'{"size":1e999}'):
+            handler = self.control_handler('/api/task-start')
+            handler.command = 'POST'
+            handler.headers = {'Content-Length': str(len(raw))}
+            handler.rfile = io.BytesIO(raw)
+            with self.subTest(raw=raw), \
+                    mock.patch.object(handler, '_agent_grant', return_value={
+                        'scope': 'all', 'actor': 'shared-agent/test'}), \
+                    mock.patch.object(control, 'UnixHTTPConnection') as collector:
+                handler._proxy()
+                self.assertEqual(self.result(handler)[0], 400)
+                collector.assert_not_called()
+
     def test_invalid_lengths_fail_before_body_read(self):
         for length, expected in (('-1', 413), ('65537', 413), ('invalid', 400)):
             with self.subTest(length=length):
