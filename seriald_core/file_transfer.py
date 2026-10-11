@@ -53,6 +53,7 @@ class SerialFileTransfer:
         self._opening_actor = 'web'
         self.lock = threading.RLock()
         self.state = None
+        self._expiry_timer = None
 
     @property
     def active(self):
@@ -83,10 +84,20 @@ class SerialFileTransfer:
                 or not device.present or device.fd is None or device.stop.is_set()):
             raise TransferError('设备连接已变化，请重新选择设备', 409)
 
-    def _schedule_expiry(self, transfer_id):
-        timer = threading.Timer(IDLE_SECONDS, self._expire, args=(transfer_id,))
+    def _schedule_expiry(self, transfer_id, delay=IDLE_SECONDS):
+        if self._expiry_timer is not None:
+            self._expiry_timer.cancel()
+        timer = threading.Timer(delay, self._expire, args=(transfer_id,))
         timer.daemon = True
+        self._expiry_timer = timer
         timer.start()
+
+    def _release(self):
+        """Release the reservation and its timer while the transfer lock is held."""
+        if self._expiry_timer is not None:
+            self._expiry_timer.cancel()
+            self._expiry_timer = None
+        self.state = None
 
     def _expire(self, transfer_id):
         with self.lock:
@@ -95,12 +106,10 @@ class SerialFileTransfer:
                 return
             remaining = IDLE_SECONDS - (time.monotonic() - state['last'])
             if remaining > 0:
-                timer = threading.Timer(remaining, self._expire, args=(transfer_id,))
-                timer.daemon = True
-                timer.start()
+                self._schedule_expiry(transfer_id, remaining)
                 return
             self._cleanup(state)
-            self.state = None
+            self._release()
 
     def _cleanup(self, state):
         if state['direction'] != 'upload' or not state.get('temp'):
@@ -390,7 +399,7 @@ class SerialFileTransfer:
                 output = self._run(command, timeout=120)
                 if _field(output, 'SD_SIZE') != str(state['size']) or _field(output, 'SD_SHA') != digest:
                     raise TransferError('板端文件在传输期间发生变化', 409)
-            self.state = None
+            self._release()
             return {'id': transfer_id, 'path': state['path'], 'size': state['size'],
                     'sha256': digest, 'direction': state['direction']}
         finally:
@@ -402,7 +411,7 @@ class SerialFileTransfer:
         try:
             state = self._state(transfer_id, connection_id, allow_failed=True)
             self._cleanup(state)
-            self.state = None
+            self._release()
             return {'id': transfer_id, 'aborted': True}
         finally:
             self.lock.release()

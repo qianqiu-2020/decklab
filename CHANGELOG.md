@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Release transfer expiry timers immediately after completion, abort or expiry,
+  so repeated transfers do not accumulate ten-minute timer threads.
+
 - Coordinate console input, commands, provisioning, transfer and recovery with
   total deadlines and connection-generation guards. Expose owner-checked,
   ID-scoped cancellation without closing the shared serial reader.

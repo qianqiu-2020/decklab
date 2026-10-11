@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 from seriald_core.file_transfer import (BATCH_SIZE, CHUNK_SIZE, MAX_CONSOLE_LINE,
                                         SerialFileTransfer, TransferError, _field)
@@ -36,6 +37,59 @@ class ShellDevice:
 
 
 class SerialFileTransferTests(unittest.TestCase):
+    def test_completed_and_aborted_transfers_release_expiry_timer(self):
+        with mock.patch('seriald_core.file_transfer.threading.Timer') as timer_factory:
+            timers = []
+
+            def make_timer(*args, **kwargs):
+                timer = mock.Mock()
+                timers.append(timer)
+                return timer
+
+            timer_factory.side_effect = make_timer
+            self.upload(self.root / 'complete', b'')
+            timers[0].cancel.assert_called_once()
+            self.assertIsNone(self.transfer._expiry_timer)
+            state = self.transfer.start('upload', str(self.root / 'abort'),
+                                        self.device.connection_id, size=0)
+            timer = self.transfer._expiry_timer
+            self.transfer.abort(state['id'], self.device.connection_id)
+            timer.cancel.assert_called_once()
+            self.assertIsNone(self.transfer._expiry_timer)
+            self.assertFalse(self.transfer.active)
+
+    def test_idle_timer_reschedules_then_expires_and_releases_reservation(self):
+        with mock.patch('seriald_core.file_transfer.threading.Timer') as factory:
+            factory.side_effect = lambda *args, **kwargs: mock.Mock()
+            state = self.transfer.start('upload', str(self.root / 'expire'),
+                                        self.device.connection_id, size=0)
+            original = self.transfer._expiry_timer
+            self.transfer._expire(state['id'])
+            replacement = self.transfer._expiry_timer
+            original.cancel.assert_called_once()
+            self.assertIsNot(original, replacement)
+            self.transfer.state['last'] -= 601
+            self.transfer._expire(state['id'])
+            replacement.cancel.assert_called_once()
+            self.assertIsNone(self.transfer._expiry_timer)
+            self.assertFalse(self.transfer.active)
+            self.assertFalse(list(self.root.glob('*.part')))
+
+    def test_stale_expiry_callback_cannot_cancel_replacement_transfer(self):
+        with mock.patch('seriald_core.file_transfer.threading.Timer') as factory:
+            factory.side_effect = lambda *args, **kwargs: mock.Mock()
+            first = self.transfer.start('upload', str(self.root / 'first'),
+                                        self.device.connection_id, size=0)
+            self.transfer.abort(first['id'], self.device.connection_id)
+            second = self.transfer.start('upload', str(self.root / 'second'),
+                                         self.device.connection_id, size=0)
+            timer = self.transfer._expiry_timer
+            self.transfer._expire(first['id'])
+            self.assertEqual(self.transfer.state['id'], second['id'])
+            self.assertIs(self.transfer._expiry_timer, timer)
+            timer.cancel.assert_not_called()
+            self.transfer.abort(second['id'], self.device.connection_id)
+
     def test_result_field_follows_echoed_batch_command(self):
         output = 'SD_RC=%s\nSD_SIZE=%s\n\x1b[?2004l\rSD_RC=0\r\nSD_SIZE=30720\x13\n'
         self.assertEqual(_field(output, 'SD_RC'), '0')

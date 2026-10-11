@@ -83,3 +83,8 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   remaining Linux short writes. Tests exercise independent boards, deadlines,
   generation/stop-event replacement, provisioning cancellation, HTTP ownership
   and upload cancellation without automatic recovery. Task/UI integration remains.
+- Transfer lifecycle: completion, abort and idle expiry cancel the owned timer;
+  stale expiry callbacks cannot release a newer transfer. All 316 backend tests
+  pass, plus 51 frontend isolation checks, sharing checks and real-browser demo
+  input/SSE/archive checks. Windows build-script syntax parses locally; native
+  Windows execution and hosted CI remain unverified.
