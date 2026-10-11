@@ -1,6 +1,6 @@
 """Application actions shared by protocol adapters; no HTTP or global manager."""
-from dataclasses import dataclass
 import time
+from .results import ActionResult, response
 
 from .config import RESCUE_BIN
 from .transport import try_rescue
@@ -24,21 +24,6 @@ def capabilities():
     })
 
 
-@dataclass(frozen=True)
-class ActionResult:
-    status: int
-    payload: dict
-
-
-def response(status, payload):
-    if status >= 400 or payload.get('ok') is False:
-        payload = dict(payload)
-        payload.setdefault('code', {
-            400: 'invalid-argument', 403: 'forbidden', 404: 'not-found',
-            409: 'conflict', 413: 'too-large', 502: 'remote-failure',
-            503: 'unavailable', 504: 'timeout',
-        }.get(status, 'operation-failed'))
-    return ActionResult(status, payload)
 
 
 class DeviceActions:

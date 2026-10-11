@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Extract session/archive queries from HTTP handling and share result/error codes
+  with control authentication. Keep boot partition caches intact when listing;
+  reject archive links, nonregular files and replacement races across readers.
+
 - Separate device write actions from HTTP handling into injected application
   services. Add protocol capabilities and CLI operation status/cancellation;
   action errors expose stable codes while preserving existing response fields.

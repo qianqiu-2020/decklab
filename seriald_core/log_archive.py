@@ -3,6 +3,7 @@ import hashlib
 import os
 import re
 from datetime import datetime
+from .archive_io import open_archive
 
 
 STAMP = re.compile(br'^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)  ')
@@ -74,7 +75,7 @@ def boot_epochs(root, files, cache=None):
             markers = list(cached[1]) if same_file else []
             file_last_stamp = cached[2] if same_file else ''
             resume = cached[3] if same_file else 0
-            with open(path, 'rb') as source:
+            with open_archive(path) as source:
                 source.seek(resume)
                 while True:
                     offset = source.tell()
@@ -148,8 +149,7 @@ def read_epoch(root, epoch):
     data = bytearray()
     for part in epoch['parts']:
         path = os.path.join(root, part['file'])
-        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
-        with os.fdopen(fd, 'rb') as source:
+        with open_archive(path) as source:
             source.seek(part['start'])
             remaining = part['end'] - part['start']
             while remaining:
@@ -176,9 +176,7 @@ def search_epochs(root, epochs, query, offset=0, limit=20):
     for epoch in epochs:
         line_number = 0
         for part in epoch['parts']:
-            fd = os.open(os.path.join(root, part['file']),
-                         os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
-            with os.fdopen(fd, 'rb') as source:
+            with open_archive(os.path.join(root, part['file'])) as source:
                 source.seek(part['start'])
                 remaining = part['end'] - part['start']
                 while remaining > 0:

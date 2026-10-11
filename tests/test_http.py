@@ -371,6 +371,7 @@ class HandlerTests(unittest.TestCase):
         remote.client_address = ('192.0.2.10', 12345)
         remote.do_GET()
         self.assertEqual(remote.send_response.call_args.args[0], 401)
+        self.assertEqual(self.result(remote)[1]['code'], 'unauthorized')
 
     def test_share_link_grants_expiring_browser_cookie_but_cannot_create_more_links(self):
         owner = self.control_handler('/api/share-link')

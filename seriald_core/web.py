@@ -13,9 +13,11 @@ from .devices import Manager
 from .storage import IdentityError
 from .httpd import BoundedThreadingTCPServer as BoundedThreadingServer
 from .log_archive import read_epoch, search_epochs
-from .boot_compare import MAX_BOOT_BYTES, compare_boots
+from .boot_compare import compare_boots
 from .actions import DeviceActions, capabilities
+from .queries import ArchiveQueries, ArchiveDownload, SessionQueries, open_archive
 from . import __version__
+from .results import response as api_response
 
 MGR = Manager()
 STARTED = time.time()
@@ -75,6 +77,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _json(self, code, payload):
+        payload = api_response(code, payload).payload
         if getattr(self, 'response_key', None):
             payload = dict(payload, key=self.response_key)
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
@@ -93,11 +96,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return None
         return device
 
+    def _archives(self):
+        return ArchiveQueries(MGR, log_root=LOG_ROOT, reader=read_epoch,
+                              searcher=search_epochs, comparator=compare_boots)
+
     def _download_log(self, path, name):
         """Stream one validated regular archive file without loading it into RAM."""
         try:
-            fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
-            source = os.fdopen(fd, 'rb')
+            source = open_archive(path)
         except OSError:
             return self._json(404, {'error': 'log unavailable'})
         with source:
@@ -159,170 +165,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(result.status, result.payload)
 
         if route == '/api/boot-compare':
-            selected = []
-            for side in ('left', 'right'):
-                key = (q.get(side + '_key') or [''])[0]
-                serial = (q.get(side + '_serial') or [''])[0]
-                boot_id = (q.get(side + '_id') or [''])[0]
-                device = MGR.resolve(key) if key else None
-                if not device or not serial or device.serial != serial:
-                    return self._json(404, {'error': '%s device unavailable' % side})
-                boot = next((item for item in device.boot_epochs() if item['id'] == boot_id), None)
-                if not boot:
-                    return self._json(404, {'error': '%s boot unavailable' % side})
-                if boot['size'] > MAX_BOOT_BYTES:
-                    return self._json(413, {'error': '%s boot exceeds 4 MiB' % side})
-                selected.append((device, boot))
-            try:
-                data = [read_epoch(device.stable_dir(), boot) for device, boot in selected]
-                comparison = compare_boots(*data)
-            except OSError:
-                return self._json(404, {'error': 'boot log unavailable'})
-            except ValueError as error:
-                return self._json(413, {'error': str(error)})
-            comparison['left'] = {'key': selected[0][0].key, 'serial': selected[0][0].serial,
-                                  'boot': {k: v for k, v in selected[0][1].items() if k != 'parts'}}
-            comparison['right'] = {'key': selected[1][0].key, 'serial': selected[1][0].serial,
-                                   'boot': {k: v for k, v in selected[1][1].items() if k != 'parts'}}
-            return self._json(200, comparison)
+            result = self._archives().compare({key: values[0] for key, values in q.items()})
+            return self._json(result.status, result.payload)
 
-        if route == '/api/serial':
-            d = self._dev(q)
-            if not d:
+        if route in ('/api/serial', '/api/session', '/api/sessions'):
+            device = self._dev(q)
+            if not device:
                 return self._json(404, {'error': 'no such device'})
-            try:
-                off = int((q.get('off') or ['0'])[0] or 0)
-                if off < 0:
-                    raise ValueError
-            except ValueError:
-                return self._json(400, {'error': 'bad offset'})
-            new_off, data, alive = d.read(off)
-            return self._json(200, {'key': d.key, 'dev': d.dev, 'off': new_off,
-                                    'alive': alive, 'data_b64': base64.b64encode(data).decode('ascii'),
-                                    'data': data.decode('utf-8', 'replace')})
-
-        if route == '/api/session':
-            d = self._dev(q)
-            if not d:
-                return self._json(404, {'error': 'no such device'})
-            sid = (q.get('sid') or ['serial'])[0]
-            try:
-                off = int((q.get('off') or ['0'])[0] or 0)
-                if off < 0:
-                    raise ValueError
-            except ValueError:
-                return self._json(400, {'error': 'bad offset'})
-            if sid == 'serial':
-                new_off, data, alive = d.read(off)
-                return self._json(200, {'sid': 'serial', 'dev': d.dev, 'off': new_off,
-                                        'alive': alive, 'data_b64': base64.b64encode(data).decode('ascii'),
-                                    'data': data.decode('utf-8', 'replace')})
-            s = d.get_session(sid)
-            if not s:
-                return self._json(404, {'error': 'no such session'})
-            new_off, data, alive = s.read(off)
-            return self._json(200, {'sid': sid, 'ip': s.ip, 'off': new_off,
-                                    'alive': alive, 'data_b64': base64.b64encode(data).decode('ascii'),
-                                    'data': data.decode('utf-8', 'replace')})
+            result = SessionQueries().execute(route.removeprefix('/api/'),
+                                              {key: values[0] for key, values in q.items()}, device)
+            return self._json(result.status, result.payload)
 
         if route == '/api/session-events':
             return self._session_events(q)
 
-        if route == '/api/sessions':
-            d = self._dev(q)
-            if not d:
-                return self._json(404, {'error': 'no such device'})
-            out = [{'sid': 'serial', 'kind': 'serial', 'dev': d.dev,
-                    'alive': d.fd is not None}]
-            out += d.list_sessions()
-            return self._json(200, {'sessions': out, 'label': d.label})
-
         if route in ('/api/logs', '/api/log', '/api/boot-log', '/api/boot-search', '/api/activity', '/api/commands'):
-            d = self._dev(q)
-            if not d:
+            device = self._dev(q)
+            if not device:
                 return self._json(404, {'error': 'no such device'})
-            if route == '/api/activity':
-                try:
-                    legacy_offset = (q.get('offset') or ['0'])[0]
-                    session_offset = int((q.get('session_offset') or [legacy_offset])[0])
-                    event_offset = int((q.get('event_offset') or ['0'])[0])
-                    limit = int((q.get('limit') or ['50'])[0])
-                    if session_offset < 0 or event_offset < 0 or not 1 <= limit <= 50:
-                        raise ValueError
-                except ValueError:
-                    return self._json(400, {'error': 'bad offset'})
-                history = MGR.store.sessions(d.serial, session_offset, limit) if d.serial else []
-                events = MGR.store.visible_events(d.serial, event_offset, limit) if d.serial else []
-                return self._json(200, {
-                    'sessions': history, 'session_offset': session_offset,
-                    'session_total': MGR.store.session_count(d.serial) if d.serial else 0,
-                    'events': events, 'event_offset': event_offset,
-                    'event_total': MGR.store.visible_event_count(d.serial) if d.serial else 0,
-                    # Keep old clients useful while they migrate to independent pagers.
-                    'next_offset': session_offset + len(history)})
-            if route == '/api/commands':
-                commands = MGR.store.commands(d.serial, 20) if d.serial else []
-                return self._json(200, {'commands': commands})
-            files = d.log_files()
-            if route == '/api/logs':
-                archive = os.path.relpath(d.stable_dir(), LOG_ROOT)
-                boots = d.boot_epochs(files)
-                for boot in boots:
-                    boot.pop('parts', None)
-                return self._json(200, {'label': d.label, 'serial': d.serial,
-                                        'archive': archive, 'files': files, 'boots': boots})
-            if route == '/api/boot-search':
-                query = (q.get('q') or [''])[0].strip()
-                try:
-                    offset = int((q.get('offset') or ['0'])[0])
-                    limit = int((q.get('limit') or ['20'])[0])
-                    if not query or len(query) > 200 or offset < 0 or not 1 <= limit <= 50:
-                        raise ValueError
-                except ValueError:
-                    return self._json(400, {'error': '请输入 1–200 字符的关键词，分页参数必须有效'})
-                try:
-                    result = search_epochs(d.stable_dir(), d.boot_epochs(files), query, offset, limit)
-                except OSError:
-                    return self._json(404, {'error': '启动日志不可用，请刷新后重试'})
-                result.update({'query': query, 'serial': d.serial, 'label': d.label})
-                return self._json(200, result)
-            if route == '/api/boot-log':
-                boot_id = (q.get('id') or [''])[0]
-                boot = next((item for item in d.boot_epochs(files) if item['id'] == boot_id), None)
-                if not boot:
-                    return self._json(404, {'error': 'no such boot'})
-                try:
-                    data = read_epoch(d.stable_dir(), boot)
-                except OSError:
-                    return self._json(404, {'error': 'boot log unavailable'})
-                return self._json(200, {'id': boot_id, 'data': data.decode('utf-8', 'replace'),
-                    'data_b64': base64.b64encode(data).decode('ascii'), 'start_off': 0,
-                    'off': len(data), 'size': len(data), 'more': False})
-            name = (q.get('file') or [''])[0]
-            if name not in {entry['name'] for entry in files}:
-                return self._json(404, {'error': 'no such log'})
-            path = os.path.join(d.stable_dir(), name)
-            if (q.get('download') or ['0'])[0] == '1':
-                return self._download_log(path, name)
-            try:
-                offset = int((q.get('off') or ['-1'])[0])
-                if offset < -1:
-                    raise ValueError
-                full = (q.get('full') or ['0'])[0] == '1'
-                # Open only regular files inside the selected board's directory, no symlink traversal.
-                fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
-                with os.fdopen(fd, 'rb') as source:
-                    size = os.fstat(source.fileno()).st_size
-                    start = (0 if full else max(0, size - 65536)) if offset == -1 else min(offset, size)
-                    source.seek(start)
-                    data = source.read() if full else source.read(65536)
-                return self._json(200, {'file': name, 'data': data.decode('utf-8', 'replace'),
-                    'data_b64': base64.b64encode(data).decode('ascii'), 'start_off': start,
-                    'off': start + len(data), 'size': size, 'more': start + len(data) < size})
-            except ValueError:
-                return self._json(400, {'error': 'bad offset'})
-            except OSError:
-                return self._json(404, {'error': 'log unavailable'})
+            result = self._archives().execute(route.removeprefix('/api/'),
+                                               {key: values[0] for key, values in q.items()}, device)
+            if isinstance(result, ArchiveDownload):
+                return self._download_log(result.path, result.name)
+            return self._json(result.status, result.payload)
 
         return self._json(404, {'error': 'not found'})
 

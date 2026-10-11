@@ -20,6 +20,7 @@ from .config import AUTH_TOKEN, BASE, SOCKET, STATIC
 from .agent_grants import AgentGrantStore
 from .httpd import BoundedThreadingTCPServer
 from . import __version__
+from .results import response as api_response
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -82,6 +83,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         return super().guess_type(path)
 
     def _json(self, code, payload):
+        payload = api_response(code, payload).payload
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -200,7 +202,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     def _require_auth(self):
         if self._authorized():
             return False
-        body = b'{"error":"authentication required"}'
+        body = b'{"error":"authentication required","code":"unauthorized"}'
         self.send_response(401)
         self.send_header('WWW-Authenticate', 'Basic realm="seriald", charset="UTF-8"')
         self.send_header('Content-Type', 'application/json')

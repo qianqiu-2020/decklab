@@ -71,6 +71,9 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/schema.py` | 数据库版本、升级前 WAL 快照、事务迁移与回滚 |
 | `seriald_core/web.py` | HTTP 参数校验、API、静态文件 |
 | `seriald_core/actions.py` | 注入 Manager 的设备写操作应用服务、错误码与能力查询 |
+| `seriald_core/queries.py` | 会话游标、归档、启动搜索/对比与历史查询服务 |
+| `seriald_core/results.py` | HTTP/直接调用共用的结果结构与稳定错误码 |
+| `seriald_core/archive_io.py` | 普通日志文件校验、符号链接与替换竞态防护 |
 | `seriald_core/admin.py` | 显式迁移旧目录，不访问硬件 |
 | `static/app.js` / `static/app.css` | 网页行为和样式；`index.html` 仅布局 |
 | `serialctl.py` | 无第三方依赖的 agent 客户端 |
@@ -125,7 +128,10 @@ HTTP 写操作委托给 `DeviceActions(manager)`：输入、识别、换板、�
 传输及取消共用同一编排、actor scope 和审计。服务返回 `ActionResult(status, payload)`，
 不依赖 HTTP handler 或全局 Manager；HTTP 层负责解析请求、设备选择和响应 key 标注，
 control 层仍负责认证、授权范围和 actor 重写。独立 CLI 调用相同 HTTP 接口。
-写操作错误保留原有 error/ok 字段并增加稳定 code；读取和归档服务尚未完成拆分。
+会话与归档读取委托给 `SessionQueries` 和 `ArchiveQueries`，直接调用使用普通标量参数，
+不依赖 HTTP 查询字符串。下载返回已选定档案的描述，由 HTTP 层流式发送。
+归档列表复制启动摘要，不删除内部缓存中的分段信息；启动读取、搜索和下载共用普通文件校验。
+错误保留原有 error/ok 字段并增加稳定 code；control 的认证及代理错误也使用同一错误码约定。
 `GET /api/capabilities` 不访问开发板，报告协议能力及使用条件，不报告密码或设备清单。
 
 每个串口只有一个采集线程；网页和 CLI 读取同一个缓存。写通路不读串口、不修改 termios。

@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from seriald_core.log_archive import boot_epochs, read_epoch, search_epochs
+from seriald_core.archive_io import open_archive
 
 
 class LogArchiveTests(unittest.TestCase):
@@ -131,7 +132,7 @@ class LogArchiveTests(unittest.TestCase):
         path.write_bytes(b'2026-09-21 08:00:00  U-Boot 2024.10\n')
         cache = {}
         self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 1)
-        with mock.patch('builtins.open', side_effect=AssertionError('archive rescanned')):
+        with mock.patch('seriald_core.log_archive.open_archive', side_effect=AssertionError('archive rescanned')):
             self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 1)
         with path.open('ab') as output:
             output.write(b'2026-09-21 09:00:00  Linux version 6.18.0\n')
@@ -146,10 +147,10 @@ class LogArchiveTests(unittest.TestCase):
         with path.open('ab') as output:
             output.write(b'2026-09-21 09:00:00  Linux version 6.18.0\n')
         seeks = []
-        real_open = open
+        real_open = open_archive
         class TrackedFile:
             def __init__(self, filename):
-                self.source = real_open(filename, 'rb')
+                self.source = real_open(filename)
             def __enter__(self):
                 return self
             def __exit__(self, *args):
@@ -161,7 +162,7 @@ class LogArchiveTests(unittest.TestCase):
                 return self.source.tell()
             def readline(self):
                 return self.source.readline()
-        with mock.patch('seriald_core.log_archive.open', side_effect=lambda filename, mode: TrackedFile(filename), create=True):
+        with mock.patch('seriald_core.log_archive.open_archive', side_effect=TrackedFile):
             self.assertEqual(len(boot_epochs(str(self.root), self.files(), cache=cache)), 2)
         self.assertEqual(seeks, [previous_end])
         self.assertGreater(cache[path.name][3], 200000)

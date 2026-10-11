@@ -14,7 +14,7 @@ Do not change an installed service or use live boards during regression tests.
 | Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented; broader transaction integration continues |
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API implemented; task/UI integration pending |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
-| Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Write actions implemented; read/archive services pending |
+| Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Device/read services implemented; final API audit pending |
 | Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Pending |
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Pending |
@@ -105,3 +105,12 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   Full regression passed 334 tests before one final CLI test-only addition; the
   final 26-test CLI suite, frontend/share suites and demo browser pass. Read/archive
   application services and task/UI integration remain pending.
+- Read/query services: SessionQueries and ArchiveQueries cover cursor reads,
+  session lists, archive/history queries, boot search and cross-board comparison.
+  Direct/HTTP contracts use real temporary archives. Boot summaries preserve
+  cached partition metadata; shared archive IO rejects links, nonregular files
+  and replaced file identities for indexing, preview, search and download.
+  Control and collector JSON errors share codes, including authentication.
+  All 345 backend tests, frontend/share suites and the real demo browser pass.
+  SSE framing and streaming downloads remain HTTP adapter responsibilities;
+  final API documentation/audit and task/UI work remain pending.
