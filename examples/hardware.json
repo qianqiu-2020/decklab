@@ -16,7 +16,8 @@
       },
       "flash": {
         "argv": ["/usr/local/bin/board-flash", "--serial", "{serial}", "--image", "/data/images/current.img"],
-        "timeout": 600
+        "timeout": 600,
+        "exclusive_serial": false
       }
     }
   }

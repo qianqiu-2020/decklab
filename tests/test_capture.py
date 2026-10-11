@@ -361,7 +361,9 @@ class ManagerTests(DeviceFixture):
         self.assertEqual(open_reader.call_count, 1)
         self.assertEqual(read.call_count, 1)
         close.assert_called_once_with(98765)
-        wait.assert_called_once_with(1.0)
+        wait.assert_called_once()
+        self.assertGreater(wait.call_args.args[0], 0)
+        self.assertLessEqual(wait.call_args.args[0], 0.1)
         self.assertIsNone(device.fd)
         self.assertTrue(device.dead)
 

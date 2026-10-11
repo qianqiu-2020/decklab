@@ -16,7 +16,9 @@ No configured action runs on service startup, probing or reconnection.
 
 Each action has `argv` (an absolute executable and up to 63 arguments), an
 integer `timeout` of 1–3600 seconds (default 60), and optional `allow_agent`
-(default false). There is no shell expansion. Argument placeholders are limited
+(default false). Optional `exclusive_serial` is a boolean (default false);
+set it to true only for helpers that open the board's current serial port.
+There is no shell expansion. Argument placeholders are limited
 to `{serial}`, `{device}` and `{port}`; clients cannot supply command arguments,
 executables or host image paths. Flash images are selected by host configuration
 or the configured helper. Credentials and environment are not exposed in task
@@ -41,10 +43,17 @@ Independent fixed power commands can operate on an identified offline board.
 Commands using device/port placeholders require those attachment fields.
 Unidentified boards are rejected. All operations pin identity and generation,
 respect input ownership, and acquire the existing console transaction lease;
-a file transfer cannot be interrupted by starting a helper. Serial capture and
-other devices/SSH readers remain active. Do not configure helpers that open the
-same serial port while the collector owns it. A serial flasher needing exclusive
-port ownership requires a future explicit collector handoff adapter.
+a file transfer cannot be interrupted by starting a helper. Other devices and SSH readers remain active. Without `exclusive_serial`,
+serial capture also remains active and the helper must not open that port.
+With `exclusive_serial: true`, the task waits for the existing reader to close
+its handle before starting the helper. Discovery cannot reopen that attachment
+while the helper owns it. Once helper process-tree cleanup succeeds, capture
+resumes on the same connection and archive without flushing pending bytes.
+The log records the capture gap; output during exclusive ownership is not
+recorded by DeckLab. Disconnect, changed host attachment or service shutdown
+prevents resuming the old reader. If helper cleanup fails, the port stays paused;
+confirm the external tool is stopped before restarting the collector. This
+mode requires an active collector, so it cannot flash a known offline board.
 
 Tasks record progress and exit status/duration. Operation history records start,
 completion or stop. Helper stdout/stderr is discarded rather than exposing host

@@ -100,6 +100,32 @@ class HardwareTaskTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertTrue(marker.exists())
 
+    def test_exclusive_command_uses_handoff_inside_task_lease(self):
+        from contextlib import contextmanager
+        self.configure('pass')
+        self.manager.hardware = HardwareBook({'boards': {self.device.serial: {'reset': {
+            'argv': [sys.executable, '-c', 'pass'], 'exclusive_serial': True}}}})
+        phases = []
+        @contextmanager
+        def handoff(device, check):
+            check()
+            self.assertIs(device, self.device)
+            self.assertIsNotNone(device.transactions._active)
+            phases.append('released')
+            yield {'resume': True}
+            phases.append('resumed')
+        def run(argv, timeout, check, cleanup_failed):
+            check()
+            self.assertEqual(phases, ['released'])
+            self.assertTrue(callable(cleanup_failed))
+            phases.append('cleaned')
+            return {'exit_code': 0, 'duration_ms': 1}
+        with mock.patch.object(self.manager, 'exclusive_serial', side_effect=handoff), \
+                mock.patch('seriald_core.hardware.run_command', side_effect=run):
+            task = self.finish(self.start())
+        self.assertEqual(phases, ['released', 'cleaned', 'resumed'])
+        self.assertEqual(task['state'], 'completed')
+
     def test_configured_helper_audits_without_persisting_command_or_output(self):
         output = self.root / 'args.json'
         self.configure('import json,sys\nfrom pathlib import Path\nPath(%r).write_text(json.dumps(sys.argv[1:]))\n'

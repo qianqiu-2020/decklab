@@ -99,6 +99,7 @@ class Device:
         self.boot_index_lock = threading.Lock()
         self.boot_index_cache = {}
         self.stop = threading.Event()
+        self.capture_paused = threading.Event()
         self.thread = None
         self.identity = None
         self.present = False
@@ -894,6 +895,7 @@ class Device:
                 'hostname': self.hostname, 'alive': self.fd is not None and self.present,
                 'bytes': self.bytes, 'last_rx': self.last_rx,
                 'last_health_check': self.last_health_check, 'capture_started': self.started,
+                'capture_paused': self.capture_paused.is_set(),
                 'last_line': tail, 'log': os.path.basename(self.logpath or ''),
                 'log_error': self.log_error,
                 'probes': self.probed, 'fail_count': self.fail_count,

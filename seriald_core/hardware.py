@@ -1,4 +1,5 @@
 """Explicit host-command hardware adapters; never discover or guess a target."""
+from contextlib import nullcontext
 from dataclasses import dataclass
 import json
 import os
@@ -52,6 +53,7 @@ class HardwareCommand:
     argv: tuple
     timeout: int = 60
     allow_agent: bool = False
+    exclusive_serial: bool = False
 
     def __post_init__(self):
         if (not isinstance(self.argv, tuple) or not 1 <= len(self.argv) <= 64
@@ -60,6 +62,8 @@ class HardwareCommand:
             raise ValueError('hardware argv requires an absolute executable and bounded string arguments')
         if type(self.timeout) is not int or not 1 <= self.timeout <= 3600:
             raise ValueError('hardware timeout must be an integer between 1 and 3600 seconds')
+        if type(self.exclusive_serial) is not bool:
+            raise ValueError('hardware exclusive_serial must be boolean')
         if type(self.allow_agent) is not bool:
             raise ValueError('hardware allow_agent must be boolean')
         for index, arg in enumerate(self.argv):
@@ -88,11 +92,12 @@ class HardwareBook:
                 raise ValueError('invalid hardware action')
             self.boards[serial] = {}
             for action, values in actions.items():
-                if (not isinstance(values, dict) or set(values) - {'argv', 'timeout', 'allow_agent'}
+                if (not isinstance(values, dict) or set(values) - {'argv', 'timeout', 'allow_agent', 'exclusive_serial'}
                         or not isinstance(values.get('argv'), list)):
                     raise ValueError('invalid hardware command configuration')
                 self.boards[serial][action] = HardwareCommand(tuple(values['argv']), values.get('timeout', 60),
-                                                            values.get('allow_agent', False))
+                                                            values.get('allow_agent', False),
+                                                            values.get('exclusive_serial', False))
 
     @classmethod
     def from_env(cls):
@@ -121,7 +126,7 @@ class HardwareBook:
                 'supported': os.name in ('posix', 'nt'), 'adapter': host_adapter()}
 
 
-def run_command(argv, timeout, check):
+def run_command(argv, timeout, check, cleanup_failed=None):
     """Bound execution and terminate the whole owned group, including descendants."""
     check()
     started = time.monotonic()
@@ -137,7 +142,12 @@ def run_command(argv, timeout, check):
             raise TaskError('hardware helper exited with status %s; operation may be partial' % process.returncode, 502)
         return {'exit_code': process.returncode, 'duration_ms': round((time.monotonic() - started) * 1000)}
     finally:
-        process.close()
+        try:
+            process.close()
+        except BaseException:
+            if cleanup_failed is not None:
+                cleanup_failed()
+            raise
 
 
 class HardwareOperation:
@@ -172,7 +182,11 @@ class HardwareOperation:
             self.manager.store.event(self.serial, self.actor, 'hardware-start', self.action)
             context.progress(0, 1, self.action)
             try:
-                result = run_command(self.argv, self.command.timeout, check)
+                handoff = (self.manager.exclusive_serial(device, check)
+                           if self.command.exclusive_serial else nullcontext())
+                with handoff as permit:
+                    result = run_command(self.argv, self.command.timeout, check,
+                                         (lambda: permit.update(resume=False)) if permit is not None else None)
                 check()
                 self.manager.store.event(self.serial, self.actor, 'hardware-complete', self.action)
                 context.progress(1, 1, self.action)

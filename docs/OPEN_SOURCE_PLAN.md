@@ -20,7 +20,7 @@ Do not change an installed service or use live boards during regression tests.
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
 | Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI and browser transfers implemented; CLI result retrieval implemented; CLI orchestration consolidated; final audit pending |
-| Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Linux/Windows task adapters implemented; native Windows and exclusive-serial handoff pending |
+| Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Linux/Windows task adapters and exclusive-serial handoff implemented; native Windows verification pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
 Implementation order: release foundations and configuration, demo, core/service
@@ -381,3 +381,22 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   omitted. Syntax/whitespace checks pass. No installed service or real helper
   was invoked. Exclusive UART flashing handoff and actual Windows/release
   verification remain required.
+
+- Exclusive UART helpers: explicit `exclusive_serial` configuration pauses only
+  the selected collector under its console lease, joins the old reader and
+  verifies handle release before helper launch. Linux and Windows share the
+  handoff; discovery cannot reopen a paused attachment. Successful process-tree
+  cleanup resumes the same connection/archive without flushing input. Cancel,
+  changed attachment, host shutdown and cleanup failure have separate recovery
+  paths; unproven helper cleanup quarantines the port until operator inspection
+  and collector restart. Snapshot exposes capture_paused and logs record the gap.
+  Native Windows hardware/installation remains unverified.
+
+  Verification: 496 backend checks pass (three native Windows Job tests
+  skipped on Linux), plus 74 frontend isolation checks and sharing tests.
+  Eight handoff regressions exercise real Linux/Windows reader loops with fake
+  handles, discovery while paused, retained identity/log ownership, cancellation,
+  disconnection, changed attachment, backoff wakeup and cleanup quarantine; a
+  hardware task fixture verifies lease/release/helper-cleanup/resume ordering.
+  Windows build runs the handoff suite. Syntax and whitespace checks pass.
+  No live port, board, installed service or real flashing tool was used.

@@ -68,11 +68,11 @@ class WindowsManager(Manager):
 
     def _capture(self, device):
         try:
-            if device.stop.is_set() or not self._matches(device):
+            if device.stop.is_set() or device.capture_paused.is_set() or not self._matches(device):
                 return
             try:
                 with device.write_lock:
-                    if device.stop.is_set() or not self._matches(device):
+                    if device.stop.is_set() or device.capture_paused.is_set() or not self._matches(device):
                         return
                     with device.cv:
                         device.console_tail = ''
@@ -87,7 +87,7 @@ class WindowsManager(Manager):
                 device.fail_count += 1
                 device._say('打不开 %s: %s' % (device.dev, error))
                 return
-            while not device.stop.is_set():
+            while not device.stop.is_set() and not device.capture_paused.is_set():
                 try:
                     data = device.fd.read(min(max(device.fd.in_waiting, 1), 65536))
                     if data:
@@ -102,10 +102,11 @@ class WindowsManager(Manager):
                     device._say('%s 读取中断: %s' % (device.dev, error))
                     break
         finally:
-            device.stop.set()
             self._close_reader(device)
-            device.dead = True
-            device.present = False
-            device.close_log()
-            if self.store and device.serial:
-                device.record['last_seen'] = self.store.touch(device.serial)
+            if not device.capture_paused.is_set() or device.stop.is_set():
+                device.stop.set()
+                device.dead = True
+                device.present = False
+                device.close_log()
+                if self.store and device.serial:
+                    device.record['last_seen'] = self.store.touch(device.serial)

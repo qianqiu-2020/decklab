@@ -1,6 +1,6 @@
 """Device discovery, collector ownership and persistent identity binding."""
 import errno
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import os
 import select
 import stat
@@ -23,7 +23,7 @@ from .profiles import ProfileBook
 from .models import Board
 from .session_base import relocate_session_logs
 from .maintenance import LogMaintenance, MaintenancePolicy
-from .tasks import TaskManager
+from .tasks import TaskManager, TaskError
 from .transfer_artifacts import TransferArtifacts
 from .hardware import HardwareBook
 
@@ -275,6 +275,8 @@ class Manager:
             for key, (dev, identity) in found.items():
                 with self.lock:
                     d = self.devices.get(key)
+                if d is not None and d.capture_paused.is_set():
+                    continue
                 if d is not None and (d.stop.is_set() or d.identity != identity):
                     if d.thread and d.thread.is_alive():
                         continue
@@ -369,11 +371,11 @@ class Manager:
 
     def _capture(self, d):
         try:
-            while not d.stop.is_set() and self._matches(d):
+            while not d.stop.is_set() and not d.capture_paused.is_set() and self._matches(d):
                 if d.fd is None:
                     try:
                         with d.write_lock:
-                            if d.stop.is_set() or not self._matches(d):
+                            if d.stop.is_set() or d.capture_paused.is_set() or not self._matches(d):
                                 break
                             with d.cv:
                                 d.console_tail = ''
@@ -392,7 +394,7 @@ class Manager:
                         if d.fail_count == 1 or time.time() - d.fail_logged > 60:
                             d.fail_logged = time.time()
                             d._say('打不开 %s: %s (退避 %ds 重试)' % (d.dev, e, delay))
-                        d.stop.wait(delay)
+                        self._capture_wait(d, delay)
                         continue
                 try:
                     ready, _, _ = select.select([d.fd], [], [], 0.5)
@@ -415,17 +417,70 @@ class Manager:
                 except (OSError, ValueError, termios.error) as e:
                     self._close_reader(d)
                     d._say('%s 读取中断: %s' % (d.dev, e))
-                    d.stop.wait(1.0)
+                    self._capture_wait(d, 1.0)
                     # 断线后的重开也属于新连接;交回 scan 等旧操作退出,不能原地换 fd。
                     break
         finally:
-            d.stop.set()
             self._close_reader(d)
-            d.dead = True
-            d.present = False
-            d.close_log()
-            if self.store and d.serial:
-                d.record['last_seen'] = self.store.touch(d.serial)
+            if not d.capture_paused.is_set() or d.stop.is_set():
+                d.stop.set()
+                d.dead = True
+                d.present = False
+                d.close_log()
+                if self.store and d.serial:
+                    d.record['last_seen'] = self.store.touch(d.serial)
+
+    @staticmethod
+    def _capture_wait(device, seconds):
+        deadline = time.monotonic() + seconds
+        while not device.stop.is_set() and not device.capture_paused.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            device.stop.wait(min(remaining, 0.1))
+
+    @contextmanager
+    def exclusive_serial(self, device, check):
+        """Caller holds the console lease; never reopen before helper cleanup."""
+        with self.scan_lock:
+            check()
+            if (self.stopping.is_set() or device.stop.is_set() or not device.present
+                    or not device.thread or not device.thread.is_alive()):
+                raise TaskError('exclusive serial requires an active collector', 409)
+            device.capture_paused.set()
+            thread, stop = device.thread, device.stop
+        permit = {'resume': True}
+        try:
+            deadline = time.monotonic() + 5
+            while thread.is_alive():
+                check()
+                if time.monotonic() >= deadline:
+                    raise TaskError('collector did not release serial port', 504)
+                thread.join(timeout=0.05)
+            check()
+            if device.fd is not None:
+                raise TaskError('collector serial handle is still open', 409)
+            device._say('seriald 串口交给外部工具；此期间不采集输出')
+            yield permit
+        finally:
+            with self.scan_lock:
+                if permit['resume']:
+                    device.capture_paused.clear()
+                else:
+                    device._say('seriald 外部工具清理失败；串口保持暂停，请确认工具退出后重启采集器')
+                # A late/changed attachment is left for normal discovery. Never
+                # start a second reader while the old one is still exiting.
+                if (permit['resume'] and not self.stopping.is_set() and device.stop is stop and not stop.is_set()
+                        and self.devices.get(device.by_path) is device and self._matches(device)):
+                    if not thread.is_alive():
+                        device._say('seriald 外部工具结束，恢复串口采集')
+                        device.thread = threading.Thread(target=self._capture, args=(device,), daemon=True)
+                        device.thread.start()
+                elif permit['resume'] and not thread.is_alive():
+                    device.stop.set()
+                    device.dead = True
+                    device.present = False
+                    device.close_log()
 
     def close(self):
         self.stopping.set()
