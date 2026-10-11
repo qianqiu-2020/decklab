@@ -40,6 +40,16 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+Linux hardware cleanup now waits for the root within a bounded deadline and
+checks remaining owned process/thread states before exclusive UART resume.
+Local tests verify root-before-child exit, unaffected unrelated groups, zombie
+leaders with live threads, unreadable/invisible metadata and cleanup timeouts.
+The complete suite passes 522 backend tests (three native Windows tests skipped),
+74 frontend isolation checks and sharing checks. Existing handoff tests verify
+cleanup failures leave the UART paused. The adapter requires foreground helpers
+that preserve group/namespace/credential ownership; it does not contain detached
+descendants. Native Windows process ownership remains unverified.
+
 The API/configuration review now includes all 34 host variable names and 54
 public route names found in the runtime sources. `check_public_docs.py` checks
 that inventory offline without importing hardware modules and is required by

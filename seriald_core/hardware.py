@@ -6,6 +6,7 @@ import os
 import signal
 import string
 import subprocess
+import sys
 import time
 
 from .profiles import _unique_object
@@ -36,7 +37,62 @@ class PosixProcess:
             os.killpg(self.process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        self.process.wait()
+        deadline = time.monotonic() + 3
+        try:
+            self.process.wait(timeout=3)
+        except subprocess.TimeoutExpired as error:
+            raise OSError('POSIX helper root process did not stop') from error
+        while self._group_running():
+            if time.monotonic() >= deadline:
+                raise OSError('POSIX helper process group did not stop')
+            time.sleep(0.01)
+
+    def _group_running(self):
+        """Prove the owned group has no live members before releasing UART."""
+        try:
+            os.killpg(self.process.pid, 0)
+        except ProcessLookupError:
+            return False
+        if not sys.platform.startswith('linux'):
+            return True
+        # Orphan zombies can keep a group ID present until their parent reaps
+        # them. Check threads below before treating them as exited. Fields after (comm) are
+        # state, ppid, pgrp; comm itself can contain spaces and parentheses.
+        found = False
+        with os.scandir('/proc') as entries:
+            for entry in entries:
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    with open(os.path.join(entry.path, 'stat'), encoding='utf-8', errors='replace') as source:
+                        fields = source.read().rpartition(')')[2].split()
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                try:
+                    group = int(fields[2])
+                    state = fields[0]
+                except (ValueError, IndexError) as error:
+                    raise OSError('Unable to verify helper process group') from error
+                if group == self.process.pid:
+                    found = True
+                    if state not in ('Z', 'X'):
+                        return True
+                    # A zombie thread-group leader can still have live threads
+                    # (for example after pthread_exit); those may hold UART fds.
+                    try:
+                        with os.scandir(os.path.join(entry.path, 'task')) as threads:
+                            for thread in threads:
+                                try:
+                                    with open(os.path.join(thread.path, 'stat'), encoding='utf-8', errors='replace') as source:
+                                        thread_state = source.read().rpartition(')')[2].split()[0]
+                                except (FileNotFoundError, ProcessLookupError):
+                                    continue
+                                if thread_state not in ('Z', 'X'):
+                                    return True
+                    except (FileNotFoundError, ProcessLookupError):
+                        pass
+        # An existing but invisible group is not proof of completed cleanup.
+        return not found
 
 
 def helper_process(argv):

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Bound POSIX hardware-helper cleanup and verify process-group/thread exit before
+  restoring exclusive UART capture, including successful root-before-child exit.
+  Failed verification keeps the attachment paused for operator recovery.
 - Document host/authentication settings and web-issued agent restrictions,
   including SSH provisioning behavior. Check public route/environment name
   coverage offline during CI and Windows builds without importing collectors.

@@ -69,6 +69,22 @@ Validate with simulation first. The regression suite launches only local Python
 fixtures in temporary directories; it does not invoke relays, real flashers,
 serial readers or recovery helpers.
 
+## Linux process ownership
+
+The helper starts in a new session/process group. Cleanup sends SIGKILL to that
+group, waits for the root with a three-second limit, then verifies remaining
+members have exited before allowing UART capture to resume. Linux checks `/proc`
+process and thread states, so an unreaped zombie does not prevent recovery but
+a zombie leader with a live thread still does. An unreadable or unobservable
+group is not successful cleanup. Other POSIX hosts require the group to disappear
+within the cleanup deadline; Linux is the supported/tested POSIX host.
+
+Configured helpers must keep children in the owned group and process namespace,
+without daemonizing, changing credentials or hiding members from the collector's
+`/proc` view. A process group is not Windows Job-style containment; detached
+descendants cannot be tracked by this adapter. Use foreground helper modes.
+Normal process-state meanings follow the [Linux proc documentation](https://docs.kernel.org/filesystems/proc.html).
+
 ## Windows process ownership
 
 The Windows adapter uses native Unicode `CreateProcessW` with
