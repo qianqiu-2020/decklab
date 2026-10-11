@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep collector health readable when disk status is unavailable, and snapshot
+  SSH sessions under their registry lock before collecting logging errors.
 - Snapshot board-profile environment defaults and configuration at collector
   startup. Later identity/port selection cannot silently change credentials,
   probing policy or framing; recreate the collector to apply changes.

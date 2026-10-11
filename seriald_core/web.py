@@ -188,14 +188,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(result.status, result.payload)
 
         if route == '/api/health':
-            disk = shutil.disk_usage(LOG_ROOT)
+            storage = disk_status(LOG_ROOT, self.manager.maintenance.policy)
             devices = self.manager.all_devices()
             log_errors = []
             for device in devices:
                 if isinstance(getattr(device, 'log_error', ''), str) and device.log_error:
                     log_errors.append({'key': device.key, 'kind': 'serial', 'error': device.log_error})
-                sessions = getattr(device, 'ssh_sessions', {})
-                for session in (sessions.values() if isinstance(sessions, dict) else ()):
+                with device.sessions_lock:
+                    sessions = device.ssh_sessions
+                    sessions = list(sessions.values()) if isinstance(sessions, dict) else []
+                for session in sessions:
                     if getattr(session, 'log_error', ''):
                         log_errors.append({'key': device.key, 'kind': 'ssh',
                                            'sid': session.sid, 'error': session.log_error})
@@ -206,8 +208,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     'online': sum(bool(d.serial and d.present) for d in devices),
                                     'pending': sum(bool(not d.serial and d.present) for d in devices),
                                     'offline': sum(not d.present for d in devices),
-                                    'disk_total': disk.total, 'disk_free': disk.free,
-                                    'storage': disk_status(LOG_ROOT, self.manager.maintenance.policy),
+                                    'disk_total': storage.get('total', 0), 'disk_free': storage.get('free', 0),
+                                    'storage': storage,
                                     'retention': self.manager.maintenance.snapshot(),
                                     'logging_ok': not log_errors, 'log_errors': log_errors})
 

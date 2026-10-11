@@ -24,6 +24,7 @@ class HandlerTests(unittest.TestCase):
         self.manager = sd.Manager()
         self.manager.store = mock.Mock()
         self.device = mock.Mock(key='board-key', serial='SN1', dev='/fake/ttyUSB0')
+        self.device.sessions_lock = threading.RLock()
         self.device.file_transfer.active = False
         board = Board({'serial': 'SN1', 'label': 'board-key', 'info': {}})
         board.connection = self.device
@@ -514,6 +515,8 @@ class HandlerTests(unittest.TestCase):
         devices = [mock.Mock(serial='SN1', present=True),
                    mock.Mock(serial='', present=True),
                    mock.Mock(serial='SN2', present=False)]
+        for device in devices:
+            device.sessions_lock = threading.RLock()
         handler = self.handler('/api/health')
         with mock.patch.object(self.manager, 'all_devices', return_value=devices), \
                 mock.patch.object(sd.shutil, 'disk_usage',
@@ -538,6 +541,25 @@ class HandlerTests(unittest.TestCase):
         _, payload = self.result(handler)
         self.assertFalse(payload['logging_ok'])
         self.assertEqual([x['kind'] for x in payload['log_errors']], ['serial', 'ssh'])
+
+    def test_health_reports_unavailable_disk_and_snapshots_sessions_under_lock(self):
+        class SessionDirectory(dict):
+            def values(inner):
+                self.assertTrue(self.device.sessions_lock._is_owned())
+                return super().values()
+        self.device.log_error = ''
+        self.device.ssh_sessions = SessionDirectory(
+            ssh1=mock.Mock(sid='ssh1', log_error='disk unavailable'))
+        handler = self.handler('/api/health')
+        with mock.patch.object(sd.shutil, 'disk_usage', side_effect=OSError('missing mount')):
+            handler.do_GET()
+        status, payload = self.result(handler)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['storage'],
+                         {'available': False, 'warning': True, 'reason': 'unavailable'})
+        self.assertEqual((payload['disk_total'], payload['disk_free']), (0, 0))
+        self.assertFalse(payload['logging_ok'])
+        self.assertEqual(payload['log_errors'][0]['sid'], 'ssh1')
 
     def test_logs_list_uses_serial_archive_without_rewriting_files(self):
         self.device.log_files.return_value = [{'name': 'serial-20260919.log', 'size': 123}]

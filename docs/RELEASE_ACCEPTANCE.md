@@ -40,6 +40,19 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+API content review now covers captured-output cursors, archive/history limits,
+SSH session actor permissions, low-level transfer payloads and control sharing
+payloads against web.py, queries.py, actions.py, file_transfer.py and control_server.py.
+API.md documents HTTP-200 operation failures, streaming failure handling, immediate
+cursor-zero snapshots, long-poll behavior, command/search limits, distinct transfer
+and task IDs, transfer idle expiry, grant creation/list limits and revocation cleanup
+confirmation. This review found health aborting on unavailable disks and iterating
+mutable SSH registries without locking; health now returns structured unavailable
+storage and snapshots sessions under their registry lock. HTTP fixtures verify
+both behaviors; all 552 backend tests pass (three native Windows tests skipped),
+and package-document fixtures and route/config name checks pass. Final task and
+artifact content review and native installation/release gates remain outstanding.
+
 The configuration content review groups all 34 runtime environment names into
 host/auth (11), board/serial (13), retention (3), artifacts (6) and helpers (1).
 CONFIGURATION.md and its linked operational guides were checked against config,

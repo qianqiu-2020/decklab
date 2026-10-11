@@ -37,6 +37,9 @@ Errors contain `error` and `code`. Generic codes include `invalid-argument`,
 include `cancelled`, `stale`, `disconnected` and `transfer-busy`. Inspect HTTP
 status as well as JSON: success of an input request does not prove command
 completion, and cancellation is not rollback.
+Some synchronous operations return HTTP 200 with `ok=false` and a failure code;
+check both fields. JSON errors are not guaranteed after a streaming response has
+begun: a truncated download or dropped SSE connection requires client recovery.
 
 ## Discovery and captured output
 
@@ -60,6 +63,16 @@ for split UTF-8 characters. `off` is the position after returned bytes; if
 scrollback. CLI reports this as `gap`. SSE event IDs are byte offsets, with a JSON
 packet in `data:` and comment heartbeats. Reconnect reads do not send board input.
 Use archives for earlier output that no longer fits the live buffer.
+`off=0` returns an immediate buffered snapshot. A cursor at the current end can
+long-poll for up to 15 seconds while the stream is alive; there is no public
+`wait` parameter. `/api/operation` and `/api/hardware` require `key` and support
+expected `serial`, like session routes. `/api/commands` returns at most 20 entries.
+
+`/api/health` returns process responsiveness separately from logging and storage
+status: HTTP 200 and `ok=true` do not imply a healthy board or successful log
+writes. Inspect `logging_ok`, `log_errors` and `storage.warning`. If disk status
+cannot be read, `storage.available=false`, `reason=unavailable` and the legacy
+`disk_total`/`disk_free` fields are zero; zero here is not a capacity measurement.
 
 ## Archives and history
 
@@ -72,7 +85,7 @@ triples, without a separate top-level `key`.
 | `/api/logs` | File list and detected boots with stable IDs |
 | `/api/log` | `file`; default last 64 KiB, or `off` for 64 KiB pages; `full=1` reads the full snapshot, `download=1` streams attachment |
 | `/api/boot-log` | `id` from the boots list; complete currently archived boot, including cross-day parts |
-| `/api/boot-search` | `q`, `offset=0`, `limit=20` (1–50); case-insensitive search across archived boots |
+| `/api/boot-search` | `q` (1–200 characters after trimming), `offset=0`, `limit=20` (1–50); case-insensitive search across archived boots |
 | `/api/activity` | `session_offset=0`, `event_offset=0`, `limit=50` (1–50); independent history pages |
 | `/api/commands` | Recently recorded commands for this board |
 | `/api/boot-compare` | `left_key`, `left_serial`, `left_id`, `right_key`, `right_serial`, `right_id` |
@@ -110,6 +123,11 @@ For long identify/SSH operations, prefer background tasks. Non-web actors reuse
 persistent SSH terminals, but CLI `exec` executes each command in a child `sh -c`.
 It preserves the terminal, not changes made to the child shell's directory or
 variables. Use one command for dependent steps, or interactive session input.
+SSH output can be read by collaborators, but input, resize and close require
+the session's actor or explicit takeover. Resize/close/takeover select an SSH
+`sid`; they do not close or resize the physical serial collector. Root SSH
+authentication-denial recovery follows the configured profile password and
+provisioning policy; different per-request credentials do not trigger provisioning.
 
 ## Tasks, file transfer and sharing
 
@@ -129,6 +147,25 @@ transfer ID, connection ID and byte offsets; new clients should prefer tasks to
 avoid coordinating serial chunks themselves. Hardware task configuration and
 exclusive UART ownership are documented in [HARDWARE_EXTENSIONS.md](HARDWARE_EXTENSIONS.md).
 
+All low-level transfer POSTs include `key`, expected `serial`, `actor`, optional
+human `client_id` and the current `connection_id`. They return HTTP 200 plus
+`ok=true` on success; the transfer ID is separate from a background task ID.
+
+| Suffix under `/api/file-transfer/` | Additional fields / response |
+| --- | --- |
+| `start` | `direction=upload` or `download`, absolute board `path`, upload `size` (nonnegative integer), optional `overwrite=true`; returns `id`, `size`, `offset=0`, `chunk_size`, `batch_size`, `gzip_available` and download `sha256` |
+| `chunk` | `id`, exact integer `offset`, upload `data_b64`; download returns `data_b64`; response `offset` is committed end and `bytes` is this chunk's length |
+| `batch` | Upload only: `id`, exact integer `offset`, `data_b64`; bounded by returned batch size and terminal input-line limits |
+| `finish` | `id`; requires complete data, verifies integrity and commits an upload; returns `path`, `size`, `sha256`, `direction` |
+| `abort` | `id`; releases the operation and attempts remote temporary-file cleanup; returns `aborted=true` |
+
+Offsets advance only on successful responses. Do not blindly replay a chunk
+whose response was lost; this protocol is not the host artifact append protocol.
+An idle low-level transfer expires after ten minutes. Compressed data and framed
+shell commands are handled internally; API `data_b64` represents original bytes.
+Uploads may require smaller chunks when encoded commands exceed the board's
+terminal line limit. Task-based clients handle this adaptation automatically.
+
 Control owns GET `/api/access`, `/api/agent-grants` and POST `/api/agent-share`,
 `/api/agent-revoke`, `/api/share-link`. Agent grants cannot mint further grants.
 Authenticated browser-share recipients can manage agent grants; creating a
@@ -136,6 +173,19 @@ browser share requires the primary credential. A browser device URL locates a
 board but does not restrict platform authorization. Agent tokens can restrict
 access to one serial. See [AGENT_ACCESS.md](AGENT_ACCESS.md) for sharing, revocation
 and command examples; do not call the collector's internal revocation endpoint.
+
+| Control route | Payload / response |
+| --- | --- |
+| GET `/api/access` | `share_enabled`, `agent_share_enabled`, `open_access`, `loopback_open`, `lan_hosts`; UI capability hints for the current credential |
+| GET `/api/agent-grants` | `grants` metadata, at most 200 newest rows; includes revoked rows and never returns token secrets |
+| POST `/api/agent-share` | `scope=all` or `device`; device scope requires nonempty `serial` (at most 128 characters); returns `token` once and `grant` metadata |
+| POST `/api/agent-revoke` | Grant `id` (16 lowercase hex characters); returns revoked `id` and `sessions_closed` cleanup confirmation |
+| POST `/api/share-link` | No payload required; primary credential only; returns relative `path` and `expires_in` |
+
+Control grant JSON bodies are limited to 64 KiB. Public grant creation does not
+accept a lifetime: it creates non-expiring revocable grants. Revocation rejects
+new authenticated operations immediately; `sessions_closed=false` means collector
+cleanup could not be confirmed, rather than that the grant remains valid.
 
 ## Agent grant restrictions
 
