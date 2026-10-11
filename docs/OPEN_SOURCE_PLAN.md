@@ -11,7 +11,7 @@ Do not change an installed service or use live boards during regression tests.
 | Release pipeline | Linux/Windows PR checks; tagged Setup, ZIP, Debian package, checksums and release notes | CI definitions plus validated release outputs; actual platform checks reported separately | In progress |
 | Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | In progress |
 | Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Implemented; native Windows package gate pending |
-| Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Pending |
+| Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | In progress |
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Pending |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Pending |
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Pending |
@@ -60,3 +60,11 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   real Chromium checks terminal input, SSE output and cross-day archive UI.
   Windows packages expose `seriald.exe demo`; hosted native execution remains
   unverified until the Windows package job runs.
+- Model implementation: Manager.boards now contains persistent Board objects;
+  Device is the replaceable UART/API connection. Board-owned session registries
+  survive re-enumeration without dict copying. Nine focused tests cover actual
+  discovery/replacement, new-port identification/archive preservation, immutable
+  identity, rename, conflicting attachments, swap isolation and late SSH creation
+  reservation release. Existing identity/archive suites remain part of validation.
+  Remaining integration: shared transaction coordination and platform session/log
+  lifecycle, including relocation of live SSH logs during archive promotion.

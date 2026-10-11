@@ -18,12 +18,13 @@ if sys.platform == 'win32':
     from .sessions_windows import SshSession, check_password_login
 else:
     from .sessions import SshSession, check_password_login
-from .storage import IdentityError, archive_component
+from .storage import IdentityError
 from .identity import eeprom_serial, usable_serial
 from .boot_marker import init_command
 from .log_archive import boot_epochs
 from .file_transfer import SerialFileTransfer
 from .profiles import ProfileBook
+from .models import Board, SessionRegistry
 
 
 def root_ssh_config_command():
@@ -58,9 +59,11 @@ def root_ssh_config_command():
 
 class Device:
     """One physical connection, optionally bound to a persistent board serial."""
-    def __init__(self, key, dev, manager=None, record=None):
+    def __init__(self, key, dev, manager=None, record=None, board=None):
         self.manager = manager
-        self.record = record
+        self.board = board if board is not None else Board(record) if record else None
+        self._sessions = self.board.sessions if self.board else SessionRegistry()
+        record = self.record
         self.connection_id = secrets.token_hex(12)
         self.by_path = key                    # physical attachment, not board identity
         self.temporary_id = hashlib.sha256(key.encode()).hexdigest()[:16] if key else self.connection_id[:16]
@@ -90,7 +93,6 @@ class Device:
         self.operation_lock = threading.Lock()  # 整个控制台事务互斥,包含手动输入/探测/自愈
         self.file_transfer = SerialFileTransfer(self)
         self.write_lock = threading.Lock()      # fd 退役与写入串行,绝不占用输出 cv
-        self.sessions_lock = threading.RLock()
         self.log_lock = threading.RLock()
         self.boot_index_lock = threading.Lock()
         self.boot_index_cache = {}
@@ -103,8 +105,6 @@ class Device:
         self.decoder = codecs.getincrementaldecoder('utf-8')('replace')
         self.log_pending = ''
         self.probe_info = dict(record['info']) if record else {}
-        self.ssh_sessions = {}            # sid -> SshSession(与串口并存的独立会话)
-        self.ssh_pending = 0
         self.logf = None
         self.log_error = ''
         # preload 可能在没有日志时早退;所有状态必须先初始化。
@@ -113,6 +113,53 @@ class Device:
         self.history_loaded = record is None
         self.input_lines = {}
         self.input_sensitive = set()
+
+    @property
+    def record(self):
+        return self.board.record if self.board else None
+
+    @record.setter
+    def record(self, record):
+        if record is None:
+            if self.board:
+                self.board.detach(self)
+            self.board = None
+            self._sessions = SessionRegistry()
+        elif self.board:
+            self.board.update(record)
+        else:
+            self.bind_board(Board(record))
+
+    def bind_board(self, board):
+        if self.board is not None and self.board.serial != board.serial:
+            raise IdentityError('Detach the current board before binding a different serial')
+        self._sessions.transfer_to(board.sessions)
+        self.board = board
+        self._sessions = board.sessions
+
+    @property
+    def sessions_lock(self):
+        return self._sessions.lock
+
+    @sessions_lock.setter
+    def sessions_lock(self, lock):
+        self._sessions.lock = lock
+
+    @property
+    def ssh_sessions(self):
+        return self._sessions.sessions
+
+    @ssh_sessions.setter
+    def ssh_sessions(self, sessions):
+        self._sessions.sessions = sessions
+
+    @property
+    def ssh_pending(self):
+        return self._sessions.pending
+
+    @ssh_pending.setter
+    def ssh_pending(self, pending):
+        self._sessions.pending = pending
 
     @property
     def profile(self):
@@ -153,7 +200,7 @@ class Device:
 
     @property
     def serial(self):
-        return self.record['serial'] if self.record else ''
+        return self.board.serial if self.board else ''
 
     @property
     def key(self):
@@ -165,8 +212,7 @@ class Device:
 
     def stable_dir(self):
         if self.serial:
-            source = self.record['info'].get('serial_source', '')
-            directory = archive_component(self.serial, source)
+            directory = self.board.archive_path
         else:
             directory = os.path.join('_unprovisioned', self.temporary_id, self.connection_id)
         path = os.path.join(LOG_ROOT, directory)
@@ -683,6 +729,7 @@ class Device:
         if not ip:
             return None, '没找到可用 IP(只看到 docker0 之类的内部地址)'
         self.reap_sessions()
+        registry = self._sessions
         # A named agent gets one long-lived shell per board.  Reusing the PTY
         # preserves shell state (cwd, exported variables, tmux, etc.) and lets
         # the human UI keep one visible tab for that agent.  The web UI uses
@@ -697,11 +744,13 @@ class Device:
                         if title:
                             existing.title = title
                         return existing, ''
-        with self.sessions_lock:
-            if len(self.ssh_sessions) + self.ssh_pending >= SSH_LIMIT:
+        with registry.lock:
+            if self._sessions is not registry:
+                return None, '设备身份已变化，请重新建立 SSH 会话'
+            if len(registry.sessions) + registry.pending >= SSH_LIMIT:
                 return None, 'SSH 会话已达上限(%d),请先关闭闲置会话' % SSH_LIMIT
             sid = 'ssh' + secrets.token_hex(12)
-            self.ssh_pending += 1
+            registry.pending += 1
         session = None
         try:
             if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
@@ -741,7 +790,8 @@ class Device:
                 session.close()
                 return None, '建立 SSH 会话失败'
             with self.operation_lock:
-                if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
+                if (self.stop is not origin or origin.is_set() or self.connection_id != connection_id
+                        or self._sessions is not registry):
                     session.close()
                     return None, '设备已重新枚举,SSH 会话已关闭'
                 with self.sessions_lock:
@@ -752,8 +802,8 @@ class Device:
                 session.close()
             return None, str(e)
         finally:
-            with self.sessions_lock:
-                self.ssh_pending -= 1
+            with registry.lock:
+                registry.pending -= 1
 
     def get_session(self, sid):
         with self.sessions_lock:

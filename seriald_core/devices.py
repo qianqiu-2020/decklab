@@ -19,6 +19,7 @@ from .storage import IdentityError, archive_component
 from .transport import open_serial
 from .boot_marker import marker_serial
 from .profiles import ProfileBook
+from .models import Board
 
 class Manager:
     """设备发现 + 每个实际 tty 一个采集线程;旧线程退出后才转移所有权。"""
@@ -27,7 +28,7 @@ class Manager:
         self.profiles = profiles if profiles is not None else ProfileBook.from_env()
         self.store = store
         self.devices = {}                 # physical by-path -> current connection
-        self.boards = {}                  # immutable serial -> known board / last connection
+        self.boards = {}                  # immutable serial -> persistent Board
         self.lock = threading.RLock()
         self.scan_lock = threading.Lock()
         self.stopping = threading.Event()
@@ -35,7 +36,7 @@ class Manager:
         self.armed_paths = {}
         if store:
             for record in store.boards():
-                self.boards[record['serial']] = Device('', '', self, record)
+                self.boards[record['serial']] = Board(record)
         for entry in handoff or []:
             if (isinstance(entry, dict) and isinstance(entry.get('by_path'), str)
                     and isinstance(entry.get('dev'), str)
@@ -47,9 +48,16 @@ class Manager:
 
     def all_devices(self):
         with self.lock:
-            known = list(self.boards.values())
+            known = [self._board_view(board) for board in self.boards.values()]
             pending = [d for d in self.devices.values() if not d.serial and d.present]
             return known + pending
+
+    def _board_view(self, board):
+        if board.connection is not None:
+            return board.connection
+        if board.history is None:
+            board.history = Device('', '', self, board=board)
+        return board.history
 
     def resolve(self, key):
         with self.lock:
@@ -99,7 +107,8 @@ class Manager:
                         else:
                             raise IdentityError('已发现正式 EEPROM 编号 %s，但该板仍有候选档案 %s；'
                                                 '请停服务后用 correct-serial 迁移' % (serial, alias))
-            previous = self.boards.get(serial)
+            previous_board = self.boards.get(serial)
+            previous = previous_board.connection if previous_board else None
             if previous is not None and previous is not device and previous.present:
                 self.store.mark_conflict(serial)
                 raise IdentityError('同一序列号已在另一个串口在线，拒绝合并设备')
@@ -108,6 +117,18 @@ class Manager:
             if device.serial and device.serial != serial:
                 raise IdentityError('当前连接的序列号改变，请重新连接后识别')
             previous_record = self.store.get(serial)
+            # Ownership must be transferable before committing a registry/log
+            # migration. A pending SSH opener still owns its original registry.
+            target_board = previous_board or device.board
+            if target_board and device._sessions is not target_board.sessions:
+                with device.sessions_lock:
+                    if device.ssh_pending:
+                        raise IdentityError('SSH 会话正在建立，稍后再识别设备')
+            promoted_board = self.boards.get(promotion_record['serial']) if promotion_record else None
+            if promoted_board and promoted_board is not target_board:
+                with promoted_board.sessions.lock:
+                    if promoted_board.sessions.pending:
+                        raise IdentityError('旧身份仍有 SSH 会话正在建立，稍后再迁移')
             with device.log_lock:
                 pending_dir = device.stable_dir()
                 device.close_log()
@@ -138,19 +159,15 @@ class Manager:
                 except Exception:
                     # Staged copies are safe to reuse on retry; source files remain authoritative.
                     raise
-                device.record = record
+                board = previous_board or device.board or Board(record)
+                board.update(record)
+                board.attach(device)
                 finish_staged(staged, sources)
             promoted = (self.boards.pop(promotion_record['serial'], None)
                         if promotion_record else None)
-            if previous is not None and previous is not device:
-                with previous.sessions_lock, device.sessions_lock:
-                    device.ssh_sessions.update(previous.ssh_sessions)
-                    previous.ssh_sessions.clear()
-            if promoted is not None and promoted is not device and promoted is not previous:
-                with promoted.sessions_lock, device.sessions_lock:
-                    device.ssh_sessions.update(promoted.ssh_sessions)
-                    promoted.ssh_sessions.clear()
-            self.boards[serial] = device
+            if promoted is not None and promoted is not board:
+                promoted.sessions.transfer_to(board.sessions)
+            self.boards[serial] = board
             self.armed_paths.pop(device.by_path, None)
             device.auto_identify = False
             info.update(selected)
@@ -179,8 +196,8 @@ class Manager:
                 with device.log_lock:
                     device.close_log()
                     old_record['last_seen'] = self.store.touch(old_serial)
-                    history = Device('', '', self, old_record)
-                    self.boards[old_serial] = history
+                    self.boards[old_serial].detach(device)
+                    self.boards[old_serial].history = None
                     self.store.event(old_serial, actor, 'switch-armed', device.by_path)
                     device.detach_identity()
                 deadline = time.monotonic() + 15 * 60
@@ -242,7 +259,8 @@ class Manager:
                         record = None
                         previous = existing.get(key)
                         armed = self.armed_paths.get(key, 0) >= time.monotonic()
-                        active_board = self.boards.get(previous.serial) if previous and previous.serial else None
+                        board = self.boards.get(previous.serial) if previous and previous.serial else None
+                        active_board = board.connection if board else None
                         if (previous and previous.record and not armed
                                 and (active_board is previous or active_board is None or not active_board.present)
                                 and not (self.store and self.store.has_conflict(previous.serial))):
@@ -252,13 +270,11 @@ class Manager:
                             if (entry and self._handoff_matches(entry, dev, identity)
                                     and self.store and not armed):
                                 record = self.store.get(entry['serial'])
-                        d = Device(key, dev, self if self.store else None, record)
-                        if record and previous:
-                            with previous.sessions_lock, d.sessions_lock:
-                                d.ssh_sessions.update(previous.ssh_sessions)
-                                previous.ssh_sessions.clear()
+                        board = self.boards.get(record['serial']) if record else None
+                        d = Device(key, dev, self if self.store else None, record, board=board)
                         if record:
-                            self.boards[record['serial']] = d
+                            d.board.attach(d)
+                            self.boards[record['serial']] = d.board
                         if armed:
                             d.auto_identify = True
                             d.auto_identify_until = self.armed_paths[key]
@@ -386,7 +402,8 @@ class Manager:
         self.stopping.set()
         # Wait for an in-flight scan before taking the final set of collectors.
         with self.scan_lock, self.lock:
-            devices = list({id(d): d for d in list(self.devices.values()) + list(self.boards.values())}.values())
+            views = [self._board_view(board) for board in self.boards.values()]
+            devices = list({id(d): d for d in list(self.devices.values()) + views}.values())
             handoff = [{'by_path': d.by_path, 'dev': d.dev, 'serial': d.serial,
                         'identity': list(d.identity)}
                        for d in self.devices.values()

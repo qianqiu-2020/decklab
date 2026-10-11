@@ -16,6 +16,7 @@ from seriald_core import web as sd
 from seriald_core import control_server as control
 from seriald_core.agent_grants import AgentGrantStore
 from seriald_core import transport as tr
+from seriald_core.models import Board
 
 
 class HandlerTests(unittest.TestCase):
@@ -24,7 +25,9 @@ class HandlerTests(unittest.TestCase):
         self.manager.store = mock.Mock()
         self.device = mock.Mock(key='board-key', serial='SN1', dev='/fake/ttyUSB0')
         self.device.file_transfer.active = False
-        self.manager.boards['SN1'] = self.device
+        board = Board({'serial': 'SN1', 'label': 'board-key', 'info': {}})
+        board.connection = self.device
+        self.manager.boards['SN1'] = board
         patcher = mock.patch.object(sd, 'MGR', self.manager)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -92,7 +95,9 @@ class HandlerTests(unittest.TestCase):
 
     def test_boot_compare_can_use_an_offline_second_board(self):
         other = mock.Mock(key='other', serial='SN2', present=False)
-        self.manager.boards['SN2'] = other
+        board = Board({'serial': 'SN2', 'label': 'other', 'info': {}})
+        board.connection = other
+        self.manager.boards['SN2'] = board
         boot = {'id': 'boot-one', 'size': 16, 'parts': []}
         self.device.boot_epochs.return_value = [boot]
         other.boot_epochs.return_value = [boot]
@@ -590,7 +595,9 @@ class HandlerTests(unittest.TestCase):
 
     def test_ssh_response_is_bound_to_requested_device_and_session(self):
         other = mock.Mock(key='other-key', serial='SN2', dev='/fake/ttyUSB1')
-        self.manager.boards['SN2'] = other
+        board = Board({'serial': 'SN2', 'label': 'other-key', 'info': {}})
+        board.connection = other
+        self.manager.boards['SN2'] = board
         session = mock.Mock(ip='192.0.2.20')
         session.read.return_value = (4, b'\x80\xe4\xb8\xad', True)
         other.get_session.return_value = session

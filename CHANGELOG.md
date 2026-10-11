@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Separate persistent board identities and SSH ownership from replaceable UART
+  connections. Preserve session registries across re-enumeration and release
+  in-flight SSH reservations against their original board after a swap.
+
 - Add an isolated hardware-free demo with simulated boards, cross-day boot logs,
   SSH, agent commands and virtual file transfers through the normal API.
 

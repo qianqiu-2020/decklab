@@ -166,6 +166,7 @@ class DemoSession(DemoDevice):
     def __init__(self, board, actor, title):
         self.sid = 'ssh' + secrets.token_hex(12)
         super().__init__(board.by_path, board.manager, board.record)
+        self.bind_board(board.board)
         self.files = board.files
         self.actor, self.title = actor, title
         self.ip = '192.0.2.10'
@@ -235,7 +236,8 @@ class DemoManager(Manager):
             record = store.bind(info, 'demo-usb-%d' % index, 'demo://%d' % index, label)
             device = DemoDevice('demo-usb-%d' % index, self, record)
             self.devices[device.by_path] = device
-            self.boards[device.serial] = device
+            device.board.attach(device)
+            self.boards[device.serial] = device.board
             self._seed_logs(device, index)
             if index == 2:
                 device.present = False

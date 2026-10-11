@@ -28,6 +28,13 @@ collector 干净重启时写入一次性短期 handoff；仅在同一 host boot�
 
 ## 模块边界
 
+板子与串口连接分开建模。`Manager.boards` 按序列号保存长期存在的 `Board`，
+包含持久化身份、标签、档案位置与 SSH 会话注册表；`Manager.devices` 按物理端口
+保存 `Device` 连接对象，包含 fd、采集线程、字节缓冲和连接代次。重新枚举建立
+新连接并绑定到原 `Board`，无需复制或清空 SSH 会话。没有连接时按需创建离线
+API 视图以查看归档。点击准备换板会分离原 Board、关闭其会话并给待识别连接
+分配独立注册表。SSH 建立请求的预留名额始终归原注册表，即使请求结束时已换板。
+
 生产环境由两个进程组成。`seriald-collector` 长期持有串口、SSH 会话、数据库和内部 API；
 `seriald-control` 提供 TCP HTTP、静态页面和 Unix socket 反向代理。重启 control 不关闭 tty fd。
 collector 只监听 `SERIALD_SOCKET`，不暴露网络端口。
@@ -53,7 +60,8 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/identity.py` | EEPROM、固件、SoC/eFuse 与旧软件身份的选择 |
 | `seriald_core/handoff.py` | 干净重启时同 boot、短时、一次性的连接接续 |
 | `seriald_core/archive.py` | 候选/正式日志的无覆盖暂存和提交后迁移 |
-| `seriald_core/device.py` | 单块板的控制台流、识别事务和 SSH 会话编排 |
+| `seriald_core/device.py` | 串口连接的控制台流、识别事务和会话 API 编排 |
+| `seriald_core/models.py` | 持久 Board 身份、可替换连接绑定与独立会话所有权 |
 | `seriald_core/devices.py` | 串口发现、单读者采集生命周期、身份绑定与在线设备 |
 | `seriald_core/sessions.py` | SSH PTY、独立日志、会话回收 |
 | `seriald_core/windows_manager.py` / `sessions_windows.py` | Windows COM 采集与 SSH channel 适配 |
