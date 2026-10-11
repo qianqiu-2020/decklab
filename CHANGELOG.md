@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Record an initial Windows native-wheel attribution audit with exact source,
+  binary-member and notice hashes. Ship the observations and remaining review
+  steps with documentation; do not treat them as frozen-output verification.
 - Complete the local API/configuration content review. Document task capacity,
   cancellation outcomes, artifact retries and expiry separately from retained
   task history; distinguish local contract checks from native release evidence.

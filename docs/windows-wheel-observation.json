@@ -1,0 +1,249 @@
+{
+  "schema": 1,
+  "scope": "downloaded-wheel-observation-not-frozen-bundle",
+  "reviewed": "2026-10-12",
+  "requested_target": {
+    "platform": "win_amd64",
+    "python": "3.12",
+    "implementation": "cp",
+    "abi": "cp312"
+  },
+  "resolver_host": "Linux",
+  "requirements": "requirements-windows.txt",
+  "limitations": [
+    "Cross-platform pip download does not establish Windows environment-marker resolution.",
+    "Only wheels with EXE/DLL/PYD files are listed; this is not a complete dependency graph.",
+    "Wheel file presence does not prove inclusion in a frozen application.",
+    "No native binaries were executed; embedded library attribution remains incomplete."
+  ],
+  "wheels": [
+    {
+      "wheel": "bcrypt-5.0.0-cp39-abi3-win_amd64.whl",
+      "sha256": "64ee8434b0da054d830fa8e89e1c8bf30061d539044a39524ff7dec90481e5c2",
+      "native_files": [
+        {
+          "file": "bcrypt/_bcrypt.pyd",
+          "size": 305152,
+          "sha256": "898d1fe05e287d66bd379f26eb49d27a260f14666c7dc8b1719dae8c489abff0"
+        }
+      ],
+      "license_files": [
+        {
+          "file": "bcrypt-5.0.0.dist-info/LICENSE",
+          "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+        }
+      ]
+    },
+    {
+      "wheel": "cffi-2.1.1-cp312-cp312-win_amd64.whl",
+      "sha256": "f53e442b08449d42821fa4a4fba000095af9f62742a500f978a9f557ec44339a",
+      "native_files": [
+        {
+          "file": "_cffi_backend.cp312-win_amd64.pyd",
+          "size": 181248,
+          "sha256": "9af5e4f68a41f26b726f2e9424f9d58a4f5666189f6a48be95f406b257102aec"
+        }
+      ],
+      "license_files": [
+        {
+          "file": "cffi-2.1.1.dist-info/licenses/LICENSE",
+          "sha256": "5ba24ddc57067f9249add644c3afc41a5d6dc37e23433ef759d95df370b0af63"
+        }
+      ]
+    },
+    {
+      "wheel": "cryptography-50.0.2-cp311-abi3-win_amd64.whl",
+      "sha256": "7afa5a6602a9f29af1f3a2965f831bae7c9d5d597b7cbb716d41ab3b7d89879c",
+      "native_files": [
+        {
+          "file": "cryptography/hazmat/bindings/_rust.pyd",
+          "size": 9897472,
+          "sha256": "1d4332a447cab13dec8e3a533ad579e0e562b79e40822c931f33769758fc7156"
+        }
+      ],
+      "license_files": [
+        {
+          "file": "cryptography-50.0.2.dist-info/licenses/LICENSE",
+          "sha256": "3e0c7c091a948b82533ba98fd7cbb40432d6f1a9acbf85f5922d2f99a93ae6bb"
+        },
+        {
+          "file": "cryptography-50.0.2.dist-info/licenses/LICENSE.APACHE",
+          "sha256": "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe"
+        },
+        {
+          "file": "cryptography-50.0.2.dist-info/licenses/LICENSE.BSD",
+          "sha256": "602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb"
+        }
+      ]
+    },
+    {
+      "wheel": "pyinstaller-6.22.3-py3-none-win_amd64.whl",
+      "sha256": "500bd58c7bf7e584a8435adccbd763a0b918d5c12b08d74ff50fd79b2915458b",
+      "native_files": [
+        {
+          "file": "PyInstaller/bootloader/Windows-64bit-intel/run.exe",
+          "size": 311808,
+          "sha256": "581ea23eb35cee8f9df8835c892e91416df95ca629b1a6050289aea19390e08d"
+        },
+        {
+          "file": "PyInstaller/bootloader/Windows-64bit-intel/run_d.exe",
+          "size": 335360,
+          "sha256": "61569642ef07b9f3c730eb6f2ab21350e74062ff409ef200bad63d038c510387"
+        },
+        {
+          "file": "PyInstaller/bootloader/Windows-64bit-intel/runw.exe",
+          "size": 306688,
+          "sha256": "2291f269c3a3804fde1079462239e09a8b32fffbeeaa8f628a531faf5be77d41"
+        },
+        {
+          "file": "PyInstaller/bootloader/Windows-64bit-intel/runw_d.exe",
+          "size": 329216,
+          "sha256": "d85a1689b986222f6950f3ba878d791068725d789c1a8e4a783a520f788c4560"
+        }
+      ],
+      "license_files": [
+        {
+          "file": "pyinstaller-6.22.3.dist-info/licenses/COPYING.txt",
+          "sha256": "0598064c7d2718e38d7914a7d08343b2fa008e3bea9ebba2aa7a6ffa5900dd64"
+        }
+      ]
+    },
+    {
+      "wheel": "pynacl-1.6.2-cp38-abi3-win_amd64.whl",
+      "sha256": "62985f233210dee6548c223301b6c25440852e13d59a8b81490203c3227c5ba0",
+      "native_files": [
+        {
+          "file": "nacl/_sodium.pyd",
+          "size": 405504,
+          "sha256": "57822e7aed944269943bcb855fc14560a5b6ae38869de4e3d00c380a5119ecc7"
+        }
+      ],
+      "license_files": [
+        {
+          "file": "pynacl-1.6.2.dist-info/licenses/LICENSE",
+          "sha256": "77af5bbded959114b6d7a5eea518b2be364e04f4f4a95f9e87d9870c27713d24"
+        },
+        {
+          "file": "pynacl-1.6.2.dist-info/licenses/licenses/LICENSE.libsodium.txt",
+          "sha256": "93e7cac854d71cdafc9d9e4e9f8fd28d87ae541b3dda224d7c8fe23d37875704"
+        }
+      ]
+    },
+    {
+      "wheel": "setuptools-84.0.0-py3-none-any.whl",
+      "sha256": "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
+      "native_files": [
+        {
+          "file": "setuptools/cli-32.exe",
+          "size": 11776,
+          "sha256": "32acc1bc543116cbe2cff10cb867772df2f254ff2634c870aef0b46c4b696fdb"
+        },
+        {
+          "file": "setuptools/cli-64.exe",
+          "size": 14336,
+          "sha256": "bbb3de5707629e6a60a0c238cd477b28f07f0066982fda953fa6fcec39073a4a"
+        },
+        {
+          "file": "setuptools/cli-arm64.exe",
+          "size": 13824,
+          "sha256": "b9a7d08da880dfac8bcf548eba4b06fb59b6f09b17d33148a0f6618328926c61"
+        },
+        {
+          "file": "setuptools/cli.exe",
+          "size": 11776,
+          "sha256": "32acc1bc543116cbe2cff10cb867772df2f254ff2634c870aef0b46c4b696fdb"
+        },
+        {
+          "file": "setuptools/gui-32.exe",
+          "size": 11776,
+          "sha256": "85dae1e95d77845f2cb59bcac3d4afe74bbe4c91a9bcc5bf4a71cd43104dbe7c"
+        },
+        {
+          "file": "setuptools/gui-64.exe",
+          "size": 14336,
+          "sha256": "3471b6140eadc6412277dbbefe3fef8c345a0f1a59776086b80a3618c3a83e3b"
+        },
+        {
+          "file": "setuptools/gui-arm64.exe",
+          "size": 13824,
+          "sha256": "e694f4743405c8b5926ff457db6fe7f1a12dec7c16a9c3864784d3f4e07ae097"
+        },
+        {
+          "file": "setuptools/gui.exe",
+          "size": 11776,
+          "sha256": "85dae1e95d77845f2cb59bcac3d4afe74bbe4c91a9bcc5bf4a71cd43104dbe7c"
+        }
+      ],
+      "license_files": [
+        {
+          "file": "setuptools/_vendor/importlib_metadata-8.7.1.dist-info/licenses/LICENSE",
+          "sha256": "458502e12d97bbf64438606a20044aa85eb05fb0a8a807bb35dbec253fd1fc04"
+        },
+        {
+          "file": "setuptools/_vendor/jaraco_context-6.1.0.dist-info/licenses/LICENSE",
+          "sha256": "9755a18519666e5f0f4cae3daad3d7012bcae48a600b31237d75e9fe134e6683"
+        },
+        {
+          "file": "setuptools/_vendor/jaraco_functools-4.4.0.dist-info/licenses/LICENSE",
+          "sha256": "5a57cb4db85e2a2dd88c290628908add57e3451449e0a9a71fdfb38776fd759d"
+        },
+        {
+          "file": "setuptools/_vendor/more_itertools-10.8.0.dist-info/licenses/LICENSE",
+          "sha256": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46"
+        },
+        {
+          "file": "setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE",
+          "sha256": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48"
+        },
+        {
+          "file": "setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.APACHE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "file": "setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.BSD",
+          "sha256": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5"
+        },
+        {
+          "file": "setuptools/_vendor/platformdirs-4.4.0.dist-info/licenses/LICENSE",
+          "sha256": "29e0fd62e929850e86eb28c3fdccf0cefdf4fa94879011cffb3d0d4bed6d4db6"
+        },
+        {
+          "file": "setuptools/_vendor/tomli-2.4.0.dist-info/licenses/LICENSE",
+          "sha256": "b80816b0d530b8accb4c2211783790984a6e3b61922c2b5ee92f3372ab2742fe"
+        },
+        {
+          "file": "setuptools/_vendor/wheel-0.46.3.dist-info/licenses/LICENSE.txt",
+          "sha256": "30c23618679108f3e8ea1d2a658c7ca417bdfc891c98ef1a89fa4ff0c9828654"
+        },
+        {
+          "file": "setuptools/_vendor/zipp-3.23.0.dist-info/licenses/LICENSE",
+          "sha256": "5a57cb4db85e2a2dd88c290628908add57e3451449e0a9a71fdfb38776fd759d"
+        },
+        {
+          "file": "setuptools/config/NOTICE",
+          "sha256": "2dddf08818297a3b89d43d95ff659d8da85741108c9136dfa3a4d856c0623bd8"
+        },
+        {
+          "file": "setuptools/config/_validate_pyproject/NOTICE",
+          "sha256": "09c9bcea95ca086f8bc5bed174e40bc835b297d40fb5f86bbbb570fe0a5581a7"
+        },
+        {
+          "file": "setuptools-84.0.0.dist-info/licenses/LICENSE",
+          "sha256": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741"
+        },
+        {
+          "file": "setuptools/_vendor/autocommand-2.2.2.dist-info/LICENSE",
+          "sha256": "ade78d04982d69972d444a8e14a94f87a2334dd3855cc80348ea8e240aa0df2d"
+        },
+        {
+          "file": "setuptools/_vendor/backports.tarfile-1.2.0.dist-info/LICENSE",
+          "sha256": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741"
+        },
+        {
+          "file": "setuptools/_vendor/jaraco.text-4.0.0.dist-info/LICENSE",
+          "sha256": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741"
+        }
+      ]
+    }
+  ]
+}

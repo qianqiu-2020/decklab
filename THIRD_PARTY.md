@@ -30,6 +30,9 @@ This inventory does not replace review of native libraries embedded in Python
 or dependency wheels (for example crypto libraries), PyInstaller's frozen output,
 or bundled frontend assets. Such binary attribution remains a release gate;
 this table and Python metadata alone are not a complete native-library SBOM.
+The [native dependency review](docs/WINDOWS_NATIVE_NOTICES.md) records an initial
+Windows-wheel observation with exact hashes and component-specific unresolved
+work. It does not replace review of the actual frozen Windows output.
 
 Windows distributions also include `bundle-manifest.json`: relative paths,
 sizes and SHA-256 for every distribution file, with EXE/DLL/PYD files marked

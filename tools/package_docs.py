@@ -11,7 +11,7 @@ GUIDES = ('BRAND', 'OPEN_SOURCE_PLAN', 'RELEASE_ACCEPTANCE', 'AGENT_ACCESS', 'AP
           'HARDWARE_ID', 'DEVICE_IDENTITY_MATRIX', 'CONFIGURATION', 'DEMO',
           'CONSOLE_TRANSACTIONS', 'STORAGE_UPGRADES', 'LOG_OPERATIONS', 'TASKS',
           'TRANSFER_ARTIFACTS', 'HARDWARE_EXTENSIONS', 'REFACTOR_PLAN', 'WINDOWS',
-          'TRANSFER_PERFORMANCE')
+          'TRANSFER_PERFORMANCE', 'WINDOWS_NATIVE_NOTICES')
 LINK = re.compile(r'(!?\[[^\]\n]*\]\()([^\s)]+)(\))')
 
 
@@ -27,6 +27,7 @@ def document_map(platform):
     pairs.update({'docs/' + name + '.md': prefix + name + '.md' for name in GUIDES})
     for name in ('seriald-architecture.png', 'seriald-architecture.svg'):
         pairs['docs/' + name] = prefix + name
+    pairs['docs/windows-wheel-observation.json'] = prefix + 'windows-wheel-observation.json'
     for path in ('examples/profiles.json', 'examples/hardware.json', 'skills/seriald-board/SKILL.md'):
         pairs[path] = path
     if platform == 'windows':

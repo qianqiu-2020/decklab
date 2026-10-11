@@ -40,6 +40,20 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+Native dependency review now has a concrete source-artifact checkpoint:
+Windows x64-compatible wheels were downloaded on Linux for Python 3.12, without
+installing or executing their binaries. WINDOWS_NATIVE_NOTICES.md records six
+native-bearing wheels and component-specific attribution gaps; the adjacent
+JSON records exact wheel/native/notice hashes, all rechecked against downloaded
+archives. Cryptography 50.0.2 contains its package license texts but no separate
+OpenSSL notice in the inspected wheel; PyNaCl 1.6.2 includes a libsodium notice.
+This is not proof of the exact Windows dependency graph: cross-platform pip
+resolution does not establish Windows environment-marker behavior, and source
+wheel presence does not establish frozen inclusion. Python runtime binaries and
+embedded dependencies still need actual-provider evidence. Both documents are
+included in package layouts; the three document-layout/link tests pass. The
+actual frozen-output attribution gate remains open.
+
 The local API content review now includes task and artifact contracts, completing
 the six groups covering all 54 public routes in API.md. TASKS.md and
 TRANSFER_ARTIFACTS.md describe start/query response wrappers, opaque IDs,
