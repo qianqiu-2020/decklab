@@ -60,7 +60,8 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/identity.py` | EEPROM、固件、SoC/eFuse 与旧软件身份的选择 |
 | `seriald_core/handoff.py` | 干净重启时同 boot、短时、一次性的连接接续 |
 | `seriald_core/archive.py` | 候选/正式日志的无覆盖暂存和提交后迁移 |
-| `seriald_core/device.py` | 串口连接的控制台流、识别事务和会话 API 编排 |
+| `seriald_core/device.py` | 连接的字节流与日志、身份发布、会话编排和协议服务入口 |
+| `seriald_core/console_protocol.py` | 独立控制台协议服务：登录、nonce 命令帧、响应等待及显式 SSH 配置；只使用连接的既有缓冲与受事务保护的写入口 |
 | `seriald_core/models.py` | 持久 Board 身份、可替换连接绑定与独立会话所有权 |
 | `seriald_core/transactions.py` | 统一串口事务租约、总超时、连接代次检查与取消 |
 | `seriald_core/devices.py` | 串口发现、单读者采集生命周期、身份绑定与在线设备 |
@@ -190,3 +191,15 @@ control 层仍负责认证、授权范围和 actor 重写。独立 CLI 调用相
 换板必须产生新连接代次，不能重用旧归属。人工编号更正和经过验证的 EEPROM 身份迁移
 会同步迁移归属与任务文件范围。未提交的上传暂存没有连接证明，不按 USB 位置猜测归属。
 升级前保存 WAL 快照；旧记录不凭当前 tty 或标签补造历史证明。
+
+## 控制台协议服务
+
+每个连接持有一个 `ConsoleProtocol`，读取当前连接的 profile、换行状态、字节
+缓冲和事务租约，不复制 stop event、连接编号或日志状态。服务只通过连接的
+`_write`、`_wait`、`_since` 等接口交互；不访问 OS 串口描述符，不维护 Board
+注册表，不创建 SSH 会话，也不提交身份或迁移目录。Device 的原控制台入口
+委托给这个服务，因此模拟固件和传输适配仍可替换连接的交互回调。
+
+识别命令完成后，Device 仍在身份发布前检查原 stop event，并由 Manager
+提交绑定和档案迁移。服务的等待沿用同一事务总截止时间、取消检查与字节
+条件变量唤醒；拆分协议不改变单读者、写入互斥或换板隔离规则。

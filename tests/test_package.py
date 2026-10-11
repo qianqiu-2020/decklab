@@ -105,6 +105,7 @@ class PackageTests(unittest.TestCase):
             self.assertGreater(links_checked, 25)
             self.assertTrue((extracted / 'usr/share/doc/seriald/examples/hardware.json').is_file())
             self.assertTrue((code / 'seriald_core/hardware.py').is_file())
+            self.assertTrue((code / 'seriald_core/console_protocol.py').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/examples/profiles.json').is_file())
             self.assertTrue((code / 'seriald_core/profiles.py').is_file())
             self.assertTrue((code / 'seriald_demo.py').is_file())

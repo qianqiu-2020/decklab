@@ -29,6 +29,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Windows portable tests failed.' }
     & $python -m unittest discover -s tests -p test_session_contract.py
     if ($LASTEXITCODE -ne 0) { throw 'Shared SSH lifecycle and archive tests failed.' }
+    & $python -m unittest discover -s tests -p test_protocol.py
+    if ($LASTEXITCODE -ne 0) { throw 'Console dialogue/framing tests failed.' }
     & $python -m unittest discover -s tests -p test_transactions.py
     if ($LASTEXITCODE -ne 0) { throw 'Console transaction tests failed.' }
     & $python -m unittest discover -s tests -p test_profiles.py

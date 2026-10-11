@@ -451,3 +451,23 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   The extracted Debian package is independently checked for all guide links.
   Syntax/whitespace checks pass. This validates document publication, not native
   Windows installation or hosted release execution. Services were unchanged.
+
+- Console protocol boundary: login negotiation, prompt/response waiting, nonce
+  command framing and explicit root SSH provisioning now live in an injected
+  per-connection ConsoleProtocol service. Device retains buffer/log ownership,
+  identification publication and SSH/session orchestration. The protocol uses
+  existing guarded connection callbacks and live transaction/profile state,
+  with no new reader, descriptor, registry access or copied connection generation.
+  Existing simulated firmware seams and HTTP/transfer entry points are preserved.
+  Identity binding/archive migration remain outside the dialogue service.
+
+  Verification: all 508 backend checks pass (three native Windows Job tests
+  skipped), 74 frontend isolation and sharing checks pass. The real-browser
+  simulated-host smoke passes terminal input/SSE, archives, client takeover,
+  UI copy/upload/download, reload task history and verified artifact links.
+  Existing protocol fixtures cover login, nonce boundaries, no lost wakeups,
+  provisioning and failure cleanup; transaction fixtures cover cancellation and
+  shared deadlines. Windows builds now run the protocol suite, skipping only
+  POSIX shell-specific syntax/builtin checks where unavailable. Debian extraction
+  confirms the new module ships. Native Windows execution remains unverified.
+  Syntax/whitespace checks pass; no installed service or live board was touched.

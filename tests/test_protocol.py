@@ -2,6 +2,7 @@
 import importlib.util
 import pathlib
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -139,6 +140,7 @@ class FramingTests(DeviceFixture):
         self.assertTrue(self.device.operation_lock.acquire(blocking=False))
         self.device.operation_lock.release()
 
+    @unittest.skipUnless(pathlib.Path('/bin/bash').is_file(), 'requires POSIX bash for syntax checks')
     def test_framed_probe_and_ssh_commands_have_valid_shell_syntax(self):
         for cmd in (sd.PROBE_CMD, sd.SSH_CMD):
             with self.subTest(command=cmd):
@@ -297,7 +299,9 @@ class RootSshSetupTests(DeviceFixture):
         command = config.call_args.args[0]
         self.assertNotIn('bianbu', command)
         self.assertIn('/etc/ssh/sshd_config', command)
-        self.assertEqual(subprocess.run(['sh', '-n', '-c', command]).returncode, 0)
+        shell = shutil.which('sh')
+        if shell:
+            self.assertEqual(subprocess.run([shell, '-n', '-c', command]).returncode, 0)
         self.assertFalse(self.device.probing)
 
     def test_sudo_password_requirement_stops_before_changing_config(self):
@@ -313,6 +317,7 @@ class RootSshSetupTests(DeviceFixture):
         config.assert_not_called()
 
 class SshStateTests(unittest.TestCase):
+    @unittest.skipUnless(pathlib.Path('/bin/bash').is_file(), 'requires POSIX bash builtins')
     def test_quiet_branches_emit_exactly_one_status_using_only_shell_mocks(self):
         # 所有可能接触系统的命令都被函数替换,PATH 为空;只有 echo/test 等 builtin。
         # 不运行 sshd、systemctl、apt-get,也不执行完整 SSH_CMD。

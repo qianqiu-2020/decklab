@@ -7,6 +7,8 @@ installation and everyday operation simple. Read `docs/ARCHITECTURE.md` and
 ## Layout
 
 - `seriald_core/`: collector, device identity, sessions, storage and HTTP services.
+  `console_protocol.py` owns login/framing/provisioning dialogue over existing
+  connection buffers and guarded writes; it must not open another serial reader.
 - `seriald.py` / `seriald_windows.py`: Linux control and Windows host entry points.
 - `index.html`, `static/`: UI layout, behavior and original assets.
   `devices.js`, `terminal-view.js`, `archives.js` and `terminal-navigation.js`
