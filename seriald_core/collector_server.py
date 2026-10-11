@@ -37,8 +37,9 @@ def main():
     with BoundedThreadingUnixServer(args.socket, web.Handler) as httpd:
         store = Store(os.path.join(BASE, 'registry.sqlite3'))
         store.recover_sessions()
-        web.MGR = Manager(store, consume_handoff(HANDOFF), profiles=profiles)
-        scanner = threading.Thread(target=web.MGR.loop, daemon=True)
+        manager = Manager(store, consume_handoff(HANDOFF), profiles=profiles)
+        httpd.manager = manager
+        scanner = threading.Thread(target=manager.loop, daemon=True)
         scanner.start()
         signal.signal(signal.SIGTERM,
                       lambda *_: threading.Thread(target=httpd.shutdown, daemon=True).start())
@@ -48,7 +49,7 @@ def main():
         except KeyboardInterrupt:
             pass
         finally:
-            connections = web.MGR.close()
+            connections = manager.close()
             try:
                 write_handoff(HANDOFF, connections)
             except OSError as error:

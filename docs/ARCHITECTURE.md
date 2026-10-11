@@ -39,6 +39,11 @@ API 视图以查看归档。点击准备换板会分离原 Board、关闭其会�
 `seriald-control` 提供 TCP HTTP、静态页面和 Unix socket 反向代理。重启 control 不关闭 tty fd。
 collector 只监听 `SERIALD_SOCKET`，不暴露网络端口。
 
+HTTP API 模块导入时不创建 Manager。Linux collector、Windows host 和 demo
+入口各创建一次管理器，注入对应 HTTP server；请求从 server 取得管理器，再注入应用服务。
+不同 server 不共享设备目录或写操作状态。未配置管理器时，除静态能力查询外返回 503。
+直接构造 handler 的旧测试夹具仍可显式注入模块级 `MGR`，生产入口不使用该回退。
+
 实时终端通过 `GET /api/session-events` 建立 SSE 流；collector 在串口或 SSH 收到字节时唤醒
 订阅者，control 逐行转发，不等响应结束。事件携带字节偏移，断线时以 `Last-Event-ID` 续读；
 旧服务或 SSE 失败时网页回退到 `GET /api/session?off=…` 长轮询。输入始终通过

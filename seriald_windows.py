@@ -52,13 +52,14 @@ def main():
         store.recover_sessions()
         try:
             with BoundedThreadingTCPServer(('127.0.0.1', 0), web.Handler) as collector:
-                web.MGR = WindowsManager(store, consume_handoff(HANDOFF), profiles=profiles)
+                manager = WindowsManager(store, consume_handoff(HANDOFF), profiles=profiles)
+                collector.manager = manager
                 ControlHandler.collector_socket = ('127.0.0.1', collector.server_address[1])
                 ControlHandler.static_root = STATIC
                 ControlHandler.auth_token = AUTH_TOKEN
                 ControlHandler.grant_store = grants
                 ControlHandler.trust_loopback = os.environ.get('SERIALD_TRUST_LOOPBACK') == '1'
-                scanner = threading.Thread(target=web.MGR.loop, daemon=True)
+                scanner = threading.Thread(target=manager.loop, daemon=True)
                 scanner.start()
                 worker = threading.Thread(target=collector.serve_forever, daemon=True)
                 worker.start()
@@ -71,7 +72,7 @@ def main():
                 except KeyboardInterrupt:
                     pass
                 finally:
-                    connections = web.MGR.close()
+                    connections = manager.close()
                     write_handoff(HANDOFF, connections)
                     collector.shutdown()
                     worker.join(timeout=6)

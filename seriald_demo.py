@@ -30,7 +30,8 @@ def main():
         with BoundedThreadingTCPServer(('127.0.0.1', args.port), ControlHandler) as control:
             with BoundedThreadingTCPServer(('127.0.0.1', 0), web.Handler) as collector:
                 store = Store(os.path.join(temporary, 'registry.sqlite3'))
-                web.MGR = DemoManager(store)
+                manager = DemoManager(store)
+                collector.manager = manager
                 ControlHandler.collector_socket = collector.server_address
                 ControlHandler.static_root = STATIC
                 ControlHandler.auth_token = ''
@@ -45,7 +46,7 @@ def main():
                 except KeyboardInterrupt:
                     pass
                 finally:
-                    web.MGR.close()
+                    manager.close()
                     collector.shutdown()
                     worker.join(timeout=6)
                     store.close()

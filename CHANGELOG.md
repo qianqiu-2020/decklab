@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Remove import-time collector Manager initialization. Linux, Windows and demo
+  entry points inject one manager into each HTTP server, isolating device state
+  and mutations; unconfigured servers return unavailable without lazy startup.
 - Extract serial archive writing into a transport-independent component owning
   UTF-8 decoding, partial lines, rotation, file handles and write-error recovery.
   Keep live byte fan-out and identity/retention lock ordering in the connection.

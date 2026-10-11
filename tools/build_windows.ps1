@@ -29,6 +29,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Public API/configuration documentation inventory failed.' }
     & $python -m unittest discover -s tests -p test_request_json.py
     if ($LASTEXITCODE -ne 0) { throw 'Request JSON validation tests failed.' }
+    & $python -m unittest discover -s tests -p test_collector_injection.py
+    if ($LASTEXITCODE -ne 0) { throw 'Collector initialization/isolation tests failed.' }
     & $python -m unittest discover -s tests -p test_serial_log.py
     if ($LASTEXITCODE -ne 0) { throw 'Serial archive writer tests failed.' }
     & $python -m unittest discover -s tests -p test_windows_build_env.py

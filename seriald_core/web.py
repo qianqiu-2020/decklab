@@ -25,11 +25,18 @@ from .artifact_actions import ArtifactActions, body_limit
 from .tasks import TaskError
 from .request_json import load_object
 
-MGR = Manager()
+MGR = None  # Direct-handler fixtures may inject a manager; production uses server.manager.
 STARTED = time.time()
 
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = 'seriald-collector/' + __version__
+
+    @property
+    def manager(self):
+        server = getattr(self, 'server', None)
+        if server is not None and hasattr(server, 'manager'):
+            return server.manager
+        return MGR
 
     def _session_events(self, q):
         """Stream one session's byte offsets; reconnect resumes via Last-Event-ID."""
@@ -97,13 +104,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _dev(self, q):
         key = (q.get('key') or [''])[0]
         self.response_key = key
-        device = MGR.resolve(key)
+        device = self.manager.resolve(key)
         if device and q.get('serial') and q['serial'][0] != device.serial:
             return None
         return device
 
     def _archives(self):
-        return ArchiveQueries(MGR, log_root=LOG_ROOT, reader=read_epoch,
+        return ArchiveQueries(self.manager, log_root=LOG_ROOT, reader=read_epoch,
                               searcher=search_epochs, comparator=compare_boots)
 
     def _download_log(self, path, name):
@@ -134,11 +141,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             result = capabilities()
             return self._json(result.status, result.payload)
 
+        if self.manager is None:
+            return self._json(503, {'error': 'collector manager unavailable'})
+
         if route == '/api/diagnostics':
-            return self._json(200, diagnostic_summary(MGR, LOG_ROOT, STARTED))
+            return self._json(200, diagnostic_summary(self.manager, LOG_ROOT, STARTED))
 
         if route in ('/api/artifact', '/api/artifact-download'):
-            actions = ArtifactActions(MGR)
+            actions = ArtifactActions(self.manager)
             artifact_id = (q.get('id') or [''])[0]
             actor, serial = self.headers.get('X-Seriald-Actor', 'web'), (q.get('serial') or [None])[0]
             if route == '/api/artifact':
@@ -171,7 +181,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             task_id = (q.get('id') or [''])[0] if route == '/api/task' else None
             if route == '/api/task' and not task_id:
                 return self._json(400, {'error': 'task id required'})
-            result = TaskActions(MGR).query(task_id, self.headers.get('X-Seriald-Actor', 'web'),
+            result = TaskActions(self.manager).query(task_id, self.headers.get('X-Seriald-Actor', 'web'),
                                            (q.get('serial') or [None])[0], limit, offset,
                                            (q.get('connection_id') or [None])[0],
                                            (q.get('target_serial') or [None])[0])
@@ -179,7 +189,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if route == '/api/health':
             disk = shutil.disk_usage(LOG_ROOT)
-            devices = MGR.all_devices()
+            devices = self.manager.all_devices()
             log_errors = []
             for device in devices:
                 if isinstance(getattr(device, 'log_error', ''), str) and device.log_error:
@@ -197,16 +207,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     'pending': sum(bool(not d.serial and d.present) for d in devices),
                                     'offline': sum(not d.present for d in devices),
                                     'disk_total': disk.total, 'disk_free': disk.free,
-                                    'storage': disk_status(LOG_ROOT, MGR.maintenance.policy),
-                                    'retention': MGR.maintenance.snapshot(),
+                                    'storage': disk_status(LOG_ROOT, self.manager.maintenance.policy),
+                                    'retention': self.manager.maintenance.snapshot(),
                                     'logging_ok': not log_errors, 'log_errors': log_errors})
 
         if route == '/api/devices':
-            devices = MGR.all_devices()
+            devices = self.manager.all_devices()
             devs = [d.snapshot() for d in devices]
             devs.sort(key=lambda x: x['key'])
             return self._json(200, {'devices': devs, 'by_path': BY_PATH,
-                                    'storage': disk_status(LOG_ROOT, MGR.maintenance.policy),
+                                    'storage': disk_status(LOG_ROOT, self.manager.maintenance.policy),
                                     'server_time': time.time()})
 
         if route == '/api/hardware':
@@ -214,13 +224,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not device:
                 return self._json(404, {'error': 'no such device'})
             actor = self.headers.get('X-Seriald-Actor') or 'web'
-            return self._json(200, MGR.hardware.available(device.serial or '', actor))
+            return self._json(200, self.manager.hardware.available(device.serial or '', actor))
 
         if route == '/api/operation':
             device = self._dev(q)
             if not device:
                 return self._json(404, {'error': 'no such device'})
-            result = DeviceActions(MGR).operation(device)
+            result = DeviceActions(self.manager).operation(device)
             return self._json(result.status, result.payload)
 
         if route == '/api/boot-compare':
@@ -272,15 +282,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(400, {'error': message})
         except TimeoutError:
             return self._json(408, {'error': 'request body timed out'})
+        if self.manager is None:
+            return self._json(503, {'error': 'collector manager unavailable'})
         if route == '/api/agent-revoke':
             actor = payload.get('actor')
             if not isinstance(actor, str) or not actor.startswith('shared-agent/'):
                 return self._json(400, {'error': 'invalid agent actor'})
             closed = 0
-            tasks = getattr(MGR, 'tasks', None)
+            tasks = getattr(self.manager, 'tasks', None)
             if tasks is not None:
                 tasks.cancel_actor(actor)
-            for device in MGR.all_devices():
+            for device in self.manager.all_devices():
                 transactions = transactions_for(device)
                 owner = transactions.ownership()
                 if owner and owner['actor'] == actor:
@@ -295,14 +307,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 for sid in ids:
                     closed += bool(device.close_session(sid))
                 if (ids or owner and owner['actor'] == actor) and device.serial:
-                    MGR.store.event(device.serial, 'service', 'agent-revoke', actor)
+                    self.manager.store.event(device.serial, 'service', 'agent-revoke', actor)
             return self._json(200, {'ok': True, 'closed_sessions': closed})
         if route == '/api/task-cancel':
-            result = TaskActions(MGR).cancel(str(payload.get('id') or ''),
+            result = TaskActions(self.manager).cancel(str(payload.get('id') or ''),
                                             str(payload.get('actor') or 'web'), payload.get('serial'))
             return self._json(result.status, result.payload)
         if route in ('/api/artifact-append', '/api/artifact-seal', '/api/artifact-delete'):
-            result = ArtifactActions(MGR).execute(route.removeprefix('/api/artifact-'), payload,
+            result = ArtifactActions(self.manager).execute(route.removeprefix('/api/artifact-'), payload,
                                                  payload.get('actor') or 'web')
             return self._json(result.status, result.payload)
         q = {'key': [str(payload.get('key') or '')]}
@@ -314,15 +326,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         actor = str(payload.get('actor') or 'web')[:80]
         if route == '/api/artifact-create':
-            result = ArtifactActions(MGR).execute('create', payload, actor, d)
+            result = ArtifactActions(self.manager).execute('create', payload, actor, d)
             return self._json(result.status, result.payload)
         if route == '/api/task-start':
-            result = TaskActions(MGR).start(payload, d, actor)
+            result = TaskActions(self.manager).start(payload, d, actor)
             return self._json(result.status, result.payload)
         return self._device_post(route, payload, d, actor)
 
     def _device_post(self, route, payload, d, actor):
-        result = DeviceActions(MGR, recover=try_rescue, recovery_binary=RESCUE_BIN).execute(
+        result = DeviceActions(self.manager, recover=try_rescue, recovery_binary=RESCUE_BIN).execute(
             route.removeprefix('/api/'), payload, d, actor)
         return self._json(result.status, result.payload)
 

@@ -40,6 +40,16 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+Collector API imports no longer instantiate a Manager or read board profile and
+hardware configuration. Linux, Windows and demo entrypoints inject their manager
+into the HTTP server; requests use that instance. Real loopback HTTP fixtures
+verify two collectors have separate directories and mutations, a module-level
+test fallback cannot override an injected manager, and an unconfigured server
+returns 503. A subprocess import with invalid/missing configuration creates no
+runtime directory. The full backend suite passes 545 tests (three native Windows
+tests skipped); the simulated-host browser verifies input/SSE, archives, takeover,
+copy/upload/download and results after reload. Native Windows remains unverified.
+
 Serial archive writing is now a separate `SerialLog` component owning its
 decoder, partial lines, file handle/path, write-error state and reentrant lock.
 It accepts a directory callback, without a connection, registry or serial reader.
