@@ -153,8 +153,15 @@ class DemoHttpTests(unittest.TestCase):
                         break
                 self.assertEqual(record['state'], 'completed')
                 self.assertEqual(record['result']['serial'], 'DEMO-001')
-                run_cli('demo-k1', 'file-copy', '--remote', '/root/log.txt',
-                        '--to-device', 'demo-k3', '--to-path', '/tmp/copied.log')
+                copy_task = json.loads(run_cli('demo-k1', 'file-copy', '--remote', '/root/log.txt',
+                        '--to-device', 'demo-k3', '--to-path', '/tmp/copied.log', '--background'))['task']
+                # The submitting CLI exits; another invocation retrieves the collector-owned result.
+                for _ in range(30):
+                    copied = json.loads(run_cli('demo-k1', 'task', copy_task['id']))['task']
+                    if copied['state'] not in ('queued', 'running'):
+                        break
+                self.assertEqual(copied['state'], 'completed', copied)
+                self.assertEqual(len(copied['targets']), 2)
                 with tempfile.TemporaryDirectory() as download:
                     destination = Path(download) / 'download.log'
                     run_cli('demo-k3', 'file-get', '--remote', '/tmp/copied.log',

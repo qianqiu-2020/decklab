@@ -145,7 +145,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(400, {'error': 'task id required'})
             result = TaskActions(MGR).query(task_id, self.headers.get('X-Seriald-Actor', 'web'),
                                            (q.get('serial') or [None])[0], limit, offset,
-                                           (q.get('connection_id') or [None])[0])
+                                           (q.get('connection_id') or [None])[0],
+                                           (q.get('target_serial') or [None])[0])
             return self._json(result.status, result.payload)
 
         if route == '/api/health':

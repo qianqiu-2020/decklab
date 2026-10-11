@@ -275,6 +275,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     if not payload.get('key'):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
                     payload['serial'] = grant['serial']
+                if (grant and grant['scope'] == 'device' and route == '/api/task-start'
+                        and payload.get('kind') == 'file-copy'):
+                    return self._json(403, {'error': '板间复制需要所有设备范围的令牌'})
                 if grant and route == '/api/identify' and payload.get('init_boot_marker'):
                     return self._json(403, {'error': 'Agent 分享令牌不能创建板端身份标记'})
                 if grant and route == '/api/task-start' and (

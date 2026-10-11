@@ -19,7 +19,7 @@ Do not change an installed service or use live boards during regression tests.
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH adapters and task API/CLI/browser implemented; file transfer integration pending |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download and browser copy integration pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
@@ -203,3 +203,17 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   histories, cancellation, fresh-page progress and retry behavior; a real demo
   browser verifies completed results survive reload. File-transfer tasks and
   actual Windows/GitHub release gates remain pending.
+
+- Collector-owned copy tasks: the API accepts two pinned connections, validates
+  both input owners and retains both historical targets. One-batch prefetch
+  overlaps destination writes; peer failures wake and join the reader before
+  aborting. CLI `file-copy --background` exits after submission, with a separate
+  invocation retrieving the durable result. Tests exercise the actual protocol
+  against simulated boards, cancellation/temp cleanup, concurrent prefetch
+  failure, overwrite/empty files and scoped authorization. The production demo
+  HTTP/CLI regression verifies copied content after the submitting process exits.
+  Upload/download staging and browser-owned-copy replacement remain outstanding.
+  Verification: 400 backend tests and 65 frontend isolation tests pass, along
+  with the sharing suite and real-browser demo reload smoke. No live hardware
+  or installed production service was used or changed. Native Windows execution
+  and hosted GitHub release jobs remain unverified.

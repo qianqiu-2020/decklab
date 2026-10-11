@@ -1246,6 +1246,22 @@ test('task history recovers progress on a fresh page and cancels only the select
   assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 0);
 });
 
+test('task history filters by involvement without narrowing multi-board cancellation scope', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: [{key: 'A', label: 'A', serial: 'SN-A', alive: true}]});
+  await drain(); h.select('A');
+  const history = h.take('/api/tasks');
+  const query = new URL(history.url, 'http://fixture').searchParams;
+  assert.equal(query.get('target_serial'), 'SN-A');
+  assert.equal(query.has('serial'), false);
+  history.resolve({tasks: [{id: 'copy', kind: 'file-copy', state: 'running', actor: 'web',
+    created: 1, progress: {done: 0, total: 100}, targets: [{serial: 'SN-A'}, {serial: 'SN-B'}]}]});
+  await drain(); h.get('d-tasks').children[0].children[1].click();
+  const cancel = h.take('/api/task-cancel');
+  assert.equal(cancel.body.id, 'copy');
+  assert.equal(Object.hasOwn(cancel.body, 'serial'), false);
+});
+
 test('stale task history cannot replace newly selected board tasks', async () => {
   const h = await setup(); h.select('A'); const old = h.take('/api/tasks');
   h.select('B'); const current = h.take('/api/tasks');

@@ -4,7 +4,7 @@
   function create(options) {
     var $ = options.byId, fetch = options.fetch;
     var selection = '', offset = 0, sequence = 0, waiting = {};
-    var names = { identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH' };
+    var names = { identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH', 'file-copy': '板间复制' };
     var states = { queued: '等待执行', running: '执行中', completed: '已完成', failed: '失败',
                    cancelled: '已取消', interrupted: '已中断' };
     function scope(ctx) { return ctx ? ctx.serial ? 'serial:' + ctx.serial
@@ -72,14 +72,15 @@
         }
         var output = document.createElement('code');
         output.textContent = task.error || task.result && (task.result.sid ? '会话 ' + task.result.sid
-          : task.result.serial ? 'SN ' + task.result.serial : '') || task.progress.phase || '';
+          : task.result.serial ? 'SN ' + task.result.serial
+          : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || task.progress.phase || '';
         main.appendChild(output); row.appendChild(main);
         if (active(task)) {
           var cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '取消';
           cancel.addEventListener('click', function () {
             if (!sameSelection(selected)) return;
             cancel.disabled = true;
-            request('/api/task-cancel', { id: task.id, key: ctx.key, serial: ctx.serial, actor: 'web' })
+            request('/api/task-cancel', { id: task.id, key: ctx.key, actor: 'web' })
               .then(function () { if (sameSelection(selected)) refresh(); })
               .catch(function (error) {
                 if (sameSelection(selected)) { $('task-status').textContent = error.message; cancel.disabled = false; }
@@ -109,7 +110,7 @@
       }
       var seq = ++sequence;
       request('/api/tasks?key=' + encodeURIComponent(ctx.key) + '&limit=11&offset=' + offset
-        + (ctx.serial ? '&serial=' + encodeURIComponent(ctx.serial)
+        + (ctx.serial ? '&target_serial=' + encodeURIComponent(ctx.serial)
           : ctx.connectionId ? '&connection_id=' + encodeURIComponent(ctx.connectionId) : '')).then(function (data) {
         if (seq !== sequence || !sameSelection(selected)) return;
         var tasks = data.tasks || [];

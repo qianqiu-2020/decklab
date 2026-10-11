@@ -1,14 +1,18 @@
 # Durable tasks: implementation contract
 
 Durable tasks currently support `identify`, `ssh-enable` and `ssh-connect` through
-the collector API, CLI and browser. Server-owned file transfer is still pending. Existing file-transfer requests keep their current behavior.
+the collector API, CLI and browser. Collector-owned `file-copy` is available
+through the task API and CLI `file-copy --background`. Browser copy execution and
+server-owned upload/download are pending; existing foreground transfers remain.
 
 ## API and CLI
 
 `POST /api/task-start` accepts `key`, expected `serial`, `connection_id`, `kind`,
 actor and optional human `client_id`; it returns HTTP 202 with a task record.
 `GET /api/tasks` lists history with `limit` (1–100), `offset` and optional
-`connection_id` (for pending connections); filters apply before pagination;
+`connection_id` (for pending connections) or `target_serial` (tasks involving a
+board); filters apply before pagination. `serial` remains an all-target visibility
+constraint used by scoped grants, separate from the involvement filter;
 `GET /api/task?id=…` reads one record. `POST /api/task-cancel` requests cancellation
 by `id`. These endpoints return normal JSON errors and retain task IDs after the
 initiating HTTP connection closes.
@@ -84,3 +88,28 @@ A submitted operation is checked every second; network failures retry after two
 seconds without starting another task. Authentication failures, revoked access or
 a missing task stop the watcher. Device switches invalidate displayed callbacks
 without cancelling the collector's work. Cancellation does not promise rollback.
+
+## Collector-owned board copy
+
+```sh
+python3 serialctl.py --device deb1 file-copy --remote /root/log.txt \
+  --to-device milkv2 --to-path /tmp/log.txt --overwrite --background
+python3 serialctl.py task <returned-task-id>
+python3 serialctl.py task-cancel <returned-task-id>
+```
+
+For `kind=file-copy`, `/api/task-start` additionally takes `path`, `to_key`,
+`to_serial`, `to_connection_id`, `to_path` and optional `overwrite=true`. Both
+connections and input ownership are checked. The task records both targets; a
+single-board grant cannot submit, inspect or cancel it. Full-access task history
+can filter by either involved board without weakening authorization.
+
+The collector runs the existing framed transfer protocol and audit events,
+prefetching one source batch while writing the previous batch. It keeps bounded
+buffers, reports committed target bytes and verifies both SHA-256 values before
+success. Cancellation wakes both leases; a peer failure also stops and joins
+prefetch before cleanup. Abort removes this operation's temporary file only on
+the original connection. Local reservations and timers are released by matching
+transfer ID and connection even if remote cleanup is impossible. A disconnect
+can prevent remote cleanup; cancellation
+is not a guarantee that the destination has not already been committed.

@@ -58,6 +58,21 @@ class SerialFileTransferTests(unittest.TestCase):
             self.assertIsNone(self.transfer._expiry_timer)
             self.assertFalse(self.transfer.active)
 
+    def test_local_release_requires_original_transfer_and_connection_and_never_writes(self):
+        state = self.transfer.start('upload', str(self.root / 'disconnect'),
+                                    self.device.connection_id, size=0)
+        timer, commands = self.transfer._expiry_timer, len(self.device.commands)
+        self.device.connection_id = 'replacement'
+        self.assertFalse(self.transfer.release_local('wrong-task', 'connection-1'))
+        self.assertFalse(self.transfer.release_local(state['id'], 'replacement'))
+        self.assertTrue(self.transfer.active)
+        self.assertTrue(self.transfer.release_local(state['id'], 'connection-1'))
+        self.assertFalse(self.transfer.active)
+        self.assertIsNone(self.transfer._expiry_timer)
+        self.assertEqual(len(self.device.commands), commands)
+        timer.join(1)
+        self.assertFalse(timer.is_alive())
+
     def test_idle_timer_reschedules_then_expires_and_releases_reservation(self):
         with mock.patch('seriald_core.file_transfer.threading.Timer') as factory:
             factory.side_effect = lambda *args, **kwargs: mock.Mock()

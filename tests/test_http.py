@@ -268,6 +268,16 @@ class HandlerTests(unittest.TestCase):
             privileged.do_POST()
             self.assertEqual(self.result(privileged)[0], 403)
 
+            body = json.dumps({'key': 'A', 'kind': 'file-copy', 'to_key': 'B'}).encode()
+            scoped_copy = self.control_handler('/api/task-start')
+            scoped_copy.auth_token, scoped_copy.grant_store = 'owner', store
+            scoped_copy.headers = dict(headers, **{'Content-Length': str(len(body))})
+            scoped_copy.rfile, scoped_copy.command = io.BytesIO(body), 'POST'
+            with mock.patch.object(control, 'UnixHTTPConnection') as upstream:
+                scoped_copy.do_POST()
+            self.assertEqual(self.result(scoped_copy)[0], 403)
+            upstream.assert_not_called()
+
             features = self.control_handler('/api/capabilities')
             features.auth_token, features.grant_store, features.headers = 'owner', store, headers
             features.command = 'GET'

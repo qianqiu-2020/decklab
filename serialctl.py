@@ -52,11 +52,11 @@ class Client:
     def request(self, route, payload=None, query=None, timeout=None):
         if payload is not None:
             payload = dict(payload, actor=self.actor)
-            if self.serial and payload.get('key'):
+            if self.serial and payload.get('key') and route != '/api/task-cancel':
                 payload['serial'] = self.serial
             if route.startswith('/api/file-transfer/'):
                 payload.setdefault('connection_id', self.connection_id)
-        if query and self.serial and query.get('key'):
+        if query and self.serial and query.get('key') and route not in ('/api/tasks', '/api/task'):
             query = dict(query, serial=self.serial)
         url = self.url + route
         if query:
@@ -524,6 +524,7 @@ def parser():
     copy.add_argument('--to-device', required=True)
     copy.add_argument('--to-path', required=True, help='absolute destination path')
     copy.add_argument('--overwrite', action='store_true')
+    copy.add_argument('--background', action='store_true', help='return a durable collector task without waiting')
     return p
 
 
@@ -540,7 +541,10 @@ def main(argv=None):
             if args.device:
                 client.select(args.device)
             if args.action == 'tasks':
-                result = client.get('/api/tasks', limit=args.limit, offset=args.offset)
+                query = dict(limit=args.limit, offset=args.offset)
+                if args.device:
+                    query['target_serial'] = client.serial
+                result = client.get('/api/tasks', **query)
             elif args.action == 'task':
                 result = client.get('/api/task', id=args.id)
             else:
@@ -595,7 +599,13 @@ def main(argv=None):
                 destination = Client(args.url, args.http_timeout, args.token)
                 destination.actor = args.actor
                 destination.select(args.to_device)
-                result = file_copy(client, destination, args.remote, args.to_path, args.overwrite)
+                if args.background:
+                    result = client.post('/api/task-start', kind='file-copy',
+                        connection_id=client.connection_id, to_key=destination.key,
+                        to_serial=destination.serial, to_connection_id=destination.connection_id,
+                        path=args.remote, to_path=args.to_path, overwrite=args.overwrite)
+                else:
+                    result = file_copy(client, destination, args.remote, args.to_path, args.overwrite)
             elif args.action == 'boot-compare':
                 baseline = client
                 if args.baseline_device:

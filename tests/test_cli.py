@@ -88,6 +88,20 @@ class ClientTests(unittest.TestCase):
         factory.return_value.request.assert_called_once_with('/api/health')
         self.assertEqual(json.loads(out.getvalue())['pid'], 123)
 
+    def test_background_copy_submits_both_device_generations_and_returns_task(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            source, destination = mock.Mock(), mock.Mock()
+            factory.side_effect = [source, destination]
+            source.connection_id, destination.connection_id = 'source-connection', 'destination-connection'
+            destination.key, destination.serial = 'destination', 'SN-DST'
+            source.post.return_value = {'task': {'id': 'copy-task'}}
+            self.assertEqual(ctl.main(['--device', 'source', 'file-copy', '--remote', '/source',
+                '--to-device', 'destination', '--to-path', '/target', '--background', '--overwrite']), 0)
+            source.post.assert_called_once_with('/api/task-start', kind='file-copy',
+                connection_id='source-connection', to_key='destination', to_serial='SN-DST',
+                to_connection_id='destination-connection', path='/source', to_path='/target', overwrite=True)
+            destination.post.assert_not_called()
+
     def test_task_commands_preserve_id_pagination_and_connection(self):
         with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
             client = factory.return_value

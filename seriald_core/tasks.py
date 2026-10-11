@@ -75,7 +75,7 @@ class TaskStore:
         record['cancel_requested'] = bool(record['cancel_requested'])
         return record
 
-    def list(self, actor=None, serials=None, limit=20, offset=0, connection_id=None):
+    def list(self, actor=None, serials=None, limit=20, offset=0, connection_id=None, target_serial=None):
         if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0:
             raise TaskError('invalid task pagination')
         clauses, arguments = [], []
@@ -93,6 +93,13 @@ class TaskStore:
                            "AND COALESCE(json_extract(tasks.result,'$.serial'),'') IN (" + placeholders + ')))')
             arguments.extend(serials)
             arguments.extend(serials)
+        if target_serial is not None:
+            if not isinstance(target_serial, str) or not target_serial or len(target_serial.encode()) > 100:
+                raise TaskError('invalid task target serial')
+            clauses.append('EXISTS (SELECT 1 FROM task_targets WHERE task_id=tasks.id AND '
+                           "(serial=? OR (serial='' AND (SELECT COUNT(*) FROM task_targets WHERE task_id=tasks.id)=1 "
+                           "AND json_extract(tasks.result,'$.serial')=?)))")
+            arguments.extend((target_serial, target_serial))
         if connection_id is not None:
             if not isinstance(connection_id, str) or not connection_id or len(connection_id) > 80:
                 raise TaskError('invalid task connection')

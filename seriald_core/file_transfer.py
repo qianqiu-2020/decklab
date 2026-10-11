@@ -101,6 +101,15 @@ class SerialFileTransfer:
             self._expiry_timer = None
         self.state = None
 
+    def release_local(self, transfer_id, connection_id):
+        """Retire this reservation without issuing commands on a disconnected board."""
+        with self.lock:
+            state = self.state
+            if not state or state['id'] != transfer_id or state['connection_id'] != connection_id:
+                return False
+            self._release()
+            return True
+
     def _expire(self, transfer_id):
         with self.lock:
             state = self.state
