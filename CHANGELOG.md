@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Extract serial archive writing into a transport-independent component owning
+  UTF-8 decoding, partial lines, rotation, file handles and write-error recovery.
+  Keep live byte fan-out and identity/retention lock ordering in the connection.
 - Inventory and verify all Windows distribution files before ZIP/installer
   packaging, including native libraries, resources, scripts and notices. Reject
   changed, missing or extra files and refuse runtime data or redirected paths.

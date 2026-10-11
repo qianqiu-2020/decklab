@@ -40,6 +40,18 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+Serial archive writing is now a separate `SerialLog` component owning its
+decoder, partial lines, file handle/path, write-error state and reentrant lock.
+It accepts a directory callback, without a connection, registry or serial reader.
+Device retains raw byte fan-out; migration and retention continue to use the
+writer's same lock. Standalone fixtures verify split UTF-8, local status isolation,
+partial-line close and disk-error recovery. Existing capture, identity, registry,
+maintenance, session and demo contracts pass in the complete 542-test backend
+suite (three native Windows tests skipped), with 74 frontend checks and sharing
+checks. A spectator fixture now uses temporary storage and explicitly closes its
+writer, fixing its stale method mock and unclosed-log warning. Windows build
+syntax parses; native execution remains unverified.
+
 Windows packaging now creates `bundle-manifest.json` after all executable,
 library, UI, launcher, documentation and notice files are ready. ZIP creation
 and standalone installer compilation verify the complete file set, sizes and

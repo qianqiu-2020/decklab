@@ -60,7 +60,8 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/identity.py` | EEPROM、固件、SoC/eFuse 与旧软件身份的选择 |
 | `seriald_core/handoff.py` | 干净重启时同 boot、短时、一次性的连接接续 |
 | `seriald_core/archive.py` | 候选/正式日志的无覆盖暂存和提交后迁移 |
-| `seriald_core/device.py` | 连接的字节流与日志、身份发布、会话编排和协议服务入口 |
+| `seriald_core/device.py` | 连接的实时字节流、身份发布、会话编排以及协议/日志组件入口 |
+| `seriald_core/serial_log.py` | 串口档案写入组件：独立持有增量解码器、半行缓存、文件句柄、按日轮转、写入错误和可重入锁；目录由调用方提供，不访问串口或注册表 |
 | `seriald_core/console_protocol.py` | 独立控制台协议服务：登录、nonce 命令帧、响应等待及显式 SSH 配置；只使用连接的既有缓冲与受事务保护的写入口 |
 | `seriald_core/models.py` | 持久 Board 身份、可替换连接绑定与独立会话所有权 |
 | `seriald_core/transactions.py` | 统一串口事务租约、总超时、连接代次检查与取消 |

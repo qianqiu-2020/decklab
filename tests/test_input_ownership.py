@@ -4,6 +4,7 @@ import types
 import io
 import json
 import unittest
+import tempfile
 from unittest import mock
 
 from seriald_core.device import Device
@@ -14,7 +15,13 @@ from seriald_core import web
 
 class InputOwnershipTests(unittest.TestCase):
     def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        patcher = mock.patch('seriald_core.device.LOG_ROOT', temporary.name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.device = Device('fake-usb', '/fake/tty')
+        self.addCleanup(self.device.close_log)
         self.device.fd, self.device.present = 98765, True
         self.transactions = self.device.transactions
         self.manager = types.SimpleNamespace(store=mock.Mock())
@@ -139,8 +146,7 @@ class InputOwnershipTests(unittest.TestCase):
         session = mock.Mock(actor='ssh-owner', takeovers=set())
         self.device.ssh_sessions['ssh1'] = session
         session.write.return_value = True
-        with mock.patch.object(self.device, '_log_text'):
-            self.device.append(b'boot output\n')
+        self.device.append(b'boot output\n')
         self.assertEqual(self.device.read(0)[1], b'boot output\n')
         with mock.patch.object(self.device, 'record_input'):
             result = self.actions.execute('session-send', {'sid': 'ssh1', 'data': 'uname\r'},

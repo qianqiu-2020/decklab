@@ -1,5 +1,4 @@
 """One board connection: console stream, probe transactions and SSH sessions."""
-import codecs
 from dataclasses import asdict
 import hashlib
 import os
@@ -9,9 +8,10 @@ import threading
 import time
 import sys
 
-from .config import ANSI, BY_PATH, DATE_FMT, HOST_PATTERNS, LOG_ROOT, SCROLLBACK, SSH_IDLE, SSH_LIMIT
+from .config import ANSI, BY_PATH, HOST_PATTERNS, LOG_ROOT, SCROLLBACK, SSH_IDLE, SSH_LIMIT
 from .transport import write_serial
 from .console_protocol import ConsoleProtocol
+from .serial_log import SerialLog
 from .protocol import PROBE_CMD, RE_LOGIN, RE_PROMPT, SSH_CMD, parse_probe
 if sys.platform == 'win32':
     from serial import SerialException
@@ -33,6 +33,7 @@ class Device:
     def __init__(self, key, dev, manager=None, record=None, board=None):
         self.manager = manager
         self.console = ConsoleProtocol(self)
+        self.log = SerialLog(self.stable_dir, opener=lambda: self.open_log())
         self.board = board if board is not None else Board(record) if record else None
         self._sessions = self.board.sessions if self.board else SessionRegistry()
         record = self.record
@@ -66,7 +67,6 @@ class Device:
         self.transactions = SerialTransactions(self, self.operation_lock)
         self.file_transfer = SerialFileTransfer(self)
         self.write_lock = threading.Lock()      # fd 退役与写入串行,绝不占用输出 cv
-        self.log_lock = threading.RLock()
         self.boot_index_lock = threading.Lock()
         self.boot_index_cache = {}
         self.stop = threading.Event()
@@ -76,17 +76,40 @@ class Device:
         self.present = False
         self.console_tail = ''
         self.newline = None            # 收到新提示符后才确认本连接的 CR/LF 策略
-        self.decoder = codecs.getincrementaldecoder('utf-8')('replace')
-        self.log_pending = ''
         self.probe_info = dict(record['info']) if record else {}
-        self.logf = None
-        self.log_error = ''
         # preload 可能在没有日志时早退;所有状态必须先初始化。
-        self.logpath = None
         self.dead = False
         self.history_loaded = record is None
         self.input_lines = {}
         self.input_sensitive = set()
+
+    @property
+    def log_lock(self):
+        return self.log.log_lock
+
+    @property
+    def logf(self):
+        return self.log.logf
+
+    @logf.setter
+    def logf(self, value):
+        self.log.logf = value
+
+    @property
+    def logpath(self):
+        return self.log.logpath
+
+    @logpath.setter
+    def logpath(self, value):
+        self.log.logpath = value
+
+    @property
+    def log_error(self):
+        return self.log.log_error
+
+    @log_error.setter
+    def log_error(self, value):
+        self.log.log_error = value
 
     @property
     def record(self):
@@ -284,58 +307,14 @@ class Device:
         self.input_lines[key] = line
 
     def open_log(self):
-        path = os.path.join(self.stable_dir(), 'serial-%s.log' % time.strftime(DATE_FMT))
-        if self.logf and self.logpath == path:
-            return
-        if self.logf:
-            self.logf.close()
-            self.logf = None
-        self.logf = open(path, 'a', encoding='utf-8', buffering=1)
-        self.logpath = path
-        self.log_error = ''
-
-    def _log_text(self, text):
-        try:
-            self.open_log()
-            stamp = time.strftime('%Y-%m-%d %H:%M:%S')
-            for raw in text.split('\n'):
-                line = ANSI.sub('', raw.rstrip('\r').split('\r')[-1]).rstrip()
-                if line:
-                    # File-transfer shell echo and SD_DATA responses can contain
-                    # whole file chunks. Keep the action visible, not the payload.
-                    line = re.sub(r'(printf %s )[A-Za-z0-9+/=]{80,}( \| (?:base64 -d))',
-                                  r'\1[base64 omitted]\2', line)
-                    line = re.sub(r'(SD_DATA=)[A-Za-z0-9+/=]{80,}',
-                                  r'\1[base64 omitted]', line)
-                    self.logf.write('%s  %s\n' % (stamp, line))
-        except (OSError, ValueError) as error:
-            # 磁盘满/目录不可写不能杀死唯一采集线程,内存扇出仍要继续。
-            self.log_error = str(error)
-            if self.logf:
-                try:
-                    self.logf.close()
-                except OSError:
-                    pass
-            self.logf = None
+        self.log.open()
 
     def append(self, data, received=True):
         b = data if isinstance(data, bytes) else data.encode('utf-8', 'replace')
         with self.log_lock:
-            if received:
-                text = self.decoder.decode(b)
-                self.log_pending += text
-                lines = self.log_pending.split('\n')
-                self.log_pending = lines.pop()
-                if lines:
-                    self._log_text('\n'.join(lines))
-                if len(self.log_pending) > 8192:
-                    self._log_text(self.log_pending)
-                    self.log_pending = ''
-            else:
-                text = b.decode('utf-8', 'replace')
-                self._log_text(text)
-                # 状态文字插入半个 UTF-8 字符/ANSI 序列中会破坏原始串口流。
-                # 本地诊断只落日志;终端缓冲始终保持采集器实际收到的字节顺序。
+            text = self.log.consume(b, received)
+            if not received:
+                # Local status belongs only in archives, never in the UART bytes.
                 return
             with self.cv:
                 self.buf += b
@@ -352,18 +331,7 @@ class Device:
                 self.cv.notify_all()
 
     def close_log(self):
-        with self.log_lock:
-            self.log_pending += self.decoder.decode(b'', final=True)
-            if self.log_pending:
-                self._log_text(self.log_pending)
-            self.log_pending = ''
-            self.decoder.reset()
-            if self.logf:
-                try:
-                    self.logf.close()
-                except OSError:
-                    pass
-                self.logf = None
+        self.log.close()
 
     def _write(self, text):
         with self.write_lock:
