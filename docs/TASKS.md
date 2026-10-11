@@ -179,8 +179,26 @@ python3 serialctl.py --device deb1 task <returned-task-id>
 ```
 
 Background downloads do not accept `--local`: the collector stores the verified
-file, and the browser task list provides its download link. Upload staging uses
+file, and `file-fetch <task-id> --local <path>` retrieves it. The browser task
+list provides the same file as a download link. Upload staging uses
 at most 1 MiB per request and compares its sealed size/SHA-256 before submitting.
 A staging failure attempts to delete its inactive artifact. If task submission
 loses its response, the client neither resubmits nor deletes staging: inspect task
 history before retrying. Once submitted, closing the CLI does not cancel work.
+
+## Retrieve a completed task file
+
+```sh
+python3 serialctl.py --device deb1 file-fetch <task-id> --local ./image.bin
+```
+
+`file-fetch` requires a completed `file-download` task. Full-platform callers
+may omit `--device`; device-scoped grants must supply it. The CLI forwards its
+bearer token and expected serial, verifies content length and SHA-256 against
+the task result, and streams at most 64 KiB at a time into a local temporary
+file. It publishes the file only after verification and a filesystem flush.
+Existing paths require `--overwrite`; without it, concurrent destination
+creation is also protected. Corrupt/truncated responses, revoked access and
+interrupted retrieval leave no partial destination and remove the temporary
+file. Retrieval never writes UART and does not delete the host artifact; it can
+be repeated until the configured artifact expiry.

@@ -19,7 +19,7 @@ Do not change an installed service or use live boards during regression tests.
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI and browser transfers implemented; local CLI artifact retrieval/final audit pending |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI and browser transfers implemented; CLI result retrieval implemented; orchestration consolidation/final audit pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
@@ -293,3 +293,18 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   once after mobile-to-desktop emulation; the unchanged rerun passed. This is
   retained as an unresolved browser-test timing concern, rather than claiming
   that one successful run proves the assertion deterministic.
+
+- CLI task-file retrieval: `file-fetch <task-id> --local <path>` streams a
+  completed download without UART IO, forwarding token and expected identity.
+  Task metadata, response length/hash and actual bytes must agree before fsync
+  and atomic publication. Existing targets need explicit overwrite; competing
+  local creation cannot be overwritten without it. Tests cover corrupt, short,
+  oversized, empty and malformed responses, revoked access, overwrite and local
+  creation races. Real demo HTTP submits tasks from one CLI process and retrieves
+  bytes from a later process. Legacy CLI orchestration consolidation, pending
+  identity-history audit and platform/release gates remain outstanding.
+
+  Verification: 452 backend tests, 74 frontend isolation tests and sharing tests
+  pass; syntax/whitespace checks pass. The production demo HTTP test retrieves
+  a completed download with an independent CLI process and checks its bytes and
+  SHA-256. No installed service or real board was changed.

@@ -137,8 +137,7 @@ serialctl --device riscv-118 file-copy --remote /tmp/firmware.bin \
 仍按解压后的内容校验。已经压缩的二进制文件通常会自动走原有的无压缩路径。
 每次请求固定设备连接 ID，断线、换板或超时会中止传输。正常取消会清理上传临时文件；上位机
 异常退出后可在板端目标目录检查遗留的 `.seriald-*.part`。串口回显可能把上传数据的 base64 文本
-写入串口日志，传敏感文件前应考虑日志权限与保留策略。浏览器也提供“文件传输”面板；浏览器
-无法流式保存时下载限制为 128 MiB，大文件请使用 CLI。
+写入串口日志，传敏感文件前应考虑日志权限与保留策略。浏览器也提供“文件传输”面板；网页下载由上位机校验完成后提供流式链接，不再有浏览器 128 MiB 限制。
 网页传输中显示原文件有效速率与预计剩余时间；标题栏可拖动。板间复制流水线地同时使用
 源板和目标板各自的串口，相邻分块的读取与写入可以重叠，但两个板的完整哈希仍分别校验。
 
@@ -191,3 +190,16 @@ serialctl --device deb1 boot-search --query 'panic'
 对应 API：`GET /api/boot-search?key=<标签>&q=<关键词>&offset=0`、`GET /api/boot-log?key=<标签>&id=<启动ID>`。单设备分享令牌继续由服务端绑定序列号。开始采集之前的输出无法补回；无启动标记时不会猜测启动次数。
 
 通过有效网页分享链接进入的同事也可以在“Agent 分享”中创建、查看和撤销 Agent 令牌；设备页默认选择当前设备。Agent 令牌自身不能创建或撤销其他令牌。网页设备链接按序列号定位，但网页分享的访问授权仍覆盖整个平台。
+
+## 后台文件传输与结果取回
+
+```sh
+serialctl --device riscv-118 file-put --local ./firmware.bin --remote /tmp/firmware.bin --background
+serialctl --device riscv-118 file-get --remote /var/log/dmesg --background
+serialctl --device riscv-118 task <返回的任务ID>
+serialctl --device riscv-118 file-fetch <下载任务ID> --local ./dmesg.txt
+```
+
+提交后可结束 agent 命令进程；采集器继续执行。上传暂存阶段仍需客户端在线。
+下载完成后按任务 ID 取回，CLI 流式校验大小及 SHA-256，再提交本地文件；默认拒绝覆盖，
+必要时显式加 `--overwrite`。不要重复提交响应丢失的任务，先查询任务历史。

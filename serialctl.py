@@ -344,6 +344,71 @@ def file_put(client, local, remote, overwrite=False):
         _abort_transfer(client, transfer_id)
 
 
+def fetch_task_file(client, task_id, local, overwrite=False):
+    """Retrieve a completed download without reading UART or buffering the file."""
+    target = Path(local).expanduser().absolute()
+    if not target.parent.is_dir():
+        raise ClientError('Local destination directory does not exist')
+    if not overwrite and os.path.lexists(target):
+        raise ClientError('Local destination already exists; pass --overwrite to replace it')
+    task = client.get('/api/task', id=task_id).get('task')
+    if (not isinstance(task, dict) or task.get('id') != task_id
+            or task.get('kind') != 'file-download' or task.get('state') != 'completed'):
+        raise ClientError('Task is not a completed file download')
+    result = task.get('result') or {}
+    if not isinstance(result, dict):
+        raise ClientError('Invalid download task metadata')
+    size, sha, artifact_id = result.get('size'), result.get('sha256'), result.get('artifact_id')
+    if (type(size) is not int or size < 0 or not isinstance(sha, str)
+            or not re.fullmatch('[a-f0-9]{64}', sha) or not isinstance(artifact_id, str)
+            or not re.fullmatch('[a-f0-9]{24}', artifact_id)):
+        raise ClientError('Invalid download task metadata')
+    query = {'id': artifact_id}
+    if client.key:
+        query['key'] = client.key
+    if client.serial:
+        query['serial'] = client.serial
+    headers = {'Authorization': 'Bearer ' + client.token} if client.token else {}
+    request = Request(client.url + '/api/artifact-download?' + urlencode(query), headers=headers)
+    temp = None
+    try:
+        with urlopen(request, timeout=client.timeout) as incoming:
+            if (incoming.headers.get('Content-Length') != str(size)
+                    or incoming.headers.get('X-Checksum-SHA256') != sha):
+                raise ClientError('Download headers do not match task metadata')
+            digest, received = hashlib.sha256(), 0
+            with tempfile.NamedTemporaryFile(dir=target.parent, prefix='.seriald-', delete=False) as sink:
+                temp = sink.name
+                while True:
+                    data = incoming.read(65536)
+                    if not data:
+                        break
+                    received += len(data)
+                    if received > size:
+                        raise ClientError('Downloaded file exceeds expected size')
+                    sink.write(data)
+                    digest.update(data)
+                sink.flush()
+                os.fsync(sink.fileno())
+            if received != size or digest.hexdigest() != sha:
+                raise ClientError('Downloaded file size or SHA-256 mismatch')
+        if overwrite:
+            os.replace(temp, target)
+        else:
+            os.link(temp, target)
+            os.unlink(temp)
+        temp = None
+        return dict(ok=True, task_id=task_id, local=str(target), size=size, sha256=sha)
+    except HTTPError as error:
+        error.close()
+        raise ClientError('HTTP %s while retrieving task file' % error.code, status=error.code) from error
+    except (URLError, OSError, http.client.HTTPException) as error:
+        raise ClientError(str(error)) from error
+    finally:
+        if temp and os.path.exists(temp):
+            os.unlink(temp)
+
+
 def file_get(client, remote, local, overwrite=False):
     target = Path(local).expanduser().absolute()
     if not target.parent.is_dir():
@@ -500,6 +565,10 @@ def parser():
     task.add_argument('id')
     task_cancel = commands.add_parser('task-cancel', help='request cancellation of a durable task')
     task_cancel.add_argument('id')
+    fetch_file = commands.add_parser('file-fetch', help='save a completed download task with size/SHA-256 verification')
+    fetch_file.add_argument('id', help='completed file-download task ID')
+    fetch_file.add_argument('--local', required=True)
+    fetch_file.add_argument('--overwrite', action='store_true')
     task_start = commands.add_parser('task-start', help='start a background device operation')
     task_start.add_argument('kind', choices=('identify', 'ssh-enable', 'ssh-connect'))
     commands.add_parser('operation', help='show the active serial operation and cancellation ID')
@@ -557,7 +626,7 @@ def parser():
     get.add_argument('--remote', required=True, help='absolute path on the board')
     get.add_argument('--local', help='local output path; required unless --background')
     get.add_argument('--overwrite', action='store_true')
-    get.add_argument('--background', action='store_true', help='return a durable task; download its result from task history')
+    get.add_argument('--background', action='store_true', help='return a durable task; retrieve it with file-fetch <task-id> --local <path>')
     copy = commands.add_parser('file-copy', help='copy a file to another board through this host')
     copy.add_argument('--remote', required=True, help='absolute source path')
     copy.add_argument('--to-device', required=True)
@@ -576,10 +645,12 @@ def main(argv=None):
         client.ssh_user, client.ssh_password = args.ssh_user, args.ssh_password
         if args.action in ('devices', 'health', 'capabilities', 'diagnostics'):
             result = client.request('/api/' + args.action)
-        elif args.action in ('tasks', 'task', 'task-cancel'):
+        elif args.action in ('tasks', 'task', 'task-cancel', 'file-fetch'):
             if args.device:
                 client.select(args.device)
-            if args.action == 'tasks':
+            if args.action == 'file-fetch':
+                result = fetch_task_file(client, args.id, args.local, args.overwrite)
+            elif args.action == 'tasks':
                 query = dict(limit=args.limit, offset=args.offset)
                 if args.device:
                     query['target_serial'] = client.serial
@@ -636,7 +707,7 @@ def main(argv=None):
             elif args.action == 'file-get':
                 if args.background:
                     if args.local:
-                        raise ClientError('--background saves on the host; omit --local and use the task download link')
+                        raise ClientError('--background saves on the host; omit --local and retrieve with file-fetch')
                     result = client.post('/api/task-start', kind='file-download', path=args.remote,
                                          connection_id=client.connection_id)
                 else:

@@ -190,6 +190,12 @@ class DemoHttpTests(unittest.TestCase):
                 with urlopen(url + '/api/artifact-download?id=' + record['result']['artifact_id'], timeout=5) as response:
                     self.assertEqual(response.read(), staged_data)
                     self.assertEqual(response.headers['X-Checksum-SHA256'], hashlib.sha256(staged_data).hexdigest())
+                with tempfile.TemporaryDirectory() as retrieved:
+                    local = Path(retrieved) / 'background.bin'
+                    fetched = json.loads(run_cli('demo-k1', 'file-fetch', downloaded['id'],
+                        '--local', str(local)))
+                    self.assertEqual(local.read_bytes(), staged_data)
+                    self.assertEqual(fetched['sha256'], hashlib.sha256(staged_data).hexdigest())
                 self.assertEqual(list(Path(forbidden).iterdir()), [])
             finally:
                 process.terminate()

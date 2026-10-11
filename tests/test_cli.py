@@ -436,5 +436,125 @@ class ExecutionTests(unittest.TestCase):
         self.assertIn('close failed', result['cleanup_error'])
 
 
+class TaskFileTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.target = Path(self.tmp.name) / 'download.bin'
+        self.data = bytes(range(256)) * 600
+        self.sha = hashlib.sha256(self.data).hexdigest()
+        self.client = ctl.Client('http://localhost:8898', token='secret')
+        self.client.key, self.client.serial = '板子', 'SN-1'
+        self.task = {'id': 'task', 'kind': 'file-download', 'state': 'completed',
+            'result': {'size': len(self.data), 'sha256': self.sha, 'artifact_id': 'a' * 24}}
+        self.client.get = mock.Mock(return_value={'task': self.task})
+
+    def incoming(self, data=None):
+        stream = io.BytesIO(self.data if data is None else data)
+        stream.headers = {'Content-Length': str(len(self.data)), 'X-Checksum-SHA256': self.sha}
+        return stream
+
+    def test_streamed_save_pins_scope_token_and_checks_digest(self):
+        stream = self.incoming()
+        with mock.patch.object(ctl, 'urlopen', return_value=stream) as request:
+            result = ctl.fetch_task_file(self.client, 'task', self.target)
+        self.assertEqual(self.target.read_bytes(), self.data)
+        self.assertEqual(result['sha256'], self.sha)
+        self.client.get.assert_called_once_with('/api/task', id='task')
+        query = ctl.urlsplit(request.call_args.args[0].full_url).query
+        self.assertIn('serial=SN-1', query)
+        self.assertIn('key=%E6%9D%BF%E5%AD%90', query)
+        self.assertEqual(request.call_args.args[0].get_header('Authorization'), 'Bearer secret')
+        self.assertTrue(stream.closed)
+        self.assertEqual(list(self.target.parent.iterdir()), [self.target])
+
+    def test_corrupt_truncated_or_excess_bytes_preserve_existing_target_and_remove_temp(self):
+        for data in (self.data[:-1], self.data + b'x', b'x' * len(self.data)):
+            self.target.write_bytes(b'original')
+            with mock.patch.object(ctl, 'urlopen', return_value=self.incoming(data)):
+                with self.assertRaises(ctl.ClientError):
+                    ctl.fetch_task_file(self.client, 'task', self.target, overwrite=True)
+            self.assertEqual(self.target.read_bytes(), b'original')
+            self.assertEqual(list(self.target.parent.iterdir()), [self.target])
+
+    def test_invalid_task_or_headers_do_not_create_local_files(self):
+        for field, value in (('state', 'running'), ('kind', 'file-upload'), ('id', 'other')):
+            old = self.task[field]; self.task[field] = value
+            with mock.patch.object(ctl, 'urlopen') as request:
+                with self.assertRaises(ctl.ClientError):
+                    ctl.fetch_task_file(self.client, 'task', self.target)
+                request.assert_not_called()
+            self.task[field] = old
+        for field in ('Content-Length', 'X-Checksum-SHA256'):
+            stream = self.incoming(); stream.headers[field] = 'bad'
+            with mock.patch.object(ctl, 'urlopen', return_value=stream):
+                with self.assertRaises(ctl.ClientError):
+                    ctl.fetch_task_file(self.client, 'task', self.target)
+            self.assertEqual(list(self.target.parent.iterdir()), [])
+
+    def test_existing_target_requires_overwrite_and_success_replaces_atomically(self):
+        self.target.write_bytes(b'original')
+        with mock.patch.object(ctl, 'urlopen') as request:
+            with self.assertRaises(ctl.ClientError):
+                ctl.fetch_task_file(self.client, 'task', self.target)
+            request.assert_not_called()
+        with mock.patch.object(ctl, 'urlopen', return_value=self.incoming()):
+            ctl.fetch_task_file(self.client, 'task', self.target, overwrite=True)
+        self.assertEqual(self.target.read_bytes(), self.data)
+
+    def test_malformed_result_is_rejected_before_fetching_or_creating_files(self):
+        for result in ([1], {'size': True}, {'size': -1}, {'size': 0, 'sha256': 'bad'}):
+            self.task['result'] = result
+            with mock.patch.object(ctl, 'urlopen') as request:
+                with self.assertRaises(ctl.ClientError):
+                    ctl.fetch_task_file(self.client, 'task', self.target)
+                request.assert_not_called()
+            self.assertEqual(list(self.target.parent.iterdir()), [])
+
+    def test_empty_download_is_verified_and_saved(self):
+        sha = hashlib.sha256(b'').hexdigest()
+        self.task['result'].update(size=0, sha256=sha)
+        incoming = self.incoming(b'')
+        incoming.headers.update({'Content-Length': '0', 'X-Checksum-SHA256': sha})
+        with mock.patch.object(ctl, 'urlopen', return_value=incoming):
+            ctl.fetch_task_file(self.client, 'task', self.target)
+        self.assertEqual(self.target.read_bytes(), b'')
+
+    def test_creation_race_cannot_overwrite_another_local_file(self):
+        stream = self.incoming()
+        original_read = stream.read
+        def read(length):
+            self.target.write_bytes(b'created concurrently')
+            self.assertEqual(length, 65536)
+            return original_read(length)
+        stream.read = read
+        with mock.patch.object(ctl, 'urlopen', return_value=stream):
+            with self.assertRaises(ctl.ClientError):
+                ctl.fetch_task_file(self.client, 'task', self.target)
+        self.assertEqual(self.target.read_bytes(), b'created concurrently')
+        self.assertEqual(list(self.target.parent.iterdir()), [self.target])
+
+    def test_revoked_request_returns_status_without_leaving_partial_files(self):
+        error = ctl.HTTPError('http://localhost', 403, 'revoked', {}, io.BytesIO(b'secret response'))
+        with mock.patch.object(ctl, 'urlopen', side_effect=error):
+            with self.assertRaises(ctl.ClientError) as failure:
+                ctl.fetch_task_file(self.client, 'task', self.target)
+        self.assertEqual(failure.exception.status, 403)
+        self.assertNotIn('secret', str(failure.exception))
+        self.assertEqual(list(self.target.parent.iterdir()), [])
+
+    def test_stream_disconnect_removes_partial_temp_and_preserves_existing_target(self):
+        self.target.write_bytes(b'original')
+        incoming = self.incoming()
+        incoming.read = mock.Mock(side_effect=[self.data[:65536], OSError('connection lost')])
+        with mock.patch.object(ctl, 'urlopen', return_value=incoming):
+            with self.assertRaisesRegex(ctl.ClientError, 'connection lost'):
+                ctl.fetch_task_file(self.client, 'task', self.target, overwrite=True)
+        self.assertEqual(incoming.read.call_args_list, [mock.call(65536), mock.call(65536)])
+        self.assertTrue(incoming.closed)
+        self.assertEqual(self.target.read_bytes(), b'original')
+        self.assertEqual(list(self.target.parent.iterdir()), [self.target])
+
+
 if __name__ == '__main__':
     unittest.main()
