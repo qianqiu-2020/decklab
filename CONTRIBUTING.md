@@ -9,6 +9,10 @@ installation and everyday operation simple. Read `docs/ARCHITECTURE.md` and
 - `seriald_core/`: collector, device identity, sessions, storage and HTTP services.
 - `seriald.py` / `seriald_windows.py`: Linux control and Windows host entry points.
 - `index.html`, `static/`: UI layout, behavior and original assets.
+  `devices.js`, `terminal-view.js`, `archives.js` and `terminal-navigation.js`
+  own directory, terminal lifetime, archive selection and buffer navigation;
+  `app.js` connects them through injected callbacks. Keep stale-view/request
+  checks when adding asynchronous work.
 - `vendor/`: bundled terminal libraries; do not patch them for application changes.
 - `serialctl.py`, `skills/`: standalone client and agent guidance.
 - `tests/`, `tools/`, `packaging/`: regression checks and release tooling.

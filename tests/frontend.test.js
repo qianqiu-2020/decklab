@@ -7,7 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { TextDecoder } = require('node:util');
 
-const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'app.js'].map(name =>
+const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'app.js'].map(name =>
   fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
 
 class Element {
@@ -193,6 +193,24 @@ test('low log-disk space is visible without disabling terminal access', async ()
   assert.ok(h.get('conn-txt').textContent.includes('日志磁盘空间不足'));
   h.select('A');
   assert.equal(h.get('d-in').disabled, false);
+});
+
+test('older device polls cannot replace the current directory or connection status', async () => {
+  for (const fail of [false, true]) {
+    const h = harness(), old = h.take('/api/devices');
+    h.intervals.find(item => item.delay === 3000).fn();
+    h.take('/api/devices').resolve({ devices: [{key: 'new', label: 'new', alive: true}] });
+    await drain();
+    if (fail) old.reject(new Error('old connection failed'));
+    else old.resolve({ devices: [{key: 'old', label: 'old', alive: true}],
+      storage: {warning: true, available: false} });
+    await drain();
+    assert.deepEqual(h.get('grid').children.map(card => card.dataset.key), ['new']);
+    assert.equal(h.get('conn-dot').className, 'dot');
+    assert.ok(h.get('conn-txt').textContent.startsWith('已连接'));
+    h.get('device-search').value = 'new'; h.get('device-search').emit('input');
+    assert.deepEqual(h.get('grid').children.map(card => card.dataset.key), ['new']);
+  }
 });
 
 test('serial ownership keeps spectators read-only and human takeover restores input', async () => {

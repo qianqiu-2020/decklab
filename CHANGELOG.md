@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Extract device directory, selection and identity transitions into a controller.
+  Out-of-order device responses and failures cannot replace newer directory or
+  connection status; ownership revision protection remains intact.
+
 - Give terminal views an independent lifecycle controller for generation guards,
   disposal, streaming/poll fallback, ordered input and firmware/PTY rendering.
 

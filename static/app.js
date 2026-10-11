@@ -3,25 +3,26 @@
   var UI = window.SerialdUI, $ = UI.byId, fmt = UI.formatBytes, ago = UI.age, copyText = UI.copyText;
   var fetch = UI.fetch;
   function ownsInput(owner) { return owner && owner.actor === 'web' && owner.client_id === UI.clientId; }
-  var requestedDevice = '';
-  try {
-    var sharedMatch = /^#device=(.*)$/.exec(window.location && window.location.hash || '');
-    if (sharedMatch) requestedDevice = decodeURIComponent(sharedMatch[1]);
-  } catch (_) { /* A malformed bookmark must not break device discovery. */ }
-  var selKey = null, lastDevices = [], lastInfoTs = 0, lastInfoIdentity = '';
   var curSid = 'serial';              // serial、sshN 或本地只读 log:* 标签
   var sessions = [{ sid: 'serial', kind: 'serial' }];
   var sessionPage = 0, eventPage = 0;
   var recordsTab = 'logs';
   var ACTIVITY_PAGE_SIZE = 10;
   var takenOver = {};
-  var ownershipRevision = 0;
+  var deviceDirectory = window.SerialdDevices.create({
+    byId: $, fetch: fetch, formatBytes: fmt, age: ago,
+    getView: function () { return terminalView.current; },
+    isCurrent: function (ctx) { return isCurrent(ctx); },
+    open: select, renderInfo: renderInfo, loadSessions: loadSessions, loadActivity: loadActivity,
+    updateInputOwner: updateInputOwner
+  });
+  var pollDevices = deviceDirectory.poll, markSelected = deviceDirectory.markSelected, adoptKey = deviceDirectory.adopt;
   var terminalView = window.SerialdTerminalView.create({
     byId: $, fetch: fetch, ownsInput: ownsInput, setInputMode: setInputMode,
-    board: function (key) { return lastDevices.find(function (board) { return board.key === key; }); },
+    board: function (key) { return deviceDirectory.items.find(function (board) { return board.key === key; }); },
     session: function (sid) { return sessions.find(function (session) { return session.sid === sid; }); },
     takenOver: function (sid) { return !!takenOver[sid]; },
-    onSelect: function (key, sid) { selKey = key; curSid = sid; },
+    onSelect: function (key, sid) { deviceDirectory.selectionChanged(key); curSid = sid; },
     clearTerminalSearch: function (focus) { clearTerminalSearch(focus); },
     clearCommandDecorations: function (ctx) { clearCommandDecorations(ctx); },
     renderCommandNav: function (ctx) { renderCommandNav(ctx); },
@@ -51,7 +52,7 @@
   });
   var loadLogs = archives.load, searchBootLogs = archives.search, clearBootSearch = archives.clearSearch;
   window.SerialdShareSelection = function () {
-    return lastDevices.filter(function (device) { return device.key === selKey; })[0] || null;
+    return deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0] || null;
   };
 
   function setInputMode(ctx) {
@@ -118,7 +119,7 @@
   // 没先点一下终端就按 Ctrl+V)，paste 事件的目标是 body，挂在 d-term 上的监听器
   // 根本收不到,表现就是"按了完全没反应"。但同时要给页面自己的输入框让路。
   document.addEventListener('paste', function (e) {
-    if (!selKey) return;
+    if (!deviceDirectory.selected) return;
     var ae = document.activeElement;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')
         && String(ae.className).indexOf('xterm-helper-textarea') < 0) return;   // 发送命令框等,照常粘贴
@@ -145,187 +146,14 @@
   });
 
   /* ---------- 设备列表 ---------- */
-  function renderDevices(list) {
-    $('count-online').textContent = list.filter(function (d) { return d.serial && d.alive; }).length;
-    $('count-history').textContent = list.filter(function (d) { return d.serial && !d.alive; }).length;
-    $('count-pending').textContent = list.filter(function (d) { return d.state === 'pending'; }).length;
-    var query = $('device-search').value.toLowerCase();
-    var filter = $('device-filter').value || 'all';
-    list = list.filter(function (d) {
-      return (filter === 'all' || d.state === filter) &&
-        [d.label, d.serial, d.hostname, d.by_path, d.last_path, d.dev].join(' ').toLowerCase().includes(query);
-    });
-    list = list.slice().sort(function (a, b) {
-      var rank = function (device) {
-        return device.alive ? (device.state === 'pending' ? 1 : 0) : 2;
-      };
-      return rank(a) - rank(b);
-    });
-    var g = $('grid');
-    if (!list.length) { g.innerHTML = '<p class="empty">没有匹配的设备。新串口连接后将显示在待识别列表。</p>'; return; }
-    g.textContent = '';
-    list.forEach(function (d) {
-      var card = document.createElement('div');
-      card.className = 'dev' + (!d.alive ? ' offline' : '') + (d.key === selKey ? ' sel' : '');
-      card.dataset.key = d.key;          // 供 markSelected() 就地改高亮用
-      card.title = (d.by_path || d.last_path || '')
-        + (d.alive ? '\n采集检查：' + ago(d.last_health_check) : '');
-      card.tabIndex = 0;
-      card.addEventListener('click', function () { select(d.key); });
-      card.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(d.key); }
-      });
-
-      var r1 = document.createElement('div'); r1.className = 'r1';
-      var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.state === 'pending' ? '待识别 · ' + (d.hostname || (d.dev || '').split('/').pop()) : d.label;
-      var st = document.createElement('span');
-      st.className = 'pill ' + (d.state === 'pending' ? 'pending' : (d.alive ? 'live' : 'dead'));
-      st.textContent = d.state === 'pending' ? 'USB 临时身份' : (d.alive ? '在线' : '历史设备');
-      r1.appendChild(nm); r1.appendChild(st);
-      if (d.hostname && d.hostname !== d.label) {
-        var sn = document.createElement('span'); sn.className = 'pill sniff';
-        sn.textContent = d.hostname; r1.appendChild(sn);
-      }
-      card.appendChild(r1);
-
-      var meta = document.createElement('div'); meta.className = 'meta';
-      var a = document.createElement('span'); a.textContent = d.dev || ('上次连接 ' + (d.last_dev || '—'));
-      var b = document.createElement('span'); b.textContent = d.serial ? 'SN ' + d.serial : (d.by_path || '尚未绑定开发板序列号');
-      meta.appendChild(a); meta.appendChild(b);
-      card.appendChild(meta);
-
-      var last = document.createElement('div'); last.className = 'last';
-      last.textContent = d.last_line || '（暂无输出）';
-      card.appendChild(last);
-
-      var stat = document.createElement('div'); stat.className = 'stat';
-      var s1 = document.createElement('span'); s1.textContent = fmt(d.bytes) + ' 记录';
-      var s2 = document.createElement('span'); s2.textContent = '末次 ' + ago(d.last_rx || d.last_seen);
-      var s3 = document.createElement('span'); s3.className = 'attachment'; s3.textContent = d.by_path || d.last_path || '';
-      stat.appendChild(s1); stat.appendChild(s2); stat.appendChild(s3);
-      card.appendChild(stat);
-      if (d.alive && (d.last_rx || d.capture_started)
-          && Date.now() / 1000 - (d.last_rx || d.capture_started) > 300) {
-        var quiet = document.createElement('div'); quiet.className = 'quiet-note';
-        quiet.textContent = '串口已静默 ' + ago(d.last_rx || d.capture_started)
-          + '；采集器仍在检查连接，板子也可能只是没有输出';
-        card.appendChild(quiet);
-      }
-
-      if (d.rescue_note) {                       // 自愈结果挂到卡片上,别让人去翻日志
-        var rn = document.createElement('div'); rn.className = 'last';
-        rn.style.color = 'var(--dead)';
-        rn.textContent = d.rescue_note;
-        card.appendChild(rn);
-      }
-      if (d.log_error) {
-        var logWarning = document.createElement('div'); logWarning.className = 'identity-error';
-        logWarning.textContent = '串口日志写入失败：' + d.log_error;
-        card.appendChild(logWarning);
-      }
-      var inf = d.info || {};
-      if (d.identity_error || (d.needs_provisioning && Object.keys(inf).length)
-          || inf.identity_status === 'provisional') {
-        var warning = document.createElement('div'); warning.className = 'identity-error';
-        warning.textContent = (d.reported_serial ? 'SN ' + d.reported_serial + '：' : '') +
-          (d.identity_error || (d.needs_provisioning
-            ? 'EEPROM 尚未写入序列号；当前身份仅作过渡，请写入 ONIE TLV 0x23'
-            : '该身份来源尚未正式确认；确认后迁入正式序列号档案'));
-        card.appendChild(warning);
-      }
-      // 板子序列号(device-tree)比 hostname 可靠:hostname 可能是出厂默认名、还会重复
-      if (inf.ips && inf.ips.length) {
-        var idl = document.createElement('div'); idl.className = 'stat';
-        if (inf.ips && inf.ips.length) {
-          var s5 = document.createElement('span');
-          s5.textContent = inf.ips.map(function (x) { return x.split(' ')[1].split('/')[0]; }).join(' ');
-          idl.appendChild(s5);
-        }
-        card.appendChild(idl);
-      }
-
-      g.appendChild(card);
-    });
-  }
-
-  function pollDevices() {
-    var ownerRevision = ownershipRevision;
-    fetch('/api/devices', { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        $('conn-dot').className = 'dot';
-        $('conn-txt').textContent = '已连接 · ' + (d.devices || []).length + ' 台设备 · '
-          + new Date().toLocaleTimeString('zh-CN');
-        if (d.storage && d.storage.warning) {
-          $('conn-txt').textContent += d.storage.available ? ' · 日志磁盘空间不足' : ' · 日志磁盘状态不可用';
-          $('conn-dot').className = 'dot bad';
-        }
-        lastDevices = d.devices || [];
-        renderDevices(lastDevices);
-        if (requestedDevice) {
-          var sharedBoard = lastDevices.find(function (board) {
-            return board.serial === requestedDevice || board.key === requestedDevice;
-          });
-          if (sharedBoard) select(sharedBoard.key);
-        }
-        // 轮询里同步选中设备的识别结果,但只在**结果真的变了**时重绘 ——
-        // 否则每 3 秒重建一次 DOM 会打断用户选中文本
-        if (selKey) {
-          var cur = lastDevices.filter(function (x) { return terminalView.current && terminalView.current.serial ? x.serial === terminalView.current.serial : (terminalView.current && terminalView.current.connectionId ? x.connection_id === terminalView.current.connectionId : x.key === selKey); })[0];
-          // A collector restart changes connection_id.  If a pending connection was
-          // promoted meanwhile, follow the same live physical attachment to its
-          // canonical key instead of leaving an unusable stale detail panel open.
-          if (!cur && terminalView.current && !terminalView.current.serial && terminalView.current.byPath) {
-            var samePath = lastDevices.filter(function (x) {
-              return x.alive && x.by_path === terminalView.current.byPath;
-            });
-            if (samePath.length === 1) cur = samePath[0];
-          }
-          if (cur && cur.key !== selKey) adoptKey(terminalView.current, cur.key, cur.serial);
-          if (cur && isCurrent(terminalView.current)) {
-            if (ownerRevision === ownershipRevision) updateInputOwner(terminalView.current, cur.input_owner);
-            else cur.input_owner = terminalView.current.inputOwner;
-          }
-          var info = cur && cur.info;
-          var infoIdentity = cur ? [cur.key, cur.connection_id, info && info.ts || 0,
-            info && info.serial_source || '', info && info.identity_status || ''].join('|') : '';
-          if (infoIdentity !== lastInfoIdentity) {
-            lastInfoIdentity = infoIdentity;
-            lastInfoTs = info && info.ts || 0;
-            renderInfo(info);
-          }
-        }
-        loadSessions();
-        loadActivity();
-      })
-      .catch(function () {
-        $('conn-dot').className = 'dot bad';
-        $('conn-txt').textContent = '服务不可达';
-      });
-  }
-
-  /* ---------- 详情 / 串口实时 ---------- */
-  // 选中高亮就地更新 —— 不能等下一次 pollDevices()(3 秒一轮),
-  // 否则会出现"终端已经切过去了,卡片高亮还停在上一台"的迟滞感
-  function markSelected() {
-    var cards = $('grid').children;
-    for (var i = 0; i < cards.length; i++) {
-      var c = cards[i];
-      if (c.dataset && c.dataset.key) {
-        c.classList.toggle('sel', c.dataset.key === selKey);
-      }
-    }
-  }
-
   function select(key) {
-    requestedDevice = '';
     // Slow paste is a workaround for one firmware input path, not a board-wide
     // default.  Keep it only while staying on the same selected board.
-    if (key !== selKey) { $('d-slow-paste').checked = false; clearBootSearch(); }
+    if (key !== deviceDirectory.selected) { $('d-slow-paste').checked = false; clearBootSearch(); }
     var ctx = createView(key, 'serial');
-    // 切设备时立即清掉旧会话标签；迟到的列表/动作响应不能借用新 selKey。
+    // 切设备时立即清掉旧会话标签；迟到的列表/动作响应不能借用新 deviceDirectory.selected。
     sessions = [{ sid: 'serial', kind: 'serial' }];
-    var d = (lastDevices || []).filter(function (x) { return x.key === key; })[0];
+    var d = (deviceDirectory.items || []).filter(function (x) { return x.key === key; })[0];
     $('detail').hidden = false;
     $('detail').classList.remove('info-open');
     $('b-info').setAttribute('aria-expanded', 'false');
@@ -346,9 +174,7 @@
     $('d-commands').textContent = '';
     loadActivity();
     loadCommands();
-    lastInfoTs = d && d.info ? d.info.ts : 0;
-    lastInfoIdentity = d ? [d.key, d.connection_id, lastInfoTs,
-      d.info && d.info.serial_source || '', d.info && d.info.identity_status || ''].join('|') : '';
+    deviceDirectory.rememberInfo(d);
     resizeTerm();
     loadLogs();
     renderInfo(d && d.info);
@@ -361,12 +187,12 @@
   }
 
   function switchSession(sid) {
-    if (!selKey) return;
+    if (!deviceDirectory.selected) return;
     if (sid === curSid) {
       if ($('d-term').scrollIntoView) $('d-term').scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
-    var ctx = createView(selKey, sid);
+    var ctx = createView(deviceDirectory.selected, sid);
     $('d-status').textContent = '';
     $('d-in').value = '';
     resizeTerm();
@@ -481,26 +307,6 @@
         renderTabs();
       })
       .catch(function () {});
-  }
-
-  function adoptKey(ctx, key, serial) {
-    if (!isCurrent(ctx) || !key || key === ctx.key) return;
-    lastDevices.forEach(function (d) {
-      if (d.key !== ctx.key) return;
-      d.key = key; d.label = key; d.serial = serial;
-      if (!serial) {
-        // /api/switch-mode detaches the old board immediately.  Clear the
-        // optimistic local copy too; otherwise the old board's candidate
-        // serial/hostname remains visible until the next device poll.
-        d.info = {};
-        d.hostname = '';
-        d.reported_serial = '';
-        d.identity_error = '';
-        d.needs_provisioning = true;
-        d.state = 'pending';
-      }
-    });
-    select(key);
   }
 
   function openArchivedLog(ctx, name, label, url) {
@@ -650,8 +456,6 @@
         setPager('event', eventPage, eventTotal, (d.events || []).length);
       }).catch(function () {});
   }
-  $('device-search').addEventListener('input', function () { renderDevices(lastDevices); });
-  $('device-filter').addEventListener('change', function () { renderDevices(lastDevices); });
   $('activity-prev').addEventListener('click', function () { if (sessionPage) { sessionPage--; loadActivity(); } });
   $('activity-next').addEventListener('click', function () { sessionPage++; loadActivity(); });
   $('event-prev').addEventListener('click', function () { if (eventPage) { eventPage--; loadActivity(); } });
@@ -690,7 +494,7 @@
     }
   });
   document.addEventListener('keydown', function (event) {
-    if (!selKey || !(event.ctrlKey || event.metaKey) || String(event.key).toLowerCase() !== 'f') return;
+    if (!deviceDirectory.selected || !(event.ctrlKey || event.metaKey) || String(event.key).toLowerCase() !== 'f') return;
     if (event.preventDefault) event.preventDefault();
     $('terminal-search').focus();
     if ($('terminal-search').select) $('terminal-search').select();
@@ -741,14 +545,14 @@
     toggleRecordsTab('inputs');
   });
   $('b-file-transfer').addEventListener('click', function () {
-    if (!selKey) return;
-    var selected = lastDevices.filter(function (device) { return device.key === selKey; })[0];
-    if (selected) SerialdFileTransfer.open(selected, lastDevices);
+    if (!deviceDirectory.selected) return;
+    var selected = deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0];
+    if (selected) SerialdFileTransfer.open(selected, deviceDirectory.items);
   });
   $('b-boot-compare').addEventListener('click', function () {
-    if (!selKey) return;
-    var selected = lastDevices.filter(function (device) { return device.key === selKey; })[0];
-    if (selected) SerialdBootCompare.open(selected, lastDevices);
+    if (!deviceDirectory.selected) return;
+    var selected = deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0];
+    if (selected) SerialdBootCompare.open(selected, deviceDirectory.items);
   });
   [-1, 1].forEach(function (step) {
     $('command-nav-' + (step < 0 ? 'prev' : 'next')).addEventListener('click', function () {
@@ -771,14 +575,14 @@
   $('b-records-close').addEventListener('click', function () { setRecordsOpen(false); });
   /* ---------- 动作 ---------- */
   $('b-send').addEventListener('click', function () {
-    var v = $('d-in').value; if (!v || !selKey) return;
+    var v = $('d-in').value; if (!v || !deviceDirectory.selected) return;
     send(v + '\r'); $('d-in').value = '';
   });
   $('d-in').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); $('b-send').click(); }
   });
-  $('b-cr').addEventListener('click', function () { if (selKey) send('\r'); });
-  $('b-ctrlc').addEventListener('click', function () { if (selKey) send('\x03'); });
+  $('b-cr').addEventListener('click', function () { if (deviceDirectory.selected) send('\r'); });
+  $('b-ctrlc').addEventListener('click', function () { if (deviceDirectory.selected) send('\x03'); });
   $('b-takeover').addEventListener('click', function () {
     var ctx = terminalView.current;
     if (!isCurrent(ctx) || !ctx.canTakeover) return;
@@ -842,16 +646,16 @@
     if (release) payload.id = owner.id;
     else payload.takeover = !!owner;
     ctx.ownerPending = true;
-    ownershipRevision++;
+    deviceDirectory.advanceOwnership();
     $('b-input-owner').disabled = true;
     fetch('/api/' + (release ? 'input-release' : 'input-claim'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     }).then(function (r) { return r.json(); }).then(function (result) {
       if (!isCurrent(ctx)) return;
       if (!result.ok) { $('d-status').textContent = result.error || '输入占用操作失败'; return; }
-      ownershipRevision++;
+      deviceDirectory.advanceOwnership();
       updateInputOwner(ctx, result.input_owner);
-      var board = lastDevices.find(function (entry) { return entry.key === ctx.key; });
+      var board = deviceDirectory.items.find(function (entry) { return entry.key === ctx.key; });
       if (board) board.input_owner = result.input_owner;
       $('d-status').textContent = release ? '已恢复共享串口输入' : '已占用串口输入；其他人仍可查看输出';
     }).catch(function (error) {
@@ -942,7 +746,7 @@
   }
   $('d-term').addEventListener('click', function () { if (terminalView.current) terminalView.current.term.focus(); });
   $('b-close').addEventListener('click', function () {
-    disposeView(); selKey = null; $('detail').hidden = true;
+    disposeView(); deviceDirectory.selectionChanged(null); $('detail').hidden = true;
     $('workspace').classList.toggle('selected', false);
     document.body.classList.toggle('detail-open', false);
     document.body.classList.remove('terminal-max');
