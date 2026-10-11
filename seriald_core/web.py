@@ -15,6 +15,7 @@ from .httpd import BoundedThreadingTCPServer as BoundedThreadingServer
 from .log_archive import read_epoch, search_epochs
 from .boot_compare import MAX_BOOT_BYTES, compare_boots
 from .file_transfer import TransferError
+from .transactions import transactions_for, TransactionError
 from . import __version__
 
 MGR = Manager()
@@ -146,6 +147,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             devs.sort(key=lambda x: x['key'])
             return self._json(200, {'devices': devs, 'by_path': BY_PATH,
                                     'server_time': time.time()})
+
+        if route == '/api/operation':
+            device = self._dev(q)
+            if not device:
+                return self._json(404, {'error': 'no such device'})
+            return self._json(200, {'operation': transactions_for(device).snapshot()})
 
         if route == '/api/boot-compare':
             selected = []
@@ -356,6 +363,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(404, {'error': 'no such device'})
 
         actor = str(payload.get('actor') or 'web')[:80]
+        with transactions_for(d).actor_scope(actor):
+            return self._device_post(route, payload, d, actor)
+
+    def _device_post(self, route, payload, d, actor):
+        if route == '/api/operation-cancel':
+            try:
+                transactions_for(d).cancel(str(payload.get('id') or ''), actor)
+                if d.serial:
+                    MGR.store.event(d.serial, actor, 'operation-cancel', str(payload.get('id') or ''))
+                return self._json(200, {'ok': True})
+            except TransactionError as error:
+                return self._json(error.status, {'ok': False, 'error': str(error), 'code': error.code})
         if route == '/api/session-result':
             try:
                 if not d.serial:
@@ -435,20 +454,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             mode = str(payload.get('mode') or 'rebind')
             if mode != 'rebind':
                 return self._json(400, {'error': 'mode must be rebind'})
-            if not d.operation_lock.acquire(blocking=False):
-                return self._json(409, {'ok': False, 'error': '已有控制台操作在进行中'})
             try:
-                with d.write_lock:
-                    if not d.present or not MGR._matches(d):
-                        return self._json(409, {'ok': False, 'error': '设备已重新枚举,请刷新后重试'})
-                    d.last_rescue = time.time()
-                    rx_before = d.bytes
-                    ok, note = try_rescue(d.dev, mode)
-                d.rescue_note = note
-                d.fail_count = 0
-                d._say('手动自愈(%s)%s: %s' % (mode, '步骤完成' if ok else '失败', note))
-            finally:
-                d.operation_lock.release()
+                with transactions_for(d).begin('usb-recovery', 35, require_open=False):
+                    with d.write_lock:
+                        if not d.present or not MGR._matches(d):
+                            return self._json(409, {'ok': False, 'error': '设备已重新枚举,请刷新后重试'})
+                        d.last_rescue = time.time()
+                        rx_before = d.bytes
+                        ok, note = try_rescue(d.dev, mode)
+                    d.rescue_note = note
+                    d.fail_count = 0
+                    d._say('手动自愈(%s)%s: %s' % (mode, '步骤完成' if ok else '失败', note))
+            except TransactionError as error:
+                return self._json(error.status, {'ok': False, 'error': str(error), 'code': error.code})
             # sysfs 写成功只能证明辅助步骤完成;不能据此宣布采集器已恢复。
             recovered = d.fd is not None and d.bytes > rx_before and MGR._matches(d)
             requires_setup = not ok and any(x in note.lower() for x in

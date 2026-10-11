@@ -62,6 +62,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/archive.py` | 候选/正式日志的无覆盖暂存和提交后迁移 |
 | `seriald_core/device.py` | 串口连接的控制台流、识别事务和会话 API 编排 |
 | `seriald_core/models.py` | 持久 Board 身份、可替换连接绑定与独立会话所有权 |
+| `seriald_core/transactions.py` | 统一串口事务租约、总超时、连接代次检查与取消 |
 | `seriald_core/devices.py` | 串口发现、单读者采集生命周期、身份绑定与在线设备 |
 | `seriald_core/sessions.py` | SSH PTY、独立日志、会话回收 |
 | `seriald_core/session_base.py` | 共用 SSH 生命周期、输出缓冲、UTF-8/按日日志、审计和日志迁移 |

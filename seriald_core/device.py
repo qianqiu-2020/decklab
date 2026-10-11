@@ -25,6 +25,7 @@ from .log_archive import boot_epochs
 from .file_transfer import SerialFileTransfer
 from .profiles import ProfileBook
 from .models import Board, SessionRegistry
+from .transactions import SerialTransactions, TransactionError
 
 
 def root_ssh_config_command():
@@ -91,6 +92,7 @@ class Device:
         self.auto_identify_until = 0.0
         self.probing = False
         self.operation_lock = threading.Lock()  # 整个控制台事务互斥,包含手动输入/探测/自愈
+        self.transactions = SerialTransactions(self, self.operation_lock)
         self.file_transfer = SerialFileTransfer(self)
         self.write_lock = threading.Lock()      # fd 退役与写入串行,绝不占用输出 cv
         self.log_lock = threading.RLock()
@@ -393,6 +395,9 @@ class Device:
 
     def _write(self, text):
         with self.write_lock:
+            lease = self.transactions.current
+            if lease:
+                lease.check()
             if self.stop.is_set() or not self.present or self.fd is None:
                 return False, '设备未打开或已重新枚举'
             if sys.platform == 'win32':
@@ -404,18 +409,17 @@ class Device:
                 except (OSError, SerialException) as error:
                     return False, str(error)
             return write_serial(os.path.join(BY_PATH, self.by_path), text,
-                                identity=self.identity, cancel=self.stop)
+                                identity=self.identity, cancel=lease or self.stop)
 
     def send(self, text):
         # probing 布尔值的检查/赋值并不原子;所有写入口共用事务锁才不会串话。
         if self.file_transfer.active:
             return False, '串口文件传输中，请完成或取消后再输入'
-        if not self.operation_lock.acquire(blocking=False):
-            return False, '已有控制台操作在进行中,稍候'
         try:
-            return self._write(text)
-        finally:
-            self.operation_lock.release()
+            with self.transactions.begin('input', 5):
+                return self._write(text)
+        except TransactionError as error:
+            return False, str(error)
 
     def sniff(self, text):
         """被动嗅探 hostname —— 不改动板子,只读它自己吐出来的内容。"""
@@ -495,7 +499,13 @@ class Device:
     def _wait(self, base, pattern, timeout=20.0):
         rx = re.compile(pattern)
         end = time.monotonic() + timeout
+        lease = self.transactions.current
+        if lease:
+            end = min(end, lease.deadline)
         while time.monotonic() < end:
+            lease = self.transactions.current
+            if lease:
+                lease.check()
             if self.stop.is_set() or self.fd is None:
                 return None
             with self.cv:
@@ -508,7 +518,11 @@ class Device:
             # wakeup and a fixed 300 ms delay on every transfer chunk.
             with self.cv:
                 if self.base + len(self.buf) == observed:
+                    if lease:
+                        lease.check()
                     self.cv.wait(min(1.0, max(0, end - time.monotonic())))
+        if lease:
+            lease.check()
         return None
 
     def ensure_shell(self, base):
@@ -559,14 +573,15 @@ class Device:
         """一个事务覆盖登录、完整发送和带 nonce 的响应,禁止其他写入口插队。"""
         if self.file_transfer.active:
             return False, '串口文件传输中，请完成或取消后再操作'
-        if not self.operation_lock.acquire(blocking=False):
-            return False, '已有一次识别/操作在进行中,稍候'
-        self.probing = True
         try:
-            return self._run_cmd_locked(cmd, timeout)
-        finally:
-            self.probing = False
-            self.operation_lock.release()
+            with self.transactions.begin('console-command', timeout):
+                self.probing = True
+                try:
+                    return self._run_cmd_locked(cmd, timeout)
+                finally:
+                    self.probing = False
+        except TransactionError as error:
+            return False, str(error)
 
     def _run_cmd_locked(self, cmd, timeout, ensure_shell=True):
         """Run one framed console command while operation_lock is held.
@@ -659,51 +674,52 @@ class Device:
             return False, '当前设备配置未允许自动修改 root 密码或 sshd 配置'
         if self.file_transfer.active:
             return False, '串口文件传输中，请完成或取消后再配置 SSH'
-        if not self.operation_lock.acquire(blocking=False):
-            return False, '串口正忙，稍后重试 SSH'
-        self.probing = True
         try:
-            if self.fd is None or self.stop.is_set():
-                return False, '串口未连接，无法自动配置 SSH'
-            ok, _ = self.ensure_shell(self.now_off())
-            if not ok:
-                return False, '串口未停在已登录的 shell，无法自动提权'
-            self._say('SSH 自动配置：通过串口修改 root 密码和 sshd 配置')
-            base = self.now_off()
-            ok, error = self._write(
-                'if [ "$(id -u)" = 0 ]; then passwd root; else sudo -n passwd root; fi'
-                + self.newline)
-            if not ok:
-                return False, error
-            first = r'(?i)(?:New (?:UNIX )?password|新的密码)[:：]\s*$'
-            second = r'(?i)(?:Retype new (?:UNIX )?password|Repeat new password|再次输入新的密码)[:：]\s*$'
-            if not self._wait(base, first, 15):
-                return False, '无法通过串口运行 passwd（sudo 可能需要普通用户密码）'
-            base = self.now_off()
-            ok, error = self._write('bianbu' + self.newline)
-            if not ok:
-                return False, error
-            if not self._wait(base, second, 15):
-                return False, 'passwd 没有请求再次输入密码'
-            base = self.now_off()
-            ok, error = self._write('bianbu' + self.newline)
-            if not ok:
-                return False, error
-            success = r'(?i)(?:password updated successfully|all authentication tokens updated successfully)'
-            if not self._wait(base, success, 20):
-                return False, 'passwd 未确认 root 密码更新成功'
-            # Wait for the normal shell prompt before sending the framed config
-            # command; passwd's success line can arrive before its child exits.
-            if not self._wait(base, RE_PROMPT, 5):
-                return False, '修改密码后未返回 shell 提示符'
-            ok, raw = self._run_cmd_locked(root_ssh_config_command(), 35)
-            if not ok or 'SSH_CONFIG_OK=1' not in raw:
-                return False, '更新 sshd 配置失败: ' + (raw[-300:] if ok else raw)
-            self._say('SSH 自动配置完成：root 密码已更新，sshd 已重启')
-            return True, ''
-        finally:
-            self.probing = False
-            self.operation_lock.release()
+            with self.transactions.begin('ssh-provision', 110):
+                self.probing = True
+                try:
+                    if self.fd is None or self.stop.is_set():
+                        return False, '串口未连接，无法自动配置 SSH'
+                    ok, _ = self.ensure_shell(self.now_off())
+                    if not ok:
+                        return False, '串口未停在已登录的 shell，无法自动提权'
+                    self._say('SSH 自动配置：通过串口修改 root 密码和 sshd 配置')
+                    base = self.now_off()
+                    ok, error = self._write(
+                        'if [ "$(id -u)" = 0 ]; then passwd root; else sudo -n passwd root; fi'
+                        + self.newline)
+                    if not ok:
+                        return False, error
+                    first = r'(?i)(?:New (?:UNIX )?password|新的密码)[:：]\s*$'
+                    second = r'(?i)(?:Retype new (?:UNIX )?password|Repeat new password|再次输入新的密码)[:：]\s*$'
+                    if not self._wait(base, first, 15):
+                        return False, '无法通过串口运行 passwd（sudo 可能需要普通用户密码）'
+                    base = self.now_off()
+                    ok, error = self._write('bianbu' + self.newline)
+                    if not ok:
+                        return False, error
+                    if not self._wait(base, second, 15):
+                        return False, 'passwd 没有请求再次输入密码'
+                    base = self.now_off()
+                    ok, error = self._write('bianbu' + self.newline)
+                    if not ok:
+                        return False, error
+                    success = r'(?i)(?:password updated successfully|all authentication tokens updated successfully)'
+                    if not self._wait(base, success, 20):
+                        return False, 'passwd 未确认 root 密码更新成功'
+                    # Wait for the normal shell prompt before sending the framed config
+                    # command; passwd's success line can arrive before its child exits.
+                    if not self._wait(base, RE_PROMPT, 5):
+                        return False, '修改密码后未返回 shell 提示符'
+                    ok, raw = self._run_cmd_locked(root_ssh_config_command(), 35)
+                    if not ok or 'SSH_CONFIG_OK=1' not in raw:
+                        return False, '更新 sshd 配置失败: ' + (raw[-300:] if ok else raw)
+                    self._say('SSH 自动配置完成：root 密码已更新，sshd 已重启')
+                    return True, ''
+                finally:
+                    self.probing = False
+        except TransactionError as error:
+            return False, str(error)
 
     def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None):
         """一键 SSH:用识别到的 IP 起一条**独立会话**(默认 root/bianbu)。
@@ -864,7 +880,7 @@ class Device:
                 tail = s[:160]
                 break
         profile = self.profile
-        return {'profile': profile.name,
+        return {'operation': self.transactions.snapshot(), 'profile': profile.name,
                 'serial_settings': asdict(self.serial_settings or profile.serial),
                 'settings_pending': self.serial_settings is not None and self.serial_settings != profile.serial,
                 'key': self.key, 'serial': self.serial, 'connection_id': self.connection_id, 'dev': self.dev if self.present else '',

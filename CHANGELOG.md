@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Coordinate console input, commands, provisioning, transfer and recovery with
+  total deadlines and connection-generation guards. Expose owner-checked,
+  ID-scoped cancellation without closing the shared serial reader.
+
 - Share SSH lifecycle, streaming, log rotation and audit across Linux/Windows IO
   adapters. Relocate live SSH log writers during identity promotion, preserving
   partial UTF-8 and resuming the correct directory after migration failures.

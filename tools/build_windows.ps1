@@ -29,6 +29,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Windows portable tests failed.' }
     & $python -m unittest discover -s tests -p test_session_contract.py
     if ($LASTEXITCODE -ne 0) { throw 'Shared SSH lifecycle and archive tests failed.' }
+    & $python -m unittest discover -s tests -p test_transactions.py
+    if ($LASTEXITCODE -ne 0) { throw 'Console transaction tests failed.' }
     & $python -m unittest discover -s tests -p test_profiles.py
     if ($LASTEXITCODE -ne 0) { throw 'Configuration tests failed.' }
     & $python -m unittest discover -s tests -p test_demo.py
@@ -65,6 +67,7 @@ try {
     New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'docs'), (Join-Path $bundle 'examples') | Out-Null
     Copy-Item docs\CONFIGURATION.md -Destination (Join-Path $bundle 'docs\CONFIGURATION.md')
     Copy-Item docs\DEMO.md -Destination (Join-Path $bundle 'docs\DEMO.md')
+    Copy-Item docs\CONSOLE_TRANSACTIONS.md -Destination (Join-Path $bundle 'docs\CONSOLE_TRANSACTIONS.md')
     Copy-Item examples\profiles.json -Destination (Join-Path $bundle 'examples\profiles.json')
     & (Join-Path $bundle 'seriald.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }

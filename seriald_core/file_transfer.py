@@ -9,6 +9,7 @@ import shlex
 import threading
 import time
 import zlib
+from .transactions import transactions_for, TransactionError
 
 
 CHUNK_SIZE = 10240  # Large reads; uploads split when their encoded shell line is too long.
@@ -47,6 +48,9 @@ class SerialFileTransfer:
 
     def __init__(self, device):
         self.device = device
+        self.transactions = transactions_for(device)
+        self._opening_connection = None
+        self._opening_actor = 'web'
         self.lock = threading.RLock()
         self.state = None
 
@@ -57,15 +61,18 @@ class SerialFileTransfer:
 
     def _run(self, command, timeout=45):
         device = self.device
-        if not device.operation_lock.acquire(blocking=False):
-            raise TransferError('串口正在执行其他操作，请稍后重试', 409)
-        device.probing = True
         try:
-            ok, output = device._run_cmd_locked(command, timeout,
-                                                ensure_shell=self.state is None)
-        finally:
-            device.probing = False
-            device.operation_lock.release()
+            state = self.state
+            with self.transactions.begin('file-transfer', timeout,
+                    actor=state['actor'] if state else self._opening_actor, allow_transfer=True,
+                    expected_connection=state['connection_id'] if state else self._opening_connection):
+                device.probing = True
+                try:
+                    ok, output = device._run_cmd_locked(command, timeout, ensure_shell=state is None)
+                finally:
+                    device.probing = False
+        except TransactionError as error:
+            raise TransferError(str(error), 502 if error.code == 'timeout' else error.status) from None
         if not ok:
             raise TransferError(output, 502)
         return output
@@ -146,6 +153,7 @@ class SerialFileTransfer:
             raise TransferError('已有文件传输请求正在执行', 409)
         try:
             self._check_connection(connection_id)
+            self._opening_connection, self._opening_actor = connection_id, actor
             if self.state:
                 raise TransferError('此串口已有文件传输，请完成或取消后再试', 409)
             transfer_id = secrets.token_hex(12)

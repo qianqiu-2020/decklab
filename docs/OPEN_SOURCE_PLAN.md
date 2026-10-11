@@ -12,7 +12,7 @@ Do not change an installed service or use live boards during regression tests.
 | Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | In progress |
 | Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Implemented; native Windows package gate pending |
 | Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented; broader transaction integration continues |
-| Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Pending |
+| Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API implemented; task/UI integration pending |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Pending |
 | Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Pending |
@@ -76,3 +76,10 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   Native Paramiko adapter fixtures cover shell/timeout failures, interrupt races
   and client cleanup. The Windows package job includes these checks; its hosted
   execution is still unverified.
+- Serial transactions: input, framed commands/probes, SSH provisioning, transfer
+  commands and USB recovery use connection/deadline/cancel leases. HTTP exposes
+  active operation status and ID-scoped, actor-checked cancellation. Writer and
+  wait guards reject stale generations; cancellation wakes waiters and stops
+  remaining Linux short writes. Tests exercise independent boards, deadlines,
+  generation/stop-event replacement, provisioning cancellation, HTTP ownership
+  and upload cancellation without automatic recovery. Task/UI integration remains.
