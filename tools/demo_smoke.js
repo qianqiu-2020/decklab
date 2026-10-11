@@ -97,11 +97,22 @@ async function until(check, description) {
   await evaluate('peerPage.contentDocument.querySelector("#b-input-owner").click()');
   await until(() => evaluate('document.querySelector("#input-owner-label").textContent === "占用输入"'), 'shared input restored');
   await evaluate('peerPage.remove()');
+  // Start via the real UI, then reload the page and recover server-owned history.
+  await evaluate('document.querySelector("#b-identify").click()');
+  await until(() => evaluate('document.querySelector("#d-status").textContent.includes("识别完成")'), 'background identification');
+  await evaluate('document.querySelector("#b-tasks").click()');
+  await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("已完成")'), 'persisted task result');
+  const previousClient = await evaluate('SerialdUI.clientId');
+  await rpc('Page.reload');
+  await until(() => evaluate('typeof SerialdUI !== "undefined" && SerialdUI.clientId !== ' + JSON.stringify(previousClient)
+    + ' && document.querySelectorAll(".dev").length === 3'), 'fresh page');
+  await evaluate('document.querySelector(\'[data-key="demo-k1"]\').click(); document.querySelector("#b-tasks").click()');
+  await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("已完成")'), 'task history after reload');
   const shot = await rpc('Page.captureScreenshot', {format: 'png'});
   fs.mkdirSync(path.join(root, 'dist'), {recursive: true});
   fs.writeFileSync(path.join(root, 'dist', 'demo-ui.png'), Buffer.from(shot.data, 'base64'));
   assert.deepEqual(errors, []);
-  console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover');
+  console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover, task result after reload');
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   if (ws) ws.close();
   for (const child of [chrome, demo]) {

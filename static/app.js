@@ -51,6 +51,18 @@
     openArchive: openArchivedLog, searchTerminal: searchTerminal
   });
   var loadLogs = archives.load, searchBootLogs = archives.search, clearBootSearch = archives.clearSearch;
+  var taskUI = window.SerialdTasks.create({
+    byId: $, fetch: fetch, age: ago,
+    getView: function () { return terminalView.current; },
+    visible: function () { return !$('d-records').hidden && recordsTab === 'tasks'; },
+    openSession: function (task) {
+      var result = task.result;
+      if (!sessions.some(function (session) { return session.sid === result.sid; })) {
+        sessions.push({ sid: result.sid, kind: 'ssh', ip: result.ip, actor: task.actor });
+      }
+      switchSession(result.sid);
+    }
+  });
   window.SerialdShareSelection = function () {
     return deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0] || null;
   };
@@ -173,6 +185,7 @@
     $('d-events').textContent = '';
     $('d-commands').textContent = '';
     loadActivity();
+    taskUI.refresh();
     loadCommands();
     deviceDirectory.rememberInfo(d);
     resizeTerm();
@@ -266,9 +279,7 @@
       if (!isCurrent(ctx) || ctx.connecting) return;
       ctx.connecting = true; add.disabled = true;
       $('d-status').textContent = ' 正在建立 SSH 会话…（认证失败时可能通过串口配置 root 登录）';
-      fetch('/api/ssh-connect', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: ctx.key, serial: ctx.serial, actor: 'web' }) })
-        .then(function (r) { return r.json(); })
+      taskUI.run('ssh-connect', ctx)
         .then(function (d) {
           if (!isCurrent(ctx)) return;
           ctx.connecting = false; add.disabled = false;
@@ -501,7 +512,7 @@
   });
   function setRecordsTab(name) {
     recordsTab = name;
-    ['logs', 'inputs', 'sessions', 'events', 'commands'].forEach(function (tab) {
+    ['logs', 'inputs', 'sessions', 'events', 'tasks', 'commands'].forEach(function (tab) {
       var selected = tab === name;
       $('record-tab-' + tab).classList.toggle('on', selected);
       $('record-tab-' + tab).setAttribute('aria-selected', selected ? 'true' : 'false');
@@ -509,8 +520,10 @@
     });
     $('d-records').scrollTop = 0;
     $('b-records').setAttribute('aria-pressed', name === 'logs' && !$('d-records').hidden ? 'true' : 'false');
+    $('b-tasks').setAttribute('aria-pressed', name === 'tasks' && !$('d-records').hidden ? 'true' : 'false');
     $('b-command-nav').setAttribute('aria-pressed', name === 'inputs' && !$('d-records').hidden ? 'true' : 'false');
     if (name === 'logs' && !$('d-records').hidden) loadLogs();
+    if (name === 'tasks' && !$('d-records').hidden) taskUI.refresh();
     if (name === 'inputs' && terminalView.current) renderCommandNav(terminalView.current);
   }
   function setRecordsOpen(open) {
@@ -528,7 +541,7 @@
     if (!$('d-records').hidden && recordsTab === name) setRecordsOpen(false);
     else { recordsTab = name; setRecordsOpen(true); }
   }
-  var recordTabs = ['logs', 'inputs', 'sessions', 'events', 'commands'];
+  var recordTabs = ['logs', 'inputs', 'sessions', 'events', 'tasks', 'commands'];
   recordTabs.forEach(function (tab, index) {
     var button = $('record-tab-' + tab);
     button.addEventListener('click', function () { setRecordsTab(tab); });
@@ -571,6 +584,7 @@
       jumpToCommand(ctx, Math.max(0, Math.min(ctx.navEntries.length - 1, current + step)));
     });
   });
+  $('b-tasks').addEventListener('click', function () { toggleRecordsTab('tasks'); });
   $('b-records').addEventListener('click', function () { toggleRecordsTab('logs'); });
   $('b-records-close').addEventListener('click', function () { setRecordsOpen(false); });
   /* ---------- 动作 ---------- */
@@ -701,9 +715,7 @@
     var ctx = terminalView.current;
     if (!isCurrent(ctx)) return;
     $('d-status').textContent = ' ' + label + '…（要往板子控制台打字，最多可能等一两分钟）';
-    fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: ctx.key, serial: ctx.serial, actor: 'web' }) })
-      .then(function (r) { return r.json(); })
+    taskUI.run(path.replace('/api/', ''), ctx)
       .then(function (d) {
         if (!isCurrent(ctx)) return;
         if (!d.ok) { $('d-status').textContent = ' 失败：' + (d.error || ''); return; }

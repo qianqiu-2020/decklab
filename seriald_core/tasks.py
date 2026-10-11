@@ -75,7 +75,7 @@ class TaskStore:
         record['cancel_requested'] = bool(record['cancel_requested'])
         return record
 
-    def list(self, actor=None, serials=None, limit=20, offset=0):
+    def list(self, actor=None, serials=None, limit=20, offset=0, connection_id=None):
         if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0:
             raise TaskError('invalid task pagination')
         clauses, arguments = [], []
@@ -88,14 +88,29 @@ class TaskStore:
             placeholders = ','.join('?' for _ in serials)
             # A single-board grant must not see a two-board copy involving another board.
             clauses.append('NOT EXISTS (SELECT 1 FROM task_targets WHERE task_id=tasks.id '
-                           'AND serial NOT IN (' + placeholders + '))')
+                           'AND serial NOT IN (' + placeholders + ') '
+                           "AND NOT (serial='' AND (SELECT COUNT(*) FROM task_targets WHERE task_id=tasks.id)=1 "
+                           "AND COALESCE(json_extract(tasks.result,'$.serial'),'') IN (" + placeholders + ')))')
             arguments.extend(serials)
+            arguments.extend(serials)
+        if connection_id is not None:
+            if not isinstance(connection_id, str) or not connection_id or len(connection_id) > 80:
+                raise TaskError('invalid task connection')
+            clauses.append('EXISTS (SELECT 1 FROM task_targets WHERE task_id=tasks.id AND connection_id=?)')
+            arguments.append(connection_id)
         where = ' WHERE ' + ' AND '.join(clauses) if clauses else ''
         with self.store.lock:
             ids = [row[0] for row in self.store.db.execute(
                 'SELECT id FROM tasks' + where + ' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',
                 (*arguments, limit, offset))]
             return [self.get(task_id) for task_id in ids]
+
+    @staticmethod
+    def visible_serial(task, serial):
+        targets = task['targets']
+        if len(targets) == 1 and not targets[0]['serial']:
+            return (task.get('result') or {}).get('serial') == serial
+        return all(target['serial'] == serial for target in targets)
 
     def update(self, task_id, state=None, progress=None, result=None, error=''):
         if state is not None and state not in ('running', 'completed', 'failed', 'cancelled'):

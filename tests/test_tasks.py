@@ -117,6 +117,34 @@ class TaskTests(unittest.TestCase):
         with self.assertRaises(TaskError):
             history.list(limit=0)
 
+    def test_connection_filter_is_applied_before_pagination_and_preserves_serial_scope(self):
+        history = self.tasks.store
+        wanted = history.create('identify', 'web', '', [TARGET])
+        for number in range(15):
+            history.create('identify', 'web', '', [{'serial': 'SN-TWO', 'connection_id': str(number)}])
+        records = history.list(connection_id=TARGET['connection_id'], limit=1)
+        self.assertEqual([record['id'] for record in records], [wanted])
+        self.assertEqual(history.list(connection_id=TARGET['connection_id'], serials=['SN-TWO']), [])
+        with self.assertRaises(TaskError):
+            history.list(connection_id='')
+
+    def test_pending_identity_result_is_visible_under_confirmed_serial_without_rewriting_snapshot(self):
+        history = self.tasks.store
+        task_id = history.create('identify', 'web', '', [{'serial': '', 'connection_id': 'pending'}])
+        history.update(task_id, state='completed', result={'serial': 'SN-NEW'})
+        task = history.get(task_id)
+        self.assertEqual(task['targets'][0]['serial'], '')
+        self.assertTrue(history.visible_serial(task, 'SN-NEW'))
+        self.assertFalse(history.visible_serial(task, 'SN-OTHER'))
+        self.assertEqual([row['id'] for row in history.list(serials=['SN-NEW'])], [task_id])
+        self.assertEqual(history.list(serials=['SN-OTHER']), [])
+        # A two-target operation cannot use one result serial to widen access.
+        copy_id = history.create('file-copy', 'web', '', [
+            {'serial': '', 'connection_id': 'pending'}, TARGET])
+        history.update(copy_id, state='completed', result={'serial': 'SN-NEW'})
+        self.assertFalse(history.visible_serial(history.get(copy_id), 'SN-NEW'))
+        self.assertEqual([row['id'] for row in history.list(serials=['SN-NEW'])], [task_id])
+
     def test_progress_and_results_are_validated_without_persisting_bad_values(self):
         history = self.tasks.store
         task_id = history.create('identify', 'web', 'page', [TARGET])

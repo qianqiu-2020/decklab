@@ -19,7 +19,7 @@ Do not change an installed service or use live boards during regression tests.
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH adapters and task API/CLI implemented; file transfer/browser integration pending |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH adapters and task API/CLI/browser implemented; file transfer integration pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
@@ -193,3 +193,13 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   sharing and demo browser checks pass; real demo HTTP/CLI rediscovers an async
   identify result through a separate invocation. Browser recovery and server-owned
   file-transfer tasks remain pending; native Windows validation remains pending.
+
+- Browser tasks: identification and SSH creation now submit durable operations;
+  task history exposes progress, cancellation and completed SSH sessions. Pending
+  connection filtering happens before pagination, and completed identification
+  remains visible under its discovered serial without rewriting the initial
+  snapshot or widening multi-board grants. Network loss retries the same task;
+  permanent access loss stops its watcher. Frontend isolation tests cover stale
+  histories, cancellation, fresh-page progress and retry behavior; a real demo
+  browser verifies completed results survive reload. File-transfer tasks and
+  actual Windows/GitHub release gates remain pending.

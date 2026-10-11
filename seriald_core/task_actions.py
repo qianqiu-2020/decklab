@@ -72,17 +72,17 @@ class TaskActions:
         except (TaskError, TransactionError, ValueError) as error:
             return response(getattr(error, 'status', 400), {'ok': False, 'error': str(error)})
 
-    def query(self, task_id=None, actor='web', serial=None, limit=20, offset=0):
+    def query(self, task_id=None, actor='web', serial=None, limit=20, offset=0, connection_id=None):
         try:
             if task_id:
                 task = self.tasks.store.get(task_id)
                 if (actor != 'web' and task['actor'] != actor or serial is not None
-                        and any(target['serial'] != serial for target in task['targets'])):
+                        and not self.tasks.store.visible_serial(task, serial)):
                     raise TaskError('task not found', 404)
                 return response(200, {'task': task})
             tasks = self.tasks.store.list(actor=actor if actor != 'web' else None,
                                          serials=[serial] if serial is not None else None,
-                                         limit=limit, offset=offset)
+                                         limit=limit, offset=offset, connection_id=connection_id)
             return response(200, {'tasks': tasks})
         except TaskError as error:
             return response(error.status, {'error': str(error)})

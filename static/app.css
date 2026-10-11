@@ -441,3 +441,5 @@
     padding:10px;background:var(--accent-soft);border:1px solid var(--accent-line);white-space:normal}
   .boot-search-match strong{font-size:11px;color:var(--accent)}
   .boot-search-match span{font:11px/1.6 var(--font-mono);color:var(--ink);overflow-wrap:anywhere}
+
+  .task-progress{display:block;width:100%;height:5px;margin-top:8px;accent-color:var(--accent)}

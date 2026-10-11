@@ -1,14 +1,14 @@
 # Durable tasks: implementation contract
 
 Durable tasks currently support `identify`, `ssh-enable` and `ssh-connect` through
-the collector API and CLI. Browser task recovery and server-owned file transfer
-are still pending. Existing file-transfer requests keep their current behavior.
+the collector API, CLI and browser. Server-owned file transfer is still pending. Existing file-transfer requests keep their current behavior.
 
 ## API and CLI
 
 `POST /api/task-start` accepts `key`, expected `serial`, `connection_id`, `kind`,
 actor and optional human `client_id`; it returns HTTP 202 with a task record.
-`GET /api/tasks` lists history with `limit` (1–100) and `offset`;
+`GET /api/tasks` lists history with `limit` (1–100), `offset` and optional
+`connection_id` (for pending connections); filters apply before pagination;
 `GET /api/task?id=…` reads one record. `POST /api/task-cancel` requests cancellation
 by `id`. These endpoints return normal JSON errors and retain task IDs after the
 initiating HTTP connection closes.
@@ -47,7 +47,9 @@ States are `queued`, `running`, `completed`, `failed`, `cancelled` and
 Terminal rows cannot be overwritten by late callbacks. Progress has `done`,
 `total` and `phase`; individual operation adapters choose units and phases.
 Historical targets are snapshots, not live board bindings, and do not silently
-follow an identity correction to another serial.
+follow an identity correction to another serial. A single-target task submitted
+without a serial can also be found under its final discovered serial; the original
+blank target snapshot is retained. This exception cannot widen multi-board access.
 
 One `TaskManager` owns execution in a collector, with four active workers by
 default. Capacity exhaustion refuses a new task before creating its record.
@@ -66,6 +68,19 @@ transaction/connection guards also apply inside task adapters.
 
 On collector startup, unfinished records become interrupted with their last
 progress retained. No board command is automatically replayed. Clients can
-rediscover history after reconnect through the task API; browser UI is pending.
+rediscover history after reconnect through the task API or browser task panel.
 Scoped history excludes a multi-board task when any target is outside the grant;
 actor and pagination filters are applied in SQLite before returning records.
+
+## Browser behavior
+
+Identification and SSH creation submit background tasks instead of holding a
+request open until the operation finishes. The terminal toolbar's task button
+opens paginated history with progress, result/error, cancellation and an existing
+SSH-session shortcut. Reopening or reloading the page retrieves history without
+replaying the operation. Visible history refreshes every five seconds.
+
+A submitted operation is checked every second; network failures retry after two
+seconds without starting another task. Authentication failures, revoked access or
+a missing task stop the watcher. Device switches invalidate displayed callbacks
+without cancelling the collector's work. Cancellation does not promise rollback.

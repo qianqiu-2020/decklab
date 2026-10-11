@@ -71,6 +71,7 @@
       <span id="terminal-search-status"></span>
       <div class="terminal-nav-tools" aria-label="侧栏导航">
         <button id="b-records" type="button" aria-expanded="false" aria-pressed="false" title="打开串口日志归档"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-log"/></svg>串口日志</button>
+        <button id="b-tasks" type="button" title="查看后台任务进度与结果"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>任务</button>
         <button id="b-command-nav" type="button" aria-pressed="false" title="在当前终端缓冲中按 shell 命令跳转"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>输入导航</button>
       </div>
       <div class="terminal-extra-tools" aria-label="终端工具">
@@ -104,6 +105,7 @@
         <button id="record-tab-inputs" type="button" role="tab" aria-controls="record-panel-inputs"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>输入导航</button>
         <button id="record-tab-sessions" type="button" role="tab" aria-controls="record-panel-sessions"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-terminal"/></svg>SSH 会话</button>
         <button id="record-tab-events" type="button" role="tab" aria-controls="record-panel-events"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-clock"/></svg>关键操作</button>
+        <button id="record-tab-tasks" type="button" role="tab" aria-controls="record-panel-tasks">后台任务</button>
         <button id="record-tab-commands" type="button" role="tab" aria-controls="record-panel-commands"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>常用命令</button>
       </div>
       <div class="records-panel" id="record-panel-logs" role="tabpanel">
@@ -130,6 +132,12 @@
         <div class="section-head"><h2>关键操作记录</h2><span>逐按键写入保留在审计库中，此处不重复显示</span></div>
         <div id="d-events" class="activity"></div>
         <div class="pager"><button id="event-prev" type="button">较新</button><span id="event-page"></span><button id="event-next" type="button">更早</button></div>
+      </div>
+      <div class="records-panel" id="record-panel-tasks" role="tabpanel" hidden>
+        <div class="section-head"><h2>后台任务</h2><button id="task-refresh" type="button">刷新</button></div>
+        <p id="task-status" class="log-note" role="status"></p>
+        <div id="d-tasks" class="activity"></div>
+        <div class="pager"><button id="task-prev" type="button">较新</button><span id="task-page"></span><button id="task-next" type="button">更早</button></div>
       </div>
       <div class="records-panel" id="record-panel-commands" role="tabpanel" hidden>
         <div class="section-head"><h2>历史常用命令</h2><span>按使用次数排序；点击填入后再执行</span></div>
@@ -192,6 +200,7 @@
 <script src="/static/terminal-view.js"></script>
 <script src="/static/archives.js"></script>
 <script src="/static/devices.js"></script>
+<script src="/static/tasks.js"></script>
 <script src="/static/file-transfer.js"></script>
 <script src="/static/boot-compare.js"></script>
 <script src="/static/share.js"></script>

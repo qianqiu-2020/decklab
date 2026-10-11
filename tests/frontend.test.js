@@ -7,7 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { TextDecoder } = require('node:util');
 
-const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'app.js'].map(name =>
+const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'tasks.js', 'app.js'].map(name =>
   fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
 
 class Element {
@@ -133,7 +133,7 @@ function harness(options = {}) {
     setInterval: (fn, delay) => { intervals.push({ fn, delay }); return intervals.length; },
     fetch: (url, options = {}) => new Promise((resolve, reject) => {
       requests.push({ url, options, body: options.body ? JSON.parse(options.body) : null,
-        resolve: data => resolve({ json: () => Promise.resolve(data) }), reject, taken: false });
+        resolve: (data, status = 200) => resolve({ status, ok: status < 400, json: () => Promise.resolve(data) }), reject, taken: false });
     }),
   };
   if (options.sse) sandbox.EventSource = class {
@@ -351,11 +351,11 @@ test('closing a terminal disposes its stream and prevents queued input or fallba
 test('late session, log and identify responses stay with their original device', async () => {
   const h = await setup(); h.select('A');
   const sessions = h.take('/api/sessions'), logs = h.take('/api/logs');
-  h.get('b-identify').click(); const identify = h.take('/api/identify');
+  h.get('b-identify').click(); const identify = h.take('/api/task-start');
   h.select('B');
   sessions.resolve({ key: 'A', sessions: [{ sid: 'ssh-old', kind: 'ssh' }] });
   logs.resolve({ key: 'A', label: 'A logs', files: [{ name: 'old.log', path: 'old', size: 1 }] });
-  identify.resolve({ ok: true, serial: 'A serial' }); await drain();
+  identify.resolve({ ok: true, task: { id: 'identify-old', state: 'completed', result: { ok: true, serial: 'A serial' } } }); await drain();
   assert.deepEqual(h.get('d-tabs').children.map(x => x.textContent), ['串口', '']);
   assert.equal(h.get('d-logs').children.length, 0);
   assert.equal(h.get('d-info').hidden, true);
@@ -406,7 +406,7 @@ test('pending view follows its promoted board after collector restart', async ()
     connection_id: 'old-connection', by_path: 'usb-port-1', alive: true, dev: '/mock/ttyUSB2',
   }] });
   await drain(); const old = h.select('unprovisioned-path');
-  h.intervals[0].fn();
+  h.intervals.find(interval => interval.delay === 3000).fn();
   h.take('/api/devices').resolve({ devices: [{
     key: 'milkv', label: 'milkv', serial: 'MJM10004000001', state: 'online',
     connection_id: 'new-connection', by_path: 'usb-port-1', alive: true, dev: '/mock/ttyUSB2',
@@ -442,20 +442,20 @@ test('preparing a board swap moves the live UART to an unprovisioned view', asyn
 test('late SSH connect response cannot switch the newly selected device', async () => {
   const h = await setup(); h.select('A');
   h.get('d-tabs').children.at(-1).children[0].click();
-  const connect = h.take('/api/ssh-connect');
+  const connect = h.take('/api/task-start');
   h.select('B'); const current = h.terminals.at(-1);
-  connect.resolve({ ok: true, sid: 'ssh-old', ip: '192.0.2.1' }); await drain();
+  connect.resolve({ ok: true, task: { id: 'ssh-old-task', state: 'completed', result: { ok: true, sid: 'ssh-old', ip: '192.0.2.1' } } }); await drain();
   assert.equal(h.terminals.at(-1), current);
   assert.equal(h.get('d-key').textContent, 'B');
   assert.equal(h.get('d-status').textContent, '');
-  assert.deepEqual(connect.body, { key: 'A', actor: 'web', client_id: h.clientId });
+  assert.deepEqual(connect.body, { key: 'A', kind: 'ssh-connect', actor: 'web', client_id: h.clientId });
 });
 
 test('SSH identification adopts the canonical label before reading or sending', async () => {
   const h = await setup(); h.select('A');
   h.get('d-tabs').children.at(-1).children[0].click();
-  h.take('/api/ssh-connect').resolve({ ok: true, sid: 'ssh123', ip: '192.0.2.1',
-    device_key: 'musepi2', serial: 'SN001', auto_configured: true });
+  h.take('/api/task-start').resolve({ ok: true, task: { id: 'ssh-task', state: 'completed', result: { ok: true, sid: 'ssh123', ip: '192.0.2.1',
+    device_key: 'musepi2', serial: 'SN001', auto_configured: true } } });
   await drain();
   assert.ok(h.get('d-status').textContent.includes('已通过串口配置 root SSH'));
   const currentRead = h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1);
@@ -1204,6 +1204,56 @@ test('boot banner split across reads still resets the live terminal once', async
   assert.equal(terminal.wasReset, true);
   assert.ok(terminal.parsed.includes('L 2022.10 fresh'));
   assert.ok(!terminal.parsed.includes('stale'));
+});
+
+
+test('durable identify resumes polling after network failure without starting again', async () => {
+  const h = await setup(); h.select('A'); h.get('b-identify').click();
+  h.take('/api/task-start').resolve({ok: true, task: {id: 'durable', state: 'running'}});
+  await drain();
+  h.take('/api/task').reject(new Error('network offline')); await drain();
+  const retry = h.timer(2000); assert.ok(retry); h.fire(retry[0]);
+  h.take('/api/task').resolve({task: {id: 'durable', state: 'completed', result: {ok: true, serial: 'SN-A'}}});
+  await drain();
+  assert.ok(h.get('d-status').textContent.includes('识别完成'));
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 1);
+});
+
+test('revoked task access stops monitoring and reports failure', async () => {
+  const h = await setup(); h.select('A'); h.get('b-identify').click();
+  h.take('/api/task-start').resolve({ok: true, task: {id: 'revoked', state: 'running'}});
+  await drain();
+  h.take('/api/task').resolve({error: 'access revoked'}, 403); await drain();
+  assert.ok(h.get('d-status').textContent.includes('access revoked'));
+  assert.equal(h.timer(2000), undefined);
+});
+
+test('task history recovers progress on a fresh page and cancels only the selected board', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: [{key: 'A', label: 'A', alive: true,
+    serial: '', connection_id: 'connection-A'}]});
+  await drain(); h.select('A');
+  const history = h.take('/api/tasks');
+  assert.equal(new URL(history.url, 'http://fixture').searchParams.get('connection_id'), 'connection-A');
+  history.resolve({tasks: [{id: 'existing', kind: 'identify', state: 'running', actor: 'agent',
+    created: 1, progress: {done: 1, total: 3, phase: 'probing'}, targets: []}]});
+  await drain();
+  const row = h.get('d-tasks').children[0];
+  assert.ok(row.children[0].children[0].textContent.includes('执行中'));
+  assert.equal(row.children[0].children[2].value, 1);
+  row.children[1].click();
+  assert.equal(h.take('/api/task-cancel').body.id, 'existing');
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 0);
+});
+
+test('stale task history cannot replace newly selected board tasks', async () => {
+  const h = await setup(); h.select('A'); const old = h.take('/api/tasks');
+  h.select('B'); const current = h.take('/api/tasks');
+  current.resolve({tasks: [{id: 'B-task', kind: 'identify', state: 'completed', actor: 'web',
+    created: 1, progress: {}, result: {serial: 'SN-B'}}]}); await drain();
+  old.resolve({tasks: [{id: 'A-task', kind: 'identify', state: 'failed', actor: 'web',
+    created: 1, progress: {}, error: 'A failed'}]}); await drain();
+  assert.equal(h.get('d-tasks').children[0].children[0].children[2].textContent, 'SN SN-B');
 });
 
 (async () => {
