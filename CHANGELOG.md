@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Snapshot board-profile environment defaults and configuration at collector
+  startup. Later identity/port selection cannot silently change credentials,
+  probing policy or framing; recreate the collector to apply changes.
 - SSH root provisioning uses the configured board-profile password instead of a
   hardcoded password. Non-root/empty-password profiles and different per-request
   credentials cannot trigger root provisioning.

@@ -1,5 +1,6 @@
 """Validated host/board configuration, independent of serial and SSH adapters."""
 from dataclasses import dataclass, field, replace
+from copy import deepcopy
 import json
 import os
 
@@ -108,9 +109,10 @@ def _unique_object(pairs):
 class ProfileBook:
     """Explicit assignments by stable serial or attachment; no hardware guessing."""
     def __init__(self, document=None):
-        document = {} if document is None else document
+        document = {} if document is None else deepcopy(document)
         if not isinstance(document, dict) or set(document) - {'default', 'profiles', 'boards', 'ports'}:
             raise ValueError('invalid profile configuration structure')
+        self._base = BoardProfile.from_env()
         self.default = document.get('default', 'default')
         self.profiles = document.get('profiles', {})
         self.boards = document.get('boards', {})
@@ -131,8 +133,6 @@ class ProfileBook:
                    or (name != 'default' and name not in self.profiles)
                    for key, name in mapping.items()):
                 raise ValueError('invalid profile assignment')
-        # Validate environment defaults even when no ports exist.
-        BoardProfile.from_env()
 
     @classmethod
     def from_env(cls):
@@ -152,7 +152,7 @@ class ProfileBook:
         if not isinstance(values, dict) or set(values) - fields:
             raise ValueError('invalid fields for profile ' + name)
         values = dict(values)
-        base = BoardProfile.from_env()
+        base = self._base
         serial = values.pop('serial', {})
         if not isinstance(serial, dict) or set(serial) - set(SerialSettings.__dataclass_fields__):
             raise ValueError('invalid serial fields for profile ' + name)

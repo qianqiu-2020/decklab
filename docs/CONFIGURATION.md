@@ -48,8 +48,9 @@ that bypass. See [installation](INSTALL.md) and [Windows launchers](WINDOWS.md).
 | `SERIALD_PROFILES` | unset | UTF-8 JSON profile file path; at most 64 KiB |
 
 The existing development workflow retains root/bianbu defaults. After explicit
-root authentication denial using the configured profile password, automatic provisioning can change root's
-password, enable root/password SSH login and restart sshd through serial.
+root authentication denial using the configured profile password, automatic
+provisioning can change root's password, enable root/password SSH login and
+restart sshd through serial.
 Set `SERIALD_AUTO_CONFIGURE_SSH=0` to preserve board policy. Custom SSH credentials
 for a non-root user are used directly. A configured root password is also used
 for serial provisioning when enabled. A per-request password different from
@@ -93,8 +94,11 @@ Only the collector applies framing when opening a port. Identity binding may
 select a different board profile; `settings_pending` reports that its framing
 awaits reconnect. Assign a port profile when framing is needed before identity
 discovery. Editing profiles requires a collector restart; restarting control/UI
-does not reload them. Linux accepts termios-supported speeds and rejects other
-rates before opening a port; Windows delegates supported rates to pySerial.
+does not reload them. The profile book snapshots environment defaults and the
+configuration document at construction; later profile selection does not reread
+environment variables or the JSON file. Linux accepts termios-supported speeds
+and rejects other rates before opening a port; Windows delegates supported rates
+to pySerial.
 
 Optional archive retention and free-space warning thresholds are documented in
 [log operations](LOG_OPERATIONS.md). Retention defaults to disabled; diagnostics
@@ -110,7 +114,27 @@ HTTP staging use these limits; browser and background CLI file transfers are int
 ## Hardware helpers
 
 `SERIALD_HARDWARE` optionally selects a bounded JSON file of explicitly configured
-per-serial power/reset/flashing argv. Default is disabled; no automatic action or
+per-serial power/reset/flashing argv (UTF-8 with optional BOM, at most 64 KiB).
+Default is disabled; no automatic action or
 sudo is used. Agent access is disabled per action unless explicitly configured.
 See [hardware extensions](HARDWARE_EXTENSIONS.md) for configuration, offline
 power commands, cancellation and exclusive UART handoff.
+
+## Configuration review boundaries
+
+The 34 runtime environment names are covered by these groups. Host settings are
+read by the relevant entrypoint; board, maintenance, staging and helper settings
+belong to the collector. Windows launchers can select listener/authentication
+values before starting the host.
+
+| Group | Names | Implementation / verification |
+| --- | ---: | --- |
+| Paths, listener, authentication | 11 | `config.py`, control/collector/Windows entrypoints and packaged launchers; config, sharing and package tests |
+| Serial framing, credentials, profiles | 13 | `profiles.py`, `transport.py`, `console_protocol.py`; profile/protocol tests, including startup snapshots and credential overrides |
+| Retention and disk warnings | 3 | `maintenance.py`; maintenance tests; see [log operations](LOG_OPERATIONS.md) |
+| Transfer quotas and expiry | 6 | `transfer_artifacts.py`; artifact tests; see [transfer staging](TRANSFER_ARTIFACTS.md) |
+| Hardware helper file | 1 | `hardware.py`; helper/handoff tests; see [hardware extensions](HARDWARE_EXTENSIONS.md) |
+
+The configuration inventory checker verifies name coverage only. Platform
+behavior requires its adapter tests and installation checks; Linux fixtures and
+PowerShell parsing do not establish native Windows installation or COM behavior.

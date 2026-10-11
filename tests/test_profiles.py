@@ -56,6 +56,37 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(selected.name, 'raw')
         self.assertFalse(selected.auto_configure_ssh)
 
+    def test_environment_defaults_are_snapshotted_once(self):
+        with mock.patch.dict(os.environ, {'SERIALD_SSH_PASSWORD': 'startup-secret',
+                                         'SERIALD_BAUD': '9600'}):
+            book = ProfileBook({'profiles': {'board': {}}, 'boards': {'SN': 'board'}})
+        with mock.patch.dict(os.environ, {'SERIALD_SSH_PASSWORD': 'changed-secret',
+                                         'SERIALD_BAUD': 'invalid',
+                                         'SERIALD_PROBE': 'manual'}):
+            for profile in (book.resolve(), book.resolve('SN')):
+                self.assertEqual(profile.ssh_password, 'startup-secret')
+                self.assertEqual(profile.console_password, 'startup-secret')
+                self.assertEqual(profile.serial.baud, 9600)
+                self.assertEqual(profile.probe, 'linux')
+                self.assertTrue(profile.auto_configure_ssh)
+
+    def test_caller_document_changes_do_not_change_active_configuration(self):
+        document = {'profiles': {'slow': {'serial': {'baud': 9600}}},
+                    'boards': {'SN': 'slow'}, 'ports': {'usb': 'slow'}}
+        book = ProfileBook(document)
+        document['profiles']['slow']['serial']['baud'] = 57600
+        document['boards']['SN'] = 'default'
+        document['ports']['usb'] = 'default'
+        self.assertEqual(book.resolve('SN').serial.baud, 9600)
+        self.assertEqual(book.resolve(port='usb').serial.baud, 9600)
+
+    def test_recreating_profile_book_applies_changed_environment(self):
+        original = ProfileBook()
+        with mock.patch.dict(os.environ, {'SERIALD_BAUD': '57600'}):
+            replacement = ProfileBook()
+        self.assertEqual(original.resolve().serial.baud, 115200)
+        self.assertEqual(replacement.resolve().serial.baud, 57600)
+
     def test_invalid_profiles_fail_before_any_io(self):
         documents = [{'unexpected': {}}, {'default': 'missing'}, {'profiles': []},
                      {'profiles': {'typo': {'ssh_pasword': 'hidden'}}},

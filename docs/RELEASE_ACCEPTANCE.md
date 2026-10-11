@@ -40,6 +40,20 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+The configuration content review groups all 34 runtime environment names into
+host/auth (11), board/serial (13), retention (3), artifacts (6) and helpers (1).
+CONFIGURATION.md and its linked operational guides were checked against config,
+entrypoints, package environment/launchers and policy constructors for defaults,
+validation, reload ownership and platform differences. This found profile
+selection rereading environment defaults; ProfileBook now snapshots defaults and
+copies its input document at construction. Fixtures verify subsequent invalid
+environment values and caller document edits cannot change active profiles;
+creating a replacement book applies new settings. Native Windows installation
+semantics and the complete API-route review remain separate requirements. Full
+backend regression passes 551 tests (three native Windows tests skipped); all
+three package-document layout/link fixtures and the 34-variable/54-route
+documentation inventory check also pass.
+
 SSH provisioning now writes the selected profile's root password, rather than
 hardcoding the development default. Automatic authentication-denial recovery
 requires an enabled root profile and credentials matching that profile; different
@@ -115,8 +129,10 @@ Verification for this checkpoint: 514 backend tests pass (three native Windows
 tests skipped), 74 frontend isolation checks and sharing checks pass. The Windows
 build script parses on PowerShell; native execution remains unverified.
 
-1. Audit documentation against every public route/configuration and supported
-   platform, including installation, upgrade and recovery behavior.
+1. Complete the public-route content review and verify supported-platform
+   installation, upgrade and recovery behavior. Configuration defaults and
+   lifecycle have a local source/fixture review above; native installation
+   evidence is still required.
 2. Review the actual frozen Windows files and embedded native-library notices.
    The installed-Python distribution inventory is not a complete binary SBOM.
 3. Execute native Windows tests, frozen demo/host checks and installer upgrades
