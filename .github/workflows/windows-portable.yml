@@ -6,6 +6,7 @@ on:
   push:
     paths:
       - 'seriald_windows.py'
+      - 'seriald_demo.py'
       - 'seriald_core/**'
       - 'serialctl.py'
       - 'static/**'
@@ -24,6 +25,9 @@ on:
       - 'packaging/decklab.ico'
       - 'packaging/inno-languages/**'
       - 'docs/WINDOWS.md'
+      - 'docs/DEMO.md'
+      - 'docs/CONFIGURATION.md'
+      - 'examples/**'
       - '.github/workflows/windows-portable.yml'
 permissions:
   contents: read
@@ -68,6 +72,26 @@ jobs:
       - name: Verify install and upgrade preserve runtime data
         shell: pwsh
         run: .\tools\test_windows_installer.ps1
+      - name: Smoke test packaged simulated boards
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath (Resolve-Path dist/seriald/seriald.exe) -ArgumentList 'demo','--port','18899' -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $response = Invoke-RestMethod http://127.0.0.1:18899/api/devices -TimeoutSec 2
+                if ($response.devices.Count -eq 3) { $ready = $true; break }
+              } catch {}
+              if ($process.HasExited) { break }
+            }
+            if (-not $ready) { throw 'Packaged demo did not expose three simulated boards' }
+            $logs = Invoke-RestMethod 'http://127.0.0.1:18899/api/logs?key=demo-k1' -TimeoutSec 5
+            if ($logs.boots.Count -ne 2) { throw 'Packaged demo archives unavailable' }
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: seriald-windows

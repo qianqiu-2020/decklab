@@ -10,7 +10,7 @@ Do not change an installed service or use live boards during regression tests.
 | Public project | Application license, third-party inventory, English/Chinese README, contribution and issue guidance | Files present; distribution notices included; inventory matches shipped dependencies | In progress |
 | Release pipeline | Linux/Windows PR checks; tagged Setup, ZIP, Debian package, checksums and release notes | CI definitions plus validated release outputs; actual platform checks reported separately | In progress |
 | Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | In progress |
-| Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Pending |
+| Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Implemented; native Windows package gate pending |
 | Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Pending |
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Pending |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Pending |
@@ -53,3 +53,10 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   Windows collector calls, Linux framing and SSH credential propagation.
   CONFIGURATION.md and an editable example are included in both packages.
   Native Windows execution remains part of the platform/release gate.
+- Demo: seriald_demo.py uses an isolated temporary directory and loopback HTTP,
+  real control/collector handlers, board registries and archive indexing. Closed
+  virtual shell/file adapters execute no host commands and discover no ports.
+  HTTP/CLI tests cover agent execution and board-to-board/download SHA-256 checks;
+  real Chromium checks terminal input, SSE output and cross-day archive UI.
+  Windows packages expose `seriald.exe demo`; hosted native execution remains
+  unverified until the Windows package job runs.

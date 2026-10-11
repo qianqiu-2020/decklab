@@ -27,6 +27,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
     & $python -m unittest discover -s tests -p test_windows_portable.py
     if ($LASTEXITCODE -ne 0) { throw 'Windows portable tests failed.' }
+    & $python -m unittest discover -s tests -p test_profiles.py
+    if ($LASTEXITCODE -ne 0) { throw 'Configuration tests failed.' }
+    & $python -m unittest discover -s tests -p test_demo.py
+    if ($LASTEXITCODE -ne 0) { throw 'Hardware-free demo tests failed.' }
     if (Get-Command node -ErrorAction SilentlyContinue) {
         & node tests/frontend.test.js
         if ($LASTEXITCODE -ne 0) { throw 'Frontend regression tests failed.' }
@@ -58,6 +62,7 @@ try {
     Copy-Item docs\WINDOWS.md -Destination (Join-Path $bundle 'README.md')
     New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'docs'), (Join-Path $bundle 'examples') | Out-Null
     Copy-Item docs\CONFIGURATION.md -Destination (Join-Path $bundle 'docs\CONFIGURATION.md')
+    Copy-Item docs\DEMO.md -Destination (Join-Path $bundle 'docs\DEMO.md')
     Copy-Item examples\profiles.json -Destination (Join-Path $bundle 'examples\profiles.json')
     & (Join-Path $bundle 'seriald.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }

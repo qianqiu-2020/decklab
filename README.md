@@ -23,6 +23,10 @@ service names, command names and installation paths retain the `seriald` name.
 
 ## Install and use
 
+Try without hardware: `python3 seriald_demo.py`, then open
+**http://127.0.0.1:8899/**. See the [demo guide](docs/DEMO.md) for simulated
+boot comparison, SSH and file transfers.
+
 Ubuntu packages are built with:
 
 ```sh

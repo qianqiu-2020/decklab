@@ -24,15 +24,20 @@ jobs:
       - run: python -m unittest discover -s tests
       - run: node tests/frontend.test.js
       - run: node tests/share.test.js
-      - run: python -m compileall -q seriald_core serialctl.py seriald.py
+      - run: python -m compileall -q seriald_core serialctl.py seriald.py seriald_demo.py
       - run: bash -n rescue.sh
       - run: git diff --check
       - name: Real browser with hardware-free fixtures
         if: matrix.python == '3.12'
         run: node tools/browser_smoke.js
+      - name: Real browser against the simulated host
+        if: matrix.python == '3.12'
+        run: node tools/demo_smoke.js
       - uses: actions/upload-artifact@v4
         if: always() && matrix.python == '3.12'
         with:
           name: browser-smoke
-          path: dist/ui-*.png
+          path: |
+            dist/ui-*.png
+            dist/demo-ui.png
           if-no-files-found: ignore

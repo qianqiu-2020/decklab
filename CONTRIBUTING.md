@@ -32,6 +32,9 @@ git diff --check
 ```
 
 `node tools/browser_smoke.js` uses an isolated HTTP fixture and real Chrome;
+`node tools/demo_smoke.js` exercises the real HTTP/SSE service with simulated
+boards. Run `python3 seriald_demo.py` for interactive hardware-free development;
+see `docs/DEMO.md` for its supported commands and virtual files.
 set `CHROME_BIN` if Chrome is not at `/usr/bin/google-chrome`. No test should
 open a real serial port, execute recovery, or modify a board. Never start a
 second collector on an active host.

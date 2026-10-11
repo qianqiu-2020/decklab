@@ -19,6 +19,11 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 
 ## 安装到 Ubuntu 上位机
 
+无需开发板即可体验：运行 `python3 seriald_demo.py`，打开
+`http://127.0.0.1:8899/`。模拟设备支持串口、SSH、跨天启动归档和文件传输；
+不会访问真实硬件或执行主机命令。Windows 安装包可运行 `seriald.exe demo`。
+详见 [Demo 使用说明](docs/DEMO.md)。
+
 ```sh
 python3 tools/build_deb.py
 sudo apt install ./dist/seriald_1.4.50_all.deb

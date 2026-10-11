@@ -12,6 +12,12 @@ ROOT = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) el
 os.environ.setdefault('SERIALD_BASE', str(ROOT / 'data'))
 os.environ.setdefault('SERIALD_STATIC', str(getattr(sys, '_MEIPASS', ROOT)))
 
+# Demo chooses isolated storage before application configuration is imported.
+if len(sys.argv) > 1 and sys.argv[1] == 'demo':
+    import seriald_demo
+    sys.argv.pop(1)
+    raise SystemExit(seriald_demo.main())
+
 import argparse
 import threading
 import webbrowser
