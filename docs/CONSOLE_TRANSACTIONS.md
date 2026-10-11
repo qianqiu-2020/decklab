@@ -58,8 +58,8 @@ serialctl --actor claude-code/diagnosis --device riscv-118 operation
 serialctl --actor claude-code/diagnosis --device riscv-118 input-release <ownership-id>
 ```
 
-`POST /api/input-claim` returns `input_owner` with `id`, `actor`, `connection_id`
-and `since`. Repeating a claim by the same actor returns its existing ID.
+`POST /api/input-claim` returns `input_owner` with `id`, `actor`, `client_id`,
+`connection_id` and `since`. Repeating a claim by the same owner returns its existing ID.
 `POST /api/input-release` requires that ID; delayed releases cannot clear a newer
 reservation. `GET /api/operation` and device snapshots expose the owner.
 Other actors receive HTTP 423 / `input-owned` for input, probes and transfer
@@ -72,8 +72,16 @@ abort to release its separate transfer reservation. Revoking an agent grant also
 releases its input claim. Claims end on connection replacement, board swap or
 collector restart; they are not durable locks and have no idle expiry.
 
-Reservations currently distinguish actors, not browser tabs: agents using the
-same actor can reuse a claim, and browser users share the human `web` actor.
-Use distinct actor names for independent agent workflows. Separate human-client
-ownership remains part of the collaboration workstream. Open LAN actors remain
-caller-reported; authenticated agent grants override those names at control.
+Agent ownership uses the actor, so the same agent can reuse its claim across CLI
+calls. Human ownership also checks `client_id`: each page gets a fresh identifier,
+and all terminal/probe/transfer requests carry it. Separate tabs and browsers
+cannot write under another page's claim even though their audit actor remains
+`web`. A different human page must explicitly take over before writing or releasing
+the reservation. Reloading a page creates a new client; click takeover to continue
+an existing reservation. Closing a page does not silently release an active board
+operation; another human can take over.
+
+Client IDs are coordination metadata, not credentials. They add no account or
+login requirement. Use distinct actor names for independent agent workflows.
+Open LAN actors remain caller-reported; authenticated agent grants override those
+names at control and cannot adopt human ownership by supplying a client ID.

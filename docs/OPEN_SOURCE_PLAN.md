@@ -17,7 +17,7 @@ Do not change an installed service or use live boards during regression tests.
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Device/read services implemented; final API audit pending |
 | Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Pending |
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
-| Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Actor reservations/UI implemented; per-client human ownership pending |
+| Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Pending |
 | Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
@@ -123,3 +123,12 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   ownership/HTTP checks also cover takeover racing with agent revocation.
   Separate ownership for human browser clients remains required before this
   workstream is complete; current browser users share the `web` actor.
+- Per-client collaboration: browser requests now carry a fresh per-page ID;
+  reservations match actor plus human client, and leases/transfer state retain
+  that identity across background work. Different human clients cannot write or
+  release another page's reservation, and explicit takeover cancels old work.
+  Agent grants still bind actors independently of supplied human client IDs.
+  All 358 backend tests and 54 frontend isolation checks pass, plus sharing and
+  desktop/mobile browser smoke. A real two-page demo check proves input rejection,
+  takeover, spectator transition and restoration of shared input. Native Windows
+  execution remains pending.

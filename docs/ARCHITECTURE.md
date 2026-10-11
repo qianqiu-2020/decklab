@@ -127,7 +127,9 @@ agent 会话在网页中默认只读，操作者可显式点击“介入此会�
 串口可选输入占用由事务协调器按 actor 管理；默认仍共享输入。占用会阻止其他 actor
 通过输入、探测或文件传输写串口，输出游标与独立 SSH 不受影响。人工 web 接管取消
 旧事务并唤醒等待者，不关闭采集器；占用随连接代次变化失效，撤销 agent 令牌也会释放。
-网页人工客户端目前共用 web actor，进一步按客户端区分仍在协作优化范围内。
+网页人工客户端沿用 web actor 审计，同时以每页 client_id 区分输入占用；同一 actor
+的另一页必须显式接管。事务和文件传输保存发起页 client_id，后台分块与等待不能
+因执行线程变化绕过占用；CLI agent 则按 actor 复用输入占用。
 
 HTTP 写操作委托给 `DeviceActions(manager)`：输入、识别、换板、标签、SSH 操作、
 传输及取消共用同一编排、actor scope 和审计。服务返回 `ActionResult(status, payload)`，

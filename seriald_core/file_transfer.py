@@ -51,6 +51,7 @@ class SerialFileTransfer:
         self.transactions = transactions_for(device)
         self._opening_connection = None
         self._opening_actor = 'web'
+        self._opening_client = ''
         self.lock = threading.RLock()
         self.state = None
         self._expiry_timer = None
@@ -66,6 +67,7 @@ class SerialFileTransfer:
             state = self.state
             with self.transactions.begin('file-transfer', timeout,
                     actor=state['actor'] if state else self._opening_actor, allow_transfer=True,
+                    client_id=state.get('client_id', '') if state else self._opening_client,
                     expected_connection=state['connection_id'] if state else self._opening_connection):
                 device.probing = True
                 try:
@@ -163,11 +165,13 @@ class SerialFileTransfer:
         try:
             self._check_connection(connection_id)
             self._opening_connection, self._opening_actor = connection_id, actor
+            self._opening_client = self.transactions.client_id if actor == 'web' else ''
             if self.state:
                 raise TransferError('此串口已有文件传输，请完成或取消后再试', 409)
             transfer_id = secrets.token_hex(12)
             state = {'id': transfer_id, 'direction': direction, 'path': path,
                      'connection_id': connection_id, 'actor': actor,
+                     'client_id': self._opening_client,
                      'offset': 0, 'last': time.monotonic()}
             quoted = shlex.quote(path)
             if direction == 'upload':

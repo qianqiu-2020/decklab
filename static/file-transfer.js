@@ -1,5 +1,6 @@
 (function (global) {
   'use strict';
+  var fetch = global.SerialdUI.fetch;
   var byId = function (id) { return document.getElementById(id); };
   var dialog = byId('file-transfer-dialog');
   var board = null, devices = [], busy = false, cancelled = false;

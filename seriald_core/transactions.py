@@ -13,10 +13,11 @@ class TransactionError(RuntimeError):
 
 
 class ConsoleLease:
-    def __init__(self, device, kind, timeout, actor, require_open):
+    def __init__(self, device, kind, timeout, actor, require_open, client_id=''):
         self.device = device
         self.id = secrets.token_hex(12)
         self.kind, self.actor = kind, actor
+        self.client_id = client_id if actor == 'web' else ''
         self.connection_id, self.stop = device.connection_id, device.stop
         self.started = time.time()
         self.start_clock = time.monotonic()
@@ -29,7 +30,7 @@ class ConsoleLease:
             raise TransactionError('cancelled', '控制台操作已取消')
         if self.device.connection_id != self.connection_id or self.device.stop is not self.stop:
             raise TransactionError('stale', '设备连接已变化，取消旧操作')
-        self.device.transactions.check_owner(self.actor)
+        self.device.transactions.check_owner(self.actor, self.client_id)
         if self.require_open and (self.stop.is_set() or self.device.fd is None):
             raise TransactionError('disconnected', '串口连接已停止')
         if time.monotonic() >= self.deadline:
@@ -67,18 +68,28 @@ class SerialTransactions:
             owner = self._owner_locked()
             return dict(owner) if owner else None
 
-    def check_owner(self, actor):
+    @property
+    def client_id(self):
+        return getattr(self._local, 'client_id', '')
+
+    @staticmethod
+    def _same(owner, actor, client_id):
+        return owner['actor'] == actor and (actor != 'web' or owner.get('client_id', '') == client_id)
+
+    def check_owner(self, actor, client_id=None):
+        client_id = self.client_id if client_id is None else client_id
         with self._state_lock:
             owner = self._owner_locked()
-            if owner and owner['actor'] != actor:
+            if owner and not self._same(owner, actor, client_id):
                 raise TransactionError('input-owned', '串口输入由 %s 占用；仍可查看输出' % owner['actor'], 423)
 
     def claim(self, actor, takeover=False):
+        client_id = self.client_id if actor == 'web' else ''
         if takeover and actor != 'web':
             raise TransactionError('forbidden', '仅人工可以接管串口输入', 403)
         with self._state_lock:
             owner = self._owner_locked()
-            if owner and owner['actor'] == actor:
+            if owner and self._same(owner, actor, client_id):
                 return dict(owner)
         if not takeover and not self.lock.acquire(blocking=False):
             raise TransactionError('busy', '控制台操作进行中，请结束后再占用')
@@ -87,13 +98,14 @@ class SerialTransactions:
                 raise TransactionError('transfer-busy', '文件传输进行中，请结束后再占用')
             with self._state_lock:
                 owner = self._owner_locked()
-                if owner and owner['actor'] == actor:
+                if owner and self._same(owner, actor, client_id):
                     return dict(owner)
                 if owner and not takeover:
                     raise TransactionError('input-owned', '串口输入已由 %s 占用' % owner['actor'], 423)
-                if self._active and self._active.actor != actor:
+                if self._active and (self._active.actor != actor or self._active.client_id != client_id):
                     self._active.cancelled.set()
                 self._owner = {'id': secrets.token_hex(12), 'actor': actor,
+                               'client_id': client_id,
                                'connection_id': self.device.connection_id, 'since': time.time()}
                 result = dict(self._owner)
             self._wake()
@@ -107,10 +119,10 @@ class SerialTransactions:
             owner = self._owner_locked()
             if not owner or owner['id'] != ownership_id:
                 raise TransactionError('not-found', '输入占用已结束或已替换', 404)
-            if actor != 'web' and actor != owner['actor']:
+            if not self._same(owner, actor, self.client_id):
                 raise TransactionError('forbidden', '只能释放自己的输入占用', 403)
             self._owner = None
-            if self._active and self._active.actor == owner['actor']:
+            if self._active and self._same(owner, self._active.actor, self._active.client_id):
                 self._active.cancelled.set()
         self._wake()
 
@@ -125,17 +137,20 @@ class SerialTransactions:
         return getattr(self._local, 'lease', None)
 
     @contextmanager
-    def actor_scope(self, actor):
+    def actor_scope(self, actor, client_id=''):
         previous = getattr(self._local, 'actor', 'service')
+        previous_client = self.client_id
         self._local.actor = actor
+        self._local.client_id = client_id if actor == 'web' else ''
         try:
             yield
         finally:
             self._local.actor = previous
+            self._local.client_id = previous_client
 
     @contextmanager
     def begin(self, kind, timeout, actor=None, allow_transfer=False,
-              expected_connection=None, require_open=True):
+              expected_connection=None, require_open=True, client_id=None):
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
             raise ValueError('transaction timeout must be finite and positive')
         if not self.lock.acquire(blocking=False):
@@ -148,7 +163,7 @@ class SerialTransactions:
                 raise TransactionError('transfer-busy', '串口文件传输中，请完成或取消后再操作')
             lease = ConsoleLease(self.device, kind, timeout,
                                  actor if actor is not None else getattr(self._local, 'actor', 'service'),
-                                 require_open)
+                                 require_open, self.client_id if client_id is None else client_id)
             lease.check()
             with self._state_lock:
                 self._active = lease

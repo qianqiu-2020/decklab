@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Distinguish human input reservations by page client ID while keeping the web
+  audit actor. Separate clients must explicitly take over; transfer commands keep
+  their originating client identity across background work.
+
 - Add optional actor-scoped serial input reservations, CLI claim/release and
   browser human takeover. Spectators retain output access and independent SSH;
   agent revocation and connection replacement release reservations.

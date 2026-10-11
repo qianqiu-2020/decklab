@@ -77,11 +77,31 @@ async function until(check, description) {
   const logs = await (await fetch(address + 'api/logs?key=demo-k1')).json();
   assert.equal(logs.boots.length, 2);
   assert.ok(logs.boots.some(boot => boot.cross_day));
+  // Two independent page instances use the production ownership API and UI.
+  await evaluate('document.querySelector("#b-input-owner").click()');
+  await until(() => evaluate('document.querySelector("#input-owner-label").textContent === "释放输入"'), 'first page ownership');
+  await evaluate(`window.peerPage=document.createElement('iframe');
+    peerPage.style.cssText='position:fixed;left:-2000px;top:0;width:1024px;height:768px';
+    peerPage.src=${JSON.stringify(address)};document.body.appendChild(peerPage);`);
+  await until(() => evaluate('peerPage.contentDocument.querySelectorAll(".dev").length === 3'), 'second page list');
+  assert.equal(await evaluate('SerialdUI.clientId !== peerPage.contentWindow.SerialdUI.clientId'), true);
+  await evaluate('peerPage.contentDocument.querySelector(\'[data-key="demo-k1"]\').click()');
+  await until(() => evaluate('peerPage.contentDocument.querySelector("#d-in").disabled'), 'second page spectator');
+  assert.equal(await evaluate(`peerPage.contentWindow.SerialdUI.fetch('/api/session-send', {
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({key:'demo-k1',sid:'serial',data:'blocked\\r',actor:'web'})
+  }).then(response=>response.status)`), 423);
+  await evaluate('peerPage.contentDocument.querySelector("#b-input-owner").click()');
+  await until(() => evaluate('peerPage.contentDocument.querySelector("#input-owner-label").textContent === "释放输入"'), 'second page takeover');
+  await until(() => evaluate('document.querySelector("#d-in").disabled'), 'first page becomes spectator');
+  await evaluate('peerPage.contentDocument.querySelector("#b-input-owner").click()');
+  await until(() => evaluate('document.querySelector("#input-owner-label").textContent === "占用输入"'), 'shared input restored');
+  await evaluate('peerPage.remove()');
   const shot = await rpc('Page.captureScreenshot', {format: 'png'});
   fs.mkdirSync(path.join(root, 'dist'), {recursive: true});
   fs.writeFileSync(path.join(root, 'dist', 'demo-ui.png'), Buffer.from(shot.data, 'base64'));
   assert.deepEqual(errors, []);
-  console.log('ok - demo browser: devices, real terminal input/SSE, cross-day archives');
+  console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover');
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   if (ws) ws.close();
   for (const child of [chrome, demo]) {

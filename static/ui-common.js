@@ -1,5 +1,24 @@
 (function (global) {
   'use strict';
+  // Per-page identity: duplicated tabs and separate browsers must not share an input reservation.
+  var clientId;
+  if (global.crypto && global.crypto.getRandomValues) {
+    var random = new Uint8Array(16);
+    global.crypto.getRandomValues(random);
+    clientId = Array.from(random, function (value) { return value.toString(16).padStart(2, '0'); }).join('');
+  } else clientId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+  function clientFetch(url, options) {
+    if (options && options.method === 'POST' && typeof options.body === 'string') {
+      try {
+        var payload = JSON.parse(options.body);
+        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+          payload.client_id = clientId;
+          options = Object.assign({}, options, { body: JSON.stringify(payload) });
+        }
+      } catch (_) { /* Preserve the original request if it is not JSON. */ }
+    }
+    return global.fetch(url, options);
+  }
   function byId(id) { return document.getElementById(id); }
   function formatBytes(n) {
     if (n == null) return '—';
@@ -28,5 +47,6 @@
     }
     return ok;
   }
-  global.SerialdUI = { byId: byId, formatBytes: formatBytes, age: age, copyText: copyText };
+  global.SerialdUI = { byId: byId, formatBytes: formatBytes, age: age, copyText: copyText,
+                      fetch: clientFetch, clientId: clientId };
 })(window);

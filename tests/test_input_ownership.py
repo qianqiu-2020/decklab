@@ -167,6 +167,64 @@ class InputOwnershipTests(unittest.TestCase):
             self.assertFalse(thread.is_alive())
         self.assertEqual(sum(result is not None for result in results), 1)
 
+    def test_two_human_clients_cannot_share_or_release_each_others_reservation(self):
+        first = self.actions.execute('input-claim', {'client_id': 'browser-one'}, self.device, 'web')
+        owner = first.payload['input_owner']
+        repeat = self.actions.execute('input-claim', {'client_id': 'browser-one'}, self.device, 'web')
+        self.assertEqual(repeat.payload['input_owner']['id'], owner['id'])
+        with mock.patch.object(self.device, '_write', return_value=(True, '')) as write:
+            denied = self.actions.execute('session-send', {'client_id': 'browser-two', 'data': 'x'}, self.device, 'web')
+            self.assertEqual(denied.status, 423)
+            self.assertEqual(self.actions.execute('session-send', {'client_id': 'browser-one', 'data': 'x'},
+                                                  self.device, 'web').status, 200)
+        write.assert_called_once()
+        denied = self.actions.execute('input-release', {'client_id': 'browser-two', 'id': owner['id']}, self.device, 'web')
+        self.assertEqual(denied.status, 403)
+        self.assertEqual(self.transactions.ownership()['id'], owner['id'])
+
+    def test_human_takeover_cancels_same_actor_different_client(self):
+        with self.transactions.actor_scope('web', 'browser-one'):
+            first = self.transactions.claim('web')
+            with self.assertRaises(TransactionError) as cancelled:
+                with self.transactions.begin('input', 1) as lease:
+                    result = self.actions.execute('input-claim', {'client_id': 'browser-two', 'takeover': True},
+                                                  self.device, 'web')
+                    self.assertEqual(result.status, 200)
+                    self.assertNotEqual(result.payload['input_owner']['id'], first['id'])
+                    self.assertTrue(lease.cancelled.is_set())
+        self.assertEqual(cancelled.exception.code, 'cancelled')
+
+    def test_client_scope_is_restored_and_nonhuman_cannot_use_human_client_identity(self):
+        with self.transactions.actor_scope('web', 'browser-one'):
+            with self.transactions.actor_scope('web', 'browser-two'):
+                self.assertEqual(self.transactions.client_id, 'browser-two')
+            self.assertEqual(self.transactions.client_id, 'browser-one')
+        self.assertEqual(self.transactions.client_id, '')
+        result = self.actions.execute('input-claim', {'client_id': 'browser-one'}, self.device, 'shared-agent/test')
+        self.assertEqual(result.payload['input_owner']['client_id'], '')
+        self.assertEqual(result.payload['input_owner']['actor'], 'shared-agent/test')
+        self.assertEqual(self.actions.execute('input-claim', {'client_id': []}, self.device, 'web').status, 400)
+
+    def test_transfer_keeps_original_client_identity_for_background_commands(self):
+        transfer = self.device.file_transfer
+        self.actions.execute('input-claim', {'client_id': 'browser-one'}, self.device, 'web')
+        seen = []
+
+        def command(*args, **kwargs):
+            seen.append(self.transactions.current.client_id)
+            return True, 'SD_OK=1\nSD_GZIP=0\n'
+
+        with mock.patch.object(self.device, '_run_cmd_locked', side_effect=command), \
+                mock.patch.object(transfer, '_schedule_expiry'):
+            result = self.actions.execute('file-transfer/start', {
+                'direction': 'upload', 'path': '/tmp/file', 'size': 0,
+                'connection_id': self.device.connection_id, 'client_id': 'browser-one'}, self.device, 'web')
+            self.assertEqual(result.status, 200)
+            transfer._run('test-background-command')
+            self.assertEqual(seen, ['browser-one', 'browser-one'])
+            self.actions.execute('file-transfer/abort', {'id': result.payload['id'],
+                'connection_id': self.device.connection_id, 'client_id': 'browser-one'}, self.device, 'web')
+
 
 if __name__ == '__main__':
     unittest.main()

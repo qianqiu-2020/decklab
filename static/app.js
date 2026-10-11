@@ -1,6 +1,8 @@
 (function () {
   'use strict';
   var UI = window.SerialdUI, $ = UI.byId, fmt = UI.formatBytes, ago = UI.age, copyText = UI.copyText;
+  var fetch = UI.fetch;
+  function ownsInput(owner) { return owner && owner.actor === 'web' && owner.client_id === UI.clientId; }
   var requestedDevice = '';
   try {
     var sharedMatch = /^#device=(.*)$/.exec(window.location && window.location.hash || '');
@@ -32,14 +34,15 @@
     $('b-input-owner').hidden = ctx.sid !== 'serial';
     $('b-input-owner').disabled = !!ctx.ownerPending;
     var owner = ctx.inputOwner;
-    $('input-owner-label').textContent = !owner ? '占用输入' : owner.actor === 'web' ? '释放输入' : '接管输入';
-    $('b-input-owner').title = owner ? '串口输入由 ' + owner.actor + ' 占用；输出仍可共享查看' : '可选占用串口输入，其他人仍可查看输出';
+    $('input-owner-label').textContent = !owner ? '占用输入' : ownsInput(owner) ? '释放输入' : '接管输入';
+    var ownerName = owner && owner.actor === 'web' ? ownsInput(owner) ? '当前页面' : '另一网页客户端' : owner && owner.actor;
+    $('b-input-owner').title = owner ? '串口输入由 ' + ownerName + ' 占用；输出仍可共享查看' : '可选占用串口输入，其他人仍可查看输出';
   }
 
   function updateInputOwner(ctx, owner) {
     ctx.inputOwner = owner || null;
     if (ctx.sid !== 'serial') return;
-    ctx.readonly = !!owner && owner.actor !== 'web';
+    ctx.readonly = !!owner && !ownsInput(owner);
     if (ctx.readonly) {
       ctx.inputQueue = [];
       clearTimeout(ctx.inputTimer);
@@ -90,7 +93,7 @@
     var ctx = { key: key, serial: board.serial, connectionId: board.connection_id,
                 byPath: board.by_path || board.last_path,
                 readonly: selectedSession.kind === 'log' || isAgentSession
-                  || (sid === 'serial' && !!board.input_owner && board.input_owner.actor !== 'web'),
+                  || (sid === 'serial' && !!board.input_owner && !ownsInput(board.input_owner)),
                 inputOwner: board.input_owner || null,
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
@@ -1682,7 +1685,7 @@
     var ctx = view;
     if (!isCurrent(ctx) || ctx.sid !== 'serial') return;
     var owner = ctx.inputOwner;
-    var release = owner && owner.actor === 'web';
+    var release = ownsInput(owner);
     var payload = { key: ctx.key, serial: ctx.serial, actor: 'web' };
     if (release) payload.id = owner.id;
     else payload.takeover = !!owner;

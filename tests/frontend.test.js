@@ -162,7 +162,7 @@ function harness(options = {}) {
   };
   const timer = delay => [...timers.entries()].find(([, t]) => t.delay === delay);
   const fire = id => { const t = timers.get(id); timers.delete(id); assert.ok(t); t.fn(); };
-  return { get, document, requests, terminals, streams, timers, intervals, take, sends, select, timer, fire };
+  return { get, document, requests, terminals, streams, timers, intervals, take, sends, select, timer, fire, clientId: sandbox.SerialdUI.clientId };
 }
 
 async function drain() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
@@ -197,7 +197,7 @@ test('serial ownership keeps spectators read-only and human takeover restores in
   h.get('b-input-owner').click();
   const request = h.take('/api/input-claim');
   assert.equal(request.body.takeover, true);
-  request.resolve({ok: true, input_owner: {id: 'human-claim', actor: 'web'}});
+  request.resolve({ok: true, input_owner: {id: 'human-claim', actor: 'web', client_id: request.body.client_id}});
   await drain();
   assert.equal(h.get('d-in').disabled, false);
   assert.equal(h.get('input-owner-label').textContent, '释放输入');
@@ -207,6 +207,26 @@ test('serial ownership keeps spectators read-only and human takeover restores in
   release.resolve({ok: true, input_owner: null});
   await drain();
   assert.equal(h.get('input-owner-label').textContent, '占用输入');
+});
+
+test('independent human pages cannot mistake another browser reservation for their own', async () => {
+  const one = harness(), two = harness();
+  assert.notEqual(one.clientId, two.clientId);
+  const board = {key: 'A', label: 'A', alive: true,
+    input_owner: {id: 'first', actor: 'web', client_id: one.clientId}};
+  one.take('/api/devices').resolve({devices: [board]});
+  two.take('/api/devices').resolve({devices: [board]});
+  await drain();
+  one.select('A');
+  const spectator = two.select('A');
+  assert.equal(one.get('input-owner-label').textContent, '释放输入');
+  assert.equal(two.get('input-owner-label').textContent, '接管输入');
+  spectator.data('blocked');
+  assert.equal(two.sends().length, 0);
+  two.get('b-input-owner').click();
+  const takeover = two.take('/api/input-claim');
+  assert.equal(takeover.body.client_id, two.clientId);
+  assert.equal(takeover.body.takeover, true);
 });
 
 test('late input ownership response cannot affect a newly selected device or leave its button disabled', async () => {
@@ -365,7 +385,7 @@ test('preparing a board swap moves the live UART to an unprovisioned view', asyn
   assert.equal(h.get('b-switch').hidden, false);
   h.get('b-switch').click();
   const request = h.take('/api/switch-mode');
-  assert.deepEqual(request.body, { key: 'milkv', serial: 'SN001', actor: 'web' });
+  assert.deepEqual(request.body, { key: 'milkv', serial: 'SN001', actor: 'web', client_id: h.clientId });
   request.resolve({ ok: true, device_key: 'unprovisioned-path', serial: '', old_serial: 'SN001' });
   await drain();
   assert.equal(h.get('d-key').textContent, 'unprovisioned-path');
@@ -383,7 +403,7 @@ test('late SSH connect response cannot switch the newly selected device', async 
   assert.equal(h.terminals.at(-1), current);
   assert.equal(h.get('d-key').textContent, 'B');
   assert.equal(h.get('d-status').textContent, '');
-  assert.deepEqual(connect.body, { key: 'A', actor: 'web' });
+  assert.deepEqual(connect.body, { key: 'A', actor: 'web', client_id: h.clientId });
 });
 
 test('SSH identification adopts the canonical label before reading or sending', async () => {
@@ -400,7 +420,7 @@ test('SSH identification adopts the canonical label before reading or sending', 
   assert.equal(query.get('sid'), 'ssh123');
   h.terminals.at(-1).data('uname -a\r'); await drain();
   assert.deepEqual(h.sends().at(-1).body, {
-    key: 'musepi2', serial: 'SN001', sid: 'ssh123', data: 'uname -a\r',
+    key: 'musepi2', serial: 'SN001', sid: 'ssh123', data: 'uname -a\r', client_id: h.clientId,
   });
 });
 
@@ -422,7 +442,7 @@ test('late rename and SSH close responses cannot mutate another device', async (
   assert.equal(h.terminals.at(-1), current);
   assert.equal(h.get('d-name').textContent, 'B');
   assert.ok(h.get('d-tabs').children.some(child => child.textContent === 'SSH ssh1'));
-  assert.deepEqual(close.body, { key: 'A', sid: 'ssh1' });
+  assert.deepEqual(close.body, { key: 'A', sid: 'ssh1', client_id: h.clientId });
 });
 
 test('late read failure cannot replace the new view status', async () => {
@@ -489,14 +509,14 @@ test('closing the panel cancels late paste and rescue effects', async () => {
 test('reconnect directly rebinds USB but does not claim recovery without received bytes', async () => {
   const h = await setup(); h.select('A'); h.get('b-rescue').click();
   const first = h.take('/api/rescue');
-  assert.deepEqual(first.body, { key: 'A', mode: 'rebind' });
+  assert.deepEqual(first.body, { key: 'A', mode: 'rebind', client_id: h.clientId });
   first.resolve({ ok: true, recovered: false, note: 'steps done', requires_setup: false });
   await drain();
   assert.ok(h.get('d-status').textContent.includes('尚未确认采集恢复'));
   assert.equal(h.requests.filter(r => r.url === '/api/rescue').length, 1);
   h.get('b-rescue').click();
   const rebind = h.take('/api/rescue');
-  assert.deepEqual(rebind.body, { key: 'A', mode: 'rebind' });
+  assert.deepEqual(rebind.body, { key: 'A', mode: 'rebind', client_id: h.clientId });
   rebind.resolve({ ok: true, recovered: true, note: 'capture alive' }); await drain();
   assert.ok(h.get('d-status').textContent.includes('采集已恢复'));
 });
@@ -967,7 +987,7 @@ test('agent SSH activity opens read-only without input or resize writes', async 
   assert.equal(h.get('b-takeover').hidden, false);
   h.get('b-takeover').click();
   const takeover = h.take('/api/session-takeover');
-  assert.deepEqual(takeover.body, { key: 'A', sid: 'sshabc', actor: 'web' });
+  assert.deepEqual(takeover.body, { key: 'A', sid: 'sshabc', actor: 'web', client_id: h.clientId });
   takeover.resolve({ ok: true, sid: 'sshabc' }); await drain();
   assert.equal(h.get('b-takeover').hidden, true);
   terminal.data('human intervention\r'); await drain();

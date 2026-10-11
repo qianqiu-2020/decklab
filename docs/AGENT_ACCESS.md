@@ -44,7 +44,7 @@ serialctl --device riscv-118 operation-cancel 操作ID
 需要连续操作而不让其他 agent 插入串口输入时，可用同一 `--actor` 执行 `input-claim`，
 完成后用返回的占用 ID 执行 `input-release`。默认输入仍共享；占用不影响输出读取或独立 SSH。
 网页可以人工接管，撤销 agent 令牌也会释放占用。不同 agent 工作流应使用不同 actor；
-网页用户目前共用人工 actor，单独区分浏览器客户端仍待完成。
+网页仍使用人工 actor，但输入占用另外区分网页客户端；另一页需显式接管后才能写入。
 
 ## key 是标签，serial 是永久身份
 

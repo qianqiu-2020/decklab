@@ -1,5 +1,6 @@
 """Application actions shared by protocol adapters; no HTTP or global manager."""
 import time
+import re
 from .results import ActionResult, response
 
 from .config import RESCUE_BIN
@@ -20,7 +21,7 @@ def capabilities():
         'file_transfer': {'transport': 'serial', 'requires_linux_shell': True,
                           'integrity': 'sha256'},
         'ssh_provisioning': 'profile-controlled',
-        'input_ownership': 'optional-actor',
+        'input_ownership': 'optional-client',
     })
 
 
@@ -41,7 +42,10 @@ class DeviceActions:
             return response(400, {'error': 'JSON object required'})
         if not isinstance(actor, str) or not actor or len(actor) > 80:
             return response(400, {'error': 'actor must be a non-empty string of at most 80 characters'})
-        with transactions_for(device).actor_scope(actor):
+        client_id = payload.get('client_id', '') if actor == 'web' else ''
+        if not isinstance(client_id, str) or client_id and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client_id):
+            return response(400, {'error': 'invalid client_id'})
+        with transactions_for(device).actor_scope(actor, client_id):
             if action in ('send', 'probe', 'identify', 'ssh-enable', 'rescue') or (
                     action.startswith('file-transfer/') and action != 'file-transfer/abort'):
                 try:
