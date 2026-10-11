@@ -19,7 +19,7 @@ Do not change an installed service or use live boards during regression tests.
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download integration pending |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI implemented; browser initiation pending |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
@@ -247,3 +247,31 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   fixtures prove task preservation and the schema-4 pre-upgrade snapshot. Debian
   package tests verify the new storage guide is shipped; Windows packaging
   definitions include it, but native Windows validation remains outstanding.
+
+- Upload/download task API: scoped staging endpoints accept bounded 1 MiB host
+  chunks (only append expands the body limit to 2 MiB), without reserving UART.
+  A shared transfer port guard now pins actor/client, serial, connection and stop
+  generation for copy/upload/download, including cleanup. Uploads validate staged
+  hashes before remote commit and retain valid sources after cancellation;
+  downloads reserve space and validate remote/host content before publication.
+  Task history exposes completed download links; proxy actor/serial pinning and
+  revocation protect streamed files. Production demo HTTP tests upload staging,
+  start both tasks, retrieve results from a separate CLI process and compare bytes
+  and SHA-256. Browser upload/download initiation and CLI local artifact retrieval remain outstanding, as do
+  actual native Windows and hosted GitHub release gates.
+
+- Background upload/download CLI: `file-put --background` performs bounded host
+  staging and sealed checksum verification before collector submission;
+  `file-get --background` returns a durable task whose verified file is available
+  in browser task history. Lost submission responses are never replayed or used
+  to delete potentially claimed artifacts. Browser-dialog initiation, CLI local
+  artifact retrieval, and final removal of duplicated foreground orchestration
+  remain outstanding.
+
+  Verification for the upload/download task and CLI checkpoint: 443 backend
+  tests, 70 frontend isolation tests and sharing tests pass. Real demo browser
+  checks verify copy/reload history and a SHA-256-checked download link; desktop,
+  laptop, dark, expanded and mobile browser smoke passes. Production demo HTTP
+  tests submit upload/download from exiting CLI processes, query their task
+  results from new processes and verify downloaded bytes/checksum. Syntax and
+  whitespace checks pass. No installed service or real board was touched.

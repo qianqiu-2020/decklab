@@ -28,7 +28,7 @@ class CopyTaskTests(unittest.TestCase):
     def start(self, **changes):
         payload = dict(kind='file-copy', connection_id=self.source.connection_id,
                        to_key=self.destination.key, to_connection_id=self.destination.connection_id,
-                       to_serial=self.destination.serial, path='/source', to_path='/destination',
+                       to_serial=self.destination.serial or '', path='/source', to_path='/destination',
                        client_id='page', overwrite=False)
         payload.update(changes)
         return self.actions.start(payload, self.source, 'web')
@@ -56,6 +56,13 @@ class CopyTaskTests(unittest.TestCase):
         self.assertFalse(self.source.file_transfer.active)
         self.assertFalse(self.destination.file_transfer.active)
         self.assertGreater(task['result']['rate_diagnostics']['effective_kib_s'], 0)
+
+    def test_unidentified_destination_is_pinned_to_its_connection_without_a_serial(self):
+        self.destination.detach_identity()
+        task = self.result(self.start())
+        self.assertEqual(task['state'], 'completed', task)
+        self.assertEqual(self.destination.files['/destination'], self.source.files['/source'])
+        self.assertTrue(any(target['serial'] == '' for target in task['targets']))
 
     def test_empty_file_and_overwrite_policy(self):
         self.source.files['/source'] = b''

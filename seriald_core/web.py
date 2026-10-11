@@ -21,6 +21,8 @@ from .results import response as api_response
 from .transactions import transactions_for, TransactionError
 from .maintenance import disk_status, diagnostic_summary
 from .task_actions import TaskActions
+from .artifact_actions import ArtifactActions, body_limit
+from .tasks import TaskError
 
 MGR = Manager()
 STARTED = time.time()
@@ -134,6 +136,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if route == '/api/diagnostics':
             return self._json(200, diagnostic_summary(MGR, LOG_ROOT, STARTED))
 
+        if route in ('/api/artifact', '/api/artifact-download'):
+            actions = ArtifactActions(MGR)
+            artifact_id = (q.get('id') or [''])[0]
+            actor, serial = self.headers.get('X-Seriald-Actor', 'web'), (q.get('serial') or [None])[0]
+            if route == '/api/artifact':
+                result = actions.metadata(artifact_id, actor, serial)
+                return self._json(result.status, result.payload)
+            try:
+                row, source = actions.download(artifact_id, actor, serial)
+            except (TaskError, OSError) as error:
+                return self._json(getattr(error, 'status', 503), {'error': str(error)})
+            with source:
+                name = row['name']
+                fallback = ''.join(char if 32 <= ord(char) < 127 and char not in '"\\' else '_' for char in name)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Disposition', 'attachment; filename="%s"; filename*=UTF-8\'\'%s'
+                                 % (fallback, quote(name)))
+                self.send_header('Content-Length', str(row['size']))
+                self.send_header('X-Checksum-SHA256', row['sha256'])
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                shutil.copyfileobj(source, self.wfile, length=65536)
+            return
+
         if route in ('/api/tasks', '/api/task'):
             try:
                 limit = int((q.get('limit') or ['20'])[0])
@@ -220,8 +247,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         route = urlparse(self.path).path
         try:
             n = int(self.headers.get('Content-Length') or 0)
-            if n < 0 or n > 65536:
-                return self._json(413, {'error': 'body must be at most 65536 bytes'})
+            limit = body_limit(route)
+            if n < 0 or n > limit:
+                return self._json(413, {'error': 'body must be at most %d bytes' % limit})
             if self.headers.get('Transfer-Encoding'):
                 return self._json(400, {'error': 'transfer encoding unsupported'})
             raw = self.rfile.read(n)
@@ -263,6 +291,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             result = TaskActions(MGR).cancel(str(payload.get('id') or ''),
                                             str(payload.get('actor') or 'web'), payload.get('serial'))
             return self._json(result.status, result.payload)
+        if route in ('/api/artifact-append', '/api/artifact-seal', '/api/artifact-delete'):
+            result = ArtifactActions(MGR).execute(route.removeprefix('/api/artifact-'), payload,
+                                                 payload.get('actor') or 'web')
+            return self._json(result.status, result.payload)
         q = {'key': [str(payload.get('key') or '')]}
         if payload.get('serial'):
             q['serial'] = [str(payload['serial'])]
@@ -271,6 +303,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(404, {'error': 'no such device'})
 
         actor = str(payload.get('actor') or 'web')[:80]
+        if route == '/api/artifact-create':
+            result = ArtifactActions(MGR).execute('create', payload, actor, d)
+            return self._json(result.status, result.payload)
         if route == '/api/task-start':
             result = TaskActions(MGR).start(payload, d, actor)
             return self._json(result.status, result.payload)

@@ -197,10 +197,15 @@ class TransferArtifacts:
             self.store.db.execute('UPDATE transfer_artifacts SET ' + ','.join(key + '=?' for key in fields)
                                   + ' WHERE id=?', (*fields.values(), artifact_id))
 
-    def seal(self, artifact_id, actor='web', serial=None, task_id=None):
+    def seal(self, artifact_id, actor='web', serial=None, task_id=None, expected_sha256=None, check=None):
+        if expected_sha256 is not None and (not isinstance(expected_sha256, str) or
+                not re.fullmatch(r'[0-9a-f]{64}', expected_sha256)):
+            raise TaskError('invalid expected artifact checksum')
         with self._lock(artifact_id):
             row = self.get(artifact_id, actor, serial)
             if row['state'] in ('ready', 'available') and row['task_id'] == task_id:
+                if expected_sha256 is not None and row['sha256'] != expected_sha256:
+                    raise TaskError('artifact checksum mismatch', 502)
                 return row
             if (row['state'] not in ('receiving', 'writing') or row['task_id'] != task_id or
                     row['received'] != row['size']):
@@ -215,7 +220,13 @@ class TransferArtifacts:
                     if info.st_size != row['size'] or info.st_nlink != 1:
                         raise TaskError('artifact file size changed', 409)
                     for chunk in iter(lambda: source.read(1024 ** 2), b''):
+                        if check:
+                            check()
                         digest.update(chunk)
+                if check:
+                    check()
+                if expected_sha256 is not None and digest.hexdigest() != expected_sha256:
+                    raise TaskError('artifact checksum mismatch', 502)
                 os.link(self._path(artifact_id, '.part'), self._path(artifact_id, '.bin'))
                 self._path(artifact_id, '.part').unlink()
                 self._update(artifact_id, state='ready' if row['direction'] == 'upload' else 'available',
@@ -245,7 +256,11 @@ class TransferArtifacts:
             if info.st_size != row['size'] or info.st_nlink != 1:
                 source.close()
                 raise TaskError('artifact file size changed', 409)
-            self._update(artifact_id, updated=time.time())
+            try:
+                self._update(artifact_id, updated=time.time())
+            except Exception:
+                source.close()
+                raise
             with self._guard:
                 self._readers[artifact_id] = self._readers.get(artifact_id, 0) + 1
             def release():
@@ -278,6 +293,17 @@ class TransferArtifacts:
                          task_id=task_id if consumed else None, updated=time.time())
             if consumed:
                 self._unlink(artifact_id)
+
+    def fail(self, artifact_id, task_id):
+        """A runner discards its own partial/corrupted file after closing readers."""
+        with self._lock(artifact_id):
+            row = self.get(artifact_id)
+            with self._guard:
+                reading = self._readers.get(artifact_id, 0)
+            if reading or row['task_id'] != task_id:
+                raise TaskError('artifact task changed or reader is still active', 409)
+            self._update(artifact_id, state='failed', updated=time.time())
+            self._unlink(artifact_id)
 
     def _unlink(self, artifact_id):
         for suffix in ('.part', '.bin'):

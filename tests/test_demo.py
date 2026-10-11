@@ -169,6 +169,27 @@ class DemoHttpTests(unittest.TestCase):
                     self.assertEqual(destination.read_bytes(),
                                      (b'[    0.000000] Linux version 6.18.0-demo\n'
                                       b'[    1.234000] mmc0: initialized\n') * 512)
+                staged_data = bytes(range(256)) * 700
+                with tempfile.TemporaryDirectory() as staging:
+                    source = Path(staging) / 'stage.bin'
+                    source.write_bytes(staged_data)
+                    uploaded = json.loads(run_cli('demo-k1', 'file-put', '--local', str(source),
+                        '--remote', '/tmp/background.bin', '--background'))['task']
+                for _ in range(30):
+                    record = json.loads(run_cli('demo-k1', 'task', uploaded['id']))['task']
+                    if record['state'] not in ('queued', 'running'):
+                        break
+                self.assertEqual(record['state'], 'completed', record)
+                downloaded = json.loads(run_cli('demo-k1', 'file-get', '--remote',
+                    '/tmp/background.bin', '--background'))['task']
+                for _ in range(30):
+                    record = json.loads(run_cli('demo-k1', 'task', downloaded['id']))['task']
+                    if record['state'] not in ('queued', 'running'):
+                        break
+                self.assertEqual(record['state'], 'completed', record)
+                with urlopen(url + '/api/artifact-download?id=' + record['result']['artifact_id'], timeout=5) as response:
+                    self.assertEqual(response.read(), staged_data)
+                    self.assertEqual(response.headers['X-Checksum-SHA256'], hashlib.sha256(staged_data).hexdigest())
                 self.assertEqual(list(Path(forbidden).iterdir()), [])
             finally:
                 process.terminate()

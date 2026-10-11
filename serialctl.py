@@ -62,8 +62,9 @@ class Client:
         if query:
             url += '?' + urlencode(query)
         data = None if payload is None else json.dumps(payload).encode('utf-8')
-        if data is not None and len(data) > 65536:
-            raise ClientError('Request exceeds the service limit of 65536 bytes')
+        body_limit = 2 * 1024 ** 2 if route == '/api/artifact-append' else 65536
+        if data is not None and len(data) > body_limit:
+            raise ClientError('Request exceeds the service limit of %d bytes' % body_limit)
         headers = {'Content-Type': 'application/json'}
         if self.token:
             headers['Authorization'] = 'Bearer ' + self.token
@@ -269,6 +270,42 @@ def _upload_slice(client, transfer_id, offset, data):
                 raise
             length = max(1, length // 2)
     raise ClientError('Empty upload slice')
+
+
+def stage_upload_task(client, local, remote, overwrite=False):
+    """Send a bounded host artifact, then let the collector own UART transfer."""
+    path = Path(local).expanduser()
+    if not path.is_file():
+        raise ClientError('Local source must be a regular file')
+    artifact = client.post('/api/artifact-create', name=path.name, size=path.stat().st_size)['artifact']
+    # A lost task-start response must never trigger deletion or automatic replay:
+    # the collector may already have claimed the artifact.
+    submitted = False
+    try:
+        offset, digest = 0, hashlib.sha256()
+        with path.open('rb') as source:
+            while True:
+                data = source.read(1024 * 1024)
+                if not data:
+                    break
+                result = client.post('/api/artifact-append', id=artifact['id'], offset=offset,
+                                     data_b64=base64.b64encode(data).decode('ascii'))['artifact']
+                offset += len(data)
+                digest.update(data)
+                if result.get('received') != offset:
+                    raise ClientError('Host staging offset mismatch')
+        sealed = client.post('/api/artifact-seal', id=artifact['id'])['artifact']
+        if sealed.get('size') != offset or sealed.get('sha256') != digest.hexdigest():
+            raise ClientError('Host staging SHA-256 mismatch')
+        submitted = True
+        return client.post('/api/task-start', kind='file-upload', artifact_id=artifact['id'],
+                           path=remote, overwrite=overwrite, connection_id=client.connection_id)
+    finally:
+        if not submitted:
+            try:
+                client.post('/api/artifact-delete', id=artifact['id'])
+            except ClientError:
+                pass  # Idle artifact expiry handles unreachable staging services.
 
 
 def file_put(client, local, remote, overwrite=False):
@@ -515,10 +552,12 @@ def parser():
     put.add_argument('--local', required=True)
     put.add_argument('--remote', required=True, help='absolute path on the board')
     put.add_argument('--overwrite', action='store_true')
+    put.add_argument('--background', action='store_true', help='stage locally, then return a durable collector task')
     get = commands.add_parser('file-get', help='download a board file through the serial console')
     get.add_argument('--remote', required=True, help='absolute path on the board')
-    get.add_argument('--local', required=True)
+    get.add_argument('--local', help='local output path; required unless --background')
     get.add_argument('--overwrite', action='store_true')
+    get.add_argument('--background', action='store_true', help='return a durable task; download its result from task history')
     copy = commands.add_parser('file-copy', help='copy a file to another board through this host')
     copy.add_argument('--remote', required=True, help='absolute source path')
     copy.add_argument('--to-device', required=True)
@@ -592,9 +631,18 @@ def main(argv=None):
                 result = client.post('/api/session-send', sid=args.sid,
                                      data=text + ('\r' if args.enter else ''))
             elif args.action == 'file-put':
-                result = file_put(client, args.local, args.remote, args.overwrite)
+                result = (stage_upload_task if args.background else file_put)(
+                    client, args.local, args.remote, args.overwrite)
             elif args.action == 'file-get':
-                result = file_get(client, args.remote, args.local, args.overwrite)
+                if args.background:
+                    if args.local:
+                        raise ClientError('--background saves on the host; omit --local and use the task download link')
+                    result = client.post('/api/task-start', kind='file-download', path=args.remote,
+                                         connection_id=client.connection_id)
+                else:
+                    if not args.local:
+                        raise ClientError('--local is required unless --background')
+                    result = file_get(client, args.remote, args.local, args.overwrite)
             elif args.action == 'file-copy':
                 destination = Client(args.url, args.http_timeout, args.token)
                 destination.actor = args.actor
@@ -602,7 +650,7 @@ def main(argv=None):
                 if args.background:
                     result = client.post('/api/task-start', kind='file-copy',
                         connection_id=client.connection_id, to_key=destination.key,
-                        to_serial=destination.serial, to_connection_id=destination.connection_id,
+                        to_serial=destination.serial or '', to_connection_id=destination.connection_id,
                         path=args.remote, to_path=args.to_path, overwrite=args.overwrite)
                 else:
                     result = file_copy(client, destination, args.remote, args.to_path, args.overwrite)

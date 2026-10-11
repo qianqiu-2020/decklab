@@ -18,6 +18,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from .config import AUTH_TOKEN, BASE, SOCKET, STATIC
 from .agent_grants import AgentGrantStore
+from .artifact_actions import body_limit
 from .httpd import BoundedThreadingTCPServer
 from . import __version__
 from .results import response as api_response
@@ -257,8 +258,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             if self.headers.get('Transfer-Encoding'):
                 return self._json(400, {'error': 'transfer encoding unsupported'})
             length = int(self.headers.get('Content-Length') or 0)
-            if length < 0 or length > 65536:
-                return self._json(413, {'error': 'body must be at most 65536 bytes'})
+            limit = body_limit(route)
+            if length < 0 or length > limit:
+                return self._json(413, {'error': 'body must be at most %d bytes' % limit})
             body = self.rfile.read(length) if length else None
             if length and len(body) != length:
                 return self._json(400, {'error': 'incomplete body'})
@@ -286,8 +288,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 payload['actor'] = agent_actor
                 body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
                 length = len(body)
-                if length > 65536:
-                    return self._json(413, {'error': 'body must be at most 65536 bytes'})
+                if length > limit:
+                    return self._json(413, {'error': 'body must be at most %d bytes' % limit})
             elif grant and grant['scope'] == 'device' and route not in ('/api/devices', '/api/capabilities'):
                 parsed = urlparse(self.path)
                 query = parse_qsl(parsed.query, keep_blank_values=True)
@@ -304,7 +306,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     target_path = urlunparse(parsed._replace(query=urlencode(query)))
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
-            if route in ('/api/tasks', '/api/task'):
+            if route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download'):
                 headers['X-Seriald-Actor'] = agent_actor or 'web'
             events = self.command == 'GET' and urlparse(self.path).path == '/api/session-events'
             if events and self.headers.get('Last-Event-ID'):
@@ -319,7 +321,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             slow = self.command == 'POST' and urlparse(self.path).path in (
                 '/api/identify', '/api/ssh-enable', '/api/ssh-connect',
                 '/api/file-transfer/start', '/api/file-transfer/chunk', '/api/file-transfer/batch',
-                '/api/file-transfer/finish', '/api/file-transfer/abort')
+                '/api/file-transfer/finish', '/api/file-transfer/abort', '/api/artifact-seal')
             timeout = 300 if slow else 30
             connection = (http.client.HTTPConnection(*self.collector_socket, timeout=timeout)
                           if isinstance(self.collector_socket, tuple)
@@ -338,7 +340,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                                               if item.get('serial') == grant['serial']]
                 return self._json(200, devices_payload)
             self.send_response(response.status)
-            for name in ('Content-Type', 'Cache-Control', 'Content-Disposition'):
+            for name in ('Content-Type', 'Cache-Control', 'Content-Disposition', 'X-Checksum-SHA256'):
                 value = response.getheader(name)
                 if value:
                     self.send_header(name, value)
@@ -365,6 +367,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             while True:
                 chunk = response.read(65536)
                 if not chunk:
+                    break
+                if route == '/api/artifact-download' and grant and not self._agent_grant():
+                    self.close_connection = True
                     break
                 self.wfile.write(chunk)
         except ValueError:

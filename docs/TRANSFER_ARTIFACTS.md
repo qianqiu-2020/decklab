@@ -1,9 +1,9 @@
 # Host transfer artifacts
 
-This is the storage foundation for forthcoming background upload/download tasks.
-It is used by collector startup/recovery and expiry, but HTTP staging, task
-adapters and browser/CLI transfer integration are not yet implemented. Existing
-upload/download behavior therefore still requires its initiating client.
+This storage layer supports collector-owned upload/download tasks and scoped HTTP
+staging/download endpoints described in [TASKS.md](TASKS.md). Browser task history
+can retrieve completed downloads. Browser-dialog and CLI transfer initiation
+still use their existing foreground flows until their task integration is finished.
 
 ## Files and ownership
 
@@ -25,8 +25,8 @@ Agent access checks both actor and requested board scope; the full human actor
 can inspect artifacts. Task claims serialize consumers and prohibit deletion or
 expiry while active. A failed/cancelled upload can return its unchanged host
 source to `ready`; successful consumption removes its file. Downloads remain
-unavailable until sealed as `available`. The task adapter must also verify the
-artifact digest before committing a remote upload or exposing a download.
+unavailable until sealed as `available`. The task adapter verifies the artifact digest before committing a remote upload
+or exposing a download. Host hash verification checks cancellation between chunks.
 
 ## Capacity and expiry
 

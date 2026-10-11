@@ -5,6 +5,9 @@ import http.client
 import io
 import json
 import subprocess
+import tempfile
+import hashlib
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -19,6 +22,61 @@ def response(data):
 
 
 class ClientTests(unittest.TestCase):
+    def test_background_upload_stages_bounded_chunks_before_task_and_never_replays_lost_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'source.bin'
+            data = b'x' * (1024 * 1024 + 17)
+            path.write_bytes(data)
+            for lost in (False, True):
+                client = mock.Mock(connection_id='generation')
+                received = bytearray()
+                def post(route, **payload):
+                    if route == '/api/artifact-create':
+                        return {'artifact': {'id': 'stage'}}
+                    if route == '/api/artifact-append':
+                        self.assertEqual(payload['offset'], len(received))
+                        chunk = base64.b64decode(payload['data_b64'], validate=True)
+                        self.assertLessEqual(len(chunk), 1024 * 1024)
+                        received.extend(chunk)
+                        return {'artifact': {'received': len(received)}}
+                    if route == '/api/artifact-seal':
+                        return {'artifact': {'size': len(received), 'sha256': hashlib.sha256(received).hexdigest()}}
+                    if route == '/api/task-start':
+                        self.assertEqual(bytes(received), data)
+                        if lost:
+                            raise ctl.ClientError('lost response')
+                        return {'task': {'id': 'upload-task'}}
+                    self.fail('unexpected request: ' + route)
+                client.post.side_effect = post
+                if lost:
+                    with self.assertRaises(ctl.ClientError):
+                        ctl.stage_upload_task(client, path, '/target', True)
+                else:
+                    self.assertEqual(ctl.stage_upload_task(client, path, '/target', True)['task']['id'], 'upload-task')
+                client.post.assert_called_with('/api/task-start', kind='file-upload', artifact_id='stage',
+                                              path='/target', overwrite=True, connection_id='generation')
+
+    def test_corrupted_staging_is_deleted_without_starting_upload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'empty'
+            path.write_bytes(b'')
+            client = mock.Mock()
+            client.post.side_effect = [{'artifact': {'id': 'stage'}},
+                                       {'artifact': {'size': 0, 'sha256': 'bad'}}, {'ok': True}]
+            with self.assertRaisesRegex(ctl.ClientError, 'SHA-256'):
+                ctl.stage_upload_task(client, path, '/target')
+            client.post.assert_called_with('/api/artifact-delete', id='stage')
+            self.assertFalse(any(call.args[0] == '/api/task-start' for call in client.post.call_args_list))
+
+    def test_background_download_returns_task_without_local_file_or_uart_requests(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            client = factory.return_value
+            client.connection_id = 'generation'
+            client.post.return_value = {'task': {'id': 'download-task'}}
+            self.assertEqual(ctl.main(['--device', 'board', 'file-get', '--remote', '/root/log.txt', '--background']), 0)
+            client.post.assert_called_once_with('/api/task-start', kind='file-download',
+                                               path='/root/log.txt', connection_id='generation')
+
     def test_client_preserves_stable_error_code_from_http_and_success_status_failure(self):
         client = ctl.Client('http://127.0.0.1:8898')
         error = ctl.HTTPError(client.url, 409, 'Conflict', {}, response({'code': 'busy', 'error': 'busy'}))
@@ -101,6 +159,15 @@ class ClientTests(unittest.TestCase):
                 connection_id='source-connection', to_key='destination', to_serial='SN-DST',
                 to_connection_id='destination-connection', path='/source', to_path='/target', overwrite=True)
             destination.post.assert_not_called()
+
+    def test_host_staging_chunk_limit_does_not_expand_serial_command_limit(self):
+        client = ctl.Client('http://127.0.0.1:8898')
+        payload = {'id': 'opaque', 'offset': 0, 'data_b64': 'x' * 100000}
+        with mock.patch.object(ctl, 'urlopen', return_value=response({'ok': True})) as request:
+            self.assertTrue(client.request('/api/artifact-append', payload)['ok'])
+            self.assertGreater(len(request.call_args.args[0].data), 65536)
+        with self.assertRaises(ctl.ClientError):
+            client.request('/api/file-transfer/chunk', payload)
 
     def test_task_commands_preserve_id_pagination_and_connection(self):
         with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):

@@ -2,8 +2,12 @@
 
 Durable tasks currently support `identify`, `ssh-enable` and `ssh-connect` through
 the collector API, CLI and browser. Collector-owned `file-copy` is available
-through the task API, browser and CLI `file-copy --background`. Server-owned
-upload/download are pending; existing foreground upload/download remain.
+through the task API, browser and CLI `file-copy --background`. Collector-owned
+upload/download are available through the task API and HTTP artifact staging. The browser task panel can retrieve completed downloads.
+CLI `file-put --background` stages and verifies a local file before submitting an
+upload; `file-get --background` stores a download on the host for later retrieval.
+Without this flag, CLI transfers retain their foreground behavior. Browser-dialog
+upload/download task initiation remains pending.
 
 ## API and CLI
 
@@ -128,6 +132,52 @@ mismatched task responses. Browser upload/download still require the initiating
 page to remain connected until their future staging/task integration is finished.
 
 The host-side artifact foundation is implemented separately in
-[TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). HTTP staging, upload/download
-worker adapters and browser/CLI integration remain pending; these are required
-before upload/download can continue after the initiating page exits.
+[TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). HTTP staging and upload/download worker adapters are implemented. Browser transfer initiation remains pending; foreground transfers still depend
+on the initiating client. Direct task-API transfers run in the collector after
+the submitting connection closes.
+
+## Upload/download task API
+
+Upload staging uses `POST /api/artifact-create` with board `key`, optional expected
+`serial`, display `name`, `size` and actor. `POST /api/artifact-append` takes `id`,
+`offset` and `data_b64`; decoded host chunks are at most 1 MiB. Only this endpoint
+has a 2 MiB JSON body limit; other request limits remain 64 KiB.
+`POST /api/artifact-seal` finalizes a complete upload. These host-only operations
+do not reserve or write the board's serial console. `GET /api/artifact?id=…` reads
+scoped metadata and `POST /api/artifact-delete` removes an inactive file.
+
+Start `kind=file-upload` with `key`, expected serial/connection, `path`,
+`artifact_id` and optional `overwrite=true`. The runner claims the sealed artifact,
+uploads to a remote temporary file and checks the staged SHA-256 before remote
+commit. A cancelled/failed board operation returns valid staging for retry;
+corrupted sources are failed and discarded. Successful consumption removes the
+host file.
+
+Start `kind=file-download` with `key`, expected serial/connection and absolute
+`path`. The collector reserves host space, reads bounded serial chunks and
+verifies both remote and host SHA-256 before publishing. Cancellation wakes UART
+waits and interrupts host hash verification between chunks. Failure removes the
+partial artifact and releases its reservation. Result metadata includes
+`artifact_id`, name, size and SHA-256, never file bytes or host paths.
+
+`GET /api/artifact-download?id=…` streams an available download with content length,
+attachment name and `X-Checksum-SHA256`. Clients should verify size/hash before
+keeping their local file. The task panel offers the same download after reload.
+Control pins scoped tokens to their actor/serial, strips untrusted actor headers
+and stops forwarding a file after revocation. A single-board grant can stage
+and transfer its own board files; cross-board copies still require all-board access.
+
+## Background CLI file transfers
+
+```sh
+python3 serialctl.py --device deb1 file-put --local image.bin --remote /tmp/image.bin --background
+python3 serialctl.py --device deb1 file-get --remote /tmp/image.bin --background
+python3 serialctl.py --device deb1 task <returned-task-id>
+```
+
+Background downloads do not accept `--local`: the collector stores the verified
+file, and the browser task list provides its download link. Upload staging uses
+at most 1 MiB per request and compares its sealed size/SHA-256 before submitting.
+A staging failure attempts to delete its inactive artifact. If task submission
+loses its response, the client neither resubmits nor deletes staging: inspect task
+history before retrying. Once submitted, closing the CLI does not cancel work.

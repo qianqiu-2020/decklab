@@ -1328,6 +1328,24 @@ test('copy monitoring retries the same ID after network loss and stops on malfor
   assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 1);
 });
 
+test('completed background downloads offer a scoped file link after fresh-page history recovery', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: [{key: 'A', serial: 'SN-A', alive: true}, {key: 'B', serial: 'SN-B', alive: true}]});
+  await drain(); h.select('A');
+  h.take('/api/tasks').resolve({tasks: [{id: 'download', kind: 'file-download', state: 'completed', actor: 'agent',
+    created: 1, progress: {}, result: {artifact_id: 'opaque/file', name: '固件.bin', path: '/tmp/firmware', size: 10}}]});
+  await drain();
+  const row = h.get('d-tasks').children[0], link = row.children[1];
+  assert.ok(row.children[0].children[0].textContent.includes('下载文件'));
+  const query = new URL(link.href, 'http://fixture').searchParams;
+  assert.equal(query.get('id'), 'opaque/file');
+  assert.equal(query.get('serial'), 'SN-A');
+  assert.equal(link.download, '固件.bin');
+  h.select('B'); let blocked = false;
+  link.emit('click', {preventDefault() { blocked = true; }});
+  assert.equal(blocked, true);
+});
+
 test('task history filters by involvement without narrowing multi-board cancellation scope', async () => {
   const h = harness();
   h.take('/api/devices').resolve({devices: [{key: 'A', label: 'A', serial: 'SN-A', alive: true}]});

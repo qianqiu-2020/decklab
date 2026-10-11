@@ -55,7 +55,8 @@
   function create(options) {
     var $ = options.byId, client = createClient(options.fetch), request = client.request;
     var selection = '', offset = 0, sequence = 0;
-    var names = { identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH', 'file-copy': '板间复制' };
+    var names = { identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH', 'file-copy': '板间复制',
+                  'file-upload': '上传文件', 'file-download': '下载文件' };
     function scope(ctx) { return ctx ? ctx.serial ? 'serial:' + ctx.serial
       : 'connection:' + (ctx.connectionId || ctx.key) : ''; }
     function sameSelection(selected) { return !!selected && scope(options.getView()) === selected; }
@@ -99,6 +100,16 @@
               });
           });
           row.appendChild(cancel);
+        } else if (task.state === 'completed' && task.result && task.result.artifact_id) {
+          var download = document.createElement('a'); download.className = 'log-download';
+          download.textContent = '下载文件'; download.download = task.result.name || '';
+          download.href = '/api/artifact-download?id=' + encodeURIComponent(task.result.artifact_id)
+            + '&key=' + encodeURIComponent(ctx.key)
+            + (ctx.serial ? '&serial=' + encodeURIComponent(ctx.serial) : '');
+          download.addEventListener('click', function (event) {
+            if (!sameSelection(selected) && event.preventDefault) event.preventDefault();
+          });
+          row.appendChild(download);
         } else if (task.state === 'completed' && task.result && task.result.sid) {
           var open = document.createElement('button'); open.type = 'button'; open.textContent = '打开会话';
           open.addEventListener('click', function () { if (sameSelection(selected)) options.openSession(task); });

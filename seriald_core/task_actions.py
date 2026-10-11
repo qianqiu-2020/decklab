@@ -4,12 +4,12 @@ from .actions import DeviceActions
 from .results import response
 from .tasks import TaskCancelled, TaskError
 from .transactions import transactions_for, TransactionError
-from .transfer_tasks import TransferCopy
+from .transfer_tasks import TransferCopy, TransferFile
 from .file_transfer import TransferError
 
 
 class TaskActions:
-    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'file-copy'))
+    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download'))
 
     def __init__(self, manager):
         self.manager = manager
@@ -38,11 +38,18 @@ class TaskActions:
             transactions = transactions_for(device)
             with transactions.actor_scope(actor, client):
                 transactions.check_owner(actor)
+            if kind in ('file-upload', 'file-download'):
+                operation = TransferFile(self.manager, device, actor, client,
+                    'upload' if kind == 'file-upload' else 'download', payload.get('path'),
+                    payload.get('artifact_id'), payload.get('overwrite') is True, (connection, stop, source_serial))
+                task = self.tasks.start(kind, actor, client,
+                    [{'serial': source_serial, 'connection_id': connection}], operation.run)
+                return response(202, {'ok': True, 'task': task})
             if kind == 'file-copy':
                 destination = self.manager.resolve(payload.get('to_key'))
                 if (destination is None or destination is device or
                         payload.get('to_connection_id') != destination.connection_id or
-                        payload.get('to_serial') != destination.serial or not destination.present or
+                        payload.get('to_serial') != (destination.serial or '') or not destination.present or
                         destination.stop.is_set()):
                     raise TaskError('destination device connection changed or invalid', 409)
                 destination_transactions = transactions_for(destination)
@@ -51,6 +58,8 @@ class TaskActions:
                 copy = TransferCopy(self.manager, device, destination, actor, client,
                                     payload.get('path'), payload.get('to_path'), payload.get('overwrite') is True)
                 copy.snapshots[device] = (connection, stop)
+                copy.serials[device] = source_serial
+                copy.serials[destination] = payload['to_serial'] or ''
                 copy.snapshots[destination] = (payload['to_connection_id'], copy.snapshots[destination][1])
                 task = self.tasks.start(kind, actor, client, [
                     {'serial': source_serial, 'connection_id': connection},

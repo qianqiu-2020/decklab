@@ -70,9 +70,10 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/storage.py` | SQLite 注册表和持久化操作历史 |
 | `seriald_core/schema.py` | 数据库版本、升级前 WAL 快照、事务迁移与回滚 |
 | `seriald_core/tasks.py` | 持久任务状态、进度、范围查询、有界后台执行和协作取消 |
-| `seriald_core/transfer_artifacts.py` | 主机暂存文件、身份与 actor 范围、分块写入、任务占用、配额及重启恢复；上传／下载 API 接入待完成 |
+| `seriald_core/artifact_actions.py` | 范围校验后的主机暂存写操作、元数据查询及下载流；不接受主机路径 |
+| `seriald_core/transfer_artifacts.py` | 主机暂存文件、身份与 actor 范围、分块写入、任务占用、配额及重启恢复；上传／下载任务与 HTTP 暂存已接入 |
 | `seriald_core/transfer_tasks.py` | 采集器执行板间复制任务、有限缓冲与并行预读、双连接取消及临时文件清理 |
-| `seriald_core/task_actions.py` | 后台识别／SSH 操作适配、连接代次与 actor/client 保护；任务 API／CLI／网页已接入，上传／下载任务待完成 |
+| `seriald_core/task_actions.py` | 后台识别／SSH 操作适配、连接代次与 actor/client 保护；任务 API／CLI／网页已接入，上传／下载任务已接入，CLI 后台发起已接入，网页上传／下载发起待完成 |
 | `seriald_core/web.py` | HTTP 参数校验、API、静态文件 |
 | `seriald_core/actions.py` | 注入 Manager 的设备写操作应用服务、错误码与能力查询 |
 | `seriald_core/queries.py` | 会话游标、归档、启动搜索/对比与历史查询服务 |

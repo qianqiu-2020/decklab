@@ -127,11 +127,32 @@ async function until(check, description) {
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("/tmp/browser-copy.log")'), 'copy history after reload');
   await evaluate('document.querySelector(\'[data-key="demo-k3"]\').click()');
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("/tmp/browser-copy.log")'), 'copy visible under destination board');
+  const destination = (await (await fetch(address + 'api/devices')).json()).devices.find(board => board.key === 'demo-k3');
+  const downloadTask = (await (await fetch(address + 'api/task-start', {method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({kind:'file-download',key:destination.key,serial:destination.serial,
+      connection_id:destination.connection_id,path:'/tmp/browser-copy.log',actor:'web'})})).json()).task;
+  await until(async () => {
+    const task=(await (await fetch(address+'api/task?id='+downloadTask.id)).json()).task;
+    if (task.state==='failed') throw new Error(task.error);
+    return task.state==='completed';
+  }, 'background download');
+  await evaluate('document.querySelector("#task-refresh").click()');
+  await until(() => evaluate('!!document.querySelector("#d-tasks a[download]")'), 'recovered download link');
+  const downloaded = await evaluate(`(async () => {
+    const link=document.querySelector('#d-tasks a[download]');
+    const response=await fetch(link.href); const data=await response.arrayBuffer();
+    const hash=await crypto.subtle.digest('SHA-256',data);
+    return {size:data.byteLength,header:response.headers.get('X-Checksum-SHA256'),
+      sha:Array.from(new Uint8Array(hash),value=>value.toString(16).padStart(2,'0')).join('')};
+  })()`);
+  assert.equal(downloaded.size, expected.length);
+  assert.equal(downloaded.sha, copied.result.sha256);
+  assert.equal(downloaded.header, copied.result.sha256);
   const shot = await rpc('Page.captureScreenshot', {format: 'png'});
   fs.mkdirSync(path.join(root, 'dist'), {recursive: true});
   fs.writeFileSync(path.join(root, 'dist', 'demo-ui.png'), Buffer.from(shot.data, 'base64'));
   assert.deepEqual(errors, []);
-  console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover, copy via UI, task result after reload');
+  console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover, copy via UI, task result after reload, verified download link');
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   if (ws) ws.close();
   for (const child of [chrome, demo]) {

@@ -154,6 +154,70 @@ class HandlerTests(unittest.TestCase):
                 handler._proxy()
                 self.assertEqual(handler.send_response.call_args.args[0], expected)
 
+    def test_artifact_proxy_pins_actor_scope_and_only_expands_append_body_limit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = AgentGrantStore(str(pathlib.Path(folder) / 'grants.sqlite3'))
+            self.addCleanup(store.close)
+            token, grant = store.issue('device', 'SN1')
+            reply = mock.Mock(status=200)
+            reply.getheader.return_value = None
+            connection = mock.Mock()
+            connection.getresponse.return_value = reply
+            for route in ('/api/artifact', '/api/artifact-download'):
+                handler = self.control_handler(route + '?id=opaque&key=A&serial=SN2')
+                handler.command, handler.auth_token, handler.grant_store = 'GET', 'owner', store
+                handler.headers = {'Authorization': 'Bearer ' + token, 'X-Seriald-Actor': 'web'}
+                reply.read.side_effect = [b'{}', b'']
+                with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                    handler.do_GET()
+                forwarded = connection.request.call_args
+                self.assertIn('serial=SN1', forwarded.args[1])
+                self.assertEqual(forwarded.kwargs['headers']['X-Seriald-Actor'], grant['actor'])
+            body = json.dumps({'id': 'opaque', 'key': 'A', 'serial': 'SN2',
+                               'offset': 0, 'actor': 'web', 'data_b64': 'x' * 100000}).encode()
+            append = self.control_handler('/api/artifact-append')
+            append.command, append.auth_token, append.grant_store = 'POST', 'owner', store
+            append.headers = {'Authorization': 'Bearer ' + token, 'Content-Length': str(len(body))}
+            append.rfile = io.BytesIO(body)
+            reply.read.side_effect = [b'{}', b'']
+            with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                append.do_POST()
+            self.assertEqual(append.send_response.call_args.args[0], 200)
+            forwarded = json.loads(connection.request.call_args.kwargs['body'])
+            self.assertEqual((forwarded['serial'], forwarded['actor']), ('SN1', grant['actor']))
+            too_large = self.control_handler('/api/artifact-seal')
+            too_large.command, too_large.headers = 'POST', {'Content-Length': '65537'}
+            too_large._proxy()
+            self.assertEqual(too_large.send_response.call_args.args[0], 413)
+
+    def test_revoked_artifact_download_stops_forwarding_and_preserves_checksum_header(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = AgentGrantStore(str(pathlib.Path(folder) / 'grants.sqlite3'))
+            self.addCleanup(store.close)
+            token, grant = store.issue('all')
+            handler = self.control_handler('/api/artifact-download?id=opaque')
+            handler.command, handler.auth_token, handler.grant_store = 'GET', 'owner', store
+            handler.headers = {'Authorization': 'Bearer ' + token}
+            reply = mock.Mock(status=200)
+            reply.getheader.side_effect = lambda name: {'X-Checksum-SHA256': 'digest', 'Content-Length': '6'}.get(name)
+            count = 0
+            def read(size):
+                nonlocal count
+                count += 1
+                if count == 1:
+                    return b'abc'
+                store.revoke(grant['id'])
+                return b'def'
+            reply.read.side_effect = read
+            connection = mock.Mock()
+            connection.getresponse.return_value = reply
+            with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                handler.do_GET()
+            self.assertEqual(handler.wfile.getvalue(), b'abc')
+            self.assertTrue(handler.close_connection)
+            headers = dict(call.args for call in handler.send_header.call_args_list)
+            self.assertEqual(headers['X-Checksum-SHA256'], 'digest')
+
     def test_optional_control_token_supports_browser_basic_and_cli_bearer(self):
         import base64 as b64
         for authorization in ('Bearer secret',

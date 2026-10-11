@@ -231,6 +231,30 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(self.spool.get(row['id'])['state'], 'failed')
         self.assertEqual(list(self.spool.root.iterdir()), [])
 
+    def test_seal_expected_checksum_is_enforced_on_initial_and_repeated_publication(self):
+        row = self.spool.create('upload', 'empty', 0)
+        with self.assertRaises(TaskError):
+            self.spool.seal(row['id'], expected_sha256='0' * 64)
+        self.assertEqual(self.spool.get(row['id'])['state'], 'failed')
+        ready = self.ready()
+        with self.assertRaises(TaskError):
+            self.spool.seal(ready['id'], expected_sha256='0' * 64)
+        self.assertEqual(self.spool.seal(ready['id'], expected_sha256=ready['sha256'])['state'], 'ready')
+
+    def test_open_metadata_failure_closes_source_and_leaves_no_reader_reservation(self):
+        from seriald_core.archive_io import open_archive
+        row, opened = self.ready(), []
+        def capture(path):
+            source = open_archive(path)
+            opened.append(source)
+            return source
+        with mock.patch('seriald_core.transfer_artifacts.open_archive', side_effect=capture), \
+             mock.patch.object(self.spool, '_update', side_effect=OSError('database unavailable')):
+            with self.assertRaises(OSError):
+                self.spool.open(row['id'])
+        self.assertTrue(opened[0].closed)
+        self.assertEqual(self.spool._readers, {})
+
     def test_create_commit_failure_does_not_leave_an_orphan_file_or_quota(self):
         original = self.store.db
         class FailedCommit:
