@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add disposable Ubuntu 22.04/24.04 package installation checks covering actual
+  dpkg upgrade/purge, conffile/runtime preservation, service-account API/CLI and
+  independent control restart. No host serial devices or service changes.
 - Record an initial Windows native-wheel attribution audit with exact source,
   binary-member and notice hashes. Ship the observations and remaining review
   steps with documentation; do not treat them as frozen-output verification.

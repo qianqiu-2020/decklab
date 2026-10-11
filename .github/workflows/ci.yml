@@ -6,6 +6,19 @@ on:
 permissions:
   contents: read
 jobs:
+  package_install:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:22.04', 'ubuntu:24.04']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install, upgrade and purge in an isolated Ubuntu container
+        run: python tools/test_deb_container.py --image '${{ matrix.image }}'
   test:
     runs-on: ubuntu-latest
     strategy:

@@ -16,7 +16,9 @@ serialctl devices
 默认监听 `0.0.0.0:8898`；浏览器访问 `http://上位机地址:8898`。
 安装脚本会按配置端口打印本机与探测到的局域网 URL；若局域网地址未出现，请检查网卡配置。
 
-编辑 `/etc/seriald/seriald.env` 后执行 `sudo systemctl restart seriald`：
+编辑 `/etc/seriald/seriald.env` 后，监听地址和认证配置通过
+`sudo systemctl restart seriald` 生效；板卡密码、串口参数、profile、日志和传输配置
+需要 `sudo systemctl restart seriald-collector`。仅重启网页服务不加载采集器配置。
 
 ```ini
 SERIALD_SOCKET=/run/seriald/collector.sock
@@ -43,10 +45,11 @@ agent 使用其专用令牌时，control 会覆盖请求中的 `actor`，操作�
 共享的主令牌仍有完整管理权限；无认证模式下 `actor` 只是客户端自报的标签。
 终端访问等同于使用开发板登录账户，即使启用 token 也应限制防火墙访问范围。
 
-默认 root/bianbu SSH 认证被拒绝时，服务会尝试从已登录的串口 shell 执行免密码 sudo，
-交互式设置 root 密码为 bianbu，在 sshd_config 顶部启用 root 密码登录，验证配置并
+启用自动配置的 root profile 使用配置密码认证被拒绝时，服务会尝试从已登录的串口 shell 执行免密码 sudo，
+交互式设置 root 密码为 profile 中的密码（默认 bianbu），在 sshd_config 顶部启用 root 密码登录，验证配置并
 重启 sshd，然后复验 SSH。串口停在登录提示符、sudo 要求普通用户密码或 SSH 网络不通时
-不会盲目更改配置；使用自定义 SSH 账户或密码也不会触发该流程。
+不会盲目更改配置；非 root profile 或单次请求使用与 profile 不同的密码也不会触发该流程。
+设置 `SERIALD_AUTO_CONFIGURE_SSH=0` 可以关闭自动修改。
 
 ## 安装布局
 

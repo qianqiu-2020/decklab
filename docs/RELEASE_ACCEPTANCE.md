@@ -40,6 +40,22 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+Ubuntu package acceptance now includes actual isolated installations on 22.04
+and 24.04, using tools/test_deb_container.py. Both completed successfully with
+dpkg installation and same-version reinstall, modified conffile/data preservation,
+root-owned non-group-writable recovery helper, valid sudoers, runtime ownership,
+service-account collector/control API/CLI startup, independent control restart
+preserving collector PID, and purge preserving the registry/runtime sentinel.
+The disposable containers had no host mounts/devices/ports or privileged mode;
+each was removed after verification. This does not exercise systemd activation,
+collector-restart fingerprint decisions in a running systemd installation, actual
+UART or USB recovery. CI now defines both Ubuntu baselines and tagged Linux
+releases require the 24.04 check. Hosted execution remains unverified. Container
+image IDs observed: 22.04 e8df6c74f650ad385efe2e20103eca9b0ad50690fb3c63d49fa00762412bbf55;
+24.04 69f919497cada9a8611f3de61df902d9f94bf20f84552ef5bd93125c38608ef9.
+Install documentation now distinguishes control and collector config reloads
+and uses the current profile-controlled root password semantics.
+
 Native dependency review now has a concrete source-artifact checkpoint:
 Windows x64-compatible wheels were downloaded on Linux for Python 3.12, without
 installing or executing their binaries. WINDOWS_NATIVE_NOTICES.md records six

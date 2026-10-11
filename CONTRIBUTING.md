@@ -50,6 +50,13 @@ set `CHROME_BIN` if Chrome is not at `/usr/bin/google-chrome`. No test should
 open a real serial port, execute recovery, or modify a board. Never start a
 second collector on an active host.
 
+`python3 tools/test_deb_container.py --image ubuntu:24.04` performs actual package
+installation, same-version upgrade, conffile/data preservation, service-account
+API/CLI startup, independent control restart and purge in a disposable Docker
+container. Use `ubuntu:22.04` for the other supported baseline. It downloads the
+image/dependencies, exposes no host devices/mounts/ports and removes only its own
+container. It does not test systemd activation or privileged USB recovery.
+
 Use four spaces and snake_case in Python, two spaces and camelCase in JavaScript.
 Keep one serial reader per connection; writers must not reconfigure termios.
 Preserve connection generations and expected serial checks across asynchronous
