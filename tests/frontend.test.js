@@ -7,7 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { TextDecoder } = require('node:util');
 
-const script = ['ui-common.js', 'terminal-policy.js', 'app.js'].map(name =>
+const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'app.js'].map(name =>
   fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
 
 class Element {
@@ -821,6 +821,24 @@ test('echoed shell commands share one default color without changing output', as
   assert.equal(background.length, 2);
   assert.equal(foreground[0].options.foregroundColor, foreground[1].options.foregroundColor);
   assert.ok(terminal.parsed.includes('root@board:~# dmesg'), 'terminal bytes are unchanged');
+  assert.equal(h.sends().length, 0);
+});
+
+test('queued command navigation and old buttons cannot change a replacement terminal', async () => {
+  const h = await setup(); const old = h.select('A');
+  h.take('/api/session').resolve(readResponse('A', 'root@board:~# uname -a\r\n'));
+  await drain(); old.flush();
+  h.get('b-command-nav').click();
+  const oldButton = h.get('d-command-nav').children[0];
+  const [timerId, pending] = h.timer(350);
+  const replacement = h.select('B');
+  assert.equal(h.timers.has(timerId), false, 'disposing the view cancels navigation work');
+  pending.fn(); // Simulate an already-dispatched browser timer after cancellation.
+  oldButton.click();
+  assert.equal(h.get('command-nav-count').textContent, '0 条');
+  assert.equal(replacement.scrolledToLine, undefined);
+  assert.equal(replacement.selected, undefined);
+  assert.equal(replacement.decorations?.length || 0, 0);
   assert.equal(h.sends().length, 0);
 });
 

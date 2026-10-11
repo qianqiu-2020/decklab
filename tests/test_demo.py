@@ -122,7 +122,13 @@ class DemoHttpTests(unittest.TestCase):
                 self.assertEqual(len(devices), 3)
                 self.assertEqual(sum(d['state'] == 'online' for d in devices), 2)
                 with urlopen(url + '/', timeout=5) as response:
-                    self.assertIn(b'DeckLab', response.read())
+                    html = response.read()
+                    self.assertIn(b'DeckLab', html)
+                # Each page module must be exposed by the production static allowlist.
+                for asset in re.findall(rb'<script src="(/static/[^\"]+)"', html):
+                    route = asset.decode('utf-8')
+                    with urlopen(url + route, timeout=5) as response:
+                        self.assertEqual(response.read(), (ROOT / route.lstrip('/')).read_bytes())
                 session = request('/api/ssh-connect', {'key': 'demo-k1', 'actor': 'demo-agent'})
                 self.assertTrue(session['ok'])
                 logs = request('/api/logs?key=demo-k1')

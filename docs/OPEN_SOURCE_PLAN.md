@@ -15,7 +15,7 @@ Do not change an installed service or use live boards during regression tests.
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API implemented; task/UI integration pending |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Device/read services implemented; final API audit pending |
-| Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Pending |
+| Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Navigation extracted; device/terminal/archive state pending |
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
@@ -140,3 +140,11 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   All 369 backend tests, 55 frontend isolation checks and sharing checks pass.
   The real demo browser verifies terminal input/SSE, archives and independent
   client takeover. Native Windows execution remains pending.
+- Frontend navigation boundary: terminal-buffer search, echoed-command indexing,
+  navigation rendering and decoration work moved into an injected module. Old
+  buttons and dispatched timers cannot affect a replacement terminal. Production
+  static allowlist/cache rules include the module; demo HTTP checks every script
+  referenced by the page. All 369 backend tests, 56 frontend isolation checks,
+  sharing and demo browser checks pass. Desktop/mobile smoke passed on repeat;
+  its first attempt failed the native scrollbar timing assertion. Device,
+  terminal lifecycle and archive state extraction remain pending.

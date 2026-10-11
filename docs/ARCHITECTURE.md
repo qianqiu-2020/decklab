@@ -77,6 +77,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/maintenance.py` | 可选日志保留、活动写入/跨天启动保护、磁盘提示与白名单诊断导出 |
 | `seriald_core/admin.py` | 显式迁移旧目录，不访问硬件 |
 | `static/app.js` / `static/app.css` | 网页行为和样式；`index.html` 仅布局 |
+| `static/terminal-navigation.js` | 终端缓冲搜索、已回显命令导航和高亮；通过注入当前视图检查隔离旧回调 |
 | `serialctl.py` | 无第三方依赖的 agent 客户端 |
 
 文件复制在两个串口上重叠源读取与目标写入。当前原始分块上限为 10 KiB，上传最多三块一批；若压缩后的命令

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Extract terminal-buffer search, echoed-command navigation and highlighting
+  into an injected module, retaining view-generation checks for stale callbacks.
+
 - Add opt-in daily archive retention with active-writer/running-boot protection,
   disk-space warnings and allowlisted diagnostic exports. Retention is disabled
   by default; metadata and database backups are never pruned by this policy.
