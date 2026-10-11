@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a disposable cloud-image VM check for actual systemd startup, collector
+  fingerprint upgrade decisions and purge/data preservation. Verify the image
+  against the supplied provider SHA-256; use no physical hardware or host mounts.
 - Add disposable Ubuntu 22.04/24.04 package installation checks covering actual
   dpkg upgrade/purge, conffile/runtime preservation, service-account API/CLI and
   independent control restart. No host serial devices or service changes.

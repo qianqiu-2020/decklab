@@ -57,6 +57,22 @@ container. Use `ubuntu:22.04` for the other supported baseline. It downloads the
 image/dependencies, exposes no host devices/mounts/ports and removes only its own
 container. It does not test systemd activation or privileged USB recovery.
 
+For actual systemd lifecycle checks:
+
+```sh
+python3 tools/test_deb_vm.py --image /path/to/ubuntu-cloud.img --sha256 <provider-hash>
+```
+
+Obtain an Ubuntu 22.04/24.04
+amd64 cloud image and matching SHA256SUMS from the official provider. The tool
+requires QEMU, qemu-img, genisoimage and OpenSSH clients. It defaults to KVM;
+`--accel tcg` selects software emulation. A temporary overlay, SSH key and
+loopback-only SSH port isolate the guest; no physical devices or host directories
+are shared. Actual package/service startup, unchanged/changed collector upgrade
+decisions and purge are checked. The changed package is a temporary fixture,
+not a release version. Image/dependency downloads and sufficient VM resources
+are required; this is separate from the fast hardware-free regression suite.
+
 Use four spaces and snake_case in Python, two spaces and camelCase in JavaScript.
 Keep one serial reader per connection; writers must not reconfigure termios.
 Preserve connection generations and expected serial checks across asynchronous

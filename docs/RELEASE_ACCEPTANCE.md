@@ -40,6 +40,25 @@ scrollbar behavior was changed. Five package/documentation tests also pass.
 
 ## Remaining gates
 
+Actual systemd lifecycle now passes in disposable Ubuntu 22.04 and 24.04 KVM
+guests through tools/test_deb_vm.py. Official cloud-image hashes were checked;
+private overlays and temporary SSH keys/loopback forwarding shared no physical
+devices or host directories. Real installation started both units and served
+the API/CLI. Same-fingerprint reinstall reported kept-running and preserved the
+collector PID. A temporary comment-only collector change with a recomputed
+fingerprint and higher fixture package version reported restarted and changed
+the PID. Reinstalling that fixture then preserved the new PID. Modified conffiles,
+runtime data and registry survived; purge stopped both units and kept data.
+Restart markers were removed after configuration. Both guests exited and their
+overlays/keys were removed. The VM launcher rejects an incorrect image checksum
+before boot; its final launch/check path passed on 22.04, and the equivalent
+systemd checks passed on 24.04 before adding explicit hash/SSH-config arguments.
+Image hashes: 22.04 012d81fade7e8ff4428fc35dfeee711d66d1f47d5ea9c5c8ced96a85b959835c;
+24.04 6a81c37564db9b1ee84e141922625e1d7c5b389b99bb3c572e0243607d5bb4d2.
+Physical UART continuity and privileged USB recovery are not established by an
+empty-port VM. Three packaged-document tests and the documentation inventory
+check pass. Native Windows and hosted GitHub results are still missing.
+
 Ubuntu package acceptance now includes actual isolated installations on 22.04
 and 24.04, using tools/test_deb_container.py. Both completed successfully with
 dpkg installation and same-version reinstall, modified conffile/data preservation,
@@ -187,9 +206,9 @@ Verification for this checkpoint: 514 backend tests pass (three native Windows
 tests skipped), 74 frontend isolation checks and sharing checks pass. The Windows
 build script parses on PowerShell; native execution remains unverified.
 
-1. Verify supported-platform installation, upgrade and recovery behavior.
-   API/configuration content has a local source/fixture review above; native
-   installation evidence is still required.
+1. Finish Windows installation/upgrade and native-adapter verification. Ubuntu
+   22.04/24.04 installation/systemd lifecycle has actual isolated evidence above;
+   physical UART/USB recovery remains limited to existing fixture/support evidence.
 2. Review the actual frozen Windows files and embedded native-library notices.
    The installed-Python distribution inventory is not a complete binary SBOM.
 3. Execute native Windows tests, frozen demo/host checks and installer upgrades
