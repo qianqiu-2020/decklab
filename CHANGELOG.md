@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Extract archive selection, list refresh and all-boot search into a controller;
+  detached archive controls and superseded search buttons cannot change the
+  current device or open stale results.
+
 - Extract terminal-buffer search, echoed-command navigation and highlighting
   into an injected module, retaining view-generation checks for stale callbacks.
 

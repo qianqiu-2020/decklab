@@ -15,7 +15,7 @@ Do not change an installed service or use live boards during regression tests.
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API implemented; task/UI integration pending |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Device/read services implemented; final API audit pending |
-| Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Navigation extracted; device/terminal/archive state pending |
+| Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Navigation/archive controllers extracted; device/terminal lifecycle pending |
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
@@ -148,3 +148,11 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   sharing and demo browser checks pass. Desktop/mobile smoke passed on repeat;
   its first attempt failed the native scrollbar timing assertion. Device,
   terminal lifecycle and archive state extraction remain pending.
+- Archive controller: date/boot selection, list refresh and all-boot search now
+  own their state outside app.js and depend on injected current-view, panel and
+  archive-opening callbacks. Selection resets for a changed serial even if the
+  label is reused. Detached controls and superseded search buttons are guarded;
+  opening a search result attaches its query to the replacement archive terminal.
+  All 369 backend tests, 58 frontend isolation checks and sharing checks pass;
+  demo and desktop/mobile browser smoke pass. Device and terminal lifecycle
+  extraction, durable tasks and native Windows release validation remain pending.

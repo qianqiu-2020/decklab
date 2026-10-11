@@ -7,7 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { TextDecoder } = require('node:util');
 
-const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'app.js'].map(name =>
+const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'archives.js', 'app.js'].map(name =>
   fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
 
 class Element {
@@ -890,8 +890,40 @@ test('all-boot search pages results and opens a complete read-only boot', async 
   h.terminals.at(-1).flush(); await drain();
   assert.equal(h.get('terminal-search-scope').value, 'terminal');
   assert.equal(h.get('terminal-search').value, 'panic');
+  assert.equal(h.get('terminal-search-status').textContent, '1 / 1');
+  assert.equal(h.terminals.at(-1).selected.col, 7);
   assert.equal(h.get('d-in').disabled, true);
   assert.equal(h.sends().length, 0);
+});
+
+test('detached archive controls cannot change another board selection', async () => {
+  const h = await setup(); h.select('A');
+  const logs = key => ({ key, files: [
+    { name: 'serial-20261012.log', date: '2026-10-12', size: 100 },
+  ], boots: [{ id: key + '-boot', number: 1, started: '2026-10-12 10:00:00',
+    dates: ['2026-10-12'], size: 100 }] });
+  h.take('/api/logs').resolve(logs('A')); await drain();
+  const oldShow = h.get('d-logs').children.find(row => row.className.includes('boot-row')).children[1];
+  const oldPicker = h.get('archive-picker').children[0];
+  h.select('B'); h.take('/api/logs').resolve(logs('B')); await drain();
+  oldShow.click(); oldPicker.value = '2026-01-01'; oldPicker.emit('change');
+  assert.equal(h.get('archive-mode-date').attributes['aria-pressed'], 'true');
+  assert.equal(h.get('archive-picker').children[0].value, '2026-10-12');
+  h.get('archive-mode-boot').click();
+  assert.equal(h.get('archive-picker').children[0].value, 'B-boot');
+});
+
+test('superseded boot-search result buttons cannot open old archives', async () => {
+  const h = await setup(); h.select('A');
+  h.get('terminal-search-scope').value = 'boots'; h.get('terminal-search').value = 'old';
+  h.get('terminal-search-next').click();
+  h.take('/api/boot-search').resolve({ results: [{ id: 'old', number: 1, excerpt: 'old' }] });
+  await drain(); const oldButton = h.get('boot-search-matches').children[0];
+  h.get('terminal-search').value = 'new'; h.get('terminal-search-next').click();
+  h.take('/api/boot-search').resolve({ results: [] }); await drain();
+  oldButton.click();
+  assert.equal(h.requests.filter(r => r.url.startsWith('/api/boot-log')).length, 0);
+  assert.equal(h.get('terminal-search').value, 'new');
 });
 
 test('late all-boot search responses cannot replace a newer search or device', async () => {
