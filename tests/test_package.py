@@ -18,6 +18,8 @@ from seriald_core.storage import Store
 from seriald_core import __version__
 from tools.build_deb import build, collector_build_id
 
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
+
 
 @unittest.skipUnless(shutil.which('dpkg-deb'), 'requires dpkg-deb')
 class PackageTests(unittest.TestCase):
@@ -179,12 +181,11 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(first_health['role'], 'collector')
                 self.assertEqual(first_health['version'], __version__)
                 self.assertEqual(first_health['pid'], collector_pid)
-                with urlopen(url + '/static/app.js') as response:
-                    self.assertIn('no-cache', response.headers['Cache-Control'])
-                    self.assertIn(b'SerialdTerminalPolicy.install', response.read())
-                with urlopen(url + '/static/terminal-policy.js') as response:
-                    self.assertIn('no-cache', response.headers['Cache-Control'])
-                    self.assertIn(b'registerCsiHandler', response.read())
+                for name in ('app.js', 'terminal-view.js', 'terminal-policy.js',
+                             'terminal-navigation.js', 'archives.js'):
+                    with urlopen(url + '/static/' + name) as response:
+                        self.assertIn('no-cache', response.headers['Cache-Control'])
+                        self.assertEqual(response.read(), (SOURCE_ROOT / 'static' / name).read_bytes())
                 with urlopen(url + '/static/icons.svg') as response:
                     self.assertIn('image/svg+xml', response.headers['Content-Type'])
                     self.assertIn('no-cache', response.headers['Cache-Control'])

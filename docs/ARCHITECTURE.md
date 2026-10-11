@@ -78,6 +78,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/admin.py` | 显式迁移旧目录，不访问硬件 |
 | `static/app.js` / `static/app.css` | 网页行为和样式；`index.html` 仅布局 |
 | `static/terminal-navigation.js` | 终端缓冲搜索、已回显命令导航和高亮；通过注入当前视图检查隔离旧回调 |
+| `static/terminal-view.js` | 当前 xterm 视图及连接代次、销毁、SSE／长轮询、输入队列、尺寸协商和固件屏幕重绘 |
 | `static/archives.js` | 日期／启动选择、归档列表刷新和跨启动搜索；以标签及序列号隔离选择状态，通过注入回调打开终端标签 |
 | `serialctl.py` | 无第三方依赖的 agent 客户端 |
 

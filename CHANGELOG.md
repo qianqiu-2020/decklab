@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Give terminal views an independent lifecycle controller for generation guards,
+  disposal, streaming/poll fallback, ordered input and firmware/PTY rendering.
+
 - Extract archive selection, list refresh and all-boot search into a controller;
   detached archive controls and superseded search buttons cannot change the
   current device or open stale results.

@@ -15,7 +15,7 @@ Do not change an installed service or use live boards during regression tests.
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API implemented; task/UI integration pending |
 | Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Device/read services implemented; final API audit pending |
-| Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Navigation/archive controllers extracted; device/terminal lifecycle pending |
+| Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Navigation/archive/terminal controllers extracted; device controller pending |
 | Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
@@ -156,3 +156,11 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   All 369 backend tests, 58 frontend isolation checks and sharing checks pass;
   demo and desktop/mobile browser smoke pass. Device and terminal lifecycle
   extraction, durable tasks and native Windows release validation remain pending.
+- Terminal lifecycle controller: owns the current xterm view and generation,
+  invalidates it before cleanup, and encapsulates stream/poll reads, ordered input,
+  geometry, resize negotiation and firmware redraw. Device/session catalogs and
+  navigation callbacks are injected; app.js reads the controller's current view.
+  Closing a view stops queued input and late SSE fallback. All 369 backend tests
+  (including extracted-package module HTTP checks), 59 frontend isolation checks
+  and sharing checks pass; demo and desktop/mobile browser smoke pass. Device
+  controller extraction remains required to finish the frontend workstream.

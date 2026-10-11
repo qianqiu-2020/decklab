@@ -7,7 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { TextDecoder } = require('node:util');
 
-const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'archives.js', 'app.js'].map(name =>
+const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'app.js'].map(name =>
   fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
 
 class Element {
@@ -311,6 +311,23 @@ test('typing is ordered; unsent input and late send errors are discarded on swit
   old.data('stale'); await drain();
   assert.equal(h.sends().length, 2);
   assert.equal(h.get('d-status').textContent, 'B status');
+});
+
+test('closing a terminal disposes its stream and prevents queued input or fallback reads', async () => {
+  const h = await setup({ sse: true }); const terminal = h.select('A');
+  const stream = h.streams.at(-1);
+  terminal.data('first'); terminal.data('queued'); await drain();
+  const writing = h.sends()[0];
+  h.get('b-close').click();
+  assert.equal(terminal.disposed, true);
+  assert.equal(stream.closed, true);
+  stream.emit(readResponse('A', 'late output', 11)); stream.fail();
+  writing.resolve({ ok: true }); await drain(); terminal.flush();
+  terminal.data('late input'); await drain();
+  assert.equal(h.sends().length, 1);
+  assert.equal(h.requests.filter(r => r.url.startsWith('/api/session?')).length, 0);
+  assert.equal(terminal.parsed, '');
+  assert.equal(h.get('detail').hidden, true);
 });
 
 test('late session, log and identify responses stay with their original device', async () => {
