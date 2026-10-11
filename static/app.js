@@ -419,10 +419,12 @@
       var visibleRows = visibleTerminalRows(ctx, dimensions);
       // xterm's viewport does not scroll through extra logical screen rows.
       // Shrink only a firmware-sized screen until the requested rows fit.
+      // A phone may have less than 350px for 50 firmware rows; an 8px
+      // floor clips the menu. Ordinary Linux/SSH text retains its normal size.
       if (required >= 40 && dimensions && dimensions.rows) {
         var fontSize = cap;
-        while (visibleRows < required && fontSize > 8) {
-          fontSize = Math.max(8, Math.min(fontSize - .5,
+        while (visibleRows < required && fontSize > 4) {
+          fontSize = Math.max(4, Math.min(fontSize - .5,
             Math.floor(fontSize * visibleRows / required * 2) / 2));
           ctx.term.options.fontSize = fontSize;
           dimensions = ctx.fit.proposeDimensions();

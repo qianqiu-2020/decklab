@@ -52,6 +52,9 @@ try {
                        'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN-Open.ps1', 'serialctl.cmd')) {
         Copy-Item -LiteralPath (Join-Path $launchers $name) -Destination $bundle
     }
+    foreach ($notice in @('LICENSE', 'NOTICE', 'THIRD_PARTY.md')) {
+        Copy-Item -LiteralPath (Join-Path $root $notice) -Destination $bundle
+    }
     Copy-Item docs\WINDOWS.md -Destination (Join-Path $bundle 'README.md')
     & (Join-Path $bundle 'seriald.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }

@@ -61,8 +61,8 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/api/log') return json({ data: log, off: log.length, start_off: 0, size: log.length, more: false });
   if (u.pathname === '/api/access') return json({ share_enabled: false });
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/app.css', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
-  res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : 'text/html');
+  if (!['/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, route)));
 });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -287,17 +287,18 @@ let chrome, ws;
   await evaluate('document.querySelector("#d-tabs button").click()');
   await delay(200);
   assert.ok(await evaluate('testTerm.rows >= 50'), 'firmware must retain its full logical screen');
-  assert.ok(await evaluate(`(() => {const host=document.querySelector('#d-term');const screen=host.querySelector('.xterm-screen');return screen.getBoundingClientRect().height<=host.querySelector('.xterm-viewport').clientHeight+1})()`),
-    'firmware screen rows should physically fit the terminal viewport');
+  const firmwareFit = await evaluate(`(() => {const host=document.querySelector('#d-term');const screen=host.querySelector('.xterm-screen');return {screen:screen.getBoundingClientRect().height,viewport:host.querySelector('.xterm-viewport').clientHeight,fontSize:testTerm.options.fontSize,rows:testTerm.rows}})()`);
+  assert.ok(firmwareFit.screen <= firmwareFit.viewport + 1,
+    'firmware rows should fit the viewport: ' + JSON.stringify(firmwareFit));
   assert.ok(await evaluate(`(() => {const v=document.querySelector('#d-term .xterm-viewport');return v.scrollHeight>v.clientHeight})()`),
     'prior serial output should remain scrollable');
   assert.ok(await evaluate(`(() => {const r=document.querySelector('#d-term .xterm-viewport').getBoundingClientRect();return document.elementFromPoint(r.right-5,(r.top+r.bottom)/2)?.classList.contains('xterm-viewport')})()`),
     'serial scrollbar edge must receive clicks even at narrow widths');
-  const track = await evaluate(`(() => {const v=document.querySelector('#d-term .xterm-viewport');v.scrollTop=0;const r=v.getBoundingClientRect();return {x:r.right-5,y:r.bottom-12}})()`);
-  await rpc('Input.dispatchMouseEvent',{type:'mousePressed',x:track.x,y:track.y,button:'left',clickCount:1});
-  await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',x:track.x,y:track.y,button:'left',clickCount:1});
+  const mobileScroll = await evaluate(`(() => {const v=document.querySelector('#d-term .xterm-viewport');v.scrollTop=0;const r=v.getBoundingClientRect();return {x:r.left+20,y:r.top+20}})()`);
+  await rpc('Input.dispatchMouseEvent',{type:'mouseWheel',x:mobileScroll.x,y:mobileScroll.y,deltaX:0,deltaY:180});
+  await delay(100);
   assert.ok(await evaluate('document.querySelector("#d-term .xterm-viewport").scrollTop > 0'),
-    'clicking the visible serial scrollbar must move through history');
+    'mobile serial history should remain scrollable');
   const regularHeight = await evaluate('document.querySelector("#d-term").getBoundingClientRect().height');
   await evaluate('document.querySelector("#b-expand").click()');
   await delay(200);
@@ -316,6 +317,16 @@ let chrome, ws;
     'terminal must remain usable with records open');
   const mobile=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-mobile.png'),Buffer.from(mobile.data,'base64'));
+  // Native mouse scrollbar tracks belong to desktop mode. Mobile Chromium
+  // uses an overlay scroll indicator rather than a clickable desktop track.
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
+  await delay(300);
+  const track = await evaluate(`(() => {const v=document.querySelector('#d-term .xterm-viewport');v.scrollTop=0;const r=v.getBoundingClientRect();return {x:r.right-5,y:r.bottom-12}})()`);
+  await rpc('Input.dispatchMouseEvent',{type:'mousePressed',x:track.x,y:track.y,button:'left',clickCount:1});
+  await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',x:track.x,y:track.y,button:'left',clickCount:1});
+  await delay(100); // Native scrollbar scrolling is applied on the browser's next frame.
+  assert.ok(await evaluate('document.querySelector("#d-term .xterm-viewport").scrollTop > 0'),
+    'clicking the visible serial scrollbar must move through history');
   assert.deepEqual(errors,[]);
   console.log('Browser smoke passed: real xterm query suppression, read-only agent/archive tabs, desktop/mobile layout.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{

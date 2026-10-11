@@ -1,0 +1,38 @@
+name: Linux regression
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install 'pyserial>=3.5,<4' 'paramiko>=3.4,<5'
+      - run: python -m unittest discover -s tests
+      - run: node tests/frontend.test.js
+      - run: node tests/share.test.js
+      - run: python -m compileall -q seriald_core serialctl.py seriald.py
+      - run: bash -n rescue.sh
+      - run: git diff --check
+      - name: Real browser with hardware-free fixtures
+        if: matrix.python == '3.12'
+        run: node tools/browser_smoke.js
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.python == '3.12'
+        with:
+          name: browser-smoke
+          path: dist/ui-*.png
+          if-no-files-found: ignore

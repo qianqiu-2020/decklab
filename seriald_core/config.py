@@ -3,9 +3,9 @@ import re
 import sys
 
 BASE = os.environ.get('SERIALD_BASE', os.path.join(os.path.dirname(sys.executable), 'data')
-                      if sys.platform == 'win32' else '/data/seriald')
+                      if sys.platform == 'win32' else os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 静态根(页面/前端库)与数据根分开 —— 打成 deb 后代码在 /usr/lib/seriald,
-# 包安装时通过环境配置到 /data/seriald-data；源码运行时默认留在仓库 /data/seriald。
+# 包安装时通过环境配置到 /data/seriald-data；源码运行时默认留在当前仓库根目录，不依赖固定的检出位置。
 STATIC = os.environ.get('SERIALD_STATIC') or (getattr(sys, '_MEIPASS', None)
          or os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LOG_ROOT = os.path.join(BASE, 'logs')

@@ -403,6 +403,7 @@
     .records{flex:0 0 auto;border-left:0;border-top:1px solid var(--line);max-height:min(300px,36vh)}
   }
   @media(max-width:620px){
+    .records{max-height:min(200px,24vh)}
     .workspace.selected>.device-pane{max-height:78px}
     .workspace.selected .device-pane>.toolbar{display:none}
     .workspace.selected .device-pane>.grid{display:flex;max-height:78px;overflow-x:auto;overflow-y:hidden;

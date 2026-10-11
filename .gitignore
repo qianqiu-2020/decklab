@@ -18,3 +18,18 @@ __pycache__/
 registry.sqlite3*
 dist/
 seriald-installed/
+
+# Development environments and runtime credentials
+.venv/
+venv/
+data/
+*.sqlite3*
+collector-handoff.json
+lan-token.dpapi
+agent-tokens.json
+.env
+.pytest_cache/
+.ruff_cache/
+build/
+*.egg-info/
+*.spec
