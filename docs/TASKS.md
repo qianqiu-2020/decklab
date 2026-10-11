@@ -39,7 +39,7 @@ Final results contain selected operation metadata, not raw probe dumps.
 
 ## Storage and execution
 
-`TaskStore` uses registry schema 3. It persists a random task ID, operation kind,
+`TaskStore` was introduced in registry schema 3; schema 4 adds transfer artifact metadata. It persists a random task ID, operation kind,
 actor and human client ID, historical serial/connection targets, state, timestamps,
 progress, cancellation request and final result/error. Original request payloads
 and executable callbacks remain in memory. Results are bounded to 64 KiB and
@@ -126,3 +126,8 @@ The shared browser task client serves copy, identification and SSH creation. It
 retries reads on network outages, stops on revoked/missing access and rejects
 mismatched task responses. Browser upload/download still require the initiating
 page to remain connected until their future staging/task integration is finished.
+
+The host-side artifact foundation is implemented separately in
+[TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). HTTP staging, upload/download
+worker adapters and browser/CLI integration remain pending; these are required
+before upload/download can continue after the initiating page exits.

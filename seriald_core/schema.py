@@ -61,7 +61,16 @@ def _registry_tasks(db):
     db.execute('CREATE INDEX IF NOT EXISTS task_board ON task_targets(serial, task_id)')
 
 
-REGISTRY_MIGRATIONS = (_registry_initial, _registry_history, _registry_tasks)
+def _registry_artifacts(db):
+    db.execute('CREATE TABLE IF NOT EXISTS transfer_artifacts ('
+               'id TEXT PRIMARY KEY, actor TEXT NOT NULL, serial TEXT NOT NULL, '
+               'direction TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, '
+               'received INTEGER NOT NULL, sha256 TEXT NOT NULL, state TEXT NOT NULL, '
+               'task_id TEXT REFERENCES tasks(id), created REAL NOT NULL, updated REAL NOT NULL)')
+    db.execute('CREATE INDEX IF NOT EXISTS artifact_expiry ON transfer_artifacts(state,updated)')
+
+
+REGISTRY_MIGRATIONS = (_registry_initial, _registry_history, _registry_tasks, _registry_artifacts)
 GRANT_MIGRATIONS = (_grants_initial,)
 _SCHEMAS = {
     'registry': (0x444C5247, REGISTRY_MIGRATIONS, {
@@ -72,6 +81,7 @@ _SCHEMAS = {
         'commands': 'serial command first_used last_used use_count',
         'tasks': 'id kind actor client_id state progress result error created updated cancel_requested',
         'task_targets': 'task_id serial connection_id',
+        'transfer_artifacts': 'id actor serial direction name size received sha256 state task_id created updated',
     }),
     'grants': (0x444C4147, GRANT_MIGRATIONS, {
         'grants': 'id token_hash actor scope serial created expires revoked',

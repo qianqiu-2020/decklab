@@ -71,6 +71,7 @@ try {
     Copy-Item docs\STORAGE_UPGRADES.md -Destination (Join-Path $bundle 'docs\STORAGE_UPGRADES.md')
     Copy-Item docs\LOG_OPERATIONS.md -Destination (Join-Path $bundle 'docs\LOG_OPERATIONS.md')
     Copy-Item docs\TASKS.md -Destination (Join-Path $bundle 'docs\TASKS.md')
+    Copy-Item docs\TRANSFER_ARTIFACTS.md -Destination (Join-Path $bundle 'docs\TRANSFER_ARTIFACTS.md')
     Copy-Item examples\profiles.json -Destination (Join-Path $bundle 'examples\profiles.json')
     & (Join-Path $bundle 'seriald.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }

@@ -102,6 +102,26 @@ class SchemaTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_version_three_artifact_migration_preserves_tasks_and_backups(self):
+        db = self.legacy()
+        schema._registry_history(db)
+        schema._registry_tasks(db)
+        db.execute('INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                   ('task-one', 'identify', 'agent', '', 'completed', '{}', '{}', '', 1, 2, 0))
+        db.execute('INSERT INTO task_targets VALUES (?,?,?)', ('task-one', 'SN1', 'connection-one'))
+        db.execute('PRAGMA user_version=3')
+        db.commit()
+        store = Store(str(self.path))
+        try:
+            self.assertEqual(store.db.execute('SELECT id FROM tasks').fetchone()[0], 'task-one')
+            self.assertEqual(store.db.execute('SELECT COUNT(*) FROM transfer_artifacts').fetchone()[0], 0)
+            with sqlite3.connect(store.schema_backup) as backup:
+                self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 3)
+                self.assertIsNone(backup.execute("SELECT name FROM sqlite_master WHERE name='transfer_artifacts'").fetchone())
+                self.assertEqual(backup.execute('SELECT serial FROM task_targets').fetchone()[0], 'SN1')
+        finally:
+            store.close()
+
     def test_failed_migration_rolls_back_ddl_data_and_version(self):
         db = self.legacy()
         owner, migrations, expected = schema._SCHEMAS['registry']

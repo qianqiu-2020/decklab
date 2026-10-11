@@ -231,3 +231,19 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   desktop/mobile browser smoke and real demo UI copy/reload checks pass. The
   generated task-panel screenshot was inspected. No installed service or live
   board was changed.
+
+- Host transfer artifact foundation: registry schema 4 adds scoped temporary-file
+  metadata and task ownership with a pre-upgrade WAL snapshot. Collector startup
+  recovers artifacts after interrupting unfinished tasks, and its existing loop
+  expires idle files. Random internal paths, per-file locks, checked/idempotent
+  chunks, sealed SHA-256, bounded quotas/free-space checks and task claims support
+  the forthcoming upload/download adapters. Restart returns unconsumed uploads
+  without replay, fails partial downloads, and detects file/DB write gaps. HTTP
+  staging and upload/download execution/UI/CLI remain outstanding.
+  Verification: 422 backend tests, 69 frontend isolation tests, the sharing
+  suite and real demo browser smoke pass. Artifact tests cover quotas (including
+  empty-file slots), scope isolation, idempotent writes, disk/commit/publication
+  failures, missing files, active readers and restart recovery. Schema-3 upgrade
+  fixtures prove task preservation and the schema-4 pre-upgrade snapshot. Debian
+  package tests verify the new storage guide is shipped; Windows packaging
+  definitions include it, but native Windows validation remains outstanding.

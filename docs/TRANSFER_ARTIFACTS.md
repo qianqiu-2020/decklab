@@ -1,0 +1,65 @@
+# Host transfer artifacts
+
+This is the storage foundation for forthcoming background upload/download tasks.
+It is used by collector startup/recovery and expiry, but HTTP staging, task
+adapters and browser/CLI transfer integration are not yet implemented. Existing
+upload/download behavior therefore still requires its initiating client.
+
+## Files and ownership
+
+`<registry-directory>/transfers/` stores opaque random IDs with `.part` while
+receiving and `.bin` after sealing. User filenames are metadata only and cannot
+select host paths. Registry schema 4 stores actor, board serial, direction,
+declared/received size, SHA-256, state, timestamps and optional owning task ID.
+Directory/file creation modes permit the service group; actual access also follows
+Unix umask or Windows ACLs. The directory is created only when a file is staged.
+
+The service accepts chunks up to 1 MiB with an exact offset. Already committed
+bytes can be retried only with identical content. Symlinks, nonregular files,
+linked write targets and opening/replacement races are rejected. A write is
+flushed and synced before metadata advances. Sealing checks completeness, hashes
+bounded chunks, and publishes the finished file without replacing an existing
+sealed path. Publication currently requires filesystem hard-link support.
+
+Agent access checks both actor and requested board scope; the full human actor
+can inspect artifacts. Task claims serialize consumers and prohibit deletion or
+expiry while active. A failed/cancelled upload can return its unchanged host
+source to `ready`; successful consumption removes its file. Downloads remain
+unavailable until sealed as `available`. The task adapter must also verify the
+artifact digest before committing a remote upload or exposing a download.
+
+## Capacity and expiry
+
+Declared sizes reserve quota and available disk space before creating files.
+Each append rechecks free space. Collector maintenance checks expiry every minute;
+active claims, download writers and open readers are excluded. Reading a sealed artifact refreshes
+its expiry timestamp. Metadata remains after file deletion for task diagnosis.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SERIALD_TRANSFER_MAX_FILES` | 128 | Maximum live files, including empty files |
+| `SERIALD_TRANSFER_MAX_FILE_BYTES` | 8589934592 | Maximum declared file size (8 GiB) |
+| `SERIALD_TRANSFER_MAX_TOTAL_BYTES` | 34359738368 | Total live declared sizes (32 GiB) |
+| `SERIALD_TRANSFER_MIN_FREE_BYTES` | 268435456 | Disk space to preserve (256 MiB) |
+| `SERIALD_TRANSFER_IDLE_SECONDS` | 3600 | Idle partial-upload expiry |
+| `SERIALD_TRANSFER_RETENTION_SECONDS` | 604800 | Ready upload/download expiry (7 days) |
+
+Values must be integer byte/second counts. File/expiry limits are positive and
+total quota must accommodate one maximum-size file. Invalid settings stop startup.
+These lifetimes govern temporary transfer files, not agent grants or board logs.
+
+## Restart
+
+One collector owns the spool. After task recovery marks unfinished execution
+interrupted, artifact recovery returns unconsumed claimed uploads to ready without
+sending board commands. A completed consuming task removes its leftover upload.
+Partial downloads or interrupted publication become failed and are cleaned up.
+Receiving uploads resume only when file size matches committed metadata; a crash
+between file sync and database commit is reported as failure rather than replayed.
+Missing files, invalid file types and size mismatches are failed and their quota
+released. Same-size content changes must be caught by the task digest check. Completed downloads
+and sealed uploads survive restarts until deletion or expiry.
+
+Recovery snapshots cover database metadata, not artifact bytes. Do not start a
+second collector on the same spool or restore only metadata while another process
+is writing files. Native Windows artifact/installer validation remains outstanding.

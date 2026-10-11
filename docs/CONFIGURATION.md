@@ -72,3 +72,11 @@ rates before opening a port; Windows delegates supported rates to pySerial.
 Optional archive retention and free-space warning thresholds are documented in
 [log operations](LOG_OPERATIONS.md). Retention defaults to disabled; diagnostics
 can be exported with `serialctl diagnostics` without board credentials or logs.
+
+## Host transfer staging
+
+The collector's artifact storage foundation reserves disk space and recovers
+temporary files alongside its registry. Limits and temporary-file lifetimes are
+documented in [TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). Upload/download
+HTTP/task integration is still pending; these settings do not change agent grant
+expiry or serial/SSH log retention.

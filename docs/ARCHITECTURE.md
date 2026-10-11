@@ -70,6 +70,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/storage.py` | SQLite 注册表和持久化操作历史 |
 | `seriald_core/schema.py` | 数据库版本、升级前 WAL 快照、事务迁移与回滚 |
 | `seriald_core/tasks.py` | 持久任务状态、进度、范围查询、有界后台执行和协作取消 |
+| `seriald_core/transfer_artifacts.py` | 主机暂存文件、身份与 actor 范围、分块写入、任务占用、配额及重启恢复；上传／下载 API 接入待完成 |
 | `seriald_core/transfer_tasks.py` | 采集器执行板间复制任务、有限缓冲与并行预读、双连接取消及临时文件清理 |
 | `seriald_core/task_actions.py` | 后台识别／SSH 操作适配、连接代次与 actor/client 保护；任务 API／CLI／网页已接入，上传／下载任务待完成 |
 | `seriald_core/web.py` | HTTP 参数校验、API、静态文件 |

@@ -24,15 +24,23 @@ from .models import Board
 from .session_base import relocate_session_logs
 from .maintenance import LogMaintenance, MaintenancePolicy
 from .tasks import TaskManager
+from .transfer_artifacts import TransferArtifacts
 
 class Manager:
     """设备发现 + 每个实际 tty 一个采集线程;旧线程退出后才转移所有权。"""
 
-    def __init__(self, store=None, handoff=None, profiles=None):
+    def __init__(self, store=None, handoff=None, profiles=None, artifact_dir=None):
         self.profiles = profiles if profiles is not None else ProfileBook.from_env()
         self.maintenance = LogMaintenance(MaintenancePolicy.from_env())
         self.store = store
         self.tasks = TaskManager(store) if store is not None else None
+        self.artifacts = None
+        if store is not None and (artifact_dir is not None or store.path != ':memory:'):
+            directory = artifact_dir if artifact_dir is not None else os.path.join(
+                os.path.dirname(os.path.abspath(store.path)), 'transfers')
+            self.artifacts = TransferArtifacts(store, directory)
+            self.artifacts.recover()
+        self.artifacts_checked = 0.0
         self.devices = {}                 # physical by-path -> current connection
         self.boards = {}                  # immutable serial -> persistent Board
         self.lock = threading.RLock()
@@ -446,6 +454,9 @@ class Manager:
                     if self.store and d.serial and d.present:
                         d.record['last_seen'] = self.store.touch(d.serial)
                 self.maintenance.run_due(self, LOG_ROOT)
+                if self.artifacts is not None and time.monotonic() - self.artifacts_checked >= 60:
+                    self.artifacts.expire()
+                    self.artifacts_checked = time.monotonic()
                 # 启动/重连只被动采集;自动回车或 USB 软拔插会干扰正在使用的控制台。
             except Exception as e:
                 print('seriald scan: %s' % e, file=sys.stderr, flush=True)

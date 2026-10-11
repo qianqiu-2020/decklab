@@ -48,6 +48,8 @@ def validate_label(label):
 
 class Store:
     def __init__(self, path):
+        path = os.fspath(path)
+        self.path = path
         if path != ':memory:':
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self.lock = threading.RLock()
