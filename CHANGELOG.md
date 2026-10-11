@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Recreate a dedicated Windows packaging environment on every build, keeping
+  development environments untouched and excluding leftover development packages
+  from dependency and license collection. Installer verification uses the same
+  packaging interpreter.
+
 - Expose durable identify/SSH tasks through API and CLI with connection/client
   guards, actor/board filtering, revocation cancellation and retained results.
   Browser recovery and server-owned file-transfer tasks remain pending.

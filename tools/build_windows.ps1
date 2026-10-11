@@ -14,17 +14,19 @@ try {
     if (Test-Path (Join-Path $bundle 'data')) {
         throw 'dist\seriald\data contains runtime data. Move the running installation elsewhere before rebuilding; the build must not erase it.'
     }
-    if ($UseCurrentPython) { & python -m venv .venv }
-    else { & py -3.12 -m venv .venv }
+    if ($UseCurrentPython) { & python tools/prepare_windows_build.py $root }
+    else { & py -3.12 tools/prepare_windows_build.py $root }
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is required (install it with the py launcher).' }
-    $python = Join-Path $root '.venv\Scripts\python.exe'
-    $pyinstaller = Join-Path $root '.venv\Scripts\pyinstaller.exe'
+    $python = Join-Path $root 'build\windows-venv\Scripts\python.exe'
+    $pyinstaller = Join-Path $root 'build\windows-venv\Scripts\pyinstaller.exe'
 
     & $python -c 'import sys; sys.exit(0 if sys.maxsize > 2**32 else 1)'
     if ($LASTEXITCODE -ne 0) { throw 'The Windows x64 package requires 64-bit Python.' }
 
     & $python -m pip install -r requirements-windows.txt
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+    & $python -m unittest discover -s tests -p test_windows_build_env.py
+    if ($LASTEXITCODE -ne 0) { throw 'Packaging environment isolation tests failed.' }
     & $python -m unittest discover -s tests -p test_windows_portable.py
     if ($LASTEXITCODE -ne 0) { throw 'Windows portable tests failed.' }
     & $python -m unittest discover -s tests -p test_session_contract.py

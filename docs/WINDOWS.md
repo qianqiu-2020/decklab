@@ -17,7 +17,7 @@ winget install --id JRSoftware.InnoSetup -e -s winget -i
 .\Build-seriald.cmd
 ```
 
-构建会创建 `.venv/`、运行回归测试并输出：
+构建每次重建独立的 `build/windows-venv/`，不修改开发用 `.venv/` 或安装目录中的数据。依赖和许可证清单均来自该构建环境。随后运行回归测试并输出：
 
 - `dist/seriald-1.4.50-windows-x64-setup.exe`：常规安装与升级。
 - 对应 `.exe.sha256`：安装包摘要，供可信渠道核对。

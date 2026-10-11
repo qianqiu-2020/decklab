@@ -34,6 +34,16 @@ CONTRIBUTING.md documents the current modular repository and test commands.
 
 ## Verified checkpoints
 
+- Windows build isolation: packaging now recreates `build/windows-venv` rather
+  than reusing the contributor's `.venv`. Tests create a real virtual environment,
+  add an extra module, rebuild and prove that the module is removed while the
+  development directory remains intact. Redirected build directories are rejected
+  before any cleanup. Installer notice verification uses the packaging interpreter.
+  Both PowerShell scripts parse on Linux PowerShell; actual Windows packaging and
+  native-library attribution remain separate, unverified release gates. Dependency
+  ranges are still resolved at build time, so isolation alone does not establish
+  fully reproducible builds.
+
 - Public-source foundation: LICENSE/NOTICE/third-party summary, bilingual
   landing README, contribution/security/issue guidance and runtime ignore rules
   are present. Transitive Windows license collection and history review remain.
