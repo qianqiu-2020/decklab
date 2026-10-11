@@ -400,3 +400,20 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   hardware task fixture verifies lease/release/helper-cleanup/resume ordering.
   Windows build runs the handoff suite. Syntax and whitespace checks pass.
   No live port, board, installed service or real flashing tool was used.
+
+- Windows Python notices: offline packaging collector inventories every installed
+  distribution/version and copies nested notices with hashes, including Python's
+  license. A pinned pySerial 3.5 upstream notice covers distributions that omit
+  it; unrecognized missing/empty licenses fail packaging. Collection publishes
+  atomically into a fresh bundle, and installer compilation verifies notice
+  paths and hashes. The manifest explicitly records a build-environment superset,
+  not an exact frozen-module/native-library SBOM. Native library attribution,
+  frozen output review and actual Windows packaging remain release requirements.
+
+  Verification: 504 backend checks pass (three native Windows tests skipped),
+  74 frontend isolation checks and sharing checks pass. Eight notice regressions
+  cover exact-version fallbacks, nested notices, UTF-8, hashes, missing/empty
+  files, duplicate names, path traversal and publication failure. A fresh Linux
+  wheel environment using requirements-windows.txt collected and verified 15
+  installed distributions; this is not native Windows package evidence. Python
+  syntax and whitespace checks pass. Installed services remain unchanged.

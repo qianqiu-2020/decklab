@@ -90,3 +90,13 @@ Windows 10+ 可用 `SERIALD_HARDWARE` 配置按板子序列号绑定的电源、
 [硬件扩展](HARDWARE_EXTENSIONS.md)。命令创建时绑定 Job Object，超时、取消及
 宿主进程异常退出都会清理关联进程。构建脚本包含原生 Job Object 及模拟任务测试；
 未运行原生 Windows 测试的 Linux 验证结果不能代替此项发布验收。
+
+## Third-party notices in release bundles
+
+The ZIP and Setup include `third-party/`, with the packaging environment's
+installed distribution versions, original license files, Python attribution and
+SHA-256 checksums. Missing license files stop packaging. This environment list
+includes build tools and is deliberately broader than the frozen runtime.
+`tools/collect_windows_notices.py --verify <bundle>/third-party` verifies copied
+notices using the build Python; installer compilation performs this check too.
+Native-library and frozen-output attribution still require release review.

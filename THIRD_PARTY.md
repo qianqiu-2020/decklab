@@ -13,6 +13,20 @@ It does not replace the licenses of the following components.
 | pySerial | Windows executable dependency | BSD-3-Clause; https://github.com/pyserial/pyserial |
 | Paramiko | Windows executable dependency | LGPL-2.1; https://github.com/paramiko/paramiko |
 
-Windows build dependencies include transitive packages. The release build must
-collect their license files and version inventory, rather than treating this
-short table as a complete binary-distribution inventory.
+Windows bundles include `third-party/inventory.json`, exact installed dependency
+versions, copied license/notice files and their SHA-256 digests. Collection runs
+in the packaging interpreter and includes all installed distributions, including
+build-only tools; it is a conservative build-environment inventory, not an exact
+list of frozen modules. Python's license is included separately. Installer builds
+verify the copied notice hashes and reject missing or incomplete inventories.
+
+Some distributions omit license files. The version-specific pySerial 3.5 notice
+is retained in `packaging/third-party/pyserial-3.5/`, copied unchanged from
+https://github.com/pyserial/pyserial/blob/v3.5/LICENSE.txt. Missing notices for
+other versions/components stop the build; the collector never fetches arbitrary
+licenses during packaging.
+
+This inventory does not replace review of native libraries embedded in Python
+or dependency wheels (for example crypto libraries), PyInstaller's frozen output,
+or bundled frontend assets. Such binary attribution remains a release gate;
+this table and Python metadata alone are not a complete native-library SBOM.

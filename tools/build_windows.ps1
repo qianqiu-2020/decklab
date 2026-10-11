@@ -39,6 +39,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Windows helper Job Object tests failed.' }
     & $python -m unittest discover -s tests -p test_serial_handoff.py
     if ($LASTEXITCODE -ne 0) { throw 'Serial handoff regression tests failed' }
+    & $python -m unittest discover -s tests -p test_windows_notices.py
+    if ($LASTEXITCODE -ne 0) { throw 'Windows distribution notice tests failed.' }
     & $python -m unittest discover -s tests -p test_hardware.py
     if ($LASTEXITCODE -ne 0) { throw 'Configured hardware task tests failed.' }
     if (Get-Command node -ErrorAction SilentlyContinue) {
@@ -60,6 +62,9 @@ try {
         --add-data 'skills/seriald-board/SKILL.md;skills/seriald-board' `
         seriald_windows.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
+
+    & $python tools/collect_windows_notices.py (Join-Path $bundle 'third-party')
+    if ($LASTEXITCODE -ne 0) { throw 'Third-party notice collection failed; refusing to publish incomplete packages.' }
 
     $launchers = Join-Path $root 'tools\windows-launchers'
     foreach ($name in @('Start-seriald.cmd', 'Start-seriald-LAN.cmd', 'Start-seriald-LAN.ps1',

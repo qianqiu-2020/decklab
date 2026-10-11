@@ -10,6 +10,13 @@ if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Build the Window
 if (Test-Path -LiteralPath (Join-Path $bundle 'data')) {
     throw 'The bundle contains runtime data; refusing to include it in the installer.'
 }
+$notices = Join-Path $bundle 'third-party\inventory.json'
+if (-not (Test-Path -LiteralPath $notices -PathType Leaf)) {
+    throw 'Third-party inventory is missing. Rebuild with Build-seriald.cmd.'
+}
+$noticePython = Join-Path $root '.venv\Scripts\python.exe'
+& $noticePython (Join-Path $PSScriptRoot 'collect_windows_notices.py') (Join-Path $bundle 'third-party') --verify
+if ($LASTEXITCODE -ne 0) { throw 'Third-party notice inventory validation failed.' }
 $versionSource = Get-Content -LiteralPath (Join-Path $root 'seriald_core\version.py') -Raw
 if ($versionSource -notmatch "__version__\s*=\s*'([0-9]+\.[0-9]+\.[0-9]+)'") { throw 'Package version was not found.' }
 $version = $Matches[1]
