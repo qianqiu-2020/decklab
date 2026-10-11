@@ -79,3 +79,11 @@ The collector's artifact storage foundation reserves disk space and recovers
 temporary files alongside its registry. Limits and temporary-file lifetimes are
 documented in [TRANSFER_ARTIFACTS.md](TRANSFER_ARTIFACTS.md). Collector-owned upload/download tasks and
 HTTP staging use these limits; browser and background CLI file transfers are integrated. These settings do not change agent grant expiry or serial/SSH log retention.
+
+## Hardware helpers
+
+`SERIALD_HARDWARE` optionally selects a bounded JSON file of explicitly configured
+per-serial power/reset/flashing argv. Default is disabled; no automatic action or
+sudo is used. Agent access is disabled per action unless explicitly configured.
+See [hardware extensions](HARDWARE_EXTENSIONS.md) for configuration, offline
+power commands, cancellation and current platform/exclusive-flasher limits.

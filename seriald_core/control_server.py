@@ -306,7 +306,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     target_path = urlunparse(parsed._replace(query=urlencode(query)))
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
-            if route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download'):
+            if route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware'):
                 headers['X-Seriald-Actor'] = agent_actor or 'web'
             events = self.command == 'GET' and urlparse(self.path).path == '/api/session-events'
             if events and self.headers.get('Last-Event-ID'):

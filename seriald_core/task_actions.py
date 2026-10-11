@@ -6,10 +6,12 @@ from .tasks import TaskCancelled, TaskError
 from .transactions import transactions_for, TransactionError
 from .transfer_tasks import TransferCopy, TransferFile
 from .file_transfer import TransferError
+from .hardware import ACTIONS, HardwareOperation
 
 
 class TaskActions:
-    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download'))
+    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download')) | frozenset(
+        'hardware-' + action for action in ACTIONS)
 
     def __init__(self, manager):
         self.manager = manager
@@ -33,11 +35,22 @@ class TaskActions:
                 raise TaskError('invalid task client')
             connection, stop = device.connection_id, device.stop
             source_serial = device.serial or ''
-            if payload.get('connection_id') != connection or not device.present or stop.is_set():
+            hardware = kind.startswith('hardware-')
+            if (payload.get('connection_id') != connection or
+                    (not hardware and (not device.present or stop.is_set()))):
                 raise TaskError('device connection changed', 409)
+            if hardware and not source_serial:
+                raise TaskError('hardware operations require an identified board serial', 409)
             transactions = transactions_for(device)
             with transactions.actor_scope(actor, client):
                 transactions.check_owner(actor)
+            if kind.startswith('hardware-'):
+                if set(payload) - {'kind', 'key', 'serial', 'connection_id', 'actor', 'client_id'}:
+                    raise TaskError('hardware task accepts only a configured action and target')
+                operation = HardwareOperation(self.manager, device, kind[9:], actor, client)
+                task = self.tasks.start(kind, actor, client,
+                    [{'serial': source_serial, 'connection_id': connection}], operation.run)
+                return response(202, {'ok': True, 'task': task})
             if kind in ('file-upload', 'file-download'):
                 operation = TransferFile(self.manager, device, actor, client,
                     'upload' if kind == 'file-upload' else 'download', payload.get('path'),

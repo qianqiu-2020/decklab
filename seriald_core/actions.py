@@ -9,6 +9,7 @@ from .storage import IdentityError
 from .file_transfer import TransferError
 from .transactions import transactions_for, TransactionError
 from . import __version__
+from .hardware import ACTIONS
 
 
 def capabilities():
@@ -18,13 +19,16 @@ def capabilities():
         'features': {'serial': True, 'ssh': True, 'sse_offsets': True,
                      'boot_archives': True, 'boot_compare': True,
                      'operation_status': True, 'operation_cancel': True, 'durable_tasks': True},
-        'tasks': {'kinds': ['identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download'], 'restart': 'interrupt',
+        'tasks': {'kinds': ['identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download']
+                  + ['hardware-' + action for action in ACTIONS], 'restart': 'interrupt',
                   'file_transfer': ['copy', 'upload', 'download']},
         'artifacts': {'chunk_size': 1024 ** 2, 'append_body_limit': 2 * 1024 ** 2, 'download': 'stream'},
         'file_transfer': {'transport': 'serial', 'requires_linux_shell': True,
                           'integrity': 'sha256'},
         'ssh_provisioning': 'profile-controlled',
         'input_ownership': 'optional-client',
+        'hardware': {'actions': list(ACTIONS), 'configuration': 'explicit-serial',
+                     'host_adapter': 'linux-process-group', 'default': 'disabled'},
     })
 
 

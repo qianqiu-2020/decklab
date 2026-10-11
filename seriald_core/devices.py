@@ -25,11 +25,13 @@ from .session_base import relocate_session_logs
 from .maintenance import LogMaintenance, MaintenancePolicy
 from .tasks import TaskManager
 from .transfer_artifacts import TransferArtifacts
+from .hardware import HardwareBook
 
 class Manager:
     """设备发现 + 每个实际 tty 一个采集线程;旧线程退出后才转移所有权。"""
 
-    def __init__(self, store=None, handoff=None, profiles=None, artifact_dir=None):
+    def __init__(self, store=None, handoff=None, profiles=None, artifact_dir=None, hardware=None):
+        self.hardware = hardware if hardware is not None else HardwareBook.from_env()
         self.profiles = profiles if profiles is not None else ProfileBook.from_env()
         self.maintenance = LogMaintenance(MaintenancePolicy.from_env())
         self.store = store

@@ -430,6 +430,7 @@ def parser():
     commands.add_parser('devices', help='list devices without probing them')
     commands.add_parser('capabilities', help='show supported protocol features without accessing boards')
     commands.add_parser('diagnostics', help='export a sanitized platform summary without logs or credentials')
+    commands.add_parser('hardware', help='list configured board hardware actions without executing them')
     tasks = commands.add_parser('tasks', help='list durable tasks; optionally select a device')
     tasks.add_argument('--limit', type=nonnegative, default=20)
     tasks.add_argument('--offset', type=nonnegative, default=0)
@@ -442,7 +443,8 @@ def parser():
     fetch_file.add_argument('--local', required=True)
     fetch_file.add_argument('--overwrite', action='store_true')
     task_start = commands.add_parser('task-start', help='start a background device operation')
-    task_start.add_argument('kind', choices=('identify', 'ssh-enable', 'ssh-connect'))
+    task_start.add_argument('kind', choices=('identify', 'ssh-enable', 'ssh-connect',
+        'hardware-power-on', 'hardware-power-off', 'hardware-reset', 'hardware-flash'))
     commands.add_parser('operation', help='show the active serial operation and cancellation ID')
     cancel = commands.add_parser('operation-cancel', help='cancel your active serial operation by ID')
     cancel.add_argument('id', help='operation ID returned by operation')

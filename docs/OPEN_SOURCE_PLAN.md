@@ -20,7 +20,7 @@ Do not change an installed service or use live boards during regression tests.
 | Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
 | Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Identify/SSH task API/CLI/browser and collector-owned copy API/CLI implemented; upload/download task API implemented; background CLI and browser transfers implemented; CLI result retrieval implemented; CLI orchestration consolidated; final audit pending |
-| Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Pending |
+| Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Linux task adapter implemented; Windows process-tree and exclusive-serial handoff pending |
 | Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Pending |
 
 Implementation order: release foundations and configuration, demo, core/service
@@ -344,3 +344,22 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   unchanged submission snapshots, per-endpoint scope, actor isolation, corrected
   identity, EEPROM promotion and pending-download file scope have regression
   evidence. Syntax/whitespace checks pass. Production services were unchanged.
+
+- Hardware extension foundation: explicit per-serial power/reset/external-flash
+  argv configuration, bounded timeouts, restricted templates, actor policy and
+  no arbitrary client commands. Hardware task kinds and discovery API/CLI use
+  the existing actor scopes, ownership, generation guards, durable task status,
+  cancellation and operation audit. Fixed independent power commands support
+  identified offline boards. Linux process groups bound helpers and descendants;
+  capture/other sessions are not stopped. Native Windows process-tree containment
+  and flashers needing collector UART handoff remain outstanding; such Windows
+  commands are currently rejected rather than using incomplete process cleanup.
+
+  Verification: 478 backend tests, 74 frontend isolation tests and sharing
+  tests pass. Fifteen hardware regressions cover configuration bounds, literal
+  argv, discovery/agent policy, audit redaction, offline power, ownership and
+  active-transfer exclusion, nonzero exits, timeout, task/lease cancellation,
+  connection changes and Linux descendant cleanup. Debian extraction checks
+  confirm the adapter, guide and example ship. Windows packaging lists include
+  them but native execution remains unverified. No real hardware command or
+  installed service was used or modified.

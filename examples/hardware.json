@@ -1,0 +1,23 @@
+{
+  "boards": {
+    "YOUR-BOARD-SERIAL": {
+      "power-on": {
+        "argv": ["/usr/local/bin/board-power", "--serial", "{serial}", "on"],
+        "timeout": 30
+      },
+      "power-off": {
+        "argv": ["/usr/local/bin/board-power", "--serial", "{serial}", "off"],
+        "timeout": 30
+      },
+      "reset": {
+        "argv": ["/usr/local/bin/board-reset", "--serial", "{serial}"],
+        "timeout": 30,
+        "allow_agent": true
+      },
+      "flash": {
+        "argv": ["/usr/local/bin/board-flash", "--serial", "{serial}", "--image", "/data/images/current.img"],
+        "timeout": 600
+      }
+    }
+  }
+}

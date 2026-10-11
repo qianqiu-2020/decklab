@@ -208,6 +208,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     'storage': disk_status(LOG_ROOT, MGR.maintenance.policy),
                                     'server_time': time.time()})
 
+        if route == '/api/hardware':
+            device = self._dev(q)
+            if not device:
+                return self._json(404, {'error': 'no such device'})
+            actor = self.headers.get('X-Seriald-Actor') or 'web'
+            return self._json(200, MGR.hardware.available(device.serial or '', actor))
+
         if route == '/api/operation':
             device = self._dev(q)
             if not device:
