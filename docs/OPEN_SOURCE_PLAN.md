@@ -471,3 +471,48 @@ CONTRIBUTING.md documents the current modular repository and test commands.
   POSIX shell-specific syntax/builtin checks where unavailable. Debian extraction
   confirms the new module ships. Native Windows execution remains unverified.
   Syntax/whitespace checks pass; no installed service or live board was touched.
+
+- Public source/history review at 47750f9f8042c9a1a857f92bec4df2fe29882303:
+  the local repository is not shallow and has no replacement refs. All reachable
+  refs contain 109 commits / 1792 objects. Runtime-path checks found no committed
+  logs/data/dist, labels, SQLite registries, agent token files or .env files.
+  Targeted private-key, GitHub/GitLab token and credential-in-URL checks inspected
+  1128 nonbinary text blobs up to 2 MiB and found no matches. This bounded check
+  alone is not proof that arbitrary secrets cannot exist.
+
+  Gitleaks 8.24.2 was downloaded from its official release into a temporary
+  directory and verified against the release SHA-256 list. Its all-ref history
+  scan reported two generic-api-key findings. Source review confirmed a CLI call
+  using destination.key / destination.serial attributes and xterm's export-to-
+  undefined initialization chain, neither a credential. .gitleaksignore contains
+  only those two exact historical fingerprints, with explanations; there are no
+  file-wide or rule-wide exclusions. The reviewed all-ref scan exits zero with
+  an empty report. A temporary independent Git repository, using the same ignore
+  file and serialctl.py path, still detects a new synthetic GitHub token and
+  fully redacts the report. An initial alphabet-sequence fixture was ignored by
+  the tool's own sample handling; the repeat used deterministic mixed characters.
+
+  Current Windows firewall examples and sharing/package fixtures now use the
+  documentation address range rather than the work network. Older commits retain
+  benign network examples; no history was rewritten, and no remote was pushed.
+  No scanner binary or report is shipped in application packages. This audit is
+  separate from the remaining native-binary attribution and actual release gates.
+
+  To repeat with the reviewed scanner version in a full clone, run:
+
+  ```sh
+  gitleaks git --redact=100 --no-banner --log-opts=--all \
+    --report-format=json --report-path=/tmp/decklab-source-review.json .
+  ```
+
+  Review new findings individually; do not suppress entire files just to pass.
+  Upstream usage and fingerprint behavior:
+  https://github.com/gitleaks/gitleaks/tree/v8.24.2
+
+  Verification: reviewed all-ref Gitleaks scan passes; exact-ignore isolation
+  fixture detects the new synthetic credential with full redaction. Debian
+  extraction/post-install address fixtures, both documentation layouts, 74
+  frontend isolation checks and sharing checks pass. Whitespace checks pass.
+  This turn changes only examples, test fixtures and source-review metadata;
+  installed services and runtime behavior are untouched. Windows environment/CI
+  input was requested for the remaining native gate; no access was assumed.

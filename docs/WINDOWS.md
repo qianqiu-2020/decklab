@@ -53,7 +53,7 @@ $hash = '由 IT 独立核实的 64 位 SHA-256'
 & $approvalScript -Action Verify -InstallDir "$root\seriald-installed" -Port 8898
 ```
 
-如同事位于另一网段，IT 可用 `-RemoteAddress 10.0.120.0/21` 指定范围。撤销时用 `-Action Remove -Port 8898`。每次升级 EXE 都会改变摘要：应在升级前移除旧规则，安装后让 IT 用新摘要重新批准。Windows 防火墙规则本身按**路径**匹配，并不会在每次连接时重新计算哈希；若需要防止用户在批准后替换 EXE，应由 IT 把程序安装在普通用户不可写的受保护目录并管理升级。本仓库默认的 `seriald-installed\` 便于开发，但不提供持续的哈希强制执行。[Windows 防火墙规则参数](https://learn.microsoft.com/en-us/powershell/module/netsecurity/new-netfirewallrule)
+如同事位于另一网段，IT 可用 `-RemoteAddress 192.0.2.0/24` 指定范围。撤销时用 `-Action Remove -Port 8898`。每次升级 EXE 都会改变摘要：应在升级前移除旧规则，安装后让 IT 用新摘要重新批准。Windows 防火墙规则本身按**路径**匹配，并不会在每次连接时重新计算哈希；若需要防止用户在批准后替换 EXE，应由 IT 把程序安装在普通用户不可写的受保护目录并管理升级。本仓库默认的 `seriald-installed\` 便于开发，但不提供持续的哈希强制执行。[Windows 防火墙规则参数](https://learn.microsoft.com/en-us/powershell/module/netsecurity/new-netfirewallrule)
 
 安装目录提供三个启动入口，同一时间只运行其中一个。源码目录只有构建与安装入口；
 `Start-seriald*.cmd` 只存在于打包产物 `dist\seriald\` 和安装目录中。Setup 会添加三个开始菜单快捷方式；ZIP 安装脚本会打印启动路径。

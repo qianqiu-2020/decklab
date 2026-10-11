@@ -28,7 +28,7 @@ async function main() {
     calls.push({ route, options });
     let body = {};
     if (route === '/api/access') body = { share_enabled: true, agent_share_enabled: true,
-      open_access: false, lan_hosts: ['10.0.120.161'] };
+      open_access: false, lan_hosts: ['192.0.2.161'] };
     else if (route === '/api/agent-grants') body = { grants: active.slice() };
     else if (route === '/api/share-link') {
       if (rejectPageShare) throw new Error('network unavailable');
@@ -70,7 +70,7 @@ async function main() {
   byId('b-agent-share').click();
   assert.equal(byId('agent-share-scope').value, 'device');
   assert.equal(byId('agent-share-address-mode').value, 'lan');
-  assert.equal(byId('agent-share-url').value, 'http://10.0.120.161:8898');
+  assert.equal(byId('agent-share-url').value, 'http://192.0.2.161:8898');
   byId('agent-share-address-mode').value = 'local';
   byId('agent-share-address-mode').change();
   assert.equal(byId('agent-share-url').value, 'http://127.0.0.1:8898');
@@ -81,7 +81,7 @@ async function main() {
   assert.deepEqual(JSON.parse(request.options.body), { scope: 'device', serial: 'SN1' });
   const text = byId('agent-share-text').value;
   assert.match(text, /seriald-ag-secret/);
-  assert.match(text, /\nexport SERIALD_URL='http:\/\/10\.0\.120\.161:8898'\n/);
+  assert.match(text, /\nexport SERIALD_URL='http:\/\/192\.0\.2\.161:8898'\n/);
   assert.match(text, /skills\/seriald-board\/SKILL\.md/);
   assert.ok(text.indexOf(' exec --command ') < text.indexOf(' read --sid serial'));
   assert.doesNotMatch(text, /其他客户端仍可无令牌访问/);
@@ -92,12 +92,12 @@ async function main() {
   await byId('agent-share-copy').click();
   assert.equal(clipboard[0], text);
   await byId('b-share').click();
-  assert.equal(clipboard.at(-1), 'http://10.0.120.161:8898/share/browser-token');
+  assert.equal(clipboard.at(-1), 'http://192.0.2.161:8898/share/browser-token');
   const sharing = byId('b-device-share').click();
   assert.equal(byId('b-device-share').disabled, true);
   assert.equal(byId('b-share').disabled, true);
   await sharing;
-  assert.equal(clipboard.at(-1), 'http://10.0.120.161:8898/share/browser-token#device=SN1');
+  assert.equal(clipboard.at(-1), 'http://192.0.2.161:8898/share/browser-token#device=SN1');
   assert.equal(byId('device-share-status').textContent, '链接已复制，24 小时有效');
   assert.equal(byId('b-device-share').disabled, false);
   assert.equal(byId('b-share').disabled, false);
@@ -121,7 +121,7 @@ async function main() {
       openCalls.push(route);
       assert.equal(route, '/api/access');
       return { ok: true, json: async () => ({ open_access: true, share_enabled: false,
-        agent_share_enabled: false, lan_hosts: ['10.0.120.161'] }) };
+        agent_share_enabled: false, lan_hosts: ['192.0.2.161'] }) };
     }
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'static/share.js'), 'utf8'), openContext);
@@ -129,7 +129,7 @@ async function main() {
   assert.equal(openById('b-device-share').hidden, false);
   assert.equal(openById('b-device-share').disabled, false);
   await openById('b-device-share').click();
-  assert.equal(clipboard.at(-1), 'http://10.0.120.161:8898/#device=SN1');
+  assert.equal(clipboard.at(-1), 'http://192.0.2.161:8898/#device=SN1');
   assert.deepEqual(openCalls, ['/api/access']);
   console.log('ok - scoped agent handoff, self-hosted skill and revocation UI');
 }

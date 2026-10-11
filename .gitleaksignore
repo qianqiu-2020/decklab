@@ -1,0 +1,5 @@
+# Reviewed exact historical false positives; no path/rule-wide exclusions.
+# Task target arguments contain attribute names, not credentials.
+2d71e69895ac3706209e74950049bb85aef82612:serialctl.py:generic-api-key:400
+# Bundled xterm initializes exported map classes to undefined.
+ec7b719cb39f9dbbea6918d136e8f15aefed18e4:vendor/xterm.js:generic-api-key:1
