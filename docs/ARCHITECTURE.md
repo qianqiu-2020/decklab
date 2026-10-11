@@ -83,6 +83,7 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `static/terminal-navigation.js` | 终端缓冲搜索、已回显命令导航和高亮；通过注入当前视图检查隔离旧回调 |
 | `static/terminal-view.js` | 当前 xterm 视图及连接代次、销毁、SSE／长轮询、输入队列、尺寸协商和固件屏幕重绘 |
 | `static/archives.js` | 日期／启动选择、归档列表刷新和跨启动搜索；以标签及序列号隔离选择状态，通过注入回调打开终端标签 |
+| `static/tasks.js` | 共用后台任务提交／查询客户端、分页历史与取消；用于识别、SSH 和网页板间复制 |
 | `static/devices.js` | 设备目录、选中身份、搜索筛选、轮询顺序和重连／改名对应；输入占用修订号阻止旧轮询覆盖新操作 |
 | `serialctl.py` | 无第三方依赖的 agent 客户端 |
 

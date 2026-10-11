@@ -4,7 +4,8 @@
   var byId = function (id) { return document.getElementById(id); };
   var dialog = byId('file-transfer-dialog');
   var board = null, devices = [], busy = false, cancelled = false;
-  var meter = null, drag = null;
+  var meter = null, drag = null, copyTask = null, copyStarting = false;
+  var taskClient = global.SerialdTasks.createClient(fetch);
   var MAX_BLOB_DOWNLOAD = 128 * 1024 * 1024;
 
   function status(text) { byId('ft-status').textContent = text; }
@@ -63,11 +64,6 @@
       throw error;
     }
     return result;
-  }
-  async function timedApi(device, action, payload) {
-    var started = performance.now();
-    var result = await api(device, action, payload);
-    return { result: result, seconds: (performance.now() - started) / 1000 };
   }
   async function writeBlock(device, transfer, offset, raw) {
     var started = performance.now(), sent = 0;
@@ -163,70 +159,49 @@
     }
   }
 
+  function cancelCopy() {
+    var entry = copyTask;
+    if (!entry || entry.cancelPending) return;
+    entry.cancelPending = true;
+    taskClient.request('/api/task-cancel', { id: entry.id, key: entry.key, actor: 'web' })
+      .then(function () {
+        if (copyTask === entry) status('已请求取消；请在后台任务中确认最终结果。');
+      })
+      .catch(function (error) {
+        if (copyTask === entry) status('取消请求失败：' + error.message + '；可在后台任务中重试。');
+      })
+      .finally(function () { entry.cancelPending = false; });
+  }
   async function copy(source, destination, target, overwrite) {
-    var incoming = null, outgoing = null;
+    var selected = board;
+    copyStarting = true; copyTask = null; beginProgress();
+    status('正在提交后台复制；关闭面板或刷新页面不会取消。');
     try {
-      incoming = await api(board, 'start', { direction: 'download', path: source });
-      outgoing = await api(destination, 'start', { direction: 'upload', path: target,
-        size: incoming.size, overwrite: overwrite });
-      beginProgress();
-      var sourceSeconds = 0, targetSeconds = 0, sourceBytes = 0, targetBytes = 0;
-      var batchSize = outgoing.batch_size || incoming.chunk_size;
-      async function readBatch(offset) {
-        var parts = [], length = 0, seconds = 0;
-        while (offset + length < incoming.size && length < batchSize) {
-          var read = await timedApi(board, 'chunk', { id: incoming.id, offset: offset + length });
-          var data = decode(read.result.data_b64);
-          if (!data.length || read.result.offset !== offset + length + data.length)
-            throw new Error('源板传输偏移不匹配');
-          parts.push(data); length += data.length; seconds += read.seconds;
-        }
-        var joined = new Uint8Array(length), cursor = 0;
-        parts.forEach(function (part) { joined.set(part, cursor); cursor += part.length; });
-        return { data: joined, offset: offset + length, seconds: seconds };
-      }
-      var chunk = incoming.size ? await readBatch(0) : null;
-      if (chunk) { sourceSeconds += chunk.seconds; sourceBytes = chunk.offset; }
-      for (var offset = 0; offset < incoming.size;) {
-        checkCancelled();
-        if (chunk.offset !== offset + chunk.data.length || chunk.offset > incoming.size)
-          throw new Error('源板传输偏移不匹配');
-        // Source and destination are independent serial ports. Read the next
-        // block while writing this one, then inspect both outcomes together.
-        var next = chunk.offset < incoming.size ? readBatch(chunk.offset) : null;
-        var writes = [writeBlock(destination, outgoing, offset, chunk.data)];
-        if (next) writes.push(next);
-        var outcomes = await Promise.allSettled(writes);
-        var failure = outcomes.find(function (item) { return item.status === 'rejected'; });
-        if (failure) throw failure.reason;
-        if (outcomes[0].value.result.offset !== chunk.offset) throw new Error('目标板传输偏移不匹配');
-        targetSeconds += outcomes[0].value.seconds;
-        targetBytes += chunk.offset - offset;
-        offset = outcomes[0].value.result.offset;
-        if (next) {
-          var read = outcomes[1].value;
-          sourceSeconds += read.seconds;
-          sourceBytes = read.offset;
-          chunk = read;
-        } else chunk = null;
-        var sourceRate = sourceSeconds ? rateText(sourceBytes / sourceSeconds) : '计算中';
-        var targetRate = targetSeconds ? rateText(targetBytes / targetSeconds) : '计算中';
-        progress(offset, incoming.size, '源读取 ' + sourceRate + ' · 目标写入 ' + targetRate);
-      }
-      checkCancelled();
-      var sourceDone = await api(board, 'finish', { id: incoming.id });
-      incoming = null;
-      var targetDone = await api(destination, 'finish', { id: outgoing.id });
-      outgoing = null;
-      if (sourceDone.sha256 !== targetDone.sha256) throw new Error('目标板文件校验失败');
+      var done = await taskClient.start({ kind: 'file-copy', key: selected.key, serial: selected.serial || '',
+        connection_id: selected.connection_id, actor: 'web', path: source, to_key: destination.key,
+        to_serial: destination.serial || '', to_connection_id: destination.connection_id,
+        to_path: target, overwrite: overwrite }, function (task) {
+        var first = !copyTask;
+        if (first) copyTask = { id: task.id, key: selected.key };
+        copyStarting = false;
+        if (first && cancelled) cancelCopy();
+        var p = task.progress || {};
+        if (p.total !== undefined) progress(p.done || 0, p.total,
+          '任务 ' + task.id + (p.phase === 'verifying' ? ' · 正在校验' : ''));
+        else status('后台复制 ' + task.id + ' · 可关闭面板，在任务列表中查看。');
+      }, { key: selected.key });
       byId('ft-progress').value = 100;
-      status('板间复制完成 · 平均 ' + rateText(averageRate(targetDone.size))
-        + ' · 源读取 ' + rateText(sourceBytes / Math.max(sourceSeconds, 0.001))
-        + ' · 目标写入 ' + rateText(targetBytes / Math.max(targetSeconds, 0.001))
-        + ' · ' + destination.key + ':' + target + ' · SHA-256 ' + targetDone.sha256);
+      var rates = done.rate_diagnostics || {};
+      status('板间复制完成 · 平均 ' + rateText((rates.effective_kib_s || 0) * 1024)
+        + ' · 源读取 ' + rateText((rates.source_kib_s || 0) * 1024)
+        + ' · 目标写入 ' + rateText((rates.destination_kib_s || 0) * 1024)
+        + ' · ' + destination.key + ':' + target + ' · SHA-256 ' + done.sha256);
+    } catch (error) {
+      if (!copyTask && (!error.status || error.status >= 500))
+        throw new Error(error.message + '；提交结果未确认，请在任务列表中核实后再重试。');
+      throw error;
     } finally {
-      if (incoming) await api(board, 'abort', { id: incoming.id }).catch(function () {});
-      if (outgoing) await api(destination, 'abort', { id: outgoing.id }).catch(function () {});
+      copyStarting = false; copyTask = null;
     }
   }
 
@@ -241,7 +216,7 @@
   }
 
   function open(selected, available) {
-    if (busy) return;
+    if (busy) { dialog.show(); return; }
     dialog.removeAttribute('style');
     board = selected; devices = available;
     byId('ft-board').textContent = selected.key + ' · ' + (selected.dev || '串口');
@@ -306,13 +281,17 @@
     if (file && !byId('ft-target').value) byId('ft-target').value = '/tmp/' + file.name;
   });
   byId('ft-close').addEventListener('click', function () {
-    if (busy) { cancelled = true; status('正在取消，等待当前分块结束…'); }
+    if (copyTask || copyStarting) dialog.close();
+    else if (busy) { cancelled = true; status('正在取消，等待当前分块结束…'); }
     else dialog.close();
   });
   byId('ft-cancel').addEventListener('click', function () {
-    cancelled = true; status('正在取消，等待当前分块结束…');
+    cancelled = true;
+    if (copyTask || copyStarting) { status('正在请求取消后台复制…'); cancelCopy(); }
+    else status('正在取消，等待当前分块结束…');
   });
   dialog.addEventListener('cancel', function (event) {
+    if (copyTask || copyStarting) return;
     if (busy) { event.preventDefault(); cancelled = true; status('正在取消，等待当前分块结束…'); }
   });
   byId('ft-start').addEventListener('click', async function () {

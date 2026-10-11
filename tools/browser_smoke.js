@@ -215,17 +215,24 @@ let chrome, ws;
   fs.writeFileSync(path.join(out,'ui-desktop.png'),Buffer.from(screenshot.data,'base64'));
   const transferMetrics=await evaluate(`(async () => {
     const original=window.fetch.bind(window), values=[];
-    let phase='upload', sourceNextStarted=false, overlapped=false;
+    let phase='upload', taskPolls=0, starts=0;
     const output=document.querySelector('#ft-status');
     const observer=new MutationObserver(()=>values.push(output.textContent));
     observer.observe(output,{childList:true});
     window.fetch=async (url,options) => {
+      if (phase==='copy' && String(url)==='/api/task-start') {
+        starts++;
+        return {ok:true,json:async()=>({task:{id:'browser-copy',state:'running',progress:{done:0,total:4096}}})};
+      }
+      if (phase==='copy' && String(url).startsWith('/api/task?')) {
+        taskPolls++;
+        const task=taskPolls===1 ? {id:'browser-copy',state:'running',progress:{done:2048,total:4096}}
+          : {id:'browser-copy',state:'completed',progress:{done:4096,total:4096},result:{ok:true,size:4096,
+              path:'/tmp/target.bin',sha256:'mock-sha',rate_diagnostics:{effective_kib_s:8,source_kib_s:13,destination_kib_s:8}}};
+        return {ok:true,json:async()=>({task})};
+      }
       if (!String(url).startsWith('/api/file-transfer/')) return original(url,options);
       const action=String(url).split('/').pop(), body=JSON.parse(options.body);
-      if (phase==='copy' && action==='chunk' && body.key==='milkv2' && body.offset===2048)
-        sourceNextStarted=true;
-      if (phase==='copy' && action==='chunk' && body.key!=='milkv2' && body.offset===0)
-        overlapped=sourceNextStarted;
       if (action==='chunk') await new Promise(resolve=>setTimeout(resolve,120));
       const result=action==='start'
         ? {ok:true,id:body.direction==='download'?'fake-source':'fake-upload',chunk_size:2048,size:4096,sha256:'mock-sha'}
@@ -252,7 +259,7 @@ let chrome, ws;
       document.querySelector('#ft-start').click();
       for(let n=0;n<40 && !output.textContent.includes('板间复制完成');n++)
         await new Promise(resolve=>setTimeout(resolve,50));
-      answer.copyFinal=output.textContent; answer.overlapped=overlapped;
+      answer.copyFinal=output.textContent; answer.starts=starts; answer.taskPolls=taskPolls;
       document.querySelector('#ft-close').click();
       return answer;
     } finally {window.fetch=original;observer.disconnect();}
@@ -260,7 +267,8 @@ let chrome, ws;
   assert.ok(transferMetrics.values.some(value=>value.includes('/s') && value.includes('预计剩余')),
     'active transfer should show estimated rate and remaining time');
   assert.ok(transferMetrics.final.includes('平均') && transferMetrics.final.includes('/s'));
-  assert.ok(transferMetrics.overlapped, 'copy should read the next source chunk during destination write');
+  assert.equal(transferMetrics.starts, 1, 'browser copy must start exactly one collector task');
+  assert.ok(transferMetrics.taskPolls >= 2, 'browser must follow collector progress');
   assert.ok(transferMetrics.copyFinal.includes('板间复制完成'));
   await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
   await delay(150);

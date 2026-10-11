@@ -14,7 +14,7 @@ class Element {
   constructor(tag = 'div') {
     this.tagName = tag; this.children = []; this.events = {};
     this.dataset = {}; this.style = {}; this.hidden = false;
-    this.checked = true; this.value = ''; this._text = '';
+    this.checked = true; this.value = ''; this._text = ''; this.files = [];
     this.attributes = {};
     const classes = new Set();
     this.classList = {
@@ -44,6 +44,10 @@ class Element {
   scrollIntoView(options) { this.scrolled = options || true; }
   select() {}
   remove() { this.removed = true; }
+  removeAttribute(name) { delete this.attributes[name]; }
+  querySelector() { return this.head ||= new Element(); }
+  show() { this.open = true; }
+  close() { this.open = false; }
 }
 
 function harness(options = {}) {
@@ -126,6 +130,7 @@ function harness(options = {}) {
       fit() { this.fitted = true; }
       proposeDimensions() { return { cols: 140, rows: 42 }; }
     } },
+    performance: { now: () => Date.now() },
     Uint8Array, AbortController, console, location: { hash: options.hash || '' },
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     setTimeout: (fn, delay) => { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
@@ -148,6 +153,7 @@ function harness(options = {}) {
   sandbox.addEventListener = function () {};
   sandbox.prompt = () => '新编号';
   vm.runInNewContext(script, sandbox, { filename: 'index.html' });
+  if (options.transfer) vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'static', 'file-transfer.js'), 'utf8'), sandbox);
   const take = (route, predicate = () => true) => {
     const request = requests.find(r => !r.taken && r.url.split('?')[0] === route && predicate(r));
     assert.ok(request, 'missing request: ' + route);
@@ -162,7 +168,7 @@ function harness(options = {}) {
   };
   const timer = delay => [...timers.entries()].find(([, t]) => t.delay === delay);
   const fire = id => { const t = timers.get(id); timers.delete(id); assert.ok(t); t.fn(); };
-  return { get, document, requests, terminals, streams, timers, intervals, take, sends, select, timer, fire, clientId: sandbox.SerialdUI.clientId };
+  return { get, document, requests, terminals, streams, timers, intervals, take, sends, select, timer, fire, clientId: sandbox.SerialdUI.clientId, transfer: sandbox.SerialdFileTransfer };
 }
 
 async function drain() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
@@ -1244,6 +1250,82 @@ test('task history recovers progress on a fresh page and cancels only the select
   row.children[1].click();
   assert.equal(h.take('/api/task-cancel').body.id, 'existing');
   assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 0);
+});
+
+function copyHarness() {
+  const h = harness({transfer: true});
+  const boards = ['A', 'B'].map(key => ({key, alive: true, serial: 'SN-' + key, connection_id: 'connection-' + key}));
+  h.transfer.open(boards[0], boards);
+  h.get('ft-mode').value = 'copy'; h.get('ft-mode').emit('change');
+  h.get('ft-target-device').value = 'B'; h.get('ft-target-device').emit('change');
+  h.get('ft-source').value = '/source'; h.get('ft-target').value = '/target';
+  return h;
+}
+function runningCopy() {
+  return {id: 'copy-task', kind: 'file-copy', state: 'running', progress: {done: 20, total: 100, phase: 'copying'}};
+}
+function completedCopy() {
+  return {id: 'copy-task', state: 'completed', progress: {done: 100, total: 100},
+    result: {ok: true, size: 100, sha256: 'digest', rate_diagnostics: {effective_kib_s: 8, source_kib_s: 13, destination_kib_s: 8}}};
+}
+
+test('browser copy submits once, survives closing/reopening and polls without a single-board scope', async () => {
+  const h = copyHarness(); h.get('ft-start').click();
+  const start = h.take('/api/task-start');
+  assert.equal(start.body.connection_id, 'connection-A');
+  assert.equal(start.body.to_connection_id, 'connection-B');
+  assert.equal(start.body.to_serial, 'SN-B');
+  start.resolve({task: runningCopy()}); await drain();
+  assert.equal(h.get('ft-progress').value, 20);
+  const poll = h.take('/api/task');
+  assert.equal(new URL(poll.url, 'http://fixture').searchParams.has('serial'), false);
+  h.get('ft-close').click();
+  assert.equal(h.get('file-transfer-dialog').open, false);
+  assert.equal(h.requests.filter(r => r.url === '/api/task-cancel').length, 0);
+  h.transfer.open({key: 'B'}, []);
+  assert.equal(h.get('file-transfer-dialog').open, true);
+  assert.ok(h.get('ft-board').textContent.startsWith('A'));
+  poll.resolve({task: completedCopy()}); await drain();
+  assert.ok(h.get('ft-status').textContent.includes('板间复制完成'));
+  assert.equal(h.requests.filter(r => r.url.startsWith('/api/file-transfer/')).length, 0);
+  assert.equal(h.get('ft-start').disabled, false);
+});
+
+test('copy cancellation during submission waits for its ID and cancels exactly once', async () => {
+  const h = copyHarness(); h.get('ft-start').click(); h.get('ft-cancel').click();
+  assert.equal(h.requests.filter(r => r.url === '/api/task-cancel').length, 0);
+  h.take('/api/task-start').resolve({task: runningCopy()}); await drain();
+  h.get('ft-cancel').click();
+  const cancel = h.take('/api/task-cancel');
+  assert.equal(cancel.body.id, 'copy-task');
+  assert.equal(Object.hasOwn(cancel.body, 'serial'), false);
+  assert.equal(h.requests.filter(r => r.url === '/api/task-cancel').length, 1);
+  h.take('/api/task').resolve({task: {id: 'copy-task', state: 'cancelled', error: 'cancelled'}}); await drain();
+  h.transfer.open({key: 'new-board'}, []);
+  const currentStatus = h.get('ft-status').textContent;
+  cancel.resolve({ok: true}); await drain();
+  assert.equal(h.get('ft-status').textContent, currentStatus);
+});
+
+test('lost copy submission response is not replayed and asks users to inspect task history', async () => {
+  const h = copyHarness(); h.get('ft-start').click();
+  h.take('/api/task-start').reject(new Error('connection lost')); await drain();
+  assert.ok(h.get('ft-status').textContent.includes('提交结果未确认'));
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 1);
+  assert.equal(h.get('ft-start').disabled, false);
+});
+
+test('copy monitoring retries the same ID after network loss and stops on malformed task response', async () => {
+  const h = copyHarness(); h.get('ft-start').click();
+  h.take('/api/task-start').resolve({task: runningCopy()}); await drain();
+  h.take('/api/task').reject(new Error('offline')); await drain();
+  const retry = h.timer(2000); assert.ok(retry); h.fire(retry[0]);
+  const poll = h.take('/api/task');
+  assert.equal(new URL(poll.url, 'http://fixture').searchParams.get('id'), 'copy-task');
+  poll.resolve({task: {id: 'another-task', state: 'completed'}}); await drain();
+  assert.ok(h.get('ft-status').textContent.includes('不匹配'));
+  assert.equal(h.timer(2000), undefined);
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 1);
 });
 
 test('task history filters by involvement without narrowing multi-board cancellation scope', async () => {

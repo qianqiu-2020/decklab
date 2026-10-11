@@ -2,8 +2,8 @@
 
 Durable tasks currently support `identify`, `ssh-enable` and `ssh-connect` through
 the collector API, CLI and browser. Collector-owned `file-copy` is available
-through the task API and CLI `file-copy --background`. Browser copy execution and
-server-owned upload/download are pending; existing foreground transfers remain.
+through the task API, browser and CLI `file-copy --background`. Server-owned
+upload/download are pending; existing foreground upload/download remain.
 
 ## API and CLI
 
@@ -113,3 +113,16 @@ the original connection. Local reservations and timers are released by matching
 transfer ID and connection even if remote cleanup is impossible. A disconnect
 can prevent remote cleanup; cancellation
 is not a guarantee that the destination has not already been committed.
+
+The browser file-transfer dialog submits a collector-owned copy and follows its
+task ID. Closing it (including Escape) keeps copying; reopening during execution
+shows the original transfer. The cancel button requests cancellation by task ID,
+even if pressed before submission returns. Delayed cancellation responses cannot
+overwrite a later transfer's status. A lost submission response is never
+automatically replayed: inspect task history before retrying. Completed copy
+results remain visible under both source and destination boards after reload.
+
+The shared browser task client serves copy, identification and SSH creation. It
+retries reads on network outages, stops on revoked/missing access and rejects
+mismatched task responses. Browser upload/download still require the initiating
+page to remain connected until their future staging/task integration is finished.

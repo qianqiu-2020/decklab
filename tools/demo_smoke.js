@@ -97,6 +97,22 @@ async function until(check, description) {
   await evaluate('peerPage.contentDocument.querySelector("#b-input-owner").click()');
   await until(() => evaluate('document.querySelector("#input-owner-label").textContent === "占用输入"'), 'shared input restored');
   await evaluate('peerPage.remove()');
+  // Use the production copy task API through the actual file-transfer dialog.
+  await evaluate('document.querySelector("#b-file-transfer").click()');
+  await evaluate(`document.querySelector('#ft-mode').value='copy';
+    document.querySelector('#ft-mode').dispatchEvent(new Event('change'));
+    document.querySelector('#ft-target-device').value='demo-k3';
+    document.querySelector('#ft-source').value='/root/log.txt';
+    document.querySelector('#ft-target').value='/tmp/browser-copy.log';
+    document.querySelector('#ft-start').click();`);
+  await until(() => evaluate('document.querySelector("#ft-status").textContent.includes("板间复制完成")'), 'collector-owned browser copy');
+  const copied = (await (await fetch(address + 'api/tasks?target_serial=DEMO-001')).json()).tasks
+    .find(task => task.kind === 'file-copy');
+  assert.equal(copied.state, 'completed');
+  assert.equal(copied.targets.length, 2);
+  const expected = Buffer.from(('[    0.000000] Linux version 6.18.0-demo\n[    1.234000] mmc0: initialized\n').repeat(512));
+  assert.equal(copied.result.sha256, require('node:crypto').createHash('sha256').update(expected).digest('hex'));
+  await evaluate('document.querySelector("#ft-close").click()');
   // Start via the real UI, then reload the page and recover server-owned history.
   await evaluate('document.querySelector("#b-identify").click()');
   await until(() => evaluate('document.querySelector("#d-status").textContent.includes("识别完成")'), 'background identification');
@@ -108,11 +124,14 @@ async function until(check, description) {
     + ' && document.querySelectorAll(".dev").length === 3'), 'fresh page');
   await evaluate('document.querySelector(\'[data-key="demo-k1"]\').click(); document.querySelector("#b-tasks").click()');
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("已完成")'), 'task history after reload');
+  await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("/tmp/browser-copy.log")'), 'copy history after reload');
+  await evaluate('document.querySelector(\'[data-key="demo-k3"]\').click()');
+  await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("/tmp/browser-copy.log")'), 'copy visible under destination board');
   const shot = await rpc('Page.captureScreenshot', {format: 'png'});
   fs.mkdirSync(path.join(root, 'dist'), {recursive: true});
   fs.writeFileSync(path.join(root, 'dist', 'demo-ui.png'), Buffer.from(shot.data, 'base64'));
   assert.deepEqual(errors, []);
-  console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover, task result after reload');
+  console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover, copy via UI, task result after reload');
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   if (ws) ws.close();
   for (const child of [chrome, demo]) {

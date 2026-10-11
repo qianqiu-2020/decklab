@@ -1,16 +1,10 @@
 // Durable task history and operation watchers survive terminal/device switches.
 (function (global) {
   'use strict';
-  function create(options) {
-    var $ = options.byId, fetch = options.fetch;
-    var selection = '', offset = 0, sequence = 0, waiting = {};
-    var names = { identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH', 'file-copy': '板间复制' };
-    var states = { queued: '等待执行', running: '执行中', completed: '已完成', failed: '失败',
-                   cancelled: '已取消', interrupted: '已中断' };
-    function scope(ctx) { return ctx ? ctx.serial ? 'serial:' + ctx.serial
-      : 'connection:' + (ctx.connectionId || ctx.key) : ''; }
-    function sameSelection(selected) { return !!selected && scope(options.getView()) === selected; }
-    function active(task) { return task.state === 'queued' || task.state === 'running'; }
+  var states = { queued: '等待执行', running: '执行中', completed: '已完成', failed: '失败',
+                 cancelled: '已取消', interrupted: '已中断' };
+  function active(task) { return task.state === 'queued' || task.state === 'running'; }
+  function createClient(fetch) {
     function request(url, payload) {
       return fetch(url, payload ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload) } : { cache: 'no-store' }).then(function (response) {
@@ -22,37 +16,55 @@
         });
       });
     }
-    function finish(entry, task) {
-      if (active(task)) return false;
-      delete waiting[task.id];
-      if (task.state === 'completed') entry.resolve(task.result || { ok: true });
-      else entry.reject(new Error(task.error || states[task.state] || '任务失败'));
-      return true;
-    }
-    function monitor(entry) {
-      request('/api/task?id=' + encodeURIComponent(entry.id) + '&key=' + encodeURIComponent(entry.key)
-        + (entry.serial ? '&serial=' + encodeURIComponent(entry.serial) : '')).then(function (data) {
-        if (!data.task || data.task.id !== entry.id) throw new Error('任务响应与请求不匹配');
-        if (!finish(entry, data.task)) entry.timer = setTimeout(function () { monitor(entry); }, 1000);
-      }).catch(function (error) {
-        if ([401, 403, 404].indexOf(error.status) !== -1) {
-          delete waiting[entry.id]; entry.reject(error); return;
+    function watch(task, ctx, onUpdate) {
+      return new Promise(function (resolve, reject) {
+        var id = task && task.id;
+        function inspect(current) {
+          if (!id || !current || current.id !== id || !states[current.state]) {
+            var error = new Error('任务响应与请求不匹配'); error.permanent = true; throw error;
+          }
+          if (onUpdate) {
+            try { onUpdate(current); } catch (error) { error.permanent = true; throw error; }
+          }
+          if (active(current)) return false;
+          if (current.state === 'completed') resolve(current.result || { ok: true });
+          else reject(new Error(current.error || states[current.state] || '任务失败'));
+          return true;
         }
-        // A network outage does not imply the collector stopped the operation.
-        entry.timer = setTimeout(function () { monitor(entry); }, 2000);
+        function monitor() {
+          request('/api/task?id=' + encodeURIComponent(id) + '&key=' + encodeURIComponent(ctx.key)
+            + (ctx.serial ? '&serial=' + encodeURIComponent(ctx.serial) : '')).then(function (data) {
+            if (!inspect(data.task)) setTimeout(monitor, 1000);
+          }).catch(function (error) {
+            if (error.permanent || [401, 403, 404].indexOf(error.status) !== -1) { reject(error); return; }
+            // Losing a network response does not stop the collector or justify replay.
+            setTimeout(monitor, 2000);
+          });
+        }
+        try { if (!inspect(task)) monitor(); } catch (error) { reject(error); }
       });
     }
-    function run(kind, ctx) {
-      return request('/api/task-start', { key: ctx.key, serial: ctx.serial,
-        connection_id: ctx.connectionId, kind: kind, actor: 'web' }).then(function (data) {
-        if (!data.task || !data.task.id) throw new Error('服务未返回任务编号');
-        refresh();
-        return new Promise(function (resolve, reject) {
-          var entry = { id: data.task.id, key: ctx.key, serial: ctx.serial, resolve: resolve, reject: reject };
-          waiting[entry.id] = entry;
-          if (!finish(entry, data.task)) monitor(entry);
-        });
+    function start(payload, onUpdate, ctx) {
+      // Never retry a start whose response was lost: execution may already exist.
+      return request('/api/task-start', payload).then(function (data) {
+        return watch(data.task, ctx || payload, onUpdate);
       });
+    }
+    return { request: request, watch: watch, start: start };
+  }
+  function create(options) {
+    var $ = options.byId, client = createClient(options.fetch), request = client.request;
+    var selection = '', offset = 0, sequence = 0;
+    var names = { identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH', 'file-copy': '板间复制' };
+    function scope(ctx) { return ctx ? ctx.serial ? 'serial:' + ctx.serial
+      : 'connection:' + (ctx.connectionId || ctx.key) : ''; }
+    function sameSelection(selected) { return !!selected && scope(options.getView()) === selected; }
+    function run(kind, ctx) {
+      var refreshed = false;
+      return client.start({ key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId,
+        kind: kind, actor: 'web' }, function () {
+          if (!refreshed) { refreshed = true; refresh(); }
+        });
     }
     function render(tasks, ctx, selected, more) {
       var box = $('d-tasks'); box.textContent = '';
@@ -125,5 +137,5 @@
     setInterval(function () { if (options.visible()) refresh(); }, 5000);
     return { run: run, refresh: refresh };
   }
-  global.SerialdTasks = { create: create };
+  global.SerialdTasks = { create: create, createClient: createClient };
 })(window);
