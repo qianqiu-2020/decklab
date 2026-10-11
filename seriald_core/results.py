@@ -14,6 +14,7 @@ def response(status, payload):
         payload.setdefault('code', {
             400: 'invalid-argument', 401: 'unauthorized', 403: 'forbidden',
             404: 'not-found', 408: 'timeout', 409: 'conflict', 413: 'too-large',
+            423: 'input-owned',
             500: 'internal-error', 502: 'remote-failure',
             503: 'unavailable', 504: 'timeout',
         }.get(status, 'operation-failed'))

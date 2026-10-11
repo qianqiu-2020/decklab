@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add optional actor-scoped serial input reservations, CLI claim/release and
+  browser human takeover. Spectators retain output access and independent SSH;
+  agent revocation and connection replacement release reservations.
+
 - Extract session/archive queries from HTTP handling and share result/error codes
   with control authentication. Keep boot partition caches intact when listing;
   reject archive links, nonregular files and replacement races across readers.

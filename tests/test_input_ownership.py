@@ -1,0 +1,172 @@
+"""Optional actor reservations coordinate fake serial writers and real waiters."""
+import threading
+import types
+import io
+import json
+import unittest
+from unittest import mock
+
+from seriald_core.device import Device
+from seriald_core.actions import DeviceActions
+from seriald_core.transactions import TransactionError
+from seriald_core import web
+
+
+class InputOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.device = Device('fake-usb', '/fake/tty')
+        self.device.fd, self.device.present = 98765, True
+        self.transactions = self.device.transactions
+        self.manager = types.SimpleNamespace(store=mock.Mock())
+        self.actions = DeviceActions(self.manager)
+
+    def test_default_shared_input_and_reserved_owner_input(self):
+        with mock.patch.object(self.device, '_write', return_value=(True, '')) as write:
+            for actor in ('one', 'two'):
+                result = self.actions.execute('session-send', {'data': 'x'}, self.device, actor)
+                self.assertEqual(result.status, 200)
+            owner = self.transactions.claim('one')
+            denied = self.actions.execute('session-send', {'data': 'x'}, self.device, 'two')
+            self.assertEqual((denied.status, denied.payload['code']), (423, 'input-owned'))
+            self.assertEqual(self.actions.execute('session-send', {'data': 'x'}, self.device, 'one').status, 200)
+            self.assertEqual(write.call_count, 3)
+            self.transactions.release(owner['id'], 'one')
+            self.assertEqual(self.actions.execute('session-send', {'data': 'x'}, self.device, 'two').status, 200)
+
+    def test_probe_transfer_and_direct_command_cannot_bypass_reservation(self):
+        self.transactions.claim('owner')
+        with mock.patch.object(self.device, '_run_cmd_locked') as command:
+            for action in ('probe', 'identify', 'ssh-enable', 'rescue', 'file-transfer/start'):
+                self.assertEqual(self.actions.execute(action, {}, self.device, 'other').status, 423)
+            with self.transactions.actor_scope('other'):
+                self.assertFalse(self.device._run_cmd('uname', 1)[0])
+        command.assert_not_called()
+        self.assertIsNone(self.transactions.snapshot())
+
+    def test_human_takeover_cancels_waiter_but_keeps_collector_open(self):
+        self.transactions.claim('agent')
+        entered = threading.Event()
+        errors = []
+
+        def wait():
+            try:
+                with self.transactions.begin('identify', 10, actor='agent'):
+                    entered.set()
+                    self.device._wait(0, 'never', 10)
+            except TransactionError as error:
+                errors.append(error.code)
+
+        worker = threading.Thread(target=wait)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(2))
+            owner = self.transactions.claim('web', takeover=True)
+            worker.join(timeout=0.5)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, ['cancelled'])
+            self.assertEqual(owner['actor'], 'web')
+            self.assertEqual(self.device.fd, 98765)
+            self.assertFalse(self.device.stop.is_set())
+            with self.transactions.begin('input', 1, actor='web'):
+                pass
+        finally:
+            self.device.stop.set()
+            with self.device.cv:
+                self.device.cv.notify_all()
+            worker.join(timeout=2)
+
+    def test_only_human_can_takeover_and_stale_release_cannot_clear_new_owner(self):
+        first = self.transactions.claim('one')
+        with self.assertRaises(TransactionError) as denied:
+            self.transactions.claim('two', takeover=True)
+        self.assertEqual(denied.exception.status, 403)
+        with self.assertRaises(TransactionError):
+            self.transactions.release(first['id'], 'two')
+        second = self.transactions.claim('web', takeover=True)
+        with self.assertRaises(TransactionError) as stale:
+            self.transactions.release(first['id'], 'one')
+        self.assertEqual(stale.exception.status, 404)
+        self.assertEqual(self.transactions.ownership()['id'], second['id'])
+
+    def test_connection_generation_invalidates_old_reservation(self):
+        old = self.transactions.claim('one')
+        self.device.connection_id = 'replacement'
+        self.assertIsNone(self.transactions.ownership())
+        with self.assertRaises(TransactionError):
+            self.transactions.release(old['id'], 'one')
+        with self.transactions.begin('input', 1, actor='two'):
+            pass
+
+    def test_repeat_claim_returns_same_id_during_owners_operation(self):
+        owner = self.transactions.claim('agent')
+        with self.transactions.begin('identify', 1, actor='agent'):
+            self.assertEqual(self.transactions.claim('agent')['id'], owner['id'])
+
+    def test_http_claim_and_agent_revocation_release_reservation(self):
+        self.manager.resolve = lambda key: self.device
+        self.manager.all_devices = lambda: [self.device]
+
+        def post(action, payload):
+            handler = web.Handler.__new__(web.Handler)
+            body = json.dumps(payload).encode()
+            handler.path, handler.headers = '/api/' + action, {'Content-Length': str(len(body))}
+            handler.rfile, handler.wfile = io.BytesIO(body), io.BytesIO()
+            handler.send_response, handler.send_header, handler.end_headers = mock.Mock(), mock.Mock(), mock.Mock()
+            with mock.patch.object(web, 'MGR', self.manager):
+                handler.do_POST()
+            return handler.send_response.call_args.args[0], json.loads(handler.wfile.getvalue())
+
+        status, result = post('input-claim', {'key': self.device.key, 'actor': 'shared-agent/test'})
+        self.assertEqual(status, 200)
+        self.assertEqual(result['input_owner']['actor'], 'shared-agent/test')
+        status, _ = post('agent-revoke', {'actor': 'shared-agent/test'})
+        self.assertEqual(status, 200)
+        self.assertIsNone(self.transactions.ownership())
+        self.transactions.claim('shared-agent/test')
+        release = self.transactions.release
+
+        def intervening_takeover(ownership_id, actor):
+            self.transactions.claim('web', takeover=True)
+            release(ownership_id, actor)
+
+        with mock.patch.object(self.transactions, 'release', side_effect=intervening_takeover):
+            status, _ = post('agent-revoke', {'actor': 'shared-agent/test'})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.transactions.ownership()['actor'], 'web')
+
+    def test_ssh_remains_writable_and_serial_output_readable_for_spectator(self):
+        self.transactions.claim('serial-owner')
+        session = mock.Mock(actor='ssh-owner', takeovers=set())
+        self.device.ssh_sessions['ssh1'] = session
+        session.write.return_value = True
+        with mock.patch.object(self.device, '_log_text'):
+            self.device.append(b'boot output\n')
+        self.assertEqual(self.device.read(0)[1], b'boot output\n')
+        with mock.patch.object(self.device, 'record_input'):
+            result = self.actions.execute('session-send', {'sid': 'ssh1', 'data': 'uname\r'},
+                                          self.device, 'ssh-owner')
+        self.assertEqual(result.status, 200)
+        session.write.assert_called_once()
+
+    def test_two_claimants_cannot_both_become_owner(self):
+        barrier = threading.Barrier(2)
+        results = []
+
+        def claim(actor):
+            barrier.wait(timeout=2)
+            try:
+                results.append(self.transactions.claim(actor)['actor'])
+            except TransactionError:
+                results.append(None)
+
+        threads = [threading.Thread(target=claim, args=(actor,)) for actor in ('one', 'two')]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(sum(result is not None for result in results), 1)
+
+
+if __name__ == '__main__':
+    unittest.main()

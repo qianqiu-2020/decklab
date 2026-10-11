@@ -18,6 +18,7 @@
   var ACTIVITY_PAGE_SIZE = 10;
   var DEFAULT_TERMINAL_FONT_SIZE = 14.5;
   var takenOver = {};
+  var ownershipRevision = 0;
   window.SerialdShareSelection = function () {
     return lastDevices.filter(function (device) { return device.key === selKey; })[0] || null;
   };
@@ -28,6 +29,24 @@
     });
     $('slow-paste-option').hidden = ctx.sid !== 'serial';
     $('b-takeover').hidden = !ctx.canTakeover;
+    $('b-input-owner').hidden = ctx.sid !== 'serial';
+    $('b-input-owner').disabled = !!ctx.ownerPending;
+    var owner = ctx.inputOwner;
+    $('input-owner-label').textContent = !owner ? '占用输入' : owner.actor === 'web' ? '释放输入' : '接管输入';
+    $('b-input-owner').title = owner ? '串口输入由 ' + owner.actor + ' 占用；输出仍可共享查看' : '可选占用串口输入，其他人仍可查看输出';
+  }
+
+  function updateInputOwner(ctx, owner) {
+    ctx.inputOwner = owner || null;
+    if (ctx.sid !== 'serial') return;
+    ctx.readonly = !!owner && owner.actor !== 'web';
+    if (ctx.readonly) {
+      ctx.inputQueue = [];
+      clearTimeout(ctx.inputTimer);
+      ctx.inputTimer = 0;
+    }
+    if (ctx.term) ctx.term.options.cursorBlink = !ctx.readonly;
+    setInputMode(ctx);
   }
 
   function isCurrent(ctx) {
@@ -70,7 +89,9 @@
       && selectedSession.actor !== 'web' && !takenOver[sid];
     var ctx = { key: key, serial: board.serial, connectionId: board.connection_id,
                 byPath: board.by_path || board.last_path,
-                readonly: selectedSession.kind === 'log' || isAgentSession,
+                readonly: selectedSession.kind === 'log' || isAgentSession
+                  || (sid === 'serial' && !!board.input_owner && board.input_owner.actor !== 'web'),
+                inputOwner: board.input_owner || null,
                 canTakeover: isAgentSession, kind: selectedSession.kind || 'serial',
                 sid: sid, gen: loopGen, off: 0, readSeq: 0, sessionsSeq: 0, activitySeq: 0,
                 logsSeq: 0,
@@ -666,6 +687,7 @@
   }
 
   function pollDevices() {
+    var ownerRevision = ownershipRevision;
     fetch('/api/devices', { cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -694,6 +716,10 @@
             if (samePath.length === 1) cur = samePath[0];
           }
           if (cur && cur.key !== selKey) adoptKey(view, cur.key, cur.serial);
+          if (cur && isCurrent(view)) {
+            if (ownerRevision === ownershipRevision) updateInputOwner(view, cur.input_owner);
+            else cur.input_owner = view.inputOwner;
+          }
           var info = cur && cur.info;
           var infoIdentity = cur ? [cur.key, cur.connection_id, info && info.ts || 0,
             info && info.serial_source || '', info && info.identity_status || ''].join('|') : '';
@@ -1651,6 +1677,35 @@
       });
   });
   $('b-rescue').addEventListener('click', function () { doRescue(); });
+
+  $('b-input-owner').addEventListener('click', function () {
+    var ctx = view;
+    if (!isCurrent(ctx) || ctx.sid !== 'serial') return;
+    var owner = ctx.inputOwner;
+    var release = owner && owner.actor === 'web';
+    var payload = { key: ctx.key, serial: ctx.serial, actor: 'web' };
+    if (release) payload.id = owner.id;
+    else payload.takeover = !!owner;
+    ctx.ownerPending = true;
+    ownershipRevision++;
+    $('b-input-owner').disabled = true;
+    fetch('/api/' + (release ? 'input-release' : 'input-claim'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); }).then(function (result) {
+      if (!isCurrent(ctx)) return;
+      if (!result.ok) { $('d-status').textContent = result.error || '输入占用操作失败'; return; }
+      ownershipRevision++;
+      updateInputOwner(ctx, result.input_owner);
+      var board = lastDevices.find(function (entry) { return entry.key === ctx.key; });
+      if (board) board.input_owner = result.input_owner;
+      $('d-status').textContent = release ? '已恢复共享串口输入' : '已占用串口输入；其他人仍可查看输出';
+    }).catch(function (error) {
+      if (isCurrent(ctx)) $('d-status').textContent = error.message;
+    }).finally(function () {
+      ctx.ownerPending = false;
+      if (isCurrent(ctx)) $('b-input-owner').disabled = false;
+    });
+  });
 
   /* ---------- 识别设备 / 一键开 SSH ---------- */
   function renderInfo(info) {

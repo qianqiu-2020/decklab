@@ -20,7 +20,7 @@ def capabilities():
         'file_transfer': {'transport': 'serial', 'requires_linux_shell': True,
                           'integrity': 'sha256'},
         'ssh_provisioning': 'profile-controlled',
-        'input_ownership': 'shared',
+        'input_ownership': 'optional-actor',
     })
 
 
@@ -33,7 +33,8 @@ class DeviceActions:
         self.recovery_binary = recovery_binary
 
     def operation(self, device):
-        return response(200, {'operation': transactions_for(device).snapshot()})
+        transactions = transactions_for(device)
+        return response(200, {'operation': transactions.snapshot(), 'input_owner': transactions.ownership()})
 
     def execute(self, action, payload, device, actor='web'):
         if not isinstance(payload, dict):
@@ -41,9 +42,31 @@ class DeviceActions:
         if not isinstance(actor, str) or not actor or len(actor) > 80:
             return response(400, {'error': 'actor must be a non-empty string of at most 80 characters'})
         with transactions_for(device).actor_scope(actor):
+            if action in ('send', 'probe', 'identify', 'ssh-enable', 'rescue') or (
+                    action.startswith('file-transfer/') and action != 'file-transfer/abort'):
+                try:
+                    transactions_for(device).check_owner(actor)
+                except TransactionError as error:
+                    return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
             return self._dispatch(action, payload, device, actor)
 
     def _dispatch(self, action, payload, d, actor):
+        if action in ('input-claim', 'input-release'):
+            try:
+                transactions = transactions_for(d)
+                if action == 'input-claim':
+                    takeover = payload.get('takeover', False)
+                    if type(takeover) is not bool:
+                        return response(400, {'error': 'takeover must be a boolean'})
+                    owner = transactions.claim(actor, takeover)
+                else:
+                    transactions.release(str(payload.get('id') or ''), actor)
+                    owner = None
+                if d.serial:
+                    self.manager.store.event(d.serial, actor, action, owner['id'] if owner else str(payload.get('id') or ''))
+                return response(200, {'ok': True, 'input_owner': owner})
+            except TransactionError as error:
+                return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
         if action == 'operation-cancel':
             try:
                 transactions_for(d).cancel(str(payload.get('id') or ''), actor)
@@ -180,6 +203,10 @@ class DeviceActions:
             if not text:
                 return response(400, {'error': 'data required'})
             if sid == 'serial':
+                try:
+                    transactions_for(d).check_owner(actor)
+                except TransactionError as error:
+                    return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
                 ok, err = d.send(text)
             else:
                 s = d.get_session(sid)

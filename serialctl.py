@@ -458,6 +458,9 @@ def parser():
     commands.add_parser('operation', help='show the active serial operation and cancellation ID')
     cancel = commands.add_parser('operation-cancel', help='cancel your active serial operation by ID')
     cancel.add_argument('id', help='operation ID returned by operation')
+    commands.add_parser('input-claim', help='reserve serial input for your actor; others can watch')
+    release = commands.add_parser('input-release', help='release your serial input reservation')
+    release.add_argument('id', help='reservation ID returned by input-claim or operation')
     read = commands.add_parser('read', help='read captured output; save off for the next call')
     read.add_argument('--sid', default='serial')
     read.add_argument('--off', type=nonnegative, default=0)
@@ -538,6 +541,10 @@ def main(argv=None):
                 result = client.post('/api/label', label=args.label)
             elif args.action == 'operation-cancel':
                 result = client.post('/api/operation-cancel', id=args.id)
+            elif args.action == 'input-claim':
+                result = client.post('/api/input-claim')
+            elif args.action == 'input-release':
+                result = client.post('/api/input-release', id=args.id)
             elif args.action == 'boot-log':
                 boot_id = args.id
                 if args.latest:

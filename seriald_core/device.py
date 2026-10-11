@@ -880,7 +880,8 @@ class Device:
                 tail = s[:160]
                 break
         profile = self.profile
-        return {'operation': self.transactions.snapshot(), 'profile': profile.name,
+        return {'operation': self.transactions.snapshot(), 'input_owner': self.transactions.ownership(),
+                'profile': profile.name,
                 'serial_settings': asdict(self.serial_settings or profile.serial),
                 'settings_pending': self.serial_settings is not None and self.serial_settings != profile.serial,
                 'key': self.key, 'serial': self.serial, 'connection_id': self.connection_id, 'dev': self.dev if self.present else '',

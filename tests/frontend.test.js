@@ -185,6 +185,44 @@ function chooseSSH(h, sid = 'ssh1') {
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
+test('serial ownership keeps spectators read-only and human takeover restores input', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({ devices: [{key: 'A', label: 'A', alive: true,
+    input_owner: {id: 'agent-claim', actor: 'claude'}}] });
+  await drain();
+  const terminal = h.select('A');
+  terminal.data('blocked');
+  assert.equal(h.sends().length, 0);
+  assert.equal(h.get('input-owner-label').textContent, '接管输入');
+  h.get('b-input-owner').click();
+  const request = h.take('/api/input-claim');
+  assert.equal(request.body.takeover, true);
+  request.resolve({ok: true, input_owner: {id: 'human-claim', actor: 'web'}});
+  await drain();
+  assert.equal(h.get('d-in').disabled, false);
+  assert.equal(h.get('input-owner-label').textContent, '释放输入');
+  h.get('b-input-owner').click();
+  const release = h.take('/api/input-release');
+  assert.equal(release.body.id, 'human-claim');
+  release.resolve({ok: true, input_owner: null});
+  await drain();
+  assert.equal(h.get('input-owner-label').textContent, '占用输入');
+});
+
+test('late input ownership response cannot affect a newly selected device or leave its button disabled', async () => {
+  const h = await setup();
+  h.select('A');
+  h.get('b-input-owner').click();
+  const request = h.take('/api/input-claim');
+  assert.equal(h.get('b-input-owner').disabled, true);
+  h.select('B');
+  assert.equal(h.get('b-input-owner').disabled, false);
+  request.resolve({ok: true, input_owner: {id: 'old', actor: 'web'}});
+  await drain();
+  assert.equal(h.get('input-owner-label').textContent, '占用输入');
+  assert.equal(h.get('b-input-owner').disabled, false);
+});
+
 test('device share bookmarks select the stable serial even after a label change', async () => {
   const h = harness({ hash: '#device=SN%20A' });
   h.take('/api/devices').resolve({ devices: [{ key: 'renamed', label: 'renamed', serial: 'SN A',

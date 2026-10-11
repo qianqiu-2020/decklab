@@ -44,6 +44,12 @@ class ClientTests(unittest.TestCase):
             client.post.return_value = {'ok': True}
             self.assertEqual(ctl.main(['--device', 'board', 'operation-cancel', 'operation-id']), 0)
             client.post.assert_called_once_with('/api/operation-cancel', id='operation-id')
+            client.post.reset_mock()
+            self.assertEqual(ctl.main(['--device', 'board', 'input-claim']), 0)
+            client.post.assert_called_once_with('/api/input-claim')
+            client.post.reset_mock()
+            self.assertEqual(ctl.main(['--device', 'board', 'input-release', 'claim-id']), 0)
+            client.post.assert_called_once_with('/api/input-release', id='claim-id')
 
     def test_boot_log_latest_resolves_id_then_reads_complete_epoch(self):
         with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):

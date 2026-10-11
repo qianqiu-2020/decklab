@@ -47,3 +47,33 @@ sent or commands already running on the board. It wakes response waiters through
 the collector condition variable and leaves serial output available for recovery.
 The browser cancellation control and persistent task lifecycle are tracked in
 the remaining application-services/long-operations workstreams.
+
+## Optional input reservation
+
+Input is shared by default. An agent can reserve serial input for its actor:
+
+```sh
+serialctl --actor claude-code/diagnosis --device riscv-118 input-claim
+serialctl --actor claude-code/diagnosis --device riscv-118 operation
+serialctl --actor claude-code/diagnosis --device riscv-118 input-release <ownership-id>
+```
+
+`POST /api/input-claim` returns `input_owner` with `id`, `actor`, `connection_id`
+and `since`. Repeating a claim by the same actor returns its existing ID.
+`POST /api/input-release` requires that ID; delayed releases cannot clear a newer
+reservation. `GET /api/operation` and device snapshots expose the owner.
+Other actors receive HTTP 423 / `input-owned` for input, probes and transfer
+commands. Serial output and independent SSH sessions remain available.
+
+The serial toolbar provides claim/release and human takeover. A human `web`
+takeover cancels the old active transaction and wakes its waiter without closing
+the collector; it cannot undo board-side commands. A failed transfer still needs
+abort to release its separate transfer reservation. Revoking an agent grant also
+releases its input claim. Claims end on connection replacement, board swap or
+collector restart; they are not durable locks and have no idle expiry.
+
+Reservations currently distinguish actors, not browser tabs: agents using the
+same actor can reuse a claim, and browser users share the human `web` actor.
+Use distinct actor names for independent agent workflows. Separate human-client
+ownership remains part of the collaboration workstream. Open LAN actors remain
+caller-reported; authenticated agent grants override those names at control.

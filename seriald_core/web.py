@@ -18,6 +18,7 @@ from .actions import DeviceActions, capabilities
 from .queries import ArchiveQueries, ArchiveDownload, SessionQueries, open_archive
 from . import __version__
 from .results import response as api_response
+from .transactions import transactions_for, TransactionError
 
 MGR = Manager()
 STARTED = time.time()
@@ -216,12 +217,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(400, {'error': 'invalid agent actor'})
             closed = 0
             for device in MGR.all_devices():
+                transactions = transactions_for(device)
+                owner = transactions.ownership()
+                if owner and owner['actor'] == actor:
+                    try:
+                        transactions.release(owner['id'], actor)
+                    except TransactionError as error:
+                        if error.code != 'not-found':
+                            raise
                 with device.sessions_lock:
                     ids = [sid for sid, session in device.ssh_sessions.items()
                            if session.actor == actor]
                 for sid in ids:
                     closed += bool(device.close_session(sid))
-                if ids and device.serial:
+                if (ids or owner and owner['actor'] == actor) and device.serial:
                     MGR.store.event(device.serial, 'service', 'agent-revoke', actor)
             return self._json(200, {'ok': True, 'closed_sessions': closed})
         q = {'key': [str(payload.get('key') or '')]}
