@@ -52,7 +52,7 @@ class SessionContracts(unittest.TestCase):
                 session.store.close_session.assert_called_once_with(session.sid)
                 self.assertIn(b'hello\n', session.read(0)[1])
                 self.assertFalse(session.snapshot()['alive'])
-                self.assertIn('hello', Path(session.logpath).read_text())
+                self.assertIn('hello', Path(session.logpath).read_text(encoding='utf-8'))
 
     def test_relocation_preserves_split_utf8_partial_line_and_concurrent_output(self):
         for adapter in ADAPTERS:
@@ -79,7 +79,7 @@ class SessionContracts(unittest.TestCase):
                 writer.join(timeout=3)
                 self.assertFalse(writer.is_alive())
                 session.close()
-                text = Path(session.logpath).read_text()
+                text = Path(session.logpath).read_text(encoding='utf-8')
                 self.assertIn('before', text)
                 self.assertIn('半汉after', text)
                 self.assertNotIn('\ufffd', text)
@@ -99,7 +99,7 @@ class SessionContracts(unittest.TestCase):
                 session._append('after rollback\n')
                 session.close()
                 self.assertEqual(Path(session.logpath).parent, source)
-                self.assertIn('after rollback', Path(session.logpath).read_text())
+                self.assertIn('after rollback', Path(session.logpath).read_text(encoding='utf-8'))
 
     def test_shared_stream_has_independent_offsets_and_bounded_history(self):
         for adapter in ADAPTERS:
@@ -161,7 +161,7 @@ class IdentitySessionMigration(unittest.TestCase):
         self.assertNotEqual(original, self.session.logpath)
         self.assertFalse(Path(original).exists())
         self.assertEqual(self.session._logdir, self.device.stable_dir())
-        text = Path(self.session.logpath).read_text()
+        text = Path(self.session.logpath).read_text(encoding='utf-8')
         self.assertIn('before migration', text)
         self.assertIn('after migration', text)
         self.assertIs(self.device.get_session(self.session.sid), self.session)
@@ -174,7 +174,7 @@ class IdentitySessionMigration(unittest.TestCase):
         self.session._append('after rollback\n')
         self.assertEqual(self.session.logpath, original)
         self.assertEqual(self.store.get(self.serial)['info']['identity_status'], 'provisional')
-        self.assertIn('after rollback', Path(original).read_text())
+        self.assertIn('after rollback', Path(original).read_text(encoding='utf-8'))
 
     def test_cleanup_failure_keeps_committed_writer_at_destination(self):
         with mock.patch('seriald_core.devices.finish_staged', side_effect=OSError('cleanup failed')):
@@ -183,7 +183,7 @@ class IdentitySessionMigration(unittest.TestCase):
         self.session._append('after committed cleanup failure\n')
         self.assertEqual(self.store.get(self.serial)['info']['identity_status'], 'confirmed')
         self.assertEqual(Path(self.session.logpath).parent, Path(self.root) / self.serial)
-        self.assertIn('after committed cleanup failure', Path(self.session.logpath).read_text())
+        self.assertIn('after committed cleanup failure', Path(self.session.logpath).read_text(encoding='utf-8'))
 
     def test_pending_opener_blocks_migration_before_database_or_handle_changes(self):
         handle = self.session.logf
@@ -222,7 +222,7 @@ class IdentitySessionMigration(unittest.TestCase):
         self.assertIs(connection.get_session(session.sid), session)
         self.assertEqual(self.store.sessions(new_serial)[0]['sid'], session.sid)
         self.assertEqual(Path(session.logpath).parent, Path(self.root) / new_serial)
-        text = Path(session.logpath).read_text()
+        text = Path(session.logpath).read_text(encoding='utf-8')
         self.assertIn('before EEPROM provisioning', text)
         self.assertIn('after EEPROM provisioning', text)
         self.assertFalse(old_directory.exists())
