@@ -4,16 +4,16 @@ Audit candidate: source version 1.5.0, reviewed 2026-10-12. This separates
 implemented behavior from platform/release evidence. Local tests use temporary
 storage, simulated boards and fake transports; they do not prove real COM or
 installed Windows behavior. Earlier checkpoint counts are historical.
-The hosted checkpoint below built 1.4.50; it is not evidence that the 1.5.0
-tagged release workflow has completed. Tagged outputs remain draft review
-artifacts until their checks and remaining attribution work are complete.
+The tagged checkpoint below builds 1.5.0; older platform checkpoints built
+1.4.50. Outputs remain draft review artifacts while native attribution work
+continues.
 
 ## Requirement evidence
 
 | Requirement | Implementation and focused evidence | Current assessment |
 | --- | --- | --- |
 | Public project | LICENSE, NOTICE, THIRD_PARTY.md, bilingual README, CONTRIBUTING.md, SECURITY.md and issue/PR templates; package tests | Present; native binary attribution incomplete |
-| Releases | CI, Windows package and tagged release workflows; version-tag validator; Debian extraction fixtures | Hosted Linux/Windows package jobs pass; tagged draft-release workflow not yet executed |
+| Releases | CI, Windows package and tagged release workflows; version-tag validator; Debian extraction fixtures | Tagged Linux/Windows/publish jobs pass; downloaded draft packages/checksums/notes verified |
 | Configurable hosts/boards | profiles.py, transport.py, windows_manager.py; test_profiles.py validates framing, profiles, manual mode and credentials | Local contracts verified |
 | Hardware-free demo | demo.py, seriald_demo.py; test_demo.py and demo_smoke.js exercise normal HTTP/CLI/browser paths | Linux demo/browser checks and frozen Windows API/archive smoke pass |
 | Board/connection/session separation | models.py, devices.py, session_base.py; model, registry and session-contract tests | Local reconnect and migration contracts verified |
@@ -26,9 +26,41 @@ artifacts until their checks and remaining attribution work are complete.
 | Log operations | maintenance.py; maintenance/archive/identity tests cover active writers, cross-day boots, disk warnings and allowlisted diagnostics | Linux and native Windows maintenance fixtures pass |
 | Long operations | tasks.py, task_actions.py, transfer_tasks.py, transfer_artifacts.py; task/file/CLI tests and demo browser upload/download/copy/reload | Local task and artifact workflows verified |
 | Hardware extensions | hardware.py, process_windows.py, exclusive_serial handoff; helper and handoff tests | Linux/fake contracts and native Windows Job/helper/handoff suites pass |
-| Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | API/config source review and layouts verified; native install/release and binary notices outstanding |
+| Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | Content/layout/native install/release reviewed; binary attribution remains outstanding |
 
-## Hosted platform checkpoint
+## Tagged 1.5.0 checkpoint
+
+Tag `v1.5.0` points to `c62e4763a88c6efe319c00253e76a4935bd51dd5`.
+The [tagged workflow](https://github.com/qianqiu-2020/decklab/actions/runs/38197327006)
+completed Linux, native Windows and draft publication jobs successfully. The
+draft has six assets: Debian package, Setup EXE, portable ZIP, combined checksums,
+Linux checksums and the installer checksum. Its release notes exactly match
+CHANGELOG's 1.5.0 section. Downloaded assets pass `tools/verify_release.py`:
+all three package checksums, Debian package/version/architecture, portable
+version, complete 210-file manifest, 16 distribution notice sets, both native
+OpenSSL provider/license hashes and three supplemental runtime source notices.
+Executables were inspected without running them on the Linux audit host.
+
+| Downloaded artifact | SHA-256 |
+| --- | --- |
+| `seriald_1.5.0_all.deb` | `503eb923309e0b9de166d556044bce609a2e0bd83ebad3b402a39517e276c1a0` |
+| `seriald-1.5.0-windows-x64-setup.exe` | `2d946b7377b00ac6371420f3c68a7680ab1ca500c6866399b111d53cc67287d0` |
+| `seriald-windows-portable.zip` | `3109a00a417782da770fc9022a76ee2b7d14b78e0e37409b850556f10eb41c57` |
+
+Repeat on Ubuntu with authenticated access to the draft:
+
+```sh
+gh release download v1.5.0 --dir /tmp/decklab-release-review
+python3 tools/verify_release.py /tmp/decklab-release-review --version 1.5.0
+```
+
+The verifier rejects changed checksum sets, duplicate/path-traversal entries,
+Windows case/separator collisions, runtime data in ZIPs, changed manifests or
+notices and mismatched package versions. Five synthetic regression fixtures
+exercise these boundaries. It also runs before draft publication in subsequent
+tagged workflows; this tag was independently inspected after publication.
+
+## Earlier hosted platform checkpoint
 
 Source `c45fb8484db7b64d304e3a263a922472dc03efc4` passed both hosted jobs:
 [Linux regression](https://github.com/qianqiu-2020/decklab/actions/runs/38195810408)
@@ -74,7 +106,7 @@ asserts overflow and native track hit-testing, then requires actual movement wit
 a bounded wait. Five consecutive complete fixture runs pass; no application
 scrollbar behavior was changed. Five package/documentation tests also pass.
 
-## Remaining gates
+## Historical platform and source audits
 
 Actual systemd lifecycle now passes in disposable Ubuntu 22.04 and 24.04 KVM
 guests through tools/test_deb_vm.py. Official cloud-image hashes were checked;
@@ -242,16 +274,17 @@ Verification for this checkpoint: 514 backend tests pass (three native Windows
 tests skipped), 74 frontend isolation checks and sharing checks pass. The Windows
 build script parses on PowerShell; native execution remains unverified.
 
-1. Finish Windows installation/upgrade and native-adapter verification. Ubuntu
-   22.04/24.04 installation/systemd lifecycle has actual isolated evidence above;
-   physical UART/USB recovery remains limited to existing fixture/support evidence.
-2. Review the actual frozen Windows files and embedded native-library notices.
-   The installed-Python distribution inventory is not a complete binary SBOM.
-3. Execute native Windows tests, frozen demo/host checks and installer upgrades
-   in a clean Windows account. Retain job output and generated package hashes.
-4. Execute the tagged release pipeline on an authorized GitHub repository and
-   review Setup, ZIP, Debian packages, checksums and release notes. Workflow
-   definitions alone do not prove a usable release.
+## Current remaining gate
 
-No native Windows or hosted GitHub results were available at this audit. The
-overall optimization goal remains incomplete until these gates have evidence.
+Finish actual frozen native dependency/source attribution: compiled Rust
+dependencies, CFFI's embedded libffi and applicable corresponding-source/rebuild
+requirements remain under review. OpenSSL provider notices and supplemental
+CPython source-baseline notices are now shipped, but are not a complete native
+SBOM. The installed-distribution inventory is a conservative superset. Source
+archives for bcrypt 5.0.0, cryptography 50.0.2, CFFI 2.1.1 and Paramiko 4.0.0
+have been downloaded from PyPI and checked against its published SHA-256, without
+executing build scripts. bcrypt and cryptography contain Cargo locks with 43
+and 40 package records respectively; those are source graphs, not proof of all
+activated Windows wheel features. Complete the review before claiming the full
+optimization goal achieved. Physical UART/USB behavior remains limited to the
+documented fixture/support scope; no installed service or real board was changed.

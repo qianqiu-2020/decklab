@@ -294,5 +294,55 @@
       "Version strings identify observed providers, not their complete compiled dependency graph.",
       "Remaining runtime and embedded dependency attribution is incomplete."
     ]
-  }
+  },
+  "source_observations": [
+    {
+      "name": "bcrypt",
+      "version": "5.0.0",
+      "archive": "bcrypt-5.0.0.tar.gz",
+      "sha256": "f748f7c2d6fd375cc93d3fba7ef4a9e3a092421b8dbf34d8d4dc06be9492dfdd",
+      "source": "https://pypi.org/project/bcrypt/5.0.0/",
+      "scope": "source-distribution-observation-not-activated-wheel-dependency-graph",
+      "cargo_locks": [
+        {
+          "file": "bcrypt-5.0.0/src/_bcrypt/Cargo.lock",
+          "sha256": "7ed23731480a808f74530c070c2a5a6d3e06a22be1de4ff8a29d3b5c784c34dc",
+          "package_records": 43
+        }
+      ]
+    },
+    {
+      "name": "cffi",
+      "version": "2.1.1",
+      "archive": "cffi-2.1.1.tar.gz",
+      "sha256": "dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be",
+      "source": "https://pypi.org/project/cffi/2.1.1/",
+      "scope": "source-distribution-observation-not-activated-wheel-dependency-graph",
+      "cargo_locks": []
+    },
+    {
+      "name": "cryptography",
+      "version": "50.0.2",
+      "archive": "cryptography-50.0.2.tar.gz",
+      "sha256": "7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5",
+      "source": "https://pypi.org/project/cryptography/50.0.2/",
+      "scope": "source-distribution-observation-not-activated-wheel-dependency-graph",
+      "cargo_locks": [
+        {
+          "file": "cryptography-50.0.2/Cargo.lock",
+          "sha256": "98778208027ce05bfff0db88c290f28355eb20e685f0c728775359fb91a1a4c4",
+          "package_records": 40
+        }
+      ]
+    },
+    {
+      "name": "paramiko",
+      "version": "4.0.0",
+      "archive": "paramiko-4.0.0.tar.gz",
+      "sha256": "6a25f07b380cc9c9a88d2b920ad37167ac4667f8d9886ccebd8f90f654b5d69f",
+      "source": "https://pypi.org/project/paramiko/4.0.0/",
+      "scope": "source-distribution-observation-not-activated-wheel-dependency-graph",
+      "cargo_locks": []
+    }
+  ]
 }

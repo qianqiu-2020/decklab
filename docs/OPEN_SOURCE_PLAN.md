@@ -13,7 +13,7 @@ for source/test evidence and the unresolved release gates.
 | Workstream | Required result | Acceptance evidence | Status |
 | --- | --- | --- | --- |
 | Public project | Application license, third-party inventory, English/Chinese README, contribution and issue guidance | Files present; distribution notices included; inventory matches shipped dependencies | In progress |
-| Release pipeline | Linux/Windows PR checks; tagged Setup, ZIP, Debian package, checksums and release notes | CI definitions plus validated release outputs; actual platform checks reported separately | In progress |
+| Release pipeline | Linux/Windows PR checks; tagged Setup, ZIP, Debian package, checksums and release notes | Tagged workflow and downloaded 1.5.0 draft packages/checksums/notes pass | Implemented and verified |
 | Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | Implemented; Linux and native Windows configuration suites pass |
 | Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Implemented; Linux and frozen Windows smoke checks pass |
 | Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented and locally verified |
@@ -26,7 +26,7 @@ for source/test evidence and the unresolved release gates.
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; Linux and selected native Windows suites pass |
 | Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Implemented; Linux browser and native Windows task/artifact/CLI suites pass |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Implemented; native Windows Job, helper and handoff suites pass |
-| Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | API/config and packaged links reviewed; native installation verified; tagged release and binary notices pending |
+| Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Content, packaged links, native installation and tagged release verified; binary attribution pending |
 
 Implementation order: release foundations and configuration, demo, core/service
 boundaries, collaboration and operations, then hardware extensions. Use existing

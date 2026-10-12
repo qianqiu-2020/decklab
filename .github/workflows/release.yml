@@ -54,4 +54,5 @@ jobs:
         run: |
           cd packages
           sha256sum *.deb *.exe *.zip > SHA256SUMS.txt
+          python3 ../tools/verify_release.py . --version "${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft --notes-file ../release-notes.md --title "DeckLab $GITHUB_REF_NAME" ./*
