@@ -3,7 +3,7 @@
 This is an incomplete release review, not a license clearance or native SBOM.
 The [wheel observation](windows-wheel-observation.json) records exact downloaded
 wheel hashes, native-member hashes and available notice hashes from 2026-10-12.
-These are source artifacts, not an executed or frozen Windows build.
+The source wheel observations are separate from the actual frozen checkpoint below.
 
 ## Evidence and limitations
 
@@ -37,6 +37,25 @@ PyInstaller's terms include a bootloader exception; review the exact build
 version's [COPYING.txt](https://github.com/pyinstaller/pyinstaller/blob/v6.22.3/COPYING.txt).
 No assumption about an embedded library's exact version is derived from these
 general documents.
+
+## Actual frozen checkpoint
+
+The [successful Windows run](https://github.com/qianqiu-2020/decklab/actions/runs/38195810414)
+built source `c45fb8484db7b64d304e3a263a922472dc03efc4` on CPython 3.12.10.
+Its downloaded ZIP verifies all 205 manifest entries and all 16 distribution
+notice sets; the Setup EXE matches its published SHA-256. ZIP member separators
+were normalized for Linux inspection without changing file bytes.
+
+Four unchanged frozen extensions match the reviewed wheel members by SHA-256:
+bcrypt 5.0.0, cffi 2.1.1, cryptography 50.0.2 and PyNaCl 1.6.2. Exact matches and
+provider observations are recorded under `frozen_observation` in the linked JSON.
+The Python runtime `libcrypto-3.dll` contains an OpenSSL 3.0.16 version string;
+cryptography's `_rust.pyd` contains OpenSSL 4.0.3. These are distinct providers
+and require corresponding attribution; host Linux OpenSSL is irrelevant.
+Python's collected license includes Microsoft redistributable terms and libffi
+and bzip2 notices. This does not close embedded OpenSSL, Rust dependencies or
+all other runtime-library attribution gaps. No native license clearance is
+claimed from an integrity check or a version string.
 
 ## Finish against an actual Windows bundle
 

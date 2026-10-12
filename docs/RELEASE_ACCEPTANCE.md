@@ -10,22 +10,55 @@ installed Windows behavior. Earlier checkpoint counts are historical.
 | Requirement | Implementation and focused evidence | Current assessment |
 | --- | --- | --- |
 | Public project | LICENSE, NOTICE, THIRD_PARTY.md, bilingual README, CONTRIBUTING.md, SECURITY.md and issue/PR templates; package tests | Present; native binary attribution incomplete |
-| Releases | CI, Windows package and tagged release workflows; version-tag validator; Debian extraction fixtures | Local tooling checked; hosted jobs and Windows outputs unverified |
+| Releases | CI, Windows package and tagged release workflows; version-tag validator; Debian extraction fixtures | Hosted Linux/Windows package jobs pass; tagged draft-release workflow not yet executed |
 | Configurable hosts/boards | profiles.py, transport.py, windows_manager.py; test_profiles.py validates framing, profiles, manual mode and credentials | Local contracts verified |
-| Hardware-free demo | demo.py, seriald_demo.py; test_demo.py and demo_smoke.js exercise normal HTTP/CLI/browser paths | Verified on Linux; frozen Windows execution unverified |
+| Hardware-free demo | demo.py, seriald_demo.py; test_demo.py and demo_smoke.js exercise normal HTTP/CLI/browser paths | Linux demo/browser checks and frozen Windows API/archive smoke pass |
 | Board/connection/session separation | models.py, devices.py, session_base.py; model, registry and session-contract tests | Local reconnect and migration contracts verified |
 | Console coordination | transactions.py, console_protocol.py; transaction, protocol, handoff and input-ownership tests | Local timeout/cancel/generation contracts verified |
-| Platform adapters | sessions.py, sessions_windows.py, windows_manager.py; shared session and fake Windows tests | Local fixtures verified; native Windows tests pending |
+| Platform adapters | sessions.py, sessions_windows.py, windows_manager.py; shared session and fake Windows tests | Linux fixtures and native Windows selected suites pass |
 | Application services/API | actions.py, queries.py, results.py, API.md; action/query/HTTP/CLI tests | Implemented; 54-route source/contract content review complete locally |
 | Frontend ownership | devices.js, terminal-view.js, archives.js, terminal-navigation.js; frontend.test.js | Isolation checks verified; desktop/mobile browser fixture passes five consecutive runs after synchronization fix |
-| Schema upgrades | schema.py registry migrations through version 5; test_schema.py checks WAL backups, rollback, concurrent openers and future versions | Local SQLite fixtures verified; Windows upgrade pending |
+| Schema upgrades | schema.py registry migrations through version 5; test_schema.py checks WAL backups, rollback, concurrent openers and future versions | Linux and native Windows upgrade/backup fixtures pass |
 | Collaboration | transactions.py, agent_grants.py, control_server.py; input-ownership, grants and sharing tests | Local reservation/revocation/takeover verified |
-| Log operations | maintenance.py; maintenance/archive/identity tests cover active writers, cross-day boots, disk warnings and allowlisted diagnostics | Local fixtures verified; native Windows file semantics pending |
+| Log operations | maintenance.py; maintenance/archive/identity tests cover active writers, cross-day boots, disk warnings and allowlisted diagnostics | Linux and native Windows maintenance fixtures pass |
 | Long operations | tasks.py, task_actions.py, transfer_tasks.py, transfer_artifacts.py; task/file/CLI tests and demo browser upload/download/copy/reload | Local task and artifact workflows verified |
-| Hardware extensions | hardware.py, process_windows.py, exclusive_serial handoff; helper and handoff tests | Local/fake contracts verified; native Windows process-tree gate pending |
+| Hardware extensions | hardware.py, process_windows.py, exclusive_serial handoff; helper and handoff tests | Linux/fake contracts and native Windows Job/helper/handoff suites pass |
 | Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | API/config source review and layouts verified; native install/release and binary notices outstanding |
 
-## Evidence from this audit
+## Hosted platform checkpoint
+
+Source `c45fb8484db7b64d304e3a263a922472dc03efc4` passed both hosted jobs:
+[Linux regression](https://github.com/qianqiu-2020/decklab/actions/runs/38195810408)
+and [Windows packages](https://github.com/qianqiu-2020/decklab/actions/runs/38195810414).
+Linux ran Python 3.10/3.12/3.13 regression jobs and actual isolated Ubuntu
+22.04/24.04 package installations. Windows used CPython 3.12.10 and built both
+Setup EXE and portable ZIP. Portable health/device API and frozen demo checks
+passed; the demo exposed three boards and two indexed boots. Installer checks
+passed portable migration, remembered upgrade directory, modified runtime data
+preservation, all three launcher targets/icons and uninstall behavior.
+
+Native Windows suites include CLI UTF-8 output, schema/WAL backup, tasks,
+artifacts, file/copy tasks, models, maintenance, grants, profiles, sessions,
+console protocol, ownership, Job containment, hardware helpers and reader
+handoff. Linux shell-specific fixtures are skipped there; fake serial transports
+do not establish physical COM reliability. Job tests actually run on Windows.
+The hosted checks uncovered and fixed default-codepage reads, test cleanup
+ordering, read-only SQLite backup fsync and CLI pipe encoding. Shortcut inspection
+copies identical bytes to an ASCII temporary filename before WScript inspection;
+the installed Chinese shortcut names remain unchanged.
+
+These results clear the hosted platform gate for the exercised scopes. They do
+not prove tagged release publication, every native dependency's attribution,
+physical UART/USB behavior or unattended installation on arbitrary PCs.
+
+The downloaded Windows artifact at that source also passes its complete
+205-file bundle manifest, all 16 distribution notice-set hashes and Setup EXE
+checksum. Four frozen extensions match the reviewed wheels byte-for-byte.
+Distinct embedded OpenSSL providers were observed; the exact evidence and
+remaining attribution gaps are in [native review](WINDOWS_NATIVE_NOTICES.md).
+Integrity verification alone does not close that release gate.
+
+## Historical local evidence
 
 The preceding code checkpoint passed 511 backend tests (three Windows-native
 tests skipped), 74 frontend isolation checks, sharing checks and PowerShell
@@ -57,7 +90,7 @@ Image hashes: 22.04 012d81fade7e8ff4428fc35dfeee711d66d1f47d5ea9c5c8ced96a85b959
 24.04 6a81c37564db9b1ee84e141922625e1d7c5b389b99bb3c572e0243607d5bb4d2.
 Physical UART continuity and privileged USB recovery are not established by an
 empty-port VM. Three packaged-document tests and the documentation inventory
-check pass. Native Windows and hosted GitHub results are still missing.
+check pass. Native Windows and hosted GitHub checks subsequently passed at the checkpoint above.
 
 Ubuntu package acceptance now includes actual isolated installations on 22.04
 and 24.04, using tools/test_deb_container.py. Both completed successfully with
@@ -69,7 +102,7 @@ The disposable containers had no host mounts/devices/ports or privileged mode;
 each was removed after verification. This does not exercise systemd activation,
 collector-restart fingerprint decisions in a running systemd installation, actual
 UART or USB recovery. CI now defines both Ubuntu baselines and tagged Linux
-releases require the 24.04 check. Hosted execution remains unverified. Container
+releases require the 24.04 check. Hosted execution subsequently passed for both images at the checkpoint above. Container
 image IDs observed: 22.04 e8df6c74f650ad385efe2e20103eca9b0ad50690fb3c63d49fa00762412bbf55;
 24.04 69f919497cada9a8611f3de61df902d9f94bf20f84552ef5bd93125c38608ef9.
 Install documentation now distinguishes control and collector config reloads

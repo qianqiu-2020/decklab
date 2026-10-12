@@ -14,19 +14,19 @@ for source/test evidence and the unresolved release gates.
 | --- | --- | --- | --- |
 | Public project | Application license, third-party inventory, English/Chinese README, contribution and issue guidance | Files present; distribution notices included; inventory matches shipped dependencies | In progress |
 | Release pipeline | Linux/Windows PR checks; tagged Setup, ZIP, Debian package, checksums and release notes | CI definitions plus validated release outputs; actual platform checks reported separately | In progress |
-| Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | Implemented and locally verified; native Windows gate pending |
-| Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Implemented; native Windows package gate pending |
+| Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | Implemented; Linux and native Windows configuration suites pass |
+| Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Implemented; Linux and frozen Windows smoke checks pass |
 | Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented and locally verified |
 | Transactions | Shared coordination for input, probes and transfers; timeout/cancel/generation protection | Concurrent actor, cancellation and replacement tests | Core/API/task/UI implemented and locally verified |
-| Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; native Windows package gate pending |
+| Platform adapters | Common session lifecycle, auditing and logs; Linux/Windows IO isolated | Equivalent contract tests on fake transports | Implemented; Linux and frozen Windows smoke checks pass |
 | Application services | HTTP/CLI share operations; reduce global manager coupling; stable API errors/capabilities | Contract tests through HTTP and direct services | Implemented; manager injection and 54-route source/contract review verified locally |
-| Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Implemented; native Windows package execution pending |
-| Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; native Windows execution pending |
-| Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; native Windows execution pending |
-| Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; native Windows execution pending |
-| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Implemented across API/CLI/browser; task/artifact source and local contract review complete; native Windows gate pending |
-| Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Linux/Windows task adapters and exclusive-serial handoff implemented; native Windows verification pending |
-| Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | API/config source content and packaged links reviewed locally; native installation/release and binary-notice evidence pending |
+| Frontend boundaries | Split device, terminal, archive and navigation state; preserve stale-response protection | Existing isolation suites and real-browser smoke | Implemented; Linux browser checks and frozen Windows host smoke pass |
+| Storage upgrades | Explicit schema version and forward migrations | Upgrade fixtures, failure/rollback and backup checks | Implemented; Linux and selected native Windows suites pass |
+| Collaboration | Optional input ownership with spectators, release and human takeover | Concurrent clients and no interleaved transaction input | Implemented; Linux and selected native Windows suites pass |
+| Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; Linux and selected native Windows suites pass |
+| Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Implemented; Linux browser and native Windows task/artifact/CLI suites pass |
+| Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Implemented; native Windows Job, helper and handoff suites pass |
+| Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | API/config and packaged links reviewed; native installation verified; tagged release and binary notices pending |
 
 Implementation order: release foundations and configuration, demo, core/service
 boundaries, collaboration and operations, then hardware extensions. Use existing

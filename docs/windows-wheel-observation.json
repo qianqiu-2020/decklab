@@ -245,5 +245,54 @@
         }
       ]
     }
-  ]
+  ],
+  "frozen_observation": {
+    "source_commit": "c45fb8484db7b64d304e3a263a922472dc03efc4",
+    "workflow_run": "https://github.com/qianqiu-2020/decklab/actions/runs/38195810414",
+    "bundle_files_verified": 205,
+    "distribution_notice_sets_verified": 16,
+    "setup_sha256_verified": true,
+    "wheel_member_matches": [
+      {
+        "bundle_file": "_internal/bcrypt/_bcrypt.pyd",
+        "wheel": "bcrypt-5.0.0-cp39-abi3-win_amd64.whl",
+        "sha256": "898d1fe05e287d66bd379f26eb49d27a260f14666c7dc8b1719dae8c489abff0"
+      },
+      {
+        "bundle_file": "_internal/_cffi_backend.cp312-win_amd64.pyd",
+        "wheel": "cffi-2.1.1-cp312-cp312-win_amd64.whl",
+        "sha256": "9af5e4f68a41f26b726f2e9424f9d58a4f5666189f6a48be95f406b257102aec"
+      },
+      {
+        "bundle_file": "_internal/cryptography/hazmat/bindings/_rust.pyd",
+        "wheel": "cryptography-50.0.2-cp311-abi3-win_amd64.whl",
+        "sha256": "1d4332a447cab13dec8e3a533ad579e0e562b79e40822c931f33769758fc7156"
+      },
+      {
+        "bundle_file": "_internal/nacl/_sodium.pyd",
+        "wheel": "pynacl-1.6.2-cp38-abi3-win_amd64.whl",
+        "sha256": "57822e7aed944269943bcb855fc14560a5b6ae38869de4e3d00c380a5119ecc7"
+      }
+    ],
+    "crypto_provider_observations": [
+      {
+        "file": "_internal/libcrypto-3.dll",
+        "sha256": "ccfffddcd3defb8d899026298af9af43bc186130f8483d77e97c93233d5f27d7",
+        "embedded_version_strings": [
+          "OpenSSL 3.0.16 11 Feb 2025"
+        ]
+      },
+      {
+        "file": "_internal/cryptography/hazmat/bindings/_rust.pyd",
+        "sha256": "1d4332a447cab13dec8e3a533ad579e0e562b79e40822c931f33769758fc7156",
+        "embedded_version_strings": [
+          "OpenSSL 4.0.3 29 Sep 2026"
+        ]
+      }
+    ],
+    "limitations": [
+      "Version strings identify observed providers, not their complete compiled dependency graph.",
+      "Remaining runtime and embedded dependency attribution is incomplete."
+    ]
+  }
 }
