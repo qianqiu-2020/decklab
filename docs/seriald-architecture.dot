@@ -1,7 +1,7 @@
 digraph seriald {
-  graph [label="seriald · 开发板访问与记录架构", labelloc=t, fontsize=26,
+  graph [label="DeckLab · 开发板访问与记录架构", labelloc=t, fontsize=26,
          fontname="Noto Sans CJK SC", fontcolor="#193438", bgcolor="#f6f8f6",
-         pad=0.32, nodesep=0.48, ranksep=0.9, splines=ortho, rankdir=LR];
+         pad=0.32, nodesep=0.48, ranksep=0.9, splines=polyline, rankdir=LR];
   node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
         fontsize=15, color="#c5d5d0", fillcolor="#ffffff", fontcolor="#193438",
         penwidth=1.3, margin="0.20,0.13"];

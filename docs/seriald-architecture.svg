@@ -9,7 +9,7 @@
 <g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(23.04 604.04)">
 <title>seriald</title>
 <polygon fill="#f6f8f6" stroke="transparent" points="-23.04,23.04 -23.04,-604.04 1605.04,-604.04 1605.04,23.04 -23.04,23.04"/>
-<text text-anchor="middle" x="791" y="-556.2" font-family="Noto Sans CJK SC" font-size="26.00" fill="#193438">seriald · 开发板访问与记录架构</text>
+<text text-anchor="middle" x="791" y="-556.2" font-family="Noto Sans CJK SC" font-size="26.00" fill="#193438">DeckLab · 开发板访问与记录架构</text>
 <g id="clust1" class="cluster">
 <title>cluster_host</title>
 <path fill="#edf3ef" stroke="#b9d1ca" d="M390,-147C390,-147 1562,-147 1562,-147 1568,-147 1574,-153 1574,-159 1574,-159 1574,-524 1574,-524 1574,-530 1568,-536 1562,-536 1562,-536 390,-536 390,-536 384,-536 378,-530 378,-524 378,-524 378,-159 378,-159 378,-153 384,-147 390,-147"/>
@@ -32,10 +32,10 @@
 <!-- web&#45;&gt;control -->
 <g id="edge1" class="edge">
 <title>web&#45;&gt;control</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M203.38,-307.5C203.38,-307.5 377.89,-307.5 377.89,-307.5"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="377.89,-310.3 385.89,-307.5 377.89,-304.7 377.89,-310.3"/>
-<text text-anchor="middle" x="294.5" y="-345.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">POST 输入 / SSE 推送</text>
-<text text-anchor="middle" x="294.5" y="-332.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">GET off 作为回退</text>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M203.34,-317.02C258.26,-310.5 325.52,-302.51 378.03,-296.27"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="378.38,-299.05 385.99,-295.33 377.72,-293.49 378.38,-299.05"/>
+<text text-anchor="middle" x="294.5" y="-328.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">POST 输入 / SSE 推送</text>
+<text text-anchor="middle" x="294.5" y="-315.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">GET off 作为回退</text>
 </g>
 <!-- agent -->
 <g id="node2" class="node">
@@ -47,8 +47,8 @@
 <!-- agent&#45;&gt;control -->
 <g id="edge2" class="edge">
 <title>agent&#45;&gt;control</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M188.22,-264C188.22,-264 377.97,-264 377.97,-264"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="377.97,-266.8 385.97,-264 377.97,-261.2 377.97,-266.8"/>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M188.29,-252.43C245.5,-259.38 320.45,-268.49 377.84,-275.47"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="377.54,-278.25 385.82,-276.44 378.21,-272.69 377.54,-278.25"/>
 </g>
 <!-- collector -->
 <g id="node4" class="node">
@@ -60,8 +60,8 @@
 <!-- control&#45;&gt;collector -->
 <g id="edge3" class="edge">
 <title>control&#45;&gt;collector</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M545.22,-286C545.22,-286 648.97,-286 648.97,-286"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="648.97,-288.8 656.97,-286 648.97,-283.2 648.97,-288.8"/>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M545.3,-286C576.7,-286 613.59,-286 648.41,-286"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="648.74,-288.8 656.74,-286 648.74,-283.2 648.74,-288.8"/>
 <text text-anchor="middle" x="601" y="-289.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">本机 IPC</text>
 </g>
 <!-- reader -->
@@ -74,8 +74,8 @@
 <!-- collector&#45;&gt;reader -->
 <g id="edge4" class="edge">
 <title>collector&#45;&gt;reader</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M890.42,-291.2C890.42,-291.2 1004.84,-291.2 1004.84,-291.2"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1004.84,-294 1012.84,-291.2 1004.84,-288.4 1004.84,-294"/>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M890.23,-286C928.12,-286 969.42,-286 1004.31,-286"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1004.57,-288.8 1012.57,-286 1004.57,-283.2 1004.57,-288.8"/>
 </g>
 <!-- writer -->
 <g id="node6" class="node">
@@ -88,8 +88,8 @@
 <!-- collector&#45;&gt;writer -->
 <g id="edge5" class="edge">
 <title>collector&#45;&gt;writer</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M890.25,-280.8C946.11,-280.8 1001,-280.8 1001,-280.8 1001,-280.8 1001,-232.59 1001,-232.59"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1003.8,-232.59 1001,-224.59 998.2,-232.59 1003.8,-232.59"/>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M859.34,-259.89C896.9,-248.34 941.46,-234.63 981.12,-222.42"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="982.16,-225.03 988.98,-220.01 980.51,-219.68 982.16,-225.03"/>
 </g>
 <!-- ssh -->
 <g id="node7" class="node">
@@ -102,8 +102,8 @@
 <!-- collector&#45;&gt;ssh -->
 <g id="edge6" class="edge">
 <title>collector&#45;&gt;ssh</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M890.01,-301.6C929.12,-301.6 963,-301.6 963,-301.6 963,-301.6 963,-339.44 963,-339.44"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="960.2,-339.44 963,-347.44 965.8,-339.44 960.2,-339.44"/>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M859.34,-312.11C892.22,-322.22 930.47,-333.99 966.1,-344.96"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="965.67,-347.75 974.14,-347.43 967.32,-342.4 965.67,-347.75"/>
 </g>
 <!-- store -->
 <g id="node8" class="node">
@@ -115,9 +115,9 @@
 <!-- collector&#45;&gt;store -->
 <g id="edge7" class="edge">
 <title>collector&#45;&gt;store</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M774,-312.21C774,-321.52 774,-329.75 774,-329.75 774,-329.75 1356,-329.75 1356,-329.75 1356,-329.75 1356,-347.88 1356,-347.88"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1353.2,-347.87 1356,-355.88 1358.8,-347.88 1353.2,-347.87"/>
-<text text-anchor="middle" x="1087.5" y="-490.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">身份 / 事件</text>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M806.71,-312.12C859.1,-354.61 957,-434 957,-434 957,-434 1218,-434 1218,-434 1218,-434 1276.44,-421.1 1335.09,-408.14"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1335.78,-410.86 1342.99,-406.4 1334.57,-405.39 1335.78,-410.86"/>
+<text text-anchor="middle" x="1087.5" y="-437.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">身份 / 事件</text>
 </g>
 <!-- pipeline -->
 <g id="node11" class="node">
@@ -132,14 +132,14 @@
 <!-- collector&#45;&gt;pipeline -->
 <g id="edge15" class="edge">
 <title>collector&#45;&gt;pipeline</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" stroke-dasharray="1,5" d="M890.06,-270.4C936.44,-270.4 979,-270.4 979,-270.4 979,-270.4 979,-171.55 979,-120.19"/>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" stroke-dasharray="1,5" d="M807.13,-259.72C859.62,-217.44 957,-139 957,-139 957,-139 980.26,-130.2 1007.07,-120.06"/>
 </g>
 <!-- reader&#45;&gt;store -->
 <g id="edge8" class="edge">
 <title>reader&#45;&gt;store</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1162.2,-299C1245.59,-299 1369,-299 1369,-299 1369,-299 1369,-347.74 1369,-347.74"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1366.2,-347.74 1369,-355.74 1371.8,-347.74 1366.2,-347.74"/>
-<text text-anchor="middle" x="1280.5" y="-313.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">归档</text>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1162.36,-305.43C1215.29,-319.35 1287.39,-338.31 1346.6,-353.88"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1346.04,-356.63 1354.49,-355.96 1347.46,-351.22 1346.04,-356.63"/>
+<text text-anchor="middle" x="1280.5" y="-345.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">归档</text>
 </g>
 <!-- board_a -->
 <g id="node9" class="node">
@@ -151,9 +151,9 @@
 <!-- reader&#45;&gt;board_a -->
 <g id="edge10" class="edge">
 <title>reader&#45;&gt;board_a</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1170.04,-273C1170.04,-273 1281,-273 1281,-273 1281,-273 1281,-39 1281,-39 1281,-39 1334.01,-39 1381.42,-39"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1170.04,-270.2 1162.04,-273 1170.04,-275.8 1170.04,-270.2"/>
-<text text-anchor="middle" x="1280.5" y="-92.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">串口输出</text>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1170.09,-258.28C1195.97,-249.48 1218,-242 1218,-242 1218,-242 1251,-117 1251,-117 1251,-117 1343,-69 1343,-69 1343,-69 1363.4,-61.06 1386.67,-52.01"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1169,-255.69 1162.33,-260.92 1170.8,-260.99 1169,-255.69"/>
+<text text-anchor="middle" x="1280.5" y="-120.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">串口输出</text>
 </g>
 <!-- board_b -->
 <g id="node10" class="node">
@@ -165,37 +165,37 @@
 <!-- reader&#45;&gt;board_b -->
 <g id="edge12" class="edge">
 <title>reader&#45;&gt;board_b</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1170.06,-286C1170.06,-286 1479,-286 1479,-286 1479,-286 1479,-187.67 1479,-139.27"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1170.06,-283.2 1162.06,-286 1170.06,-288.8 1170.06,-283.2"/>
-<text text-anchor="middle" x="1280.5" y="-205.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">串口输出</text>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1170.09,-258.28C1195.97,-249.48 1218,-242 1218,-242 1218,-242 1251,-200 1251,-200 1251,-200 1343,-143 1343,-143 1343,-143 1360.37,-138.28 1381.34,-132.59"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1169,-255.69 1162.33,-260.92 1170.8,-260.99 1169,-255.69"/>
+<text text-anchor="middle" x="1280.5" y="-203.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">串口输出</text>
 </g>
 <!-- writer&#45;&gt;board_a -->
 <g id="edge11" class="edge">
 <title>writer&#45;&gt;board_a</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1186.09,-178.5C1200.18,-178.5 1210,-178.5 1210,-178.5 1210,-178.5 1210,-13 1210,-13 1210,-13 1373.47,-13 1373.47,-13"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1373.47,-15.8 1381.47,-13 1373.47,-10.2 1373.47,-15.8"/>
-<text text-anchor="middle" x="1280.5" y="-30.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">命令 / 分块</text>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1173.07,-155.39C1197.64,-145.33 1218,-137 1218,-137 1218,-137 1251,-33 1251,-33 1251,-33 1316.49,-30.74 1372.99,-28.78"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1373.35,-31.57 1381.25,-28.5 1373.16,-25.98 1373.35,-31.57"/>
+<text text-anchor="middle" x="1280.5" y="-36.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">命令 / 分块</text>
 </g>
 <!-- writer&#45;&gt;board_b -->
 <g id="edge13" class="edge">
 <title>writer&#45;&gt;board_b</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1186.39,-201.5C1287.87,-201.5 1431,-201.5 1431,-201.5 1431,-201.5 1431,-147.07 1431,-147.07"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1433.8,-147.07 1431,-139.07 1428.2,-147.07 1433.8,-147.07"/>
-<text text-anchor="middle" x="1280.5" y="-150.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">命令 / 分块</text>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1186.31,-163.52C1220.72,-154.2 1251,-146 1251,-146 1251,-146 1316.76,-135.28 1373.34,-126.06"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1373.81,-128.82 1381.25,-124.77 1372.9,-123.3 1373.81,-128.82"/>
+<text text-anchor="middle" x="1280.5" y="-149.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">命令 / 分块</text>
 </g>
 <!-- ssh&#45;&gt;store -->
 <g id="edge9" class="edge">
 <title>ssh&#45;&gt;store</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1218.18,-382C1218.18,-382 1334.88,-382 1334.88,-382"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1334.88,-384.8 1342.88,-382 1334.88,-379.2 1334.88,-384.8"/>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" d="M1218.21,-382C1256.12,-382 1297.36,-382 1334.56,-382"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1334.93,-384.8 1342.93,-382 1334.93,-379.2 1334.93,-384.8"/>
 <text text-anchor="middle" x="1280.5" y="-385.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">会话记录</text>
 </g>
 <!-- ssh&#45;&gt;board_a -->
 <g id="edge14" class="edge">
 <title>ssh&#45;&gt;board_a</title>
-<path fill="none" stroke="#4e7975" stroke-width="1.8" stroke-dasharray="5,2" d="M1214,-347.22C1214,-257.64 1214,-26 1214,-26 1214,-26 1373.36,-26 1373.36,-26"/>
-<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1373.36,-28.8 1381.36,-26 1373.36,-23.2 1373.36,-28.8"/>
-<text text-anchor="middle" x="1280.5" y="-259.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">网络 SSH</text>
+<path fill="none" stroke="#4e7975" stroke-width="1.8" stroke-dasharray="5,2" d="M1174.52,-347.46C1198.44,-337.86 1218,-330 1218,-330 1218,-330 1310,-217 1310,-217 1310,-217 1343,-69 1343,-69 1343,-69 1359.18,-62.7 1379.16,-54.93"/>
+<polygon fill="#4e7975" stroke="#4e7975" stroke-width="1.8" points="1380.23,-57.52 1386.67,-52.01 1378.2,-52.3 1380.23,-57.52"/>
+<text text-anchor="middle" x="1280.5" y="-289.4" font-family="Noto Sans CJK SC" font-size="12.00" fill="#44645f">网络 SSH</text>
 </g>
 </g>
 </svg>

@@ -81,6 +81,9 @@ reconnection, stale callbacks, framing and archive ownership.
 
 ## Pull requests
 
+For version tags, release drafts and dependency updates, follow the
+[release guide](docs/RELEASING.md).
+
 Explain the problem, resulting behavior, and validation. Include screenshots for
 UI changes and identify any schema/API migration. Link an issue when available.
 Existing commit subjects use `seriald:` or `FIXES:` followed by an action; English
