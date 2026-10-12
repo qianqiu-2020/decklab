@@ -1,0 +1,47 @@
+digraph seriald {
+  graph [label="DeckLab · Shared board access and logging", labelloc=t, fontsize=26,
+         fontname="Noto Sans CJK SC", fontcolor="#193438", bgcolor="#f6f8f6",
+         pad=0.32, nodesep=0.48, ranksep=0.9, splines=polyline, rankdir=LR];
+  node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+        fontsize=15, color="#c5d5d0", fillcolor="#ffffff", fontcolor="#193438",
+        penwidth=1.3, margin="0.20,0.13"];
+  edge [color="#4e7975", penwidth=1.8, arrowsize=0.8,
+        fontname="Noto Sans CJK SC", fontsize=12, fontcolor="#44645f"];
+
+  web [label="People · multiple browsers\nLive terminals / logs / file transfers", fillcolor="#e3f1ec"];
+  agent [label="Agent · serialctl\nCommands / sessions / file transfers", fillcolor="#e3f1ec"];
+
+  subgraph cluster_host {
+    label="Host · seriald";
+    fontname="Noto Sans CJK SC"; fontsize=18; fontcolor="#2d5754";
+    color="#b9d1ca"; style="rounded,filled"; fillcolor="#edf3ef";
+    control [label="HTTP control service\nWeb UI + API proxy", fillcolor="#d8e8e2"];
+    collector [label="Collector\nBoard registry / connection generations / coordination", fillcolor="#c4ddd4"];
+    reader [label="One reader per serial port\nContinuous byte capture", fillcolor="#ffffff"];
+    writer [label="Serial writes\nLinux: separate write-only fd\nWindows: shared COM handle", fillcolor="#ffffff"];
+    ssh [label="SSH sessions\nLinux PTY / Windows SSH channel\nVisible to collaborators", fillcolor="#ffffff"];
+    store [label="Archives by board serial number\nSQLite + daily serial / SSH logs", fillcolor="#dce8f3"];
+  }
+
+  board_a [label="Board A\nSerial + Linux shell", fillcolor="#f7ecdc", color="#dfc7a4"];
+  board_b [label="Board B\nSerial + Linux shell", fillcolor="#f7ecdc", color="#dfc7a4"];
+
+  web -> control [label="POST input / SSE output\nGET with offset as fallback"];
+  agent -> control;
+  control -> collector [label="Local IPC"];
+  collector -> reader;
+  collector -> writer;
+  collector -> ssh;
+  collector -> store [label="Identity / events"];
+  reader -> store [label="Archive"];
+  ssh -> store [label="Session logs"];
+  reader -> board_a [dir=back, label="Serial output"];
+  writer -> board_a [label="Commands / chunks"];
+  reader -> board_b [dir=back, label="Serial output"];
+  writer -> board_b [label="Commands / chunks"];
+  ssh -> board_a [label="Network SSH", style=dashed];
+
+  pipeline [shape=note, label="Board-to-board copy pipeline\nA reads next chunk  ||  B writes current chunk\nChunk acknowledgements; final file SHA-256 check",
+            fillcolor="#fff8e9", color="#dfc7a4", fontsize=13];
+  collector -> pipeline [style=dotted, arrowhead=none];
+}

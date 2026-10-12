@@ -64,6 +64,14 @@ unprovisioned until identified through a supported explicit workflow.
 
 ## Per-board profiles
 
+Built-in defaults follow the SpacemiT K3/Bianbu development workflow: 115200,
+8N1, no flow control, console/SSH `root` with password `bianbu`, Linux probes
+and automatic SSH configuration enabled. Profiles are generic settings, not
+automatic board-model detection or proof of support on other boards. The
+example below explicitly disables automatic SSH configuration for its Linux
+profiles. See the [board support list](../README.md#board-support-and-defaults)
+for the physical-board validation scope.
+
 Copy `examples/profiles.json` and replace its example serial
 and physical port key. Omitted fields inherit environment defaults. Selection
 uses board serial first, physical port key second, configured default last.

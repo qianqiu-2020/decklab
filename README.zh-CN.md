@@ -4,6 +4,10 @@
 
 DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统一提供网页终端、SSH、历史日志和 Agent 接口。支持 Ubuntu 服务安装及 Windows 上位机。底层项目、命令与服务名保留 `seriald`。
 
+![DeckLab Demo：共享终端、设备列表与启动日志归档](docs/decklab-demo.png?v=overview-1)
+
+真实应用界面，使用模拟设备，无需接入硬件。Demo 中的设备不代表对应版型已经实测支持。
+
 ## 为什么使用 DeckLab
 
 按日常排障的影响排序，它解决了单独使用 minicom 时的这些问题：
@@ -16,6 +20,24 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 6. **USB 串口断连可尝试软件恢复。** Ubuntu 上位机可执行 USB 软解绑/重绑定，减少反复手动拔插。
 
 设备身份优先使用 EEPROM ONIE 序列号，并兼容 vendor/upstream 内核的不同暴露方式；有效 DT `serial-number` 也直接作为正式编号；`key` 是用户标签（如 `riscv-118`、`musepi2`）。待确认的 SoC/eFuse 与 `/boot` 身份保存在 `logs/_provisional/`；没有编号时按 USB 连接隔离。标签、USB 插口和 tty 节点可改变。
+
+## 支持版型与默认配置
+
+当前实机验证范围以 **SpacemiT K3** 为准。串口和 Linux 接口可配置，不代表
+已经在其他板型验证完整功能。
+
+| 版型 | 验证状态 |
+| --- | --- |
+| SpacemiT K3（Deb1、Pico ITX / Com260） | 当前实机测试范围；不代表每种板型、系统和内核组合均已验证。 |
+| SpacemiT K1 / Milk-V Jupiter / MUSE-Pi | 仅保留历史身份探测记录，不列为完整功能已验证的支持版型。 |
+| 其他开发板 | 尚未验证；接入后需确认串口参数、身份识别、登录、SSH 和文件传输。 |
+
+内置默认值沿用 K3/Bianbu 使用习惯：**115200、8N1、无流控，串口及 SSH
+使用 `root/bianbu`，启用 Linux 身份探测和 SSH 自动配置**。这是通用配置，
+不会根据型号自动选择预设；其他系统镜像需修改账号、密码或串口参数。
+显式使用示例 profile 文件时，其中的 Linux 配置会关闭 SSH 自动配置。
+详见 [配置说明](docs/CONFIGURATION.md)。
+[身份矩阵](docs/DEVICE_IDENTITY_MATRIX.md) 记录的是具体历史观测，不代表完整功能认证。
 
 ## 安装到 Ubuntu 上位机
 

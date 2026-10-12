@@ -74,6 +74,11 @@ async function until(check, description) {
   const logs = await (await fetch(address + 'api/logs?key=demo-k1')).json();
   assert.equal(logs.boots.length, 2);
   assert.ok(logs.boots.some(boot => boot.cross_day));
+  await evaluate('demoTerm.paste("dmesg\\r")');
+  await until(() => evaluate(contents + '.includes("mmc0: initialized")'), 'demo overview output');
+  const overview = await rpc('Page.captureScreenshot', {format: 'png'});
+  fs.mkdirSync(path.join(root, 'dist'), {recursive: true});
+  fs.writeFileSync(path.join(root, 'dist', 'demo-overview.png'), Buffer.from(overview.data, 'base64'));
   // Two independent page instances use the production ownership API and UI.
   await evaluate('document.querySelector("#b-input-owner").click()');
   await until(() => evaluate('document.querySelector("#input-owner-label").textContent === "释放输入"'), 'first page ownership');

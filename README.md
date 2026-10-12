@@ -6,7 +6,10 @@ A shared development-board workbench for OS and BSP developers. Capture serial
 output continuously, access boards through a browser or agent, and keep boot
 history attached to a stable board identity rather than a changing tty number.
 
-![DeckLab architecture](docs/seriald-architecture.png?v=30ea099)
+![DeckLab demo: shared terminal, board list and boot archives](docs/decklab-demo.png?v=overview-1)
+
+Actual UI with simulated boards; no physical hardware is required. Demo devices
+illustrate the workflow and do not establish hardware support.
 
 ## Why DeckLab
 
@@ -22,6 +25,8 @@ failures. Agent grants are revocable and can be scoped to one board. Runtime
 service names, command names and installation paths retain the `seriald` name.
 
 ## Install and use
+
+![DeckLab architecture](docs/seriald-architecture-en.png?v=english-1)
 
 Try without hardware: `python3 seriald_demo.py`, then open
 **http://127.0.0.1:8899/**. See the [demo guide](docs/DEMO.md) for simulated
@@ -46,14 +51,32 @@ python3 serialctl.py --url http://127.0.0.1:8898 devices
 The web UI can generate agent access instructions with hosted client and skill
 links. Serial input is shared; coordinate interactive work with other users.
 
+## Board support and defaults
+
+Physical-board validation currently focuses on **SpacemiT K3**. Configurable
+serial and Linux interfaces do not imply validation on other board families.
+
+| Board family | Validation status |
+| --- | --- |
+| SpacemiT K3 (Deb1, Pico ITX / Com260) | Current physical-board test scope; not every board/OS/kernel combination has been validated. |
+| SpacemiT K1 / Milk-V Jupiter / MUSE-Pi | Historical identity-probe observations only; not a validated full-function support claim. |
+| Other boards | Not validated; test serial framing, identity, login, SSH and file transfer before relying on them. |
+
+Built-in defaults follow the K3/Bianbu workflow: **115200 baud, 8N1, no flow
+control, `root` / `bianbu` for console and SSH, Linux identity probing, and
+automatic SSH configuration enabled**. These are generic settings, not automatic
+model detection. Override credentials and framing for other OS images; the
+example profile file disables automatic SSH configuration when explicitly used.
+See [configuration](docs/CONFIGURATION.md) and the
+[historical identity matrix](docs/DEVICE_IDENTITY_MATRIX.md). The identity matrix
+records specific observations, not full-function certification.
+
 ## Scope
 
-The strongest tested workflows currently use Ubuntu hosts, Windows COM adapters
-and Linux development boards, including SpacemiT K1/K3 vendor and upstream
-kernels. See the [identity matrix](docs/DEVICE_IDENTITY_MATRIX.md) for verified
-board identities. Serial framing, credentials and board profiles are configurable;
-see [configuration](docs/CONFIGURATION.md). Firmware-only targets can use manual
-mode without Linux shell probes; unsupported identities remain provisional.
+Ubuntu service installation and native Windows hosting are available. CI and
+simulated transports are separate from physical-board validation. Firmware-only
+targets can use manual mode without Linux shell probes; unconfirmed identities
+remain provisional.
 
 The service is intended for local or trusted-LAN development. Authentication is
 optional. SSH root provisioning can modify a development board, and SSH host
