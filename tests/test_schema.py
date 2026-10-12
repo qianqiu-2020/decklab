@@ -1,7 +1,9 @@
 """Real SQLite upgrades and WAL backups in temporary directories; no hardware."""
 import hashlib
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -96,7 +98,7 @@ class SchemaTests(unittest.TestCase):
         try:
             self.assertEqual(store.get('SN1')['label'], 'board-one')
             self.assertEqual(store.db.execute('SELECT count(*) FROM tasks').fetchone()[0], 0)
-            with sqlite3.connect(store.schema_backup) as backup:
+            with closing(sqlite3.connect(store.schema_backup)) as backup:
                 self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 2)
                 self.assertIsNone(backup.execute("SELECT name FROM sqlite_master WHERE name='tasks'").fetchone())
         finally:
@@ -115,7 +117,7 @@ class SchemaTests(unittest.TestCase):
         try:
             self.assertEqual(store.db.execute('SELECT id FROM tasks').fetchone()[0], 'task-one')
             self.assertEqual(store.db.execute('SELECT COUNT(*) FROM transfer_artifacts').fetchone()[0], 0)
-            with sqlite3.connect(store.schema_backup) as backup:
+            with closing(sqlite3.connect(store.schema_backup)) as backup:
                 self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 3)
                 self.assertIsNone(backup.execute("SELECT name FROM sqlite_master WHERE name='transfer_artifacts'").fetchone())
                 self.assertEqual(backup.execute('SELECT serial FROM task_targets').fetchone()[0], 'SN1')
@@ -135,7 +137,7 @@ class SchemaTests(unittest.TestCase):
         try:
             self.assertEqual(store.db.execute('SELECT COUNT(*) FROM connection_identities').fetchone()[0], 0)
             self.assertEqual(store.db.execute('SELECT serial FROM task_targets').fetchone()[0], '')
-            with sqlite3.connect(store.schema_backup) as backup:
+            with closing(sqlite3.connect(store.schema_backup)) as backup:
                 self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 4)
                 self.assertIsNone(backup.execute("SELECT name FROM sqlite_master WHERE name='connection_identities'").fetchone())
         finally:
@@ -166,6 +168,23 @@ class SchemaTests(unittest.TestCase):
                 Store(str(self.path))
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 0)
         self.assertNotIn('completed', {row[1] for row in db.execute('PRAGMA table_info(sessions)')})
+
+    def test_snapshot_flush_uses_writable_handle_without_changing_backup(self):
+        self.legacy()
+        real_sync = os.fsync
+        def sync(handle):
+            # Model Windows' write-access requirement, including on Linux.
+            os.write(handle, b'')
+            real_sync(handle)
+        with mock.patch.object(schema.os, 'fsync', side_effect=sync):
+            store = Store(str(self.path))
+        try:
+            with closing(sqlite3.connect(store.schema_backup)) as backup:
+                self.assertEqual(backup.execute('PRAGMA quick_check').fetchone()[0], 'ok')
+                self.assertEqual(backup.execute('SELECT label FROM boards').fetchone()[0], 'board-one')
+                self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 0)
+        finally:
+            store.close()
 
     def test_backup_publish_failure_removes_temporary_snapshot(self):
         db = self.legacy()

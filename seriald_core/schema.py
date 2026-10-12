@@ -121,7 +121,9 @@ def _backup(db_path, old_version, target_version):
                 destination.close()
         finally:
             reader.close()
-        with temporary.open('rb') as file:
+        # Windows _commit/FlushFileBuffers needs a writable handle. r+b keeps
+        # the completed SQLite snapshot intact while making its sync portable.
+        with temporary.open('r+b') as file:
             os.fsync(file.fileno())
         os.replace(temporary, final)
         return str(final)
