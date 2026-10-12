@@ -415,6 +415,7 @@ class FramingTests(unittest.TestCase):
             self.assertEqual(ctl.parse_frame(result.stdout, second_nonce),
                              (0, str(root.resolve()) + '|inherited|unset'))
 
+    @unittest.skipUnless(Path('/bin/sh').is_file(), 'requires a local POSIX shell')
     def test_child_shell_status_quotes_multiline_stderr_and_exit(self):
         for command, expected, code in (
                 ("printf '%s' \"a'b\"", "a'b", 0),
