@@ -17,6 +17,9 @@ spec.loader.exec_module(notices)
 
 class NoticeTests(unittest.TestCase):
     def setUp(self):
+        source_notices = patch.object(notices, 'native_source_notices', return_value=[])
+        source_notices.start()
+        self.addCleanup(source_notices.stop)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
@@ -203,3 +206,61 @@ class NoticeTests(unittest.TestCase):
         git('checkout-index', '--all')
         self.assertEqual(target.read_bytes(), original)
         self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), notices.OPENSSL_LICENSE_HASH)
+
+
+class NativeSourceNoticeTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.source = self.root / 'packaging/third-party/native-source-notices'
+        self.source.mkdir(parents=True)
+        self.bundle = self.root / 'bundle'
+        self.bundle.mkdir()
+        self.binary = self.bundle / 'provider.pyd'
+        self.binary.write_bytes(b'fixture binary')
+        self.license = self.source / 'LICENSE.txt'
+        self.license.write_bytes(b'fixture license')
+        self.destination = self.root / 'notices'
+
+    def catalog(self, file='LICENSE.txt'):
+        data = json.dumps({'providers': {'provider.pyd': hashlib.sha256(self.binary.read_bytes()).hexdigest()},
+                           'files': {file: hashlib.sha256(self.license.read_bytes()).hexdigest()}}).encode()
+        (self.source / 'inventory.json').write_bytes(data)
+        return patch.object(notices, 'NATIVE_SOURCE_CATALOG_HASH', hashlib.sha256(data).hexdigest())
+
+    def test_provider_catalog_and_notice_bytes_are_verified_and_copied(self):
+        with patch.object(notices, 'ROOT', self.root), self.catalog():
+            rows = notices.native_source_notices(self.bundle, self.destination)
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertEqual(hashlib.sha256((self.destination / row['file']).read_bytes()).hexdigest(), row['sha256'])
+
+    def test_changed_provider_and_notice_fail_instead_of_using_stale_catalog(self):
+        with patch.object(notices, 'ROOT', self.root), self.catalog():
+            self.binary.write_bytes(b'changed binary')
+            with self.assertRaisesRegex(ValueError, 'unreviewed native source provider'):
+                notices.native_source_notices(self.bundle, self.destination)
+            self.binary.write_bytes(b'fixture binary')
+            self.license.write_bytes(b'changed notice')
+            with self.assertRaisesRegex(ValueError, 'notice checksum'):
+                notices.native_source_notices(self.bundle, self.destination)
+
+    def test_catalog_tampering_and_escaping_notice_fail(self):
+        with patch.object(notices, 'ROOT', self.root), self.catalog():
+            (self.source / 'inventory.json').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'catalog checksum'):
+                notices.native_source_notices(self.bundle, self.destination)
+        with patch.object(notices, 'ROOT', self.root), self.catalog('../LICENSE.txt'):
+            with self.assertRaisesRegex(ValueError, 'invalid native source notice path'):
+                notices.native_source_notices(self.bundle, self.destination)
+
+    def test_repository_catalog_and_every_notice_match_pinned_hashes(self):
+        source = notices.ROOT / 'packaging/third-party/native-source-notices'
+        data = (source / 'inventory.json').read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(), notices.NATIVE_SOURCE_CATALOG_HASH)
+        catalog = json.loads(data)
+        self.assertEqual(len(catalog['crates']), 67)
+        self.assertEqual(len(catalog['embedded_cffi_source_headers']['headers']), 8)
+        for relative, checksum in catalog['files'].items():
+            self.assertEqual(hashlib.sha256((source / relative).read_bytes()).hexdigest(), checksum)

@@ -29,6 +29,38 @@ RUNTIME_SOURCE_NOTICES = (
      'https://github.com/python/cpython-source-deps/blob/zlib-1.3.1/LICENSE'),
     ('xz-COPYING', 'bcb02973ef6e87ea73d331b3a80df7748407f17efdb784b61b47e0e610d3bb5c',
      'https://github.com/python/cpython-source-deps/blob/xz-5.2.5/COPYING'))
+NATIVE_SOURCE_CATALOG_HASH = '80c2da5cf616467448c7106ffaa811b7fee4d44ddc07ba259e2e9caeddef50dc'
+
+
+def native_source_notices(bundle, destination):
+    """Copy reviewed source-graph notices only for the observed frozen providers."""
+    source = ROOT / 'packaging/third-party/native-source-notices'
+    data = (source / 'inventory.json').read_bytes()
+    if hashlib.sha256(data).hexdigest() != NATIVE_SOURCE_CATALOG_HASH:
+        raise ValueError('pinned native source catalog checksum mismatch')
+    catalog = json.loads(data)
+    for relative, checksum in catalog['providers'].items():
+        binary = Path(bundle) / relative
+        if (binary.is_symlink() or not binary.resolve().is_relative_to(Path(bundle).resolve())
+                or hashlib.sha256(binary.read_bytes()).hexdigest() != checksum):
+            raise ValueError('unreviewed native source provider: ' + relative)
+    entries = []
+    files = dict(catalog['files'], **{'inventory.json': NATIVE_SOURCE_CATALOG_HASH})
+    for relative, checksum in files.items():
+        path = PurePosixPath(relative)
+        if path.is_absolute() or '..' in path.parts or '\\' in relative or ':' in relative:
+            raise ValueError('invalid native source notice path')
+        notice = source / relative
+        if notice.is_symlink() or not notice.resolve().is_relative_to(source.resolve()):
+            raise ValueError('native source notice escapes catalog')
+        notice_data = notice.read_bytes()
+        if hashlib.sha256(notice_data).hexdigest() != checksum:
+            raise ValueError('native source notice checksum mismatch: ' + relative)
+        target = Path(destination) / 'native-source' / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(notice_data)
+        entries.append({'file': 'native-source/' + relative, 'sha256': checksum})
+    return entries
 
 
 def runtime_source_notices(destination):
@@ -141,6 +173,7 @@ def inventory(distributions, destination, python_license, fallbacks=None, native
         if native_bundle is not None:
             manifest['native_crypto_providers'] = native_crypto_notices(native_bundle, temporary)
             manifest['runtime_source_notices'] = runtime_source_notices(temporary)
+            manifest['native_source_notices'] = native_source_notices(native_bundle, temporary)
         (temporary / 'inventory.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         (temporary / 'README.txt').write_text(
             'These notices cover all installed Python distributions in the build environment.\n'
@@ -148,6 +181,7 @@ def inventory(distributions, destination, python_license, fallbacks=None, native
             'inventory.json records exact versions and hashes of copied notices.\n'
             'native_crypto_providers, when present, links observed OpenSSL binaries to pinned licenses.\n'
             'runtime_source_notices covers a named CPython source baseline, not arbitrary runtime versions.\n'
+            'native-source/inventory.json records a reviewed source-graph superset and matched provider hashes.\n'
             'This is not a complete native-library SBOM; inspect frozen binaries separately.\n', encoding='utf-8')
         temporary.rename(destination)
         return manifest
@@ -185,6 +219,7 @@ def verify(destination):
         native_files[row['file']] = row
     entries.extend(native_files.values())
     entries.extend(manifest.get('runtime_source_notices', []))
+    entries.extend(manifest.get('native_source_notices', []))
     files = set()
     for entry in entries:
         relative = entry['file']

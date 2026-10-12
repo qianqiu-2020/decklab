@@ -1,0 +1,1 @@
+/* fficonfig.h.  Originally created by configure, now hand_maintained for MSVC. */

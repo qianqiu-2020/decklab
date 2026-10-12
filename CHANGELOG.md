@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add reviewed Windows Rust source-graph notices and CFFI/libffi source headers.
+  Pin the catalog to three observed frozen provider hashes; reject stale source
+  notices and changed binaries instead of silently reusing old attribution.
+
 ## 1.5.0
 
 - Run native Windows package, installer upgrade and simulated-host checks in

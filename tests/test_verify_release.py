@@ -69,7 +69,9 @@ class ReleaseVerificationTests(unittest.TestCase):
             path = bundle / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'MZ OpenSSL ' + version.encode() + b' fixture')
-        inventory([], bundle / 'third-party', python_license, native_bundle=bundle)
+        # Model the already published 1.5.0 bundle, before source-graph supplements.
+        with patch('tools.collect_windows_notices.native_source_notices', return_value=[]):
+            inventory([], bundle / 'third-party', python_license, native_bundle=bundle)
         create(bundle)
         archive = self.root / 'seriald-windows-portable.zip'
         with zipfile.ZipFile(archive, 'w') as output:

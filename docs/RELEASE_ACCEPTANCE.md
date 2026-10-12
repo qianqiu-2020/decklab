@@ -276,9 +276,13 @@ build script parses on PowerShell; native execution remains unverified.
 
 ## Current remaining gate
 
-Finish actual frozen native dependency/source attribution: compiled Rust
-dependencies, CFFI's embedded libffi and applicable corresponding-source/rebuild
-requirements remain under review. OpenSSL provider notices and supplemental
+Finish Rust standard-library/toolchain attribution and applicable corresponding-
+source/rebuild requirements. The modeled Windows Rust registry graph now has
+67 package/version pairs and 132 pinned original notice files; eight CFFI/libffi
+source headers are also collected. All three frozen provider hashes match before
+copying this catalog. Twenty notice tests and an actual frozen-provider copy
+check pass; these supplements still require native packaging verification and
+are absent from the previously published 1.5.0 draft. OpenSSL provider notices and supplemental
 CPython source-baseline notices are now shipped, but are not a complete native
 SBOM. The installed-distribution inventory is a conservative superset. Source
 archives for bcrypt 5.0.0, cryptography 50.0.2, CFFI 2.1.1 and Paramiko 4.0.0

@@ -98,6 +98,32 @@ copying it does not claim those tools ship. Python's existing license retains
 the runtime's libffi, bzip2 and Microsoft terms. Remaining binary/source matching
 and compiled Rust dependency review still require evidence.
 
+## Reviewed Windows source graph
+
+The corresponding bcrypt 5.0.0 and cryptography 50.0.2 source archives were
+verified against PyPI's published SHA-256. `cargo metadata --locked` with
+`--filter-platform x86_64-pc-windows-msvc` resolved 37 and 31 registry packages,
+67 unique package/version pairs. Every modeled Windows node has copied notice
+texts: 132 unchanged files. Two source-lock crates without notice files,
+`r-efi` and `wasip2`, are absent from both Windows resolve graphs. The model
+includes build-time dependencies and does not attest upstream wheel feature flags.
+
+Eight leading comment headers from CFFI 2.1.1's bundled x86/x64 libffi C/header
+files are also retained unchanged, including their original copyright and
+permission terms. Archive/member/header hashes preserve extraction provenance.
+The offline catalog under `packaging/third-party/native-source-notices/` records
+crate archive checksums, original member paths, metadata license expressions,
+source parents, notice hashes and the three reviewed frozen provider hashes.
+Those providers must match before the collector copies supplements into
+`third-party/native-source/`; a different wheel binary requires review and a
+catalog update. No crate build scripts were run during this source inspection.
+
+This closes the collected notice-text gaps for the modeled registry graph and
+CFFI source headers. It does not identify Rust's standard-library/toolchain
+contributions or satisfy corresponding-source/rebuild requirements by itself.
+Those remain release review work; the already published 1.5.0 draft predates
+these supplements and must not be described as containing them.
+
 The existing notice collector remains offline and validates copied notice hashes.
 The complete bundle manifest checks distributed file integrity. Neither check
 proves embedded dependency attribution. See [release acceptance](RELEASE_ACCEPTANCE.md)
