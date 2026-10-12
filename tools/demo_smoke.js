@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const {spawn} = require('node:child_process');
+const {launchBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'decklab-demo-browser-'));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -25,13 +26,9 @@ async function until(check, description) {
   demo.on('error', error => errors.push(error.message));
   await until(() => /http:\/\/127.0.0.1:\d+\//.test(output), 'demo launch');
   const address = output.match(/http:\/\/127.0.0.1:\d+\//)[0];
-  chrome = spawn(process.env.CHROME_BIN || '/usr/bin/google-chrome', [
-    '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
-    '--disable-gpu', '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'],
-    {stdio: 'ignore'});
-  chrome.on('error', error => errors.push(error.message));
-  await until(() => fs.existsSync(path.join(profile, 'DevToolsActivePort')), 'Chromium launch');
-  const port = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0];
+  const launched = await launchBrowser(profile);
+  chrome = launched.chrome;
+  const port = launched.port;
   const tab = await (await fetch('http://127.0.0.1:' + port + '/json/new?' + encodeURIComponent(address),
                                 {method: 'PUT'})).json();
   ws = new WebSocket(tab.webSocketDebuggerUrl);
