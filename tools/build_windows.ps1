@@ -47,7 +47,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Configuration tests failed.' }
     foreach ($suite in @('test_cli.py', 'test_schema.py', 'test_tasks.py', 'test_task_actions.py',
                          'test_transfer_artifacts.py', 'test_file_tasks.py',
-                         'test_transfer_tasks.py', 'test_input_ownership.py')) {
+                         'test_transfer_tasks.py', 'test_input_ownership.py',
+                         'test_models.py', 'test_maintenance.py', 'test_agent_grants.py')) {
         & $python -m unittest discover -s tests -p $suite
         if ($LASTEXITCODE -ne 0) { throw "Native storage/task/collaboration tests failed: $suite" }
     }
