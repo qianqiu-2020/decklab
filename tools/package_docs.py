@@ -31,7 +31,8 @@ def document_map(platform):
                  'decklab-demo.png', 'decklab-demo-zh.png'):
         pairs['docs/' + name] = prefix + name
     pairs['docs/windows-wheel-observation.json'] = prefix + 'windows-wheel-observation.json'
-    for path in ('examples/profiles.json', 'examples/hardware.json', 'skills/seriald-board/SKILL.md'):
+    for path in ('examples/profiles.json', 'examples/hardware.json', 'skills/seriald-board/SKILL.md',
+                 'skills/seriald-board/SKILL.zh-CN.md'):
         pairs[path] = path
     if platform == 'windows':
         pairs['README.md'] = 'README-project.md'

@@ -24,6 +24,7 @@
   var canPageShare = false;
   var selected = null;
   var lanHosts = [];
+  var instructions = null;
 
   fetch('/api/access', { cache: 'no-store' }).then(function (response) { return response.json(); })
     .then(function (access) {
@@ -113,31 +114,42 @@
     return url.origin;
   }
   function agentText(url, token, grant, board) {
-    var target = grant.scope === 'device' ? board.label : '<先用 devices 选择标签>';
+    var english = window.SerialdI18n && window.SerialdI18n.locale === 'en';
+    function phrase(chinese, translated) { return english ? translated : chinese; }
+    var target = grant.scope === 'device' ? board.label : phrase('<先用 devices 选择标签>', '<choose a label with devices>');
     var selection = grant.scope === 'device'
-      ? '只操作 ' + board.label + '（SN ' + grant.serial + '）。令牌在服务端限制为此序列号。'
-      : '可访问所有设备；先运行 devices，再根据任务选择明确的设备标签，不要默认选第一台。';
+      ? phrase('只操作 ', 'Operate only on ') + board.label + ' (SN ' + grant.serial + '). '
+        + phrase('令牌在服务端限制为此序列号。', 'The server limits this token to that serial number.')
+      : phrase('可访问所有设备；先运行 devices，再根据任务选择明确的设备标签，不要默认选第一台。',
+        'All boards are accessible. Run devices and choose the label required by the task; do not default to the first board.');
     return [
-      '请使用 seriald 访问开发板。' + selection,
-      '授权默认不限期；用户可以随时在网页撤销。当前会话的操作标签：' + grant.actor + '。',
-      ...(openAccess ? ['当前服务为开放模式；此令牌约束使用它的请求，其他客户端仍可无令牌访问。'] : []),
-      '优先通过 SSH 执行 Linux 命令；调试启动、内核、SSH 不通或交互式固件时才用共享串口。',
-      '先读取以下自托管 skill 和客户端，再操作设备：', '', '```sh',
+      phrase('请使用 seriald 访问开发板。', 'Use seriald to access the development boards. ') + selection,
+      phrase('授权默认不限期；用户可以随时在网页撤销。当前会话的操作标签：',
+        'The grant has no expiry by default and can be revoked in the UI. Session actor: ') + grant.actor + '.',
+      ...(openAccess ? [phrase('当前服务为开放模式；此令牌约束使用它的请求，其他客户端仍可无令牌访问。',
+        'Open access is enabled. This token scopes its requests; other clients can still connect without a token.')] : []),
+      phrase('优先通过 SSH 执行 Linux 命令；调试启动、内核、SSH 不通或交互式固件时才用共享串口。',
+        'Prefer SSH for Linux commands. Use shared serial for boot, kernel or SSH failures and interactive firmware.'),
+      phrase('先读取以下自托管 skill 和客户端，再操作设备：',
+        'Read the self-hosted skill and client before operating the boards:'), '', '```sh',
       'mkdir -p "$HOME/.local/share/seriald" "$HOME/.claude/skills/seriald-board" "$HOME/.codex/skills/seriald-board"',
       'curl -fsSL ' + shellQuote(url + '/serialctl.py') + ' -o "$HOME/.local/share/seriald/serialctl.py"',
-      'curl -fsSL ' + shellQuote(url + '/skills/seriald-board/SKILL.md') + ' -o "$HOME/.claude/skills/seriald-board/SKILL.md"',
+      'curl -fsSL ' + shellQuote(url + '/skills/seriald-board/SKILL.md?lang=' + (english ? 'en' : 'zh-CN')) + ' -o "$HOME/.claude/skills/seriald-board/SKILL.md"',
       'cp "$HOME/.claude/skills/seriald-board/SKILL.md" "$HOME/.codex/skills/seriald-board/SKILL.md"',
       'export SERIALD_URL=' + shellQuote(url),
       'export SERIALD_TOKEN=' + shellQuote(token),
       'python3 "$HOME/.local/share/seriald/serialctl.py" devices',
-      '# 先按任务选定标签；首选 SSH：',
+      phrase('# 先按任务选定标签；首选 SSH：', '# Choose the label required by the task; prefer SSH:'),
       'python3 "$HOME/.local/share/seriald/serialctl.py" --device ' + shellQuote(target) + ' exec --command ' + shellQuote('uname -a'),
-      '# 启动、内核或 SSH 故障时再读取串口：',
+      phrase('# 启动、内核或 SSH 故障时再读取串口：', '# Read serial for boot, kernel or SSH failures:'),
       'python3 "$HOME/.local/share/seriald/serialctl.py" --device ' + shellQuote(target) + ' read --sid serial',
       '```', '',
-      '如果 Agent 运行在 Windows PowerShell，请用 Invoke-WebRequest 下载相同两个地址，并用 py -3 运行 serialctl.py。',
-      'SSH 会话和串口输入会显示在网页中，并保留操作记录。串口由 seriald 独占采集，不要直接打开 /dev/ttyUSB*。',
-      '如果通过 SSH 操作失败，先用 read 查看当前串口，再按 skill 指引决定是否发送输入。'
+      phrase('如果 Agent 运行在 Windows PowerShell，请用 Invoke-WebRequest 下载相同两个地址，并用 py -3 运行 serialctl.py。',
+        'On Windows PowerShell, download the same URLs with Invoke-WebRequest and run serialctl.py with py -3.'),
+      phrase('SSH 会话和串口输入会显示在网页中，并保留操作记录。串口由 seriald 独占采集，不要直接打开 /dev/ttyUSB*。',
+        'SSH sessions and serial input are visible and recorded in the UI. seriald owns serial capture; do not open /dev/ttyUSB* directly.'),
+      phrase('如果通过 SSH 操作失败，先用 read 查看当前串口，再按 skill 指引决定是否发送输入。',
+        'If SSH fails, read the existing serial output first, then follow the skill before sending input.')
     ].join('\n');
   }
 
@@ -194,9 +206,13 @@
   scope.addEventListener('change', updateHint);
   addressMode.addEventListener('change', selectAddress);
   document.getElementById('agent-share-close').addEventListener('click', function () {
-    output.value = ''; dialog.close();
+    output.value = ''; instructions = null; dialog.close();
   });
-  dialog.addEventListener('close', function () { output.value = ''; copyButton.disabled = true; });
+  dialog.addEventListener('close', function () { output.value = ''; instructions = null; copyButton.disabled = true; });
+  if (window.addEventListener) window.addEventListener('decklab-language-change', function () {
+    if (dialog.open && instructions) output.value = agentText(instructions.url, instructions.token,
+      instructions.grant, instructions.board);
+  });
   document.getElementById('agent-share-refresh').addEventListener('click', loadGrants);
   create.addEventListener('click', async function () {
     create.disabled = true;
@@ -210,6 +226,7 @@
         body: JSON.stringify({ scope: scope.value, serial: scope.value === 'device' ? board.serial : '' }) });
       var result = await response.json();
       if (!response.ok || !result.token) throw new Error(result.error || '授权失败');
+      instructions = { url: url, token: result.token, grant: result.grant, board: board };
       output.value = agentText(url, result.token, result.grant, board);
       copyButton.disabled = false;
       try { await copy(output.value); agentStatus.textContent = '已复制接入文本；令牌只显示这一次'; }

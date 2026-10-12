@@ -48,7 +48,7 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.5.2_all.deb
+sudo apt install ./dist/seriald_1.5.3_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
@@ -60,7 +60,7 @@ sudo apt install ./dist/seriald_1.5.2_all.deb
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
 
 Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。安装构建依赖后，
-双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.5.2-windows-x64-setup.exe`：
+双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.5.3-windows-x64-setup.exe`：
 首次选择安装目录，后续升级记住原目录，保留 `data/`，无需手动解压覆盖。首次从便携版迁移时选中原目录。
 开始菜单提供本机、局域网无密码、局域网有密码三个入口。详见 [Windows 构建与安装](docs/WINDOWS.md)。
 也支持 Windows Docker 容器构建；IT 可按 EXE SHA-256 审批防火墙规则，升级后需重新审批。
@@ -82,7 +82,7 @@ serialctl --device riscv-118 file-get --remote /tmp/boot.log --local ./boot.log
 返回 JSON 输出和退出码，网页会一直显示可旁观的标签。会话只在显式 `ssh-close` 或网页关闭时结束；
 网页自己创建的 `web` 会话仍按独立会话处理。
 
-[Agent 接入指南](docs/AGENT_ACCESS.md) · [seriald-board skill](skills/seriald-board/SKILL.md)
+[Agent 接入指南](docs/AGENT_ACCESS.md) · [seriald-board skill](skills/seriald-board/SKILL.zh-CN.md)
 
 网页的“启动对比”可比较同板两次或跨板的历史启动日志，突出新增异常线索与行内变化字符；
 “文件传输”通过现有串口连接上传、下载或跨板复制，无需板子联网。

@@ -451,6 +451,10 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
 
     def translate_path(self, path):
         route = urlparse(path).path.lstrip('/')
+        if route == 'skills/seriald-board/SKILL.md':
+            language = dict(parse_qsl(urlparse(path).query)).get('lang', 'en')
+            if language == 'zh-CN':
+                route = 'skills/seriald-board/SKILL.zh-CN.md'
         return os.path.join(self.static_root, *route.split('/'))
 
     def end_headers(self):

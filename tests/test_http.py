@@ -442,7 +442,9 @@ class HandlerTests(unittest.TestCase):
         self.device.close_session.assert_called_once_with('ssh1')
 
     def test_agent_skill_and_cli_are_self_hosted_without_login(self):
-        for route in ('/serialctl.py', '/skills/seriald-board/SKILL.md'):
+        for route in ('/serialctl.py', '/skills/seriald-board/SKILL.md',
+                      '/skills/seriald-board/SKILL.md?lang=en',
+                      '/skills/seriald-board/SKILL.md?lang=zh-CN'):
             with self.subTest(route=route):
                 handler = self.control_handler(route)
                 handler.auth_token = 'owner-secret'
@@ -453,8 +455,10 @@ class HandlerTests(unittest.TestCase):
                                 if call.args[0].lower() == 'content-type']
                 self.assertEqual(len(content_type), 1)
                 self.assertIn('charset=utf-8', content_type[0])
-                if route.endswith('SKILL.md'):
-                    self.assertIn('开发板', handler.wfile.getvalue().decode('utf-8'))
+                if '/SKILL.md' in route:
+                    text = handler.wfile.getvalue().decode('utf-8')
+                    self.assertIn('开发板' if 'lang=zh-CN' in route else 'development boards', text)
+                    self.assertIn('boot-log --latest', text)
 
     def test_protected_lan_allows_only_local_agents_without_token(self):
         local = self.control_handler('/healthz')

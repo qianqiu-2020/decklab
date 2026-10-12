@@ -1,131 +1,168 @@
 ---
 name: seriald-board
-description: "通过 seriald 共享串口服务访问和排查开发板：按用户标签发现设备、读取启动或故障日志、执行命令、查看 agent 操作历史，处理 SSH 不通时的串口交互。用户要求访问 seriald 管理的板子、查看板子现场或让其他 agent 会话复用开发板访问设施时使用。"
+description: "Access development boards through an existing seriald service: discover boards by user label, read boot or failure logs, run commands and inspect agent activity. Use for seriald-managed boards and shared access from other agent sessions, including serial interaction when SSH is unavailable."
 ---
 
-# seriald 开发板访问
+# seriald board access
 
-调用已经运行的服务。包安装环境使用 `serialctl`；远程 Agent 可从
-`<SERIALD_URL>/serialctl.py` 下载后用 `python3 "$HOME/.local/share/seriald/serialctl.py"` 调用。
-以下示例中的 `serialctl` 可替换为该 Python 命令；客户端仅依赖 Python 3 标准库。
-默认 URL 是 `http://127.0.0.1:8898`，用户指定的 `SERIALD_URL` 或 `--url` 优先。
-服务启用认证时设置 `SERIALD_TOKEN` 或传 `--token`。
-跨机器访问时显式指定上位机地址。网页“分享给 Agent”生成可撤销令牌，默认不限期；
-单设备令牌由服务端限制在所选序列号，全部设备令牌仍须按用户任务选择目标。
-连接服务失败不能直接判定开发板宕机。
+Use the running service. Installed hosts provide `serialctl`; remote agents can
+fetch `<SERIALD_URL>/serialctl.py` and run
+`python3 "$HOME/.local/share/seriald/serialctl.py"` instead. The client needs only
+Python 3's standard library. On Windows use `py -3 serialctl.py`.
 
-## 选择身份与读取现场
+The default URL is `http://127.0.0.1:8898`; use `SERIALD_URL` or `--url` for the
+host specified by the user. Set `SERIALD_TOKEN` or `--token` when authentication
+is enabled. UI agent grants are revocable and have no expiry by default. A
+single-board grant is enforced by serial number; all-board access still requires
+choosing the board relevant to the task. An unreachable service does not prove
+the board is down.
+
+## Select the board and read existing output
 
 ```sh
 serialctl devices
 serialctl --device riscv-118 read
 ```
 
-`key` 就是当前用户标签；`serial` 是持久化主键，但可能是正式或候选身份。检查
-`info.identity_status`：`confirmed` 日志属于 `logs/<serial>/`，`provisional` 属于
-`logs/_provisional/<serial_source>/<serial>/`。`--device` 可用标签或序列号；标签、USB 路径和 tty 节点可变。
-根据用户指定的板子确认目标，无法确定时询问，不选第一块在线设备。
+`key` is the current user label; `serial` is the persistent identity, which may
+be confirmed or provisional. Check `info.identity_status`: confirmed archives
+use `logs/<serial>/`; provisional ones use
+`logs/_provisional/<serial_source>/<serial>/`. `--device` accepts a label or serial
+number. Labels, USB attachment paths and tty nodes can change. Select the board
+specified by the user; ask when its identity is unclear, rather than choosing the
+first online board.
 
-尚未识别或确实缺少可用编号的连接显示为 `unprovisioned-…`，key 来自 USB by-path 摘要；每次连接日志仍隔离。
-需要主动访问时才对该连接
-运行 `identify`（可能自动登录、执行识别命令），按返回的新 key 使用设备。
-已知序列号保留其标签；改名用 `rename --label musepi2`。历史设备保持可见。同一 USB by-path
-在服务运行中重新枚举时沿用原绑定；换板前必须点击“准备换板”，换插口或服务异常重启后需重新识别。
-优先读取 EEPROM ONIE `0x23`：upstream 使用 `cells/serial-number@*`，无 cell 的 vendor 内核则
-校验并解析原始 at24 NVMEM；U-Boot 注入的相同 DT serial 也可识别。之后才尝试 SoC/eFuse。
-以返回的 `serial` 为身份，`reported_serial` 是固件原值，`serial_source` 说明来源。直接读取的 ONIE
-编号、有效 DT `serial-number`（包括 U-Boot 注入）会自动确认为正式身份；占位值与已知冲突编号不接受。
-SoC/eFuse 和 `/boot` 身份在正式核实前标为 `provisional`；已登记的软件标记兜底会保留至 EEPROM 确认或人工更正。
-硬件身份不可用时会读取已有的
-`/boot/seriald-id`（来源 `boot-marker`）。用户选择文件标记兜底后，可运行
-`identify --init-boot-marker` 创建一次；已有文件不覆盖，普通识别不创建文件。
-保留文件才能延续档案，克隆到另一块板前移除它。初始化超时先读现场，不盲目换号。
-所有来源都无法识别时按 USB 插口临时区分并提示 Vendor 写入 EEPROM，不通过重命名或解除冲突绕过，
-也不由 agent 自动写 EEPROM、烧写 eFuse 或更换内核。
+Unidentified connections use `unprovisioned-…` keys derived from the USB path and
+keep each connection's logs isolated. Run `identify` only when active access is
+needed: it may log in and execute identity probes. Use the returned canonical
+key afterward. Existing serial numbers retain their labels; `rename --label
+musepi2` changes only the label. Historical boards remain visible. A temporary
+USB re-enumeration on the same path preserves the binding; use **Change board**
+before attaching another board to that adapter. A new attachment or an abnormal
+service restart may require identification.
 
-`read` 不发送回车。初次输出可能含旧历史，不能单凭旧提示符认定当前 shell 状态。
-保存字节偏移 `off`，后续 `read --off <off> --tail 0` 读取增量。
-`gap` 或 `truncated_bytes` 表示输出缺失/省略，不能据此断言“没有错误”。
+Identity probes prefer EEPROM ONIE TLV `0x23`: read an exposed NVMEM cell when
+available, otherwise validate and parse raw at24 NVMEM. Valid DT `serial-number`,
+including firmware/U-Boot injection, also confirms identity automatically.
+Placeholders and known conflicting numbers do not. `reported_serial` is the
+firmware's original number; `serial_source` records the selected source.
+SoC/eFuse IDs and `/boot` markers stay provisional until verified.
 
-## 执行与记录
+The probe may read an existing `/boot/seriald-id`. Only when the user requests
+this fallback should `identify --init-boot-marker` create it; existing files are
+not overwritten and ordinary probes never create it. Preserve the marker to
+retain continuity, and remove it before cloning an image onto another board.
+After a timeout, inspect output before retrying or changing identities. With no
+usable identity, keep USB-path isolation and ask the vendor to provision EEPROM;
+do not bypass conflicts by renaming, write EEPROM/eFuse or change kernels on
+this skill's authority.
+
+`read` sends no Enter key. Initial output can include history; an old prompt does
+not establish the current shell state. Save its byte offset `off` and use
+`read --off <off> --tail 0` for subsequent output. `gap` or `truncated_bytes`
+indicates missing/omitted output and cannot establish an absence of errors.
+
+## Execute through SSH and inspect records
 
 ```sh
 serialctl --actor claude-code/diagnosis --device riscv-118 exec \
   --command 'uname -a; uptime; df -h' --timeout 60
 ```
 
-优先用 `exec` 建立 SSH 执行 Linux 命令。启动、内核、SSH 故障或固件交互才转串口。
-用 `--actor` 标记本会话/操作者，方便人从网页旁观或回看；普通访问时 actor 是自报名称，
-Agent 分享令牌则由服务端固定为授权标签。
-同一设备和 actor 的 `exec` 会复用持久 SSH 会话，网页会一直显示该标签，直到 agent 执行
-`ssh-close --sid <sid>` 或人在网页中关闭。不要借用其他 agent 或网页的会话。
-每次命令在独立的 `sh -c` 子 shell 中运行，继承持久终端环境，但本次 `cd`、`export` 不影响下次调用。
-把相关目录切换、变量设置和命令放在同一次调用；需改变父终端环境时用交互式 `send --sid`。
-远端用 POSIX `sh`，stdin 为 EOF，stdout/stderr 合并；不用于交互程序、二进制或常驻任务。
-命令限 2048 UTF-8 字节，累计输出限 1 MiB，服务缓存也有限；大日志先过滤或取尾。
-缺少 IP 时创建 SSH 可能先在串口识别；不要因 SSH 不通擅自安装服务或修改凭据。
-Ubuntu 等禁用 root SSH 的板子可按请求指定账户：设置 `SERIALD_SSH_PASSWORD_OVERRIDE`，并在命令中加入
-`--ssh-user ubuntu --ssh-password "$SERIALD_SSH_PASSWORD_OVERRIDE"`。网页默认使用上位机配置的账户。
+Prefer `exec` over SSH for Linux commands. Use serial for boot, kernel or SSH
+failures and interactive firmware. `--actor` identifies the session for human
+observation; agent grants fix their actor server-side. Ordinary actor names are
+self-reported. The same board/actor reuses a persistent SSH session, visible in
+the UI until `ssh-close --sid <sid>` or a human closes it. Use your own session.
 
-检查 JSON 中的 `completed`、`exit_code`、`output` 和 `session_closed`。
-只有完整结束标记才证明完成；非零退出码是失败。
-`may_still_be_running` 表示状态未知，先核对现场，不盲目重试写操作；关闭 SSH 不保证后台进程退出。
-`recording_error` / `cleanup_error` 要报告，并保留 sid；只清理自己创建的会话。
+Each command runs in a separate POSIX `sh -c` child with stdin at EOF and merged
+stdout/stderr. Its `cd` or `export` does not alter the next command; combine those
+with the dependent operation. Use interactive `send --sid` to change the parent
+shell environment. `exec` is not for interactive programs, binary streams or
+long-running tasks. Commands are limited to 2048 UTF-8 bytes and collected output
+to 1 MiB; the service buffer is also bounded. Filter or tail large logs first.
 
-`activity` 查看持久化操作历史，`logs` 列出文件，`log --file <文件名>` 在线读取。
-网页旁观 agent 会话默认只读，关闭后仍有记录。`--timeout` 不包含创建请求，后者受
-`--http-timeout`（默认 180 秒）控制。
+Creating SSH without a known IP may probe serial. Do not install SSH or modify
+credentials merely because a connection failed. When the user requests a
+non-root account, set `SERIALD_SSH_PASSWORD_OVERRIDE` and pass, for example,
+`--ssh-user ubuntu --ssh-password "$SERIALD_SSH_PASSWORD_OVERRIDE"`. The UI uses
+host-configured credentials.
 
-## 无网络文件传输
+Check `completed`, `exit_code`, `output` and `session_closed`. A complete end
+marker establishes completion; a nonzero exit code means failure.
+`may_still_be_running` means the outcome is unknown: inspect before retrying
+writes. Closing SSH does not guarantee background processes have exited. Report
+`recording_error` or `cleanup_error`, retain the session ID and close only your
+own sessions. `--timeout` excludes connection creation, which uses
+`--http-timeout` (default 180 seconds).
 
-用户要求传文件且板子无网络时，用 `file-put --local <本地文件> --remote <板端绝对路径>`、
-`file-get --remote <板端绝对路径> --local <本地文件>`，或从当前 `--device` 到另一台的
-`file-copy --remote <源路径> --to-device <标签> --to-path <目标路径>`。
-默认不覆盖现有文件；明确需要替换时加 `--overwrite`。先确认板子在 Linux shell，具备
-`base64`、`sha256sum`、`dd` 等工具。传输按连接 ID 固定设备并逐块校验；网页也有“文件传输”面板。
+`activity` reads persistent operation history; `logs` lists archives;
+`log --file <filename>` reads one. Humans view agent sessions read-only by default
+and can explicitly take over; closed sessions retain their transcripts.
 
-## 精确读取启动日志
+## Read the exact boot and compare failures
 
 ```sh
-serialctl --device <标签> boot-log --latest
-serialctl --device <标签> logs
-serialctl --device <标签> boot-log --id <boot-ID>
-serialctl --device <标签> boot-search --query 'panic'
+serialctl --device <label> boot-log --latest
+serialctl --device <label> logs
+serialctl --device <label> boot-log --id <boot-ID>
+serialctl --device <label> boot-search --query 'panic'
 ```
 
-`boot-log` 返回该次启动已采集的完整 `data` / `data_b64`，不受实时缓冲或末尾 64 KiB 限制；跨天的日志合并在同一启动 ID 中。`--latest` 是最新检测到启动标记的记录，不保证板子目前在线；诊断时先核对启动时间，并保存 ID，后续用 `--id` 避免重启后读到另一轮。采集开始之前的输出无法补回，没有启动标记时会明确报错。
+`boot-log` returns the complete captured `data` / `data_b64` for that boot,
+including cross-day portions; it is not limited to live-buffer history or a
+64 KiB tail. `--latest` means the most recently detected boot marker, not proof
+that the board is online. Check the time and save the ID, then use `--id` to avoid
+following another reboot. Output before capture began cannot be recovered;
+missing boot markers produce an explicit error.
 
-`boot-search` 在当前设备全部启动归档中搜索文字，不区分大小写；结果含启动 ID、时间和匹配行。`more=true` 时用 `--offset <next_offset>` 继续读取。先搜索确定 ID，再读完整启动日志；不用在每日文件中猜测启动边界。
+`boot-search` searches all boots for that board, case-insensitively, and returns
+IDs, times and matching lines. Follow `more=true` with `--offset <next_offset>`.
+Find the ID first, then read that boot instead of guessing daily-file boundaries.
 
-## 启动差异排查
+Use `boot-compare --baseline-id <ID> --target-id <ID>` for the same board. For
+cross-board comparison, `--device` selects the target and `--baseline-device
+<label>` selects the baseline. Inspect `clues` for new errors/timeouts, then
+line-numbered `rows`. Capture timestamps and kernel clocks are ignored for
+comparison. `left_spans` / `right_spans` identify changed characters in paired
+lines. The UI also compares historical boards.
 
-`logs` 列出 `boots` 和每次启动的 ID。用 `boot-compare --baseline-id <ID> --target-id <ID>`
-比较同板启动；跨板时以 `--device` 指定目标板，再加 `--baseline-device <标签>` 指定基准板。
-先看 `clues` 中目标启动新增的错误和超时，再看带行号的 `rows`；归档时间戳与内核计时已过滤。
-网页“启动对比”同样支持历史设备。完整参数见接入指南。
+## Transfer files without networking
 
-## 后台传输和配置的硬件操作
+Use `file-put --local <local-file> --remote <absolute-board-path>`,
+`file-get --remote <absolute-board-path> --local <local-file>`, or
+`file-copy --remote <source-path> --to-device <label> --to-path <target-path>`.
+Only add `--overwrite` when replacement is requested. Confirm a Linux shell with
+`base64`, `sha256sum` and `dd`. Transfers pin connection IDs and verify chunks;
+the UI provides the same transfer operations.
 
-`file-put`、`file-get`、`file-copy` 默认提交采集器任务并等待结果；`--background` 返回任务 ID。
-上传暂存阶段需要客户端在线，提交后关闭客户端不终止任务；`task <ID>` 查询，
-`task-cancel <ID>` 请求取消，`file-fetch <下载任务ID> --local <路径>` 取回校验后的文件。
-响应丢失时先查 `tasks`，不要盲目重发；取消不能撤销已完成的远端写入。
+These commands submit collector tasks and wait by default; `--background`
+returns a task ID. Upload staging needs the client online, but submitted tasks
+survive client closure. Use `task <ID>`, `task-cancel <ID>` and
+`file-fetch <download-task-ID> --local <path>`. After a lost response, inspect
+`tasks` before resubmitting. Cancellation cannot undo completed remote writes.
 
-`hardware` 只列出该板已配置且允许本 actor 执行的操作。用户已授权时才用
-`task-start hardware-reset` 等执行；配置决定工具和参数，agent 不传入任意主机命令。
-独占串口刷机期间无法采集该串口，其他设备和 SSH 不受影响。
+`hardware` lists configured actions allowed for this actor. Only execute
+`task-start hardware-reset` or similar when already authorized by the user's
+task. Configuration owns tools/arguments; agents do not supply arbitrary host
+commands. Exclusive serial flashing temporarily suspends that port's capture;
+other boards and SSH remain usable.
 
-## 串口及交互式 SSH
+## Interactive serial or SSH
 
-SSH 多步交互用 `ssh-open` 得到（或复用）自己的持久 sid，随后 `read --sid`、`send --sid`，结束 `ssh-close --sid`。
-串口是共享控制台，写入前协调唯一操作者；已有独占安排无需重复确认。
-先确认现场是 shell、登录提示符还是 U-Boot，再选择输入。`send --text '命令' --enter`
-追加 CR；其他换行或控制字符用 `--file` / `--file -`。写入成功不代表命令已完成。
+Use `ssh-open` for your persistent session ID, then `read --sid` / `send --sid`,
+and finish with `ssh-close --sid`. Serial is a shared console: coordinate one
+writer before sending input; an existing authorized arrangement needs no repeat
+confirmation. Establish whether the console is a shell, login prompt or firmware
+first. `send --text 'command' --enter` appends CR. Use `--file` or `--file -` for
+other newlines/control characters. Accepted input does not prove completion.
 
-对 seriald 管理的设备，不执行 `cat /dev/ttyUSB*`、`stty`、`screen`、`minicom`，
-不启动第二个采集器；其他 skill 的直连串口步骤不适用于这些设备。
-点击/回放终端不会自动向串口回写位置报告。多个 SSH 会话仍共享板子的文件和系统状态。
-操作范围沿用用户任务授权，skill 本身不授权刷机、重启、USB rebind 或系统配置修改。
+Do not open managed tty/COM ports with `cat`, `stty`, `screen`, `minicom` or a
+second collector. Direct-serial steps from another skill do not apply to managed
+ports. Passive terminal viewing/replay never sends position reports. SSH
+sessions still share board files and system state. This skill does not authorize
+flashing, rebooting, USB rebinds or configuration changes beyond the user's task.
 
-完整参数与异常说明见源码目录的 `docs/AGENT_ACCESS.md`；Linux 包安装环境见
-`/usr/share/doc/seriald/AGENT_ACCESS.md`，客户端 `--help` 可随时查看可用命令。
+Consult `docs/AGENT_ACCESS.md` in the checkout, or
+`/usr/share/doc/seriald/AGENT_ACCESS.md` in a Linux installation, for full API
+contracts and exceptions. The client's `--help` lists available commands.

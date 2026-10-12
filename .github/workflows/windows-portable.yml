@@ -82,6 +82,9 @@ jobs:
             if ($access.default_language -ne 'en') { throw 'Host did not expose the installation UI language.' }
             $script = Invoke-WebRequest http://127.0.0.1:18898/static/i18n.js -TimeoutSec 5
             if ($script.StatusCode -ne 200) { throw 'Packaged UI translations unavailable.' }
+            $englishSkill = Invoke-WebRequest 'http://127.0.0.1:18898/skills/seriald-board/SKILL.md?lang=en' -TimeoutSec 5
+            $chineseSkill = Invoke-WebRequest 'http://127.0.0.1:18898/skills/seriald-board/SKILL.md?lang=zh-CN' -TimeoutSec 5
+            if ($englishSkill.Content -notmatch 'development boards' -or $chineseSkill.Content -notmatch '开发板') { throw 'Packaged skill language variants unavailable.' }
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }

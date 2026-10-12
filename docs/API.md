@@ -210,7 +210,9 @@ do not receive these web-issued grant restrictions. Open anonymous access also
 retains full platform access; issuing a grant does not restrict other clients.
 
 The hosted client `/serialctl.py` and skill `/skills/seriald-board/SKILL.md` are
-public downloads. `/healthz` and API routes require the selected access mode's
+public downloads. Skill content defaults to English; `?lang=zh-CN` selects
+Chinese, and `?lang=en` explicitly selects English. Both return UTF-8 Markdown.
+`/healthz` and API routes require the selected access mode's
 credential. Browser share links last 24 hours; agent grants default to no expiry
 and remain revocable. Query parameters are URL-encoded; POST JSON uses actual
 booleans, not strings such as `"true"`.

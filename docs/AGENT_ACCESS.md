@@ -2,13 +2,16 @@
 
 ## 入口
 
-使用 [seriald-board skill](../skills/seriald-board/SKILL.md)，或直接调用 `serialctl`。
+使用 [中文 skill](../skills/seriald-board/SKILL.zh-CN.md) 或
+[English skill](../skills/seriald-board/SKILL.md)，也可直接调用 `serialctl`。
 源码环境用 `python3 <源码目录>/serialctl.py` 替代命令名。客户端只需 Python 3 标准库；
 远程机器复制客户端即可，使用 `SERIALD_URL` 指向上位机。
 
 网页选中设备后点击“分享给 Agent”，或在首页点击“Agent 接入”分享全部设备。
 页面生成可复制的接入文本，包含服务地址、独立令牌和自托管下载命令：
 `<服务地址>/serialctl.py` 与 `<服务地址>/skills/seriald-board/SKILL.md`。
+Skill 下载默认英文；`?lang=en` 或 `?lang=zh-CN` 显式选择语言，均使用 UTF-8。
+网页生成的接入指引和 skill 下载地址跟随界面语言；切换语言不会新建令牌。
 “连接位置”可切换本机 `127.0.0.1` 与探测到的局域网地址；若多网卡选择不合适，
 可直接修改地址输入框。另一台电脑上的 Agent 应使用局域网地址。
 Skill 下载响应明确使用 UTF-8，以便中文指引正确显示。

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.5.3
+
+- Allow vertical wheel scrolling over boot comparison text and inline highlights
+  while preserving horizontal scrolling for long lines.
+- Provide English and Chinese self-hosted agent skills. Generate handoff text and
+  download URLs in the selected UI language; reuse the same grant when switching.
+
 ## 1.5.2
 
 - Add live Chinese/English UI switching without reconnecting terminals or changing

@@ -101,6 +101,7 @@ try {
         --add-data 'vendor;vendor' `
         --add-data 'serialctl.py;.' `
         --add-data 'skills/seriald-board/SKILL.md;skills/seriald-board' `
+        --add-data 'skills/seriald-board/SKILL.zh-CN.md;skills/seriald-board' `
         seriald_windows.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 

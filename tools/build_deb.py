@@ -50,7 +50,8 @@ def build(output, version):
             for path in (ROOT / name).rglob('*'):
                 if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':
                     put(path.relative_to(ROOT), 'usr/lib/seriald/' + str(path.relative_to(ROOT)))
-        put('skills/seriald-board/SKILL.md', 'usr/lib/seriald/skills/seriald-board/SKILL.md')
+        for name in ('SKILL.md', 'SKILL.zh-CN.md'):
+            put('skills/seriald-board/' + name, 'usr/lib/seriald/skills/seriald-board/' + name)
         for command, invocation in [('serialctl', '/usr/lib/seriald/serialctl.py'),
                                     ('seriald-admin', '-m seriald_core.admin'),
                                     ('seriald-collector', '-m seriald_core.collector_server'),

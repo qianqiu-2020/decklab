@@ -246,7 +246,7 @@
   .bc-diff-head span{padding:8px}.bc-diff{font:12px/1.5 ui-monospace,monospace}
   .bc-row{border-top:1px solid var(--line);background:var(--line)}
   .bc-cell{display:grid;grid-template-columns:42px minmax(0,1fr);gap:8px;padding:3px 8px;background:var(--surface);white-space:pre;min-width:0}
-  .bc-content{overflow-x:auto;overscroll-behavior:contain;min-width:0;scrollbar-width:thin}
+  .bc-content{overflow-x:auto;overscroll-behavior-x:contain;overscroll-behavior-y:auto;min-width:0;scrollbar-width:thin}
   .bc-inline-remove{background:var(--dead);color:var(--ground);border-radius:2px}
   .bc-inline-add{background:var(--live);color:var(--ground);border-radius:2px}
   .bc-line-no{color:var(--ink-3);text-align:right;user-select:none}

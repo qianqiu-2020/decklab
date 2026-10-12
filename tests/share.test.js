@@ -53,6 +53,8 @@ async function main() {
     document: { getElementById: byId, createElement: () => new Element(), body: new Element(),
       execCommand: command => { assert.equal(command, 'copy'); legacyCopies++; return true; } },
     window: { SerialdShareSelection: () => ({ key: 'milkv', label: 'milkv', serial: 'SN1' }),
+      SerialdI18n: {locale: 'zh-CN', setDefaultLocale() {}},
+      addEventListener(name, fn) { this.events ||= {}; this.events[name] = fn; },
       prompt: () => { throw new Error('LAN IP should be discovered without prompting'); } },
     navigator: { clipboard: { writeText: async text => {
       if (rejectClipboard) throw new Error('NotAllowedError');
@@ -83,6 +85,7 @@ async function main() {
   assert.match(text, /seriald-ag-secret/);
   assert.match(text, /\nexport SERIALD_URL='http:\/\/192\.0\.2\.161:8898'\n/);
   assert.match(text, /skills\/seriald-board\/SKILL\.md/);
+  assert.match(text, /SKILL\.md\?lang=zh-CN/);
   assert.ok(text.indexOf(' exec --command ') < text.indexOf(' read --sid serial'));
   assert.doesNotMatch(text, /其他客户端仍可无令牌访问/);
   rejectClipboard = true;
@@ -91,6 +94,20 @@ async function main() {
   rejectClipboard = false;
   await byId('agent-share-copy').click();
   assert.equal(clipboard[0], text);
+  const grantsBeforeSwitch = active.length;
+  context.window.SerialdI18n.locale = 'en';
+  context.window.events['decklab-language-change']();
+  const english = byId('agent-share-text').value;
+  assert.doesNotMatch(english, /[\u4e00-\u9fff]/);
+  assert.match(english, /SKILL\.md\?lang=en/);
+  assert.match(english, /seriald-ag-secret/);
+  assert.ok(english.indexOf(' exec --command ') < english.indexOf(' read --sid serial'));
+  assert.equal(active.length, grantsBeforeSwitch, 'language changes must reuse the existing grant');
+  await byId('agent-share-copy').click();
+  assert.equal(clipboard.at(-1), english);
+  context.window.SerialdI18n.locale = 'zh-CN';
+  context.window.events['decklab-language-change']();
+  assert.equal(byId('agent-share-text').value, text);
   await byId('b-share').click();
   assert.equal(clipboard.at(-1), 'http://192.0.2.161:8898/share/browser-token');
   const sharing = byId('b-device-share').click();

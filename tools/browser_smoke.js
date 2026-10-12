@@ -140,6 +140,25 @@ let chrome, ws;
   assert.ok(await evaluate('document.querySelector("#boot-compare-dialog").getBoundingClientRect().width > innerWidth * .95'));
   const compareShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-boot-compare.png'),Buffer.from(compareShot.data,'base64'));
+  // A horizontal scroller inside each log line must pass vertical wheel input
+  // to the comparison pane, including over the actual changed characters.
+  await evaluate(`(() => {
+    const diff=document.querySelector('#bc-diff'), row=diff.querySelector('.bc-row');
+    row.querySelectorAll('.bc-content').forEach(cell=>cell.appendChild(document.createTextNode('x'.repeat(2000))));
+    for(let n=0;n<100;n++)diff.appendChild(row.cloneNode(true));
+  })()`);
+  for (const selector of ['.bc-content', '.bc-inline-add', '.bc-line-no', '.bc-clue-text']) {
+    await evaluate('document.querySelector("#bc-results").scrollTop=0');
+    const point=await evaluate(`(() => {const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.left+Math.min(10,r.width/2),y:r.top+r.height/2};})()`);
+    await rpc('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:180});
+    for(let n=0;n<20 && !await evaluate('document.querySelector("#bc-results").scrollTop>0');n++)await delay(50);
+    assert.ok(await evaluate('document.querySelector("#bc-results").scrollTop>0'),'vertical wheel over '+selector);
+  }
+  await evaluate('document.querySelector("#bc-results").scrollTop=0');
+  const horizontalPoint=await evaluate(`(() => {const r=document.querySelector('.bc-content').getBoundingClientRect();return {x:r.left+10,y:r.top+r.height/2};})()`);
+  await rpc('Input.dispatchMouseEvent',{type:'mouseWheel',...horizontalPoint,deltaX:200,deltaY:0});
+  for(let n=0;n<20 && !await evaluate('document.querySelector(".bc-content").scrollLeft>0');n++)await delay(50);
+  assert.ok(await evaluate('document.querySelector(".bc-content").scrollLeft>0'),'horizontal scrolling remains available');
   await evaluate('document.querySelector("#bc-close").click()');
   await evaluate('document.querySelector("#b-info").click()');
   assert.notEqual(await evaluate('getComputedStyle(document.querySelector("#d-info")).display'),'none');

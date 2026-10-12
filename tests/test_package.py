@@ -185,7 +185,12 @@ class PackageTests(unittest.TestCase):
                                  [('test-board', 'TEST-SERIAL', 'offline')])
                 with urlopen(url + '/skills/seriald-board/SKILL.md') as response:
                     self.assertIn('charset=utf-8', response.headers['Content-Type'])
-                    self.assertIn(b'seriald-board', response.read())
+                    self.assertIn(b'development boards', response.read())
+                with urlopen(url + '/skills/seriald-board/SKILL.md?lang=zh-CN') as response:
+                    self.assertIn('charset=utf-8', response.headers['Content-Type'])
+                    skill = response.read().decode('utf-8')
+                    self.assertIn('开发板', skill)
+                    self.assertIn('seriald-board', skill)
                 with urlopen(url + '/serialctl.py') as response:
                     self.assertIn(b'class Client', response.read())
                 share = Request(url + '/api/agent-share',
