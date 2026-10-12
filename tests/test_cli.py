@@ -27,9 +27,10 @@ class ClientTests(unittest.TestCase):
     def test_piped_json_preserves_unicode_under_legacy_output_encoding(self):
         for failed in (False, True):
             script = ("from unittest.mock import patch\nimport serialctl as c\n"
-                      + ("with patch.object(c.Client, 'get', side_effect=c.ClientError('连接失败')):\n"
-                         if failed else "with patch.object(c.Client, 'get', return_value={'message':'中文'}):\n")
-                      + "    raise SystemExit(c.main(['capabilities']))\n")
+                      "with patch.object(c, 'urlopen', side_effect=AssertionError('unexpected network')):\n"
+                      + ("    with patch.object(c.Client, 'request', side_effect=c.ClientError('连接失败')):\n"
+                         if failed else "    with patch.object(c.Client, 'request', return_value={'message':'中文'}):\n")
+                      + "        raise SystemExit(c.main(['capabilities']))\n")
             result = subprocess.run([sys.executable, '-c', script],
                 cwd=Path(__file__).resolve().parents[1],
                 env=dict(os.environ, PYTHONIOENCODING='ascii', PYTHONUTF8='0'),
