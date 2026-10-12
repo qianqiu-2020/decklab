@@ -24,8 +24,9 @@ git push github v1.5.2
 标签推送触发 `Tagged packages`：构建 Debian 包、Windows 安装包和便携 ZIP，
 验证版本、第三方清单与校验和，然后创建带附件的 **Release 草稿**。
 在 GitHub Actions 检查结果，下载候选包验证升级和实机串口，再在 Releases
-打开该草稿并点击 **Publish release**。普通代码推送只运行检查和 Windows
-构建，不创建正式 Release。不要移动已发布标签；修复应使用新版本号。
+打开该草稿并点击 **Publish release**。普通代码推送运行检查，并在 Actions
+运行页面底部的 Artifacts 提供 `seriald-linux` 和 `seriald-windows` 测试包，
+不创建正式 Release。不要移动已发布标签；修复应使用新版本号。
 
 ## 第三方依赖
 

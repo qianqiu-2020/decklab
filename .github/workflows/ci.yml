@@ -47,6 +47,18 @@ jobs:
       - name: Real browser against the simulated host
         if: matrix.python == '3.12'
         run: node tools/demo_smoke.js
+      - name: Build Linux package
+        if: matrix.python == '3.12'
+        run: |
+          python tools/build_deb.py
+          sha256sum dist/*.deb > dist/linux-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: matrix.python == '3.12'
+        with:
+          name: seriald-linux
+          path: |
+            dist/*.deb
+            dist/linux-SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         if: always() && matrix.python == '3.12'
         with:
