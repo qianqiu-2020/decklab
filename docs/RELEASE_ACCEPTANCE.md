@@ -1,12 +1,12 @@
 # Release acceptance audit
 
-Audit candidate: source version 1.5.1, reviewed 2026-10-12. This separates
+Accepted source version: 1.5.1, reviewed 2026-10-12. This separates
 implemented behavior from platform/release evidence. Local tests use temporary
 storage, simulated boards and fake transports; they do not prove real COM or
 installed Windows behavior. Earlier checkpoint counts are historical.
-The earlier tagged checkpoint builds 1.5.0; older platform checkpoints built
-1.4.50. Native notice/source/rebuild additions now pass the actual distribution
-checkpoint below. The new 1.5.1 candidate's tagged outputs still need inspection.
+The final tagged checkpoint builds 1.5.1; earlier checkpoints built 1.5.0 or
+1.4.50. Packaged audit text is the pre-build checkpoint; this source document
+records the subsequent independent inspection of immutable tagged artifacts.
 
 ## Requirement evidence
 
@@ -26,7 +26,46 @@ checkpoint below. The new 1.5.1 candidate's tagged outputs still need inspection
 | Log operations | maintenance.py; maintenance/archive/identity tests cover active writers, cross-day boots, disk warnings and allowlisted diagnostics | Linux and native Windows maintenance fixtures pass |
 | Long operations | tasks.py, task_actions.py, transfer_tasks.py, transfer_artifacts.py; task/file/CLI tests and demo browser upload/download/copy/reload | Local task and artifact workflows verified |
 | Hardware extensions | hardware.py, process_windows.py, exclusive_serial handoff; helper and handoff tests | Linux/fake contracts and native Windows Job/helper/handoff suites pass |
-| Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | Content/layout/native install and actual distributed native/rebuild documents reviewed; final candidate tag pending |
+| Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | Source content, layouts, installed guides and final tagged artifacts reviewed |
+
+## Final tagged 1.5.1 acceptance
+
+Tag `v1.5.1` points to `4c30196b56f543365ade231055b973e7172d7350`.
+The [tagged workflow](https://github.com/qianqiu-2020/decklab/actions/runs/38201924308)
+passes Linux regression/package installation, native Windows build/source
+replacement/host/demo/installer checks and draft publication. Its publication
+job independently requires the native source catalog and matching Paramiko
+installed/source version before creating the draft. The six downloaded assets
+also pass the same verifier outside the publishing job. Release notes match the
+tagged 1.5.1 changelog section exactly.
+
+| Final package | SHA-256 |
+| --- | --- |
+| `seriald_1.5.1_all.deb` | `6980b73aa8a69e951611d64fa16264fddd2d96faa9d98e6711214944b695d417` |
+| `seriald-1.5.1-windows-x64-setup.exe` | `6284d528e2f132662bfe61dbd2c26c3bb715b4f71fd7475f9b4b962f554f0ab2` |
+| `seriald-windows-portable.zip` | `06c807c759d4001fd158ca4b545dc8db870b060eff461ba9544fe2c7078c57c2` |
+
+Independent inspection verifies package versions, Debian architecture, all
+362 Windows bundle files, 16 distribution notice sets, provider/source/notice
+hash bindings and the corresponding-source archive. Candidate regression passes
+579 backend tests (three Windows-native cases skipped on Linux and exercised
+on Windows), 74 frontend isolation checks and sharing checks. Six release
+verification fixtures check malformed checksum/path sets, metadata/version
+mismatches and missing source supplements. Repeat on Ubuntu:
+
+```sh
+gh release download v1.5.1 --dir /tmp/decklab-final-review
+python3 tools/verify_release.py /tmp/decklab-final-review --version 1.5.1
+```
+
+All fifteen workstreams in OPEN_SOURCE_PLAN have implementation and scoped
+acceptance evidence. Artifacts intentionally remain a reviewable draft, as
+configured by the release workflow; publication is not an additional automatic
+step. The reviewed notice inventory is a documented coverage superset, not an
+exact activated dependency SBOM. Physical UART/USB recovery is covered by the
+stated fixtures/support matrix, not by an empty-port hosted runner. Linux
+systemd lifecycle has actual isolated Ubuntu 22.04/24.04 VM evidence below.
+No production service or live board was changed during acceptance.
 
 ## Native source/rebuild checkpoint
 
@@ -298,12 +337,11 @@ Verification for this checkpoint: 514 backend tests pass (three native Windows
 tests skipped), 74 frontend isolation checks and sharing checks pass. The Windows
 build script parses on PowerShell; native execution remains unverified.
 
-## Current remaining gate
+## Completion and operational limits
 
-Build and inspect the 1.5.1 tagged draft with all source/notice additions.
-The actual native source-install and distribution checkpoint above passes;
-1.5.0's earlier published draft remains an older artifact. The new verifier
-requires source supplements and a matching Paramiko installed/source version
-for releases starting with 1.5.1. Physical UART/USB behavior remains limited to
-the documented fixture/support scope; no installed service or real board was
-changed during this audit.
+The final tagged package/source/version inspection passes; no required
+implementation or release-acceptance gate remains for this optimization scope.
+Future frozen provider changes require a refreshed source/notice catalog and
+verification. Physical device/driver combinations remain bounded by the
+stated fixture/support scope. Deploying to an existing production host was
+not part of this isolated acceptance run.

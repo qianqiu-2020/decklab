@@ -8,12 +8,12 @@ Do not change an installed service or use live boards during regression tests.
 The table below is the current status. The checkpoint log records earlier
 milestones: its test counts and outstanding items describe that checkpoint,
 not today's remaining work. See [current acceptance audit](RELEASE_ACCEPTANCE.md)
-for source/test evidence and the unresolved release gates.
+for source/test evidence, final tagged artifacts and operational limits.
 
 | Workstream | Required result | Acceptance evidence | Status |
 | --- | --- | --- | --- |
 | Public project | Application license, third-party inventory, English/Chinese README, contribution and issue guidance | Source review and actual 362-file Windows distribution/source/notice inspection pass | Implemented and verified for reviewed variants |
-| Release pipeline | Linux/Windows PR checks; tagged Setup, ZIP, Debian package, checksums and release notes | Tagged workflow and downloaded 1.5.0 draft packages/checksums/notes pass | Implemented and verified |
+| Release pipeline | Linux/Windows PR checks; tagged Setup, ZIP, Debian package, checksums and release notes | Tagged workflow and downloaded 1.5.1 draft packages/checksums/sources/notes pass | Implemented and verified |
 | Generic configuration | Portable storage defaults; configurable serial framing, credentials, profiles and provisioning policy | Invalid-config tests and cross-platform transport fixtures | Implemented; Linux and native Windows configuration suites pass |
 | Demo | Useful simulated boards, boot history, SSH and transfer scenarios without hardware | HTTP/CLI/browser checks; no serial discovery or real commands | Implemented; Linux and frozen Windows smoke checks pass |
 | Model boundaries | Persistent Board, ephemeral Connection, independent Session | Identity/reconnect/archive migration tests | Implemented and locally verified |
@@ -26,7 +26,7 @@ for source/test evidence and the unresolved release gates.
 | Logs/diagnostics | Optional retention, disk warning and sanitized diagnostic export | Keep-current-file tests, low-space and export redaction fixtures | Implemented; Linux and selected native Windows suites pass |
 | Long operations | Persistent task status, progress, cancellation and browser reconnect | Task API and UI lifecycle tests | Implemented; Linux browser and native Windows task/artifact/CLI suites pass |
 | Hardware extension | Configurable power/reset and external flashing interface | Fake driver/process tests; no implicit real-board actions | Implemented; native Windows Job, helper and handoff suites pass |
-| Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Content, packaged links, native installation and source/notice review verified; final 1.5.1 tag pending |
+| Documentation | Architecture/config/API/support matrix agree with actual code | Final requirement-by-requirement audit with linked evidence | Content, packaged links, native installation, source/notice review and final 1.5.1 tagged artifacts verified |
 
 Implementation order: release foundations and configuration, demo, core/service
 boundaries, collaboration and operations, then hardware extensions. Use existing
