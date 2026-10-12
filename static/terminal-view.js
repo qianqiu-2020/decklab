@@ -392,7 +392,11 @@
         if (!d || d.sid !== ctx.sid || d.key !== ctx.key || typeof d.off !== 'number') {
           stream.onerror(); return;
         }
-        if (d.off < ctx.off || (d.off === ctx.off && ctx.off > 0)) return;
+        if (d.off < ctx.off) return;
+        if (ctx.sid === 'serial' && Object.prototype.hasOwnProperty.call(d, 'input_owner')
+            && options.updateInputOwner) options.updateInputOwner(ctx, d.input_owner);
+        if (d.off === ctx.off && !d.data_b64 && d.alive !== false) return;
+        if (d.off === ctx.off && ctx.off > 0 && d.alive !== false) return;
         ctx.off = d.off;
         $('d-dev').textContent = d.dev || d.ip || '';
         writeTerminalPayload(ctx, d);

@@ -41,7 +41,14 @@
         });
 
         var r1 = document.createElement('div'); r1.className = 'r1';
-        var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.state === 'pending' ? '待识别 · ' + (d.hostname || (d.dev || '').split('/').pop()) : d.label;
+        var nm = document.createElement('span'); nm.className = 'nm';
+        if (d.state === 'pending') {
+          nm.className += ' pending-name';
+          var pendingLabel = document.createElement('span'); pendingLabel.textContent = '待识别 · ';
+          var portLabel = document.createElement('span'); portLabel.dataset.i18nIgnore = '';
+          portLabel.textContent = d.hostname || (d.dev || '').split('/').pop();
+          nm.appendChild(pendingLabel); nm.appendChild(portLabel);
+        } else nm.textContent = d.label;
         var st = document.createElement('span');
         st.className = 'pill ' + (d.state === 'pending' ? 'pending' : (d.alive ? 'live' : 'dead'));
         st.textContent = d.state === 'pending' ? 'USB 临时身份' : (d.alive ? '在线' : '历史设备');
@@ -58,7 +65,7 @@
         meta.appendChild(a); meta.appendChild(b);
         card.appendChild(meta);
 
-        var last = document.createElement('div'); last.className = 'last';
+        var last = document.createElement('div'); last.className = 'last' + (d.last_line ? '' : ' empty-output');
         last.textContent = d.last_line || '（暂无输出）';
         card.appendChild(last);
 
@@ -154,7 +161,7 @@
             if (cur && cur.key !== selKey) adoptKey(ctx, cur.key, cur.serial);
             ctx = options.getView(); // Identity adoption can replace the terminal.
             if (cur && options.isCurrent(ctx)) {
-              if (ownerRevision === ownershipRevision) options.updateInputOwner(ctx, cur.input_owner);
+              if (ownerRevision === ownershipRevision && !ctx.ownerPending) options.updateInputOwner(ctx, cur.input_owner);
               else cur.input_owner = ctx.inputOwner;
             }
             var info = cur && cur.info;

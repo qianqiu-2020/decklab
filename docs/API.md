@@ -61,7 +61,11 @@ Session packets contain `off`, `alive` and `data_b64`. Decode bytes incrementall
 for split UTF-8 characters. `off` is the position after returned bytes; if
 `off - decoded_length` exceeds the requested cursor, output was evicted from
 scrollback. CLI reports this as `gap`. SSE event IDs are byte offsets, with a JSON
-packet in `data:` and comment heartbeats. Reconnect reads do not send board input.
+packet in `data:` and comment heartbeats. Serial SSE packets also carry
+`input_owner` (an owner object or `null`). Ownership changes can produce an empty
+`data_b64` packet with the **same `off`**; apply metadata before deduplicating
+output bytes. Quiet serial streams check this state within about one second;
+device-list polling remains a fallback. Reconnect reads do not send board input.
 Use archives for earlier output that no longer fits the live buffer.
 `off=0` returns an immediate buffered snapshot. A cursor at the current end can
 long-poll for up to 15 seconds while the stream is alive; there is no public
@@ -176,7 +180,7 @@ and command examples; do not call the collector's internal revocation endpoint.
 
 | Control route | Payload / response |
 | --- | --- |
-| GET `/api/access` | `share_enabled`, `agent_share_enabled`, `open_access`, `loopback_open`, `lan_hosts`; UI capability hints for the current credential |
+| GET `/api/access` | `share_enabled`, `agent_share_enabled`, `open_access`, `loopback_open`, `lan_hosts`, `default_language` (`en`, `zh-CN` or empty); UI capability hints and host language default |
 | GET `/api/agent-grants` | `grants` metadata, at most 200 newest rows; includes revoked rows and never returns token secrets |
 | POST `/api/agent-share` | `scope=all` or `device`; device scope requires nonempty `serial` (at most 128 characters); returns `token` once and `grant` metadata |
 | POST `/api/agent-revoke` | Grant `id` (16 lowercase hex characters); returns revoked `id` and `sessions_closed` cleanup confirmation |

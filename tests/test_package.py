@@ -201,7 +201,7 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(first_health['role'], 'collector')
                 self.assertEqual(first_health['version'], __version__)
                 self.assertEqual(first_health['pid'], collector_pid)
-                for name in ('app.js', 'terminal-view.js', 'terminal-policy.js',
+                for name in ('i18n.js', 'app.js', 'terminal-view.js', 'terminal-policy.js',
                              'terminal-navigation.js', 'archives.js', 'devices.js', 'tasks.js'):
                     with urlopen(url + '/static/' + name) as response:
                         self.assertIn('no-cache', response.headers['Cache-Control'])

@@ -11,6 +11,40 @@ KERNEL_TIME = re.compile(r'^\[\s*\d+(?:\.\d+)?\]\s*')
 CLUE = re.compile(r'\b(?:error|failed?|panic|oops|timeout|timed out|segfault|I/O error|watchdog|resetting)\b', re.I)
 
 
+def _inline_parts(left, right):
+    """Preserve original text while highlighting changed Unicode characters.
+
+    Kernel clocks remain visible but are not semantic changes. For exceptionally
+    long lines use a linear prefix/suffix comparison to bound matching work.
+    """
+    parts = [[], []]
+    texts = []
+    for side, text in enumerate((left, right)):
+        stamp = KERNEL_TIME.match(text)
+        prefix = stamp.group() if stamp else ''
+        if prefix:
+            parts[side].append({'text': prefix, 'changed': False})
+        texts.append(text[len(prefix):])
+    a, b = texts
+    if len(a) * len(b) > 1000000:
+        start = 0
+        while start < min(len(a), len(b)) and a[start] == b[start]:
+            start += 1
+        end = 0
+        while end < min(len(a), len(b)) - start and a[-end-1] == b[-end-1]:
+            end += 1
+        opcodes = [('equal', 0, start, 0, start),
+                   ('replace', start, len(a)-end, start, len(b)-end),
+                   ('equal', len(a)-end, len(a), len(b)-end, len(b))]
+    else:
+        opcodes = difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+    for tag, i1, i2, j1, j2 in opcodes:
+        for side, text in enumerate((a[i1:i2], b[j1:j2])):
+            if text:
+                parts[side].append({'text': text, 'changed': tag != 'equal'})
+    return parts
+
+
 def _lines(data):
     lines = data.decode('utf-8', 'replace').splitlines()
     if len(lines) > MAX_LINES:
@@ -48,10 +82,13 @@ def compare_boots(baseline, target):
                             clues.append({'line': j+1, 'text': right[j]})
             for i, j in pairs:
                 if len(rows) < MAX_ROWS:
-                    rows.append({'type': tag, 'left_no': i+1 if i is not None else None,
+                    row = {'type': tag, 'left_no': i+1 if i is not None else None,
                                  'left': left[i] if i is not None else '',
                                  'right_no': j+1 if j is not None else None,
-                                 'right': right[j] if j is not None else ''})
+                                 'right': right[j] if j is not None else ''}
+                    if tag == 'replace' and i is not None and j is not None:
+                        row['left_spans'], row['right_spans'] = _inline_parts(left[i], right[j])
+                    rows.append(row)
                 else:
                     truncated = True
     return {'counts': counts, 'clues': clues, 'rows': rows, 'truncated': truncated,

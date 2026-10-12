@@ -28,7 +28,14 @@
     renderCommandNav: function (ctx) { renderCommandNav(ctx); },
     scheduleCommandNav: function (ctx) { scheduleCommandNav(ctx); },
     searchTerminal: searchTerminal, loadCommands: loadCommands,
-    copyText: copyText, copySel: copySel
+    copyText: copyText, copySel: copySel,
+    updateInputOwner: function (ctx, owner) {
+      if (ctx.ownerPending) return;
+      deviceDirectory.advanceOwnership();
+      updateInputOwner(ctx, owner);
+      var board = deviceDirectory.find(ctx.key);
+      if (board) board.input_owner = owner;
+    }
   });
   var isCurrent = terminalView.isCurrent, createView = terminalView.create, disposeView = terminalView.dispose;
   var resizeTerm = terminalView.resize, redrawTerminal = terminalView.redraw;
@@ -82,6 +89,7 @@
   }
 
   function updateInputOwner(ctx, owner) {
+    var previous = ctx.inputOwner;
     ctx.inputOwner = owner || null;
     if (ctx.sid !== 'serial') return;
     ctx.readonly = !!owner && !ownsInput(owner);
@@ -92,6 +100,10 @@
     }
     if (ctx.term) ctx.term.options.cursorBlink = !ctx.readonly;
     setInputMode(ctx);
+    if ((previous && previous.id || '') !== (owner && owner.id || '')) {
+      $('d-status').textContent = !owner ? '已恢复共享串口输入'
+        : ownsInput(owner) ? '当前页面已占用串口输入' : '另一客户端已占用串口输入；输出仍可查看';
+    }
   }
 
   function searchTerminal(direction) {
@@ -619,7 +631,7 @@
     var ctx = terminalView.current;
     if (!isCurrent(ctx)) return;
     var cur = $('d-name').textContent;
-    var v = window.prompt('修改设备标签（日志目录仍为设备序列号）', cur);
+    var v = window.prompt(window.SerialdI18n ? window.SerialdI18n.translate('修改设备标签（日志目录仍为设备序列号）') : '修改设备标签（日志目录仍为设备序列号）', cur);
     if (!v || !isCurrent(ctx)) return;
     fetch('/api/label', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: ctx.key, serial: ctx.serial, label: v }) })
@@ -706,6 +718,7 @@
       var d = document.createElement('div');
       var k = document.createElement('span'); k.className = 'k'; k.textContent = r[0];
       var v = document.createElement('span'); v.className = 'v' + (r[2] ? ' hi' : '');
+      if (['身份来源', '身份状态', '识别时间'].indexOf(r[0]) < 0) v.dataset.i18nIgnore = '';
       v.textContent = r[1];
       d.appendChild(k); d.appendChild(v);
       box.appendChild(d);

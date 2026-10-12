@@ -65,5 +65,6 @@ dot -Tpng docs/seriald-architecture-en.dot -o docs/seriald-architecture-en.png
 
 检查 PNG 中的文字、箭头和连线后，一起提交 DOT、SVG 和 PNG。
 两种语言保持相同的节点和数据流；英文首页使用英文图，中文 README 使用中文图。
-运行 `node tools/demo_smoke.js` 会生成 `dist/demo-overview.png`；检查模拟界面后，
-可复制到 `docs/decklab-demo.png` 更新首页截图。该测试使用临时模拟服务，不连接真实开发板。
+运行 `node tools/demo_smoke.js` 会生成中英文截图 `dist/demo-overview.png` 和
+`dist/demo-overview-en.png`；检查界面后，分别复制到 `docs/decklab-demo-zh.png`
+和 `docs/decklab-demo.png`。该测试使用临时模拟服务，不连接真实开发板。

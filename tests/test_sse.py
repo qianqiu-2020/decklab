@@ -38,12 +38,28 @@ class SseTests(unittest.TestCase):
                     response = conn.getresponse()
                     self.assertEqual(response.status, 200)
                     self.assertTrue(response.getheader('Content-Type').startswith('text/event-stream'))
+                    initial = self._event(response, include_empty=True)
+                    self.assertIsNone(initial['input_owner'])
+                    self.assertEqual(initial['data_b64'], '')
                     started = time.monotonic()
                     board.append(b'hello')
                     first = self._event(response)
                     self.assertLess(time.monotonic() - started, 1)
                     self.assertEqual(base64.b64decode(first['data_b64']), b'hello')
                     self.assertEqual(first['off'], 5)
+                    started = time.monotonic()
+                    with board.transactions.actor_scope('web', 'peer-client'):
+                        owner = board.transactions.claim('web')
+                    reserved = self._event(response, include_empty=True)
+                    self.assertEqual(reserved['off'], 5)
+                    self.assertEqual(reserved['data_b64'], '')
+                    self.assertEqual(reserved['input_owner'], owner)
+                    self.assertLess(time.monotonic() - started, 2)
+                    with board.transactions.actor_scope('web', 'peer-client'):
+                        board.transactions.release(owner['id'], 'web')
+                    released = self._event(response, include_empty=True)
+                    self.assertIsNone(released['input_owner'])
+                    self.assertEqual(released['off'], 5)
                     conn.close()
 
                     board.append(b'world')
@@ -65,11 +81,13 @@ class SseTests(unittest.TestCase):
                     board.close_log()
 
     @staticmethod
-    def _event(response):
-        for _ in range(10):
+    def _event(response, include_empty=False):
+        for _ in range(30):
             line = response.readline()
             if line.startswith(b'data: '):
-                return json.loads(line[6:])
+                payload = json.loads(line[6:])
+                if include_empty or payload.get('data_b64') or not payload.get('alive', True):
+                    return payload
         raise AssertionError('SSE data event was not forwarded')
 
 

@@ -2,6 +2,16 @@ import os
 import re
 import sys
 
+
+def read_ui_language(base):
+    """Installer default; browser preferences override this host-wide hint."""
+    try:
+        with open(os.path.join(base, 'ui-language.txt'), encoding='utf-8-sig') as source:
+            value = source.read(32).strip()
+        return value if value in ('en', 'zh-CN') else ''
+    except (OSError, UnicodeError):
+        return ''
+
 BASE = os.environ.get('SERIALD_BASE', os.path.join(os.path.dirname(sys.executable), 'data')
                       if sys.platform == 'win32' else os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 静态根(页面/前端库)与数据根分开 —— 打成 deb 后代码在 /usr/lib/seriald,

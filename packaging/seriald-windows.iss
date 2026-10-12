@@ -69,3 +69,23 @@ begin
     SourceDir := ParentDir;
   Result := AddBackslash(SourceDir) + 'seriald-installed';
 end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  LanguageFile, LanguageCode: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    LanguageFile := ExpandConstant('{app}\data\ui-language.txt');
+    { Preserve existing defaults when upgrading or adopting a portable install. }
+    if not FileExists(LanguageFile) then
+    begin
+      if ActiveLanguage = 'chinesesimplified' then
+        LanguageCode := 'zh-CN'
+      else
+        LanguageCode := 'en';
+      if not SaveStringToFile(LanguageFile, LanguageCode + #13#10, False) then
+        RaiseException('Cannot save the application default language.');
+    end;
+  end;
+end;

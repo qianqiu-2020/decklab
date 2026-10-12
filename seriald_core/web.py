@@ -58,14 +58,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Connection', 'close')
         self.end_headers()
         self.wfile.flush()
+        last_owner = object()
+        keepalive = time.monotonic()
         try:
             while d.key == expected_key:
-                new_off, data, alive = stream.read(off)
-                if data or not alive:
+                owner = transactions_for(d).ownership() if sid == 'serial' else None
+                # Ownership is independent of byte offsets, including on a quiet
+                # board. Bound the wait; only changed state emits a data event.
+                wait = (0 if owner != last_owner else 1) if sid == 'serial' else 15
+                new_off, data, alive = stream.read(off, wait=wait)
+                owner = transactions_for(d).ownership() if sid == 'serial' else None
+                if data or not alive or sid == 'serial' and owner != last_owner:
                     payload = {'sid': sid, 'key': d.key, 'off': new_off, 'alive': alive,
                                'data_b64': base64.b64encode(data).decode('ascii')}
                     if sid == 'serial':
                         payload['dev'] = d.dev
+                        payload['input_owner'] = owner
+                        last_owner = owner
                     else:
                         payload['ip'] = stream.ip
                     body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
@@ -80,9 +89,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if off == 0:
                         with stream.cv:
                             if stream.fd is not None and not stream.buf:
-                                stream.cv.wait(10)
-                    self.wfile.write(b': keepalive\n\n')
-                    self.wfile.flush()
+                                stream.cv.wait(1 if sid == 'serial' else 10)
+                    if time.monotonic() - keepalive >= 10:
+                        self.wfile.write(b': keepalive\n\n')
+                        self.wfile.flush()
+                        keepalive = time.monotonic()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
 

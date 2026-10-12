@@ -56,12 +56,14 @@ const server = http.createServer((req, res) => {
         dates: ['2026-09-20'], size: 1024 }] });
   if (u.pathname === '/api/boot-compare') return json({
     counts: { added: 1, removed: 0, changed: 0 }, clues: [{ line: 2, text: 'mmc timeout' }],
-    rows: [{ type: 'equal', left_no: 1, left: 'U-Boot', right_no: 1, right: 'U-Boot' },
+    rows: [{ type: 'replace', left_no: 1, left: 'clock=120MHz', right_no: 1, right: 'clock=160MHz',
+      left_spans: [{text:'clock=1',changed:false},{text:'2',changed:true},{text:'0MHz',changed:false}],
+      right_spans: [{text:'clock=1',changed:false},{text:'6',changed:true},{text:'0MHz',changed:false}] },
       { type: 'insert', left_no: null, left: '', right_no: 2, right: 'mmc timeout' }], truncated: false });
   if (u.pathname === '/api/log') return json({ data: log, off: log.length, start_off: 0, size: log.length, more: false });
   if (u.pathname === '/api/access') return json({ share_enabled: false });
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, route)));
 });
@@ -85,6 +87,7 @@ let chrome, ws;
   await rpc('Emulation.setDeviceMetricsOverride',{width:1500,height:1200,deviceScaleFactor:1,mobile:false});
   for(let n=0;n<50 && !await evaluate('document.querySelectorAll(".dev").length === 5');n++)await delay(100);
   assert.equal(await evaluate('document.querySelectorAll(".dev").length'),5);
+  await evaluate('SerialdI18n.setLocale("zh-CN")');
   const out=path.join(root,'dist');fs.mkdirSync(out,{recursive:true});
   const overviewShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-overview.png'),Buffer.from(overviewShot.data,'base64'));
@@ -132,6 +135,9 @@ let chrome, ws;
   await evaluate('document.querySelector("#bc-run").click()');
   for(let n=0;n<30 && !await evaluate('document.querySelectorAll("#bc-diff .bc-row").length === 2');n++)await delay(100);
   assert.ok(await evaluate('document.querySelector("#bc-clues").textContent.includes("mmc timeout")'));
+  assert.equal(await evaluate('document.querySelector(".bc-inline-remove").textContent'), '2');
+  assert.equal(await evaluate('document.querySelector(".bc-inline-add").textContent'), '6');
+  assert.ok(await evaluate('document.querySelector("#boot-compare-dialog").getBoundingClientRect().width > innerWidth * .95'));
   const compareShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-boot-compare.png'),Buffer.from(compareShot.data,'base64'));
   await evaluate('document.querySelector("#bc-close").click()');

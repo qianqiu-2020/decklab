@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+require('./i18n.test.js');
 const { TextDecoder } = require('node:util');
 
 const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'tasks.js', 'app.js'].map(name =>
@@ -28,7 +29,7 @@ class Element {
     };
   }
   set textContent(value) { this._text = value; this.children = []; }
-  get textContent() { return this._text; }
+  get textContent() { return String(this._text) + this.children.map(child => child.textContent || '').join(''); }
   set innerHTML(value) { this.textContent = value; }
   appendChild(child) { this.children.push(child); return child; }
   addEventListener(name, fn) { (this.events[name] ||= []).push(fn); }
@@ -220,6 +221,26 @@ test('older device polls cannot replace the current directory or connection stat
   }
 });
 
+test('serial ownership SSE updates without new output and rejects stale metadata', async () => {
+  const h = harness({sse: true});
+  h.take('/api/devices').resolve({devices: [{key: 'A', label: 'A', alive: true}]});
+  await drain();
+  h.select('A');
+  const stream = h.streams[0];
+  stream.emit({key: 'A', sid: 'serial', off: 5, alive: true, data_b64: 'aGVsbG8='});
+  stream.emit({key: 'A', sid: 'serial', off: 5, alive: true, data_b64: '',
+    input_owner: {id: 'peer', actor: 'web', client_id: 'another-client'}});
+  assert.equal(h.get('d-in').disabled, true);
+  assert.equal(h.get('input-owner-label').textContent, '接管输入');
+  assert.equal(h.get('d-status').textContent, '另一客户端已占用串口输入；输出仍可查看');
+  stream.emit({key: 'A', sid: 'serial', off: 4, alive: true, data_b64: '', input_owner: null});
+  assert.equal(h.get('d-in').disabled, true);
+  stream.emit({key: 'A', sid: 'serial', off: 5, alive: true, data_b64: '', input_owner: null});
+  assert.equal(h.get('d-in').disabled, false);
+  assert.equal(h.get('input-owner-label').textContent, '占用输入');
+  assert.equal(h.get('d-status').textContent, '已恢复共享串口输入');
+});
+
 test('serial ownership keeps spectators read-only and human takeover restores input', async () => {
   const h = harness();
   h.take('/api/devices').resolve({ devices: [{key: 'A', label: 'A', alive: true,
@@ -363,7 +384,7 @@ test('late session, log and identify responses stay with their original device',
   sessions.resolve({ key: 'A', sessions: [{ sid: 'ssh-old', kind: 'ssh' }] });
   logs.resolve({ key: 'A', label: 'A logs', files: [{ name: 'old.log', path: 'old', size: 1 }] });
   identify.resolve({ ok: true, task: { id: 'identify-old', state: 'completed', result: { ok: true, serial: 'A serial' } } }); await drain();
-  assert.deepEqual(h.get('d-tabs').children.map(x => x.textContent), ['串口', '']);
+  assert.deepEqual(h.get('d-tabs').children.map(x => x.textContent), ['串口', '+ SSH 会话']);
   assert.equal(h.get('d-logs').children.length, 0);
   assert.equal(h.get('d-info').hidden, true);
   assert.equal(h.get('d-status').textContent, '');

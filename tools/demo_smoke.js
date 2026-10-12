@@ -62,12 +62,15 @@ async function until(check, description) {
   await rpc('Page.enable');
   await rpc('Emulation.setDeviceMetricsOverride', {width: 1440, height: 960, deviceScaleFactor: 1, mobile: false});
   await until(() => evaluate('document.querySelectorAll(".dev").length === 3'), 'device list');
+  await evaluate('SerialdI18n.setLocale("zh-CN")');
   await evaluate('window.BaseTerminal = Terminal; window.Terminal = class extends BaseTerminal {constructor(...args){super(...args);window.demoTerm=this;}}');
   await evaluate('document.querySelector(\'[data-key="demo-k1"]\').click()');
   const contents = `Array.from({length: demoTerm.buffer.active.length}, (_,i) =>
     demoTerm.buffer.active.getLine(i).translateToString()).join('\\n')`;
   await until(() => evaluate('!!window.demoTerm && ' + contents + '.includes("DeckLab demo")'), 'serial output');
-  await evaluate('demoTerm.paste("uname -a\\r")');
+  await evaluate('demoTerm.paste("uname -a")');
+  await until(() => evaluate(contents + '.includes("root@demo-k1:~# uname -a")'), 'echo before Enter');
+  await evaluate('demoTerm.paste("\\r")');
   await until(() => evaluate(contents + '.includes("GNU/Linux")'), 'input POST and output SSE');
   await evaluate('document.querySelector("#b-records").click()');
   await until(() => evaluate('document.querySelector("#archive-picker").textContent.length > 0'), 'archive list');
@@ -79,6 +82,13 @@ async function until(check, description) {
   const overview = await rpc('Page.captureScreenshot', {format: 'png'});
   fs.mkdirSync(path.join(root, 'dist'), {recursive: true});
   fs.writeFileSync(path.join(root, 'dist', 'demo-overview.png'), Buffer.from(overview.data, 'base64'));
+  await evaluate('window.originalDemoTerm=demoTerm;window.originalClientId=SerialdUI.clientId;SerialdI18n.setLocale("en")');
+  await until(() => evaluate('document.querySelector("#b-input-owner").textContent.includes("Reserve input")'), 'English UI');
+  assert.equal(await evaluate('demoTerm===originalDemoTerm && SerialdUI.clientId===originalClientId'), true);
+  assert.equal(await evaluate('document.querySelector("#b-agent-share").textContent.includes("Share with agent")'), true);
+  const englishOverview = await rpc('Page.captureScreenshot', {format: 'png'});
+  fs.writeFileSync(path.join(root, 'dist', 'demo-overview-en.png'), Buffer.from(englishOverview.data, 'base64'));
+  await evaluate('SerialdI18n.setLocale("zh-CN")');
   // Two independent page instances use the production ownership API and UI.
   await evaluate('document.querySelector("#b-input-owner").click()');
   await until(() => evaluate('document.querySelector("#input-owner-label").textContent === "释放输入"'), 'first page ownership');

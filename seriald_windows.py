@@ -23,7 +23,7 @@ import threading
 import webbrowser
 
 from seriald_core import web
-from seriald_core.config import AUTH_TOKEN, BASE, HANDOFF, LOG_ROOT, STATIC
+from seriald_core.config import AUTH_TOKEN, BASE, HANDOFF, LOG_ROOT, STATIC, read_ui_language
 from seriald_core.control_server import ControlHandler
 from seriald_core.agent_grants import AgentGrantStore
 from seriald_core.handoff import consume as consume_handoff, write as write_handoff
@@ -57,6 +57,7 @@ def main():
                 ControlHandler.collector_socket = ('127.0.0.1', collector.server_address[1])
                 ControlHandler.static_root = STATIC
                 ControlHandler.auth_token = AUTH_TOKEN
+                ControlHandler.default_language = read_ui_language(BASE)
                 ControlHandler.grant_store = grants
                 ControlHandler.trust_loopback = os.environ.get('SERIALD_TRUST_LOOPBACK') == '1'
                 scanner = threading.Thread(target=manager.loop, daemon=True)

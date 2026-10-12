@@ -100,3 +100,6 @@ layer, bottom-row space and full-screen firmware behavior. Check keyboard focus,
 contrast, light/dark themes and narrow screens with the isolated browser fixtures.
 Update only the needed Tabler symbols; preserve `static/icons-LICENSE.txt`.
 Original logo sources and Windows icon handling are described in `docs/BRAND.md`.
+UI translations live in `static/i18n.js`. Add translations for new labels and
+messages; mark user-provided text with `data-i18n-ignore`. Terminal output, log
+contents, commands and board labels must retain their original bytes/text.

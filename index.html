@@ -19,7 +19,8 @@
     <h1><img class="brand-logo" src="/static/decklab.svg" width="32" height="32" alt="">DeckLab</h1>
     <span class="mono" style="color:var(--ink-3);font-size:12px">开发板工作台</span>
     <button id="b-share" type="button" hidden title="创建可撤销的网页访问链接">分享访问</button>
-    <button id="b-agent-share-all" type="button" disabled title="生成可撤销的 Agent 接入令牌与指引">Agent 接入</button>
+    <button id="b-agent-share-all" type="button" disabled title="生成可撤销的 Agent 接入令牌与指引">分享给 Agent</button>
+    <select id="language-select" aria-label="Language / 语言" title="Language / 语言" data-language-select data-i18n-ignore><option value="zh-CN">中文</option><option value="en">English</option></select>
     <span id="share-status" role="status"></span>
     <span class="conn"><span class="dot" id="conn-dot"></span><span id="conn-txt">连接中…</span></span>
   </div>
@@ -50,7 +51,8 @@
         <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>识别设备</button>
         <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-info"/></svg>设备信息</button>
         <button id="b-device-share" type="button" hidden title="分享链接直接打开当前设备；网页访问授权覆盖整个平台"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>分享设备</button>
-        <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>Agent 分享</button>
+        <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>分享给 Agent</button>
+        <select id="language-select-detail" aria-label="Language / 语言" title="Language / 语言" data-language-select data-i18n-ignore><option value="zh-CN">中文</option><option value="en">English</option></select>
         <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-switch"/></svg>准备换板</button>
         <button id="b-rename" type="button">改标签</button>
         <button id="b-rescue" type="button" title="执行 USB 软解绑与重新绑定，会暂时中断该设备连接"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>重新连接串口</button>
@@ -194,6 +196,7 @@
 </dialog>
 <script src="vendor/xterm.js"></script>
 <script src="vendor/addon-fit.js"></script>
+<script src="/static/i18n.js"></script>
 <script src="/static/ui-common.js"></script>
 <script src="/static/terminal-policy.js"></script>
 <script src="/static/terminal-navigation.js"></script>

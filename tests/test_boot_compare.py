@@ -25,6 +25,26 @@ class BootComparisonTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             compare_boots(b'x' * (MAX_BOOT_BYTES + 1), b'')
 
+    def test_inline_changes_preserve_text_and_ignore_kernel_clocks(self):
+        result = compare_boots(b'[ 1.00] clock=120MHz bus=4\n',
+                               b'[ 2.00] clock=160MHz bus=8\n')
+        row = result['rows'][0]
+        self.assertEqual(''.join(p['text'] for p in row['left_spans']), row['left'])
+        self.assertEqual(''.join(p['text'] for p in row['right_spans']), row['right'])
+        self.assertEqual([p['text'] for p in row['left_spans'] if p['changed']], ['2', '4'])
+        self.assertEqual([p['text'] for p in row['right_spans'] if p['changed']], ['6', '8'])
+
+    def test_inline_changes_use_unicode_characters_and_literal_markup(self):
+        row = compare_boots('状态：好😀 <script>\n'.encode(),
+                            '状态：坏🚀 <script>\n'.encode())['rows'][0]
+        self.assertEqual(''.join(p['text'] for p in row['left_spans'] if p['changed']), '好😀')
+        self.assertEqual(''.join(p['text'] for p in row['right_spans'] if p['changed']), '坏🚀')
+
+    def test_very_long_inline_lines_keep_unchanged_edges(self):
+        row = compare_boots(('a' * 2000 + '4' + 'z' * 2000).encode(),
+                            ('a' * 2000 + '8' + 'z' * 2000).encode())['rows'][0]
+        self.assertEqual([p['text'] for p in row['right_spans'] if p['changed']], ['8'])
+
 
 if __name__ == '__main__':
     unittest.main()

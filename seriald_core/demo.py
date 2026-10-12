@@ -32,6 +32,7 @@ class DemoDevice(Device):
         self.history_loaded = True
         self.newline = '\r'
         self.input_pending = ''
+        self.input_cr = False
         self.files = {'/root/log.txt': (b'[    0.000000] Linux version 6.18.0-demo\n'
                                      b'[    1.234000] mmc0: initialized\n') * 512}
 
@@ -75,9 +76,28 @@ class DemoDevice(Device):
     def _write_input(self, text):
         if self.stop.is_set() or not self.present or self.fd is None:
             return False, 'Demo board is offline'
-        self.input_pending += text.replace('\r\n', '\n').replace('\r', '\n')
-        while '\n' in self.input_pending:
-            line, self.input_pending = self.input_pending.split('\n', 1)
+        echo = []
+        for char in text:
+            if char == '\n' and self.input_cr:
+                self.input_cr = False
+                continue
+            self.input_cr = char == '\r'
+            if char in ('\x08', '\x7f'):
+                if self.input_pending:
+                    self.input_pending = self.input_pending[:-1]
+                    echo.append('\b \b')
+                continue
+            if char == '\x03':
+                self.input_pending = ''
+                echo.append('^C\r\n' + self.prompt())
+                continue
+            if char not in ('\r', '\n'):
+                if char >= ' ':
+                    self.input_pending += char
+                    echo.append(char)
+                continue
+            line, self.input_pending = self.input_pending, ''
+            echo.append('\r\n')
             # serialctl's child-shell frame is interpreted, never executed.
             if '__SD_AGENT_B_' in line:
                 try:
@@ -91,7 +111,9 @@ class DemoDevice(Device):
                     output = 'demo: unsupported command frame\n'
             else:
                 output, _ = self.command(line)
-            self.append((line + '\n' + output + self.prompt()).replace('\n', '\r\n'))
+            echo.append((output + self.prompt()).replace('\n', '\r\n'))
+        if echo:
+            self.append(''.join(echo))
         return True, ''
 
     def run_probe(self, init_boot_marker=False):

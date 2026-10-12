@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.5.2
+
+- Add live Chinese/English UI switching without reconnecting terminals or changing
+  browser input ownership. Honor the Windows installer language as a preserved
+  host default; explicit browser preferences take priority.
+- Push serial input reservation/release changes through SSE even without new
+  output, including metadata packets at unchanged byte offsets.
+- Expand boot comparison to nearly the whole viewport and highlight changed
+  Unicode characters within lines while ignoring kernel clock differences.
+- Echo simulated serial/SSH input before Enter and support deletion and Ctrl-C.
+- Rename agent sharing and clarify that web board links grant platform-wide
+  access; retain actual single-board scope for agent grants.
+
 - Add an English architecture diagram, demo screenshot and explicit K3 hardware
   validation scope. Consolidate documentation navigation and remove completed
   plans, duplicate fix histories and obsolete generated artifacts.

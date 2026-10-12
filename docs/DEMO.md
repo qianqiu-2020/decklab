@@ -20,6 +20,10 @@ files. Unsupported commands show help and are never executed on the host.
 
 ## Explore the workflow
 
+The simulated serial and SSH terminals echo keystrokes before Enter, handle
+Backspace/Delete and Ctrl-C, and execute only the limited commands listed below.
+Choose 中文 / English in the interface without reconnecting terminals.
+
 - Select `demo-k1` or `demo-k3`; `demo-offline` illustrates historical devices.
 - Open serial or SSH and enter `uname -a`, `pwd`, `echo hello`, `ls`,
   `cat /root/log.txt`, or `dmesg`. Enter `reboot` in serial to add a boot.

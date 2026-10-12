@@ -63,6 +63,24 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(len(boots), 2)
         self.assertTrue(any(boot['cross_day'] for boot in boots))
 
+    def test_serial_and_ssh_echo_before_enter_and_handle_editing(self):
+        session, _ = self.device.ssh_connect(actor='web')
+        for stream in (self.device, session):
+            with self.subTest(kind=stream.__class__.__name__):
+                offset = stream.read(0)[0]
+                self.assertTrue(stream._write('pwX')[0])
+                offset, data, _ = stream.read(offset, wait=0)
+                self.assertEqual(data, b'pwX')
+                self.assertTrue(stream._write('\x7fd\r')[0])
+                offset, data, _ = stream.read(offset, wait=0)
+                self.assertEqual(data, ('\b \bd\r\n/root\r\n' + stream.prompt()).encode())
+                self.assertTrue(stream._write('\n')[0])
+                self.assertEqual(stream.read(offset, wait=0)[1], b'')
+                self.assertTrue(stream._write('echo cancelled\x03')[0])
+                offset, data, _ = stream.read(offset, wait=0)
+                self.assertIn(b'^C\r\n', data)
+                self.assertEqual(stream.input_pending, '')
+
     def test_upload_download_batch_checksum_and_abort(self):
         transfer = self.device.file_transfer
         connection = self.device.connection_id

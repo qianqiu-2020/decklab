@@ -69,7 +69,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     grant_store = None
     trust_loopback = False
     share_seconds = 24 * 60 * 60
-    allowed_static = frozenset(('/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js',
+    default_language = ''
+    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
     public_agent_files = frozenset(('/serialctl.py', '/skills/seriald-board/SKILL.md'))
@@ -391,6 +392,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                                     'agent_share_enabled': bool(self._agent_share_authorized() and self.grant_store),
                                     'open_access': not bool(self.auth_token),
                                     'loopback_open': bool(self.trust_loopback),
+                                    'default_language': self.default_language,
                                     'lan_hosts': lan_hosts()})
         if route == '/api/agent-grants':
             if not self._agent_share_authorized() or not self.grant_store:
@@ -452,7 +454,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         return os.path.join(self.static_root, *route.split('/'))
 
     def end_headers(self):
-        if urlparse(self.path).path in ('/', '', '/index.html', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
+        if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
                                         '/static/terminal-policy.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()

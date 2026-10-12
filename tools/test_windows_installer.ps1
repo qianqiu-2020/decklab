@@ -25,12 +25,15 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $target 'data') | Out-Null
     $sentinel = Join-Path $target 'data\preserve-me.txt'
     Set-Content -LiteralPath $sentinel -Value 'logs and configuration must survive' -Encoding ASCII
-    Run-Setup -Options @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=desktopicon', "/DIR=`"$target`"")
+    Run-Setup -Options @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/LANG=english', '/TASKS=desktopicon', "/DIR=`"$target`"")
+    $languageFile = Join-Path $target 'data\ui-language.txt'
+    if ((Get-Content -LiteralPath $languageFile -Raw).Trim() -ne 'en') { throw 'Installer did not save the English UI default.' }
     if (-not (Test-Path -LiteralPath $uninstaller)) { throw 'Uninstaller missing.' }
     $programFile = Join-Path $target 'README.md'
     Set-Content -LiteralPath $programFile -Value 'old program file' -Encoding ASCII
     # No /DIR: the second install must remember the directory from the first one.
-    Run-Setup -Options @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+    Run-Setup -Options @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/LANG=chinesesimplified')
+    if ((Get-Content -LiteralPath $languageFile -Raw).Trim() -ne 'en') { throw 'Upgrade reset the existing UI language.' }
     if ((Get-ItemProperty $key).InstallLocation.TrimEnd('\') -ne $target) { throw 'Upgrade forgot the installation directory.' }
     if ((Get-Content -LiteralPath $sentinel -Raw).Trim() -ne 'logs and configuration must survive') { throw 'Upgrade damaged runtime data.' }
     $sourceReadme = Join-Path $root 'dist\seriald\README.md'

@@ -6,7 +6,7 @@ A shared development-board workbench for OS and BSP developers. Capture serial
 output continuously, access boards through a browser or agent, and keep boot
 history attached to a stable board identity rather than a changing tty number.
 
-![DeckLab demo: shared terminal, board list and boot archives](docs/decklab-demo.png?v=overview-1)
+![DeckLab demo: shared terminal, board list and boot archives](docs/decklab-demo.png?v=ui-1.5.2)
 
 Actual UI with simulated boards; no physical hardware is required. Demo devices
 illustrate the workflow and do not establish hardware support.
@@ -36,7 +36,7 @@ Ubuntu packages are built with:
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.5.1_all.deb
+sudo apt install ./dist/seriald_1.5.2_all.deb
 ```
 
 On Windows, build with Python 3.12 x64 and Inno Setup 6.5+ using

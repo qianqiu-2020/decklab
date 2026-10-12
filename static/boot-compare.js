@@ -42,7 +42,10 @@
     if (!result.clues.length) {
       var empty = document.createElement('p'); empty.textContent = '未发现新增的错误或超时关键词；请查看下方差异。'; clues.appendChild(empty);
     } else result.clues.forEach(function (clue) {
-      var row = document.createElement('div'); row.textContent = '第 ' + clue.line + ' 行  ' + clue.text; clues.appendChild(row);
+      var row = document.createElement('div');
+      var number = document.createElement('span'); number.textContent = '第 ' + clue.line + ' 行  ';
+      var text = document.createElement('span'); text.className = 'bc-clue-text'; text.textContent = clue.text;
+      row.appendChild(number); row.appendChild(text); clues.appendChild(row);
     });
     var diff = $('bc-diff'); diff.textContent = '';
     if (!result.rows.length) {
@@ -54,7 +57,14 @@
         var cell = document.createElement('div'); cell.className = 'bc-cell';
         var number = document.createElement('span'); number.className = 'bc-line-no';
         number.textContent = row[side + '_no'] || '';
-        var content = document.createElement('span'); content.textContent = row[side] || '';
+        var content = document.createElement('span'); content.className = 'bc-content';
+        var spans = row[side + '_spans'];
+        if (Array.isArray(spans)) spans.forEach(function (part) {
+          var segment = document.createElement('span'); segment.textContent = part.text;
+          if (part.changed) segment.className = side === 'left' ? 'bc-inline-remove' : 'bc-inline-add';
+          content.appendChild(segment);
+        });
+        else content.textContent = row[side] || '';
         cell.appendChild(number); cell.appendChild(content); line.appendChild(cell);
       });
       diff.appendChild(line);

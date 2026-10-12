@@ -140,6 +140,7 @@
           date.textContent = archiveDate(file);
           var open = document.createElement('button'); open.type = 'button';
           open.textContent = file.name;
+          open.dataset.i18nIgnore = '';
           open.addEventListener('click', function () {
             if (isCurrent(ctx)) options.openArchive(ctx, file.name, '串口日志 · ' + archiveDate(file));
           });
