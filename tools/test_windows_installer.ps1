@@ -48,9 +48,10 @@ try {
     $group = Join-Path ([Environment]::GetFolderPath('Programs')) 'DeckLab'
     $launchLinks = @(Get-ChildItem -LiteralPath $group -Filter '*.lnk' | ForEach-Object {
         $shortcut = $shell.CreateShortcut($_.FullName)
+        Write-Host "Shortcut $($_.Name): target=$($shortcut.TargetPath); args=$($shortcut.Arguments); icon=$($shortcut.IconLocation)"
         if ($shortcut.TargetPath -like '*Start-seriald*.cmd') { $shortcut }
     })
-    if ($launchLinks.Count -ne 3) { throw 'Expected three start-menu launch shortcuts.' }
+    if ($launchLinks.Count -ne 3) { throw "Expected three start-menu launch shortcuts; found $($launchLinks.Count) in $group." }
     if (-not (Test-Path -LiteralPath $desktopLink)) { throw 'Desktop shortcut is missing.' }
     $launchLinks += $shell.CreateShortcut($desktopLink)
     foreach ($shortcut in $launchLinks) {
