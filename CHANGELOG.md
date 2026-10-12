@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.5.0
+
+- Run native Windows package, installer upgrade and simulated-host checks in
+  GitHub Actions; fix Unicode pipe output, SQLite backup flushing and Windows
+  test-file cleanup discovered by native execution.
+- Ship hash-pinned OpenSSL licenses selected from actual frozen provider versions,
+  plus reviewed CPython source dependency notices. Preserve upstream notice bytes
+  across Windows checkouts and verify both provider and notice hashes.
+- Wait for the browser debugging endpoint and retain bounded startup diagnostics
+  in isolated UI checks. Publish this changelog section with tagged draft packages.
+
 - Add a disposable cloud-image VM check for actual systemd startup, collector
   fingerprint upgrade decisions and purge/data preservation. Verify the image
   against the supplied provider SHA-256; use no physical hardware or host mounts.

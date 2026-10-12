@@ -1,9 +1,12 @@
 # Release acceptance audit
 
-Audit baseline: source version 1.4.50, reviewed 2026-10-12. This separates
+Audit candidate: source version 1.5.0, reviewed 2026-10-12. This separates
 implemented behavior from platform/release evidence. Local tests use temporary
 storage, simulated boards and fake transports; they do not prove real COM or
 installed Windows behavior. Earlier checkpoint counts are historical.
+The hosted checkpoint below built 1.4.50; it is not evidence that the 1.5.0
+tagged release workflow has completed. Tagged outputs remain draft review
+artifacts until their checks and remaining attribution work are complete.
 
 ## Requirement evidence
 
