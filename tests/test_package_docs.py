@@ -28,12 +28,12 @@ class PackageDocsTests(unittest.TestCase):
                 self.assertGreater(count, 25)
                 if platform == 'linux':
                     self.assertTrue((root / 'API.md').is_file())
-                    self.assertIn('(INSTALL.md)', (root / 'README.md').read_text())
-                    self.assertIn('(examples/hardware.json)', (root / 'HARDWARE_EXTENSIONS.md').read_text())
+                    self.assertIn('(INSTALL.md)', (root / 'README.md').read_text(encoding='utf-8'))
+                    self.assertIn('(examples/hardware.json)', (root / 'HARDWARE_EXTENSIONS.md').read_text(encoding='utf-8'))
                 else:
                     self.assertTrue((root / 'docs/API.md').is_file())
-                    self.assertIn('(docs/HARDWARE_EXTENSIONS.md)', (root / 'README.md').read_text())
-                    self.assertIn('(README-project.md)', (root / 'README.zh-CN.md').read_text())
+                    self.assertIn('(docs/HARDWARE_EXTENSIONS.md)', (root / 'README.md').read_text(encoding='utf-8'))
+                    self.assertIn('(README-project.md)', (root / 'README.zh-CN.md').read_text(encoding='utf-8'))
 
     def test_link_render_preserves_fragments_queries_and_external_links(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -60,5 +60,5 @@ class PackageDocsTests(unittest.TestCase):
             sentinel.write_text('keep')
             with self.assertRaisesRegex(ValueError, 'runtime'):
                 publish(root / 'bundle', 'windows')
-            self.assertEqual(sentinel.read_text(), 'keep')
+            self.assertEqual(sentinel.read_text(encoding='utf-8'), 'keep')
             self.assertFalse((root / 'bundle/README.md').exists())
