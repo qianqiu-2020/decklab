@@ -42,7 +42,10 @@ class DeviceFixture(unittest.TestCase):
                 mock.patch.object(self.device, '_write', return_value=write_result) as write, \
                 mock.patch.object(self.device, '_wait', side_effect=wait) as wait_mock, \
                 mock.patch.object(self.device, '_since', return_value=response), \
-                mock.patch.object(sd.secrets, 'token_hex', return_value=NONCE):
+                mock.patch.object(sd.secrets, 'token_hex', return_value=NONCE), \
+                mock.patch('seriald_core.transactions.time.monotonic', return_value=100.0):
+            # Framing is fully mocked IO; runner scheduling must not consume
+            # its artificial 10 ms deadline. Real deadline tests are separate.
             result = self.device._run_cmd(command, timeout=0.01)
         self.assertFalse(self.device.probing)
         self.assertTrue(self.device.operation_lock.acquire(blocking=False))
