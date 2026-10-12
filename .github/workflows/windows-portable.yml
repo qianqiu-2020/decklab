@@ -101,9 +101,11 @@ jobs:
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: seriald-windows
           path: |
             dist/seriald-*-windows-x64-setup.exe
             dist/seriald-*-windows-x64-setup.exe.sha256
             dist/seriald-windows-portable.zip
+          if-no-files-found: ignore

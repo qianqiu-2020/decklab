@@ -45,6 +45,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Console transaction tests failed.' }
     & $python -m unittest discover -s tests -p test_profiles.py
     if ($LASTEXITCODE -ne 0) { throw 'Configuration tests failed.' }
+    foreach ($suite in @('test_schema.py', 'test_tasks.py', 'test_task_actions.py',
+                         'test_transfer_artifacts.py', 'test_file_tasks.py',
+                         'test_transfer_tasks.py', 'test_input_ownership.py')) {
+        & $python -m unittest discover -s tests -p $suite
+        if ($LASTEXITCODE -ne 0) { throw "Native storage/task/collaboration tests failed: $suite" }
+    }
     & $python -m unittest discover -s tests -p test_demo.py
     if ($LASTEXITCODE -ne 0) { throw 'Hardware-free demo tests failed.' }
     & $python -m unittest discover -s tests -p test_process_windows.py
