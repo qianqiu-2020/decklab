@@ -94,6 +94,13 @@ def inspect_release(directory, version):
             raise ValueError('native crypto provider notices missing')
         if len(notices.get('runtime_source_notices', [])) != 3:
             raise ValueError('runtime source notices missing')
+        if tuple(map(int, version.split('.'))) >= (1, 5, 1):
+            if not notices.get('native_source_notices'):
+                raise ValueError('reviewed native source catalog missing')
+            sources = notices.get('corresponding_sources', [])
+            paramiko = [row for row in notices['distributions'] if row['name'].lower() == 'paramiko']
+            if len(sources) != 1 or len(paramiko) != 1 or sources[0]['installed_version'] != paramiko[0]['version']:
+                raise ValueError('Paramiko corresponding source/version mismatch')
         return {'version': version, 'bundle_files': len(manifest['files']),
                 'distribution_notice_sets': len(notices['distributions'])}
 

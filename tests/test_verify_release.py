@@ -58,17 +58,17 @@ class ReleaseVerificationTests(unittest.TestCase):
                     unpack_portable(archive, destination)
                 self.assertFalse(destination.exists())
 
-    def fixture(self):
+    def fixture(self, version='1.5.0'):
         bundle = self.root / 'build' / 'seriald'
         bundle.mkdir(parents=True)
         (bundle / 'seriald.exe').write_bytes(b'MZ fixture host')
-        (bundle / 'package-version.txt').write_text('1.5.0\n')
+        (bundle / 'package-version.txt').write_text(version + '\n')
         python_license = self.root / 'Python-LICENSE.txt'
         python_license.write_text('fixture notice')
-        for relative, version in zip(OPENSSL_PROVIDERS, ('3.0.16', '4.0.3')):
+        for relative, provider_version in zip(OPENSSL_PROVIDERS, ('3.0.16', '4.0.3')):
             path = bundle / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b'MZ OpenSSL ' + version.encode() + b' fixture')
+            path.write_bytes(b'MZ OpenSSL ' + provider_version.encode() + b' fixture')
         # Model the already published 1.5.0 bundle, before source-graph supplements.
         with patch('tools.collect_windows_notices.native_source_notices', return_value=[]):
             inventory([], bundle / 'third-party', python_license, native_bundle=bundle)
@@ -78,11 +78,12 @@ class ReleaseVerificationTests(unittest.TestCase):
             for path in bundle.rglob('*'):
                 if path.is_file():
                     output.write(path, 'seriald/' + path.relative_to(bundle).as_posix())
-        (self.root / 'seriald_1.5.0_all.deb').write_bytes(b'fixture deb')
-        setup = self.root / 'seriald-1.5.0-windows-x64-setup.exe'
+        deb = 'seriald_%s_all.deb' % version
+        (self.root / deb).write_bytes(b'fixture deb')
+        setup = self.root / ('seriald-%s-windows-x64-setup.exe' % version)
         setup.write_bytes(b'MZ fixture installer')
         setup.with_suffix('.exe.sha256').write_text(hashlib.sha256(setup.read_bytes()).hexdigest())
-        names = ('seriald_1.5.0_all.deb', setup.name, archive.name)
+        names = (deb, setup.name, archive.name)
         lines = [hashlib.sha256((self.root / name).read_bytes()).hexdigest() + '  ' + name for name in names]
         (self.root / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n')
         (self.root / 'linux-SHA256SUMS.txt').write_text(lines[0] + '\n')
@@ -97,3 +98,10 @@ class ReleaseVerificationTests(unittest.TestCase):
         with patch('tools.verify_release.subprocess.run', return_value=result):
             with self.assertRaisesRegex(ValueError, 'metadata mismatch'):
                 inspect_release(self.root, '1.5.0')
+
+    def test_new_releases_require_reviewed_native_source_supplements(self):
+        self.fixture('1.5.1')
+        result = SimpleNamespace(stdout='Package: seriald\nVersion: 1.5.1\nArchitecture: all\n')
+        with patch('tools.verify_release.subprocess.run', return_value=result):
+            with self.assertRaisesRegex(ValueError, 'native source catalog missing'):
+                inspect_release(self.root, '1.5.1')

@@ -1,18 +1,18 @@
 # Release acceptance audit
 
-Audit candidate: source version 1.5.0, reviewed 2026-10-12. This separates
+Audit candidate: source version 1.5.1, reviewed 2026-10-12. This separates
 implemented behavior from platform/release evidence. Local tests use temporary
 storage, simulated boards and fake transports; they do not prove real COM or
 installed Windows behavior. Earlier checkpoint counts are historical.
-The tagged checkpoint below builds 1.5.0; older platform checkpoints built
-1.4.50. Outputs remain draft review artifacts while native attribution work
-continues.
+The earlier tagged checkpoint builds 1.5.0; older platform checkpoints built
+1.4.50. Native notice/source/rebuild additions now pass the actual distribution
+checkpoint below. The new 1.5.1 candidate's tagged outputs still need inspection.
 
 ## Requirement evidence
 
 | Requirement | Implementation and focused evidence | Current assessment |
 | --- | --- | --- |
-| Public project | LICENSE, NOTICE, THIRD_PARTY.md, bilingual README, CONTRIBUTING.md, SECURITY.md and issue/PR templates; package tests | Present; native binary attribution incomplete |
+| Public project | LICENSE, NOTICE, THIRD_PARTY.md, bilingual README, CONTRIBUTING.md, SECURITY.md and issue/PR templates; package tests | Source/native notice review and actual Windows distribution checks pass |
 | Releases | CI, Windows package and tagged release workflows; version-tag validator; Debian extraction fixtures | Tagged Linux/Windows/publish jobs pass; downloaded draft packages/checksums/notes verified |
 | Configurable hosts/boards | profiles.py, transport.py, windows_manager.py; test_profiles.py validates framing, profiles, manual mode and credentials | Local contracts verified |
 | Hardware-free demo | demo.py, seriald_demo.py; test_demo.py and demo_smoke.js exercise normal HTTP/CLI/browser paths | Linux demo/browser checks and frozen Windows API/archive smoke pass |
@@ -26,7 +26,31 @@ continues.
 | Log operations | maintenance.py; maintenance/archive/identity tests cover active writers, cross-day boots, disk warnings and allowlisted diagnostics | Linux and native Windows maintenance fixtures pass |
 | Long operations | tasks.py, task_actions.py, transfer_tasks.py, transfer_artifacts.py; task/file/CLI tests and demo browser upload/download/copy/reload | Local task and artifact workflows verified |
 | Hardware extensions | hardware.py, process_windows.py, exclusive_serial handoff; helper and handoff tests | Linux/fake contracts and native Windows Job/helper/handoff suites pass |
-| Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | Content/layout/native install/release reviewed; binary attribution remains outstanding |
+| Distributed documentation | package_docs.py; test_package_docs.py checks both layouts, examples, assets and UTF-8 links | Content/layout/native install and actual distributed native/rebuild documents reviewed; final candidate tag pending |
+
+## Native source/rebuild checkpoint
+
+Source `9cd6fc060df263eb4af460c41d36af6ba2a9615e` passed both
+[Windows packages](https://github.com/qianqiu-2020/decklab/actions/runs/38200076917)
+and [Linux regression](https://github.com/qianqiu-2020/decklab/actions/runs/38200076913).
+Windows explicitly supplied the reviewed Paramiko source archive to the builder,
+which snapshots and installs it before regression tests and freezing. Host/demo
+and installer upgrade/icon/runtime preservation checks passed afterward.
+Downloaded Setup and ZIP passed independent checksum and manifest inspection:
+362 complete bundle files, 16 installed-distribution notice sets, 149 native
+source notice/catalog files, both OpenSSL providers, 67 modeled Rust registry
+dependencies, eight CFFI/libffi headers, two observed Rust standard-library
+release declarations, Paramiko source and the installed rebuild guide.
+The supplied unmodified source is labeled upstream only after exact hash/version
+matching. Twenty-four notice tests cover source replacement/version/hash behavior
+and rechecking frozen provider bindings after notice publication.
+
+This completes the reviewed native/source coverage gate for these observed
+variants. It is a documented source coverage superset, not an exact activated
+wheel SBOM or proof that arbitrary future dependency versions are covered.
+Changing a frozen provider requires updating the pinned attribution catalog.
+The final 1.5.1 tag will use the same source-install path and must pass its own
+combined package/source/version verification before draft publication.
 
 ## Tagged 1.5.0 checkpoint
 
@@ -276,26 +300,10 @@ build script parses on PowerShell; native execution remains unverified.
 
 ## Current remaining gate
 
-Verify the newest native-package attribution/source additions in actual Windows
-outputs and the next tagged release. Rust compiler commits embedded in the two
-extensions match official 1.90.0/1.98.1 channel metadata; verified official
-compiler archives supply original MIT/Apache/COPYRIGHT and generated library-only
-copyright summaries. Paramiko's bundled upstream source has 44 Python modules
-matching its reviewed wheel. The builder now supports an explicit replacement
-source archive, installs a private snapshot before freezing and preserves that
-snapshot/version/hash in its output. Native CI exercises this source-install
-path with the reviewed archive; its new run is still required. The modeled Windows Rust registry graph now has
-67 package/version pairs and 132 pinned original notice files; eight CFFI/libffi
-source headers are also collected. All three frozen provider hashes match before
-copying this catalog. Twenty notice tests and an actual frozen-provider copy
-check pass; these supplements still require native packaging verification and
-are absent from the previously published 1.5.0 draft. OpenSSL provider notices and supplemental
-CPython source-baseline notices are now shipped, but are not a complete native
-SBOM. The installed-distribution inventory is a conservative superset. Source
-archives for bcrypt 5.0.0, cryptography 50.0.2, CFFI 2.1.1 and Paramiko 4.0.0
-have been downloaded from PyPI and checked against its published SHA-256, without
-executing build scripts. bcrypt and cryptography contain Cargo locks with 43
-and 40 package records respectively; those are source graphs, not proof of all
-activated Windows wheel features. Complete the review before claiming the full
-optimization goal achieved. Physical UART/USB behavior remains limited to the
-documented fixture/support scope; no installed service or real board was changed.
+Build and inspect the 1.5.1 tagged draft with all source/notice additions.
+The actual native source-install and distribution checkpoint above passes;
+1.5.0's earlier published draft remains an older artifact. The new verifier
+requires source supplements and a matching Paramiko installed/source version
+for releases starting with 1.5.1. Physical UART/USB behavior remains limited to
+the documented fixture/support scope; no installed service or real board was
+changed during this audit.
