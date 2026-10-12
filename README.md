@@ -6,7 +6,7 @@ A shared development-board workbench for OS and BSP developers. Capture serial
 output continuously, access boards through a browser or agent, and keep boot
 history attached to a stable board identity rather than a changing tty number.
 
-![DeckLab architecture](docs/seriald-architecture.png)
+![DeckLab architecture](docs/seriald-architecture.png?v=30ea099)
 
 ## Why DeckLab
 

@@ -44,7 +44,7 @@ Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API
 开始菜单提供本机、局域网无密码、局域网有密码三个入口。详见 [Windows 构建与安装](docs/WINDOWS.md)。
 也支持 Windows Docker 容器构建；IT 可按 EXE SHA-256 审批防火墙规则，升级后需重新审批。
 
-![seriald 架构图](docs/seriald-architecture.png)
+![DeckLab 架构图](docs/seriald-architecture.png?v=30ea099)
 
 ## Agent 使用
 
