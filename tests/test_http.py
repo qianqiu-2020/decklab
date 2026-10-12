@@ -13,6 +13,7 @@ from seriald_core import __version__
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 from seriald_core import web as sd
+from seriald_core.devices import Manager
 from seriald_core import control_server as control
 from seriald_core.agent_grants import AgentGrantStore
 from seriald_core import transport as tr
@@ -21,7 +22,7 @@ from seriald_core.models import Board
 
 class HandlerTests(unittest.TestCase):
     def setUp(self):
-        self.manager = sd.Manager()
+        self.manager = Manager()
         self.manager.store = mock.Mock()
         self.device = mock.Mock(key='board-key', serial='SN1', dev='/fake/ttyUSB0')
         self.device.sessions_lock = threading.RLock()

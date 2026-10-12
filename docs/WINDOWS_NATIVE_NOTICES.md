@@ -134,12 +134,12 @@ in the bundle; see [replacement/rebuild guide](WINDOWS_REBUILD.md). CI exercises
 this path with the reviewed upstream archive. Modified sources retain their own
 hash/version and are not labeled unmodified upstream unless bytes match exactly.
 
-Native packaging and final release inspection still need to verify these newest
-additions. The already published 1.5.0 draft predates them and must not be
-described as containing them. Attribution remains a reviewed source coverage
+Native packaging and independent inspection of the 1.5.1 draft verified these
+additions. The earlier 1.5.0 draft predates them. Attribution remains a reviewed source coverage
 superset, not an assertion of exactly activated upstream wheel build features.
 
 The existing notice collector remains offline and validates copied notice hashes.
 The complete bundle manifest checks distributed file integrity. Neither check
-proves embedded dependency attribution. See [release acceptance](RELEASE_ACCEPTANCE.md)
+proves embedded dependency attribution. See the
+[1.5.1 acceptance record](https://github.com/qianqiu-2020/decklab/blob/f0ffcbc/docs/RELEASE_ACCEPTANCE.md)
 and the [third-party summary](../THIRD_PARTY.md).

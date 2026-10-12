@@ -7,10 +7,10 @@ import shutil
 from urllib.parse import quote, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
-GUIDES = ('BRAND', 'OPEN_SOURCE_PLAN', 'RELEASE_ACCEPTANCE', 'RELEASING', 'AGENT_ACCESS', 'API', 'ARCHITECTURE', 'INSTALL',
+GUIDES = ('RELEASING', 'AGENT_ACCESS', 'API', 'ARCHITECTURE', 'INSTALL',
           'HARDWARE_ID', 'DEVICE_IDENTITY_MATRIX', 'CONFIGURATION', 'DEMO',
           'CONSOLE_TRANSACTIONS', 'STORAGE_UPGRADES', 'LOG_OPERATIONS', 'TASKS',
-          'TRANSFER_ARTIFACTS', 'HARDWARE_EXTENSIONS', 'REFACTOR_PLAN', 'WINDOWS',
+          'TRANSFER_ARTIFACTS', 'HARDWARE_EXTENSIONS', 'WINDOWS',
           'TRANSFER_PERFORMANCE', 'WINDOWS_NATIVE_NOTICES', 'WINDOWS_REBUILD')
 LINK = re.compile(r'(!?\[[^\]\n]*\]\()([^\s)]+)(\))')
 
@@ -24,6 +24,7 @@ def document_map(platform):
              'CONTRIBUTING.md': 'CONTRIBUTING.md', 'SECURITY.md': 'SECURITY.md',
              'CHANGELOG.md': 'CHANGELOG.md'}
     prefix = '' if platform == 'linux' else 'docs/'
+    pairs['docs/README.md'] = prefix + 'index.md'
     pairs.update({'docs/' + name + '.md': prefix + name + '.md' for name in GUIDES})
     for name in ('seriald-architecture.png', 'seriald-architecture.svg',
                  'seriald-architecture-en.png', 'seriald-architecture-en.svg',

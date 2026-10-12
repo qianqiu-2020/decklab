@@ -1,8 +1,9 @@
 # Contributing to DeckLab
 
 DeckLab is a shared development-board workbench for OS/BSP developers. Keep
-installation and everyday operation simple. Read `docs/ARCHITECTURE.md` and
-`docs/OPEN_SOURCE_PLAN.md` before changing ownership or persistence rules.
+installation and everyday operation simple. Read `docs/ARCHITECTURE.md` before
+changing ownership or persistence rules. The [documentation index](docs/README.md)
+lists current guides; Git history retains completed plans and old investigations.
 
 ## Layout
 
@@ -89,3 +90,13 @@ UI changes and identify any schema/API migration. Link an issue when available.
 Existing commit subjects use `seriald:` or `FIXES:` followed by an action; English
 or Chinese descriptions are welcome. Never attach passwords, bearer tokens,
 private board logs or workplace network details.
+
+## Interface and assets
+
+Keep the terminal central, retain archive lists while browsing, and avoid blocking
+unrelated devices during transfers. Use semantic colors in `static/app.css`,
+system UI fonts and a consistent monospace terminal font. Preserve xterm's scroll
+layer, bottom-row space and full-screen firmware behavior. Check keyboard focus,
+contrast, light/dark themes and narrow screens with the isolated browser fixtures.
+Update only the needed Tabler symbols; preserve `static/icons-LICENSE.txt`.
+Original logo sources and Windows icon handling are described in `docs/BRAND.md`.

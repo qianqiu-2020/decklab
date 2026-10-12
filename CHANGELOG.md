@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an English architecture diagram, demo screenshot and explicit K3 hardware
+  validation scope. Consolidate documentation navigation and remove completed
+  plans, duplicate fix histories and obsolete generated artifacts.
+
 ## 1.5.1
 
 - Add reviewed Windows Rust source-graph notices and CFFI/libffi source headers.
@@ -155,4 +159,4 @@
 ## 1.4.50
 
 DeckLab branding and independent desktop/Start-menu ICO resources.
-For earlier development changes, see FIXES.md and docs/archive/.
+Earlier development changes and investigations remain available in Git history.

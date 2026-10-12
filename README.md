@@ -1,6 +1,6 @@
 # DeckLab
 
-[简体中文](README.zh-CN.md) · [Installation](docs/INSTALL.md) · [Windows](docs/WINDOWS.md) · [Agent access](docs/AGENT_ACCESS.md) · [HTTP API](docs/API.md)
+[简体中文](README.zh-CN.md) · [Documentation](docs/README.md) · [Installation](docs/INSTALL.md) · [Windows](docs/WINDOWS.md) · [Agent access](docs/AGENT_ACCESS.md)
 
 A shared development-board workbench for OS and BSP developers. Capture serial
 output continuously, access boards through a browser or agent, and keep boot
@@ -84,10 +84,9 @@ keys can change after flashing. See [deployment scope](SECURITY.md).
 
 ## Contribute
 
-[CONTRIBUTING.md](CONTRIBUTING.md) describes hardware-free tests and module
-boundaries. The [optimization plan](docs/OPEN_SOURCE_PLAN.md) tracks work toward
-public releases, generic configuration and a hardware-free demo. Do not start a
-second collector on active devices.
+[CONTRIBUTING.md](CONTRIBUTING.md) describes hardware-free tests, module
+boundaries and release maintenance. Do not start a second collector on active
+devices.
 
 ## License
 

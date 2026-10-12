@@ -1,6 +1,6 @@
 # DeckLab
 
-[English](README.md) · [贡献指南](CONTRIBUTING.md) · [HTTP 接口](docs/API.md) · [完整优化规划](docs/OPEN_SOURCE_PLAN.md)
+[English](README.md) · [文档目录](docs/README.md) · [贡献指南](CONTRIBUTING.md) · [HTTP 接口](docs/API.md)
 
 DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统一提供网页终端、SSH、历史日志和 Agent 接口。支持 Ubuntu 服务安装及 Windows 上位机。底层项目、命令与服务名保留 `seriald`。
 
@@ -58,7 +58,6 @@ sudo apt install ./dist/seriald_1.5.1_all.deb
 [安装、配置和旧数据迁移](docs/INSTALL.md) · [架构与模块边界](docs/ARCHITECTURE.md)
 · [硬件身份、/boot 兜底标记与重复编号处理](docs/HARDWARE_ID.md)
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
-· [分阶段重构计划](docs/REFACTOR_PLAN.md)
 
 Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。安装构建依赖后，
 双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.5.1-windows-x64-setup.exe`：

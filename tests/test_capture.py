@@ -16,7 +16,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 from seriald_core import devices as sd
 from seriald_core import device as device_module
 from seriald_core import transport as tr
-from seriald_core.web import BoundedThreadingServer
+from seriald_core.httpd import BoundedThreadingTCPServer as BoundedThreadingServer
 
 
 class SerialIoTests(unittest.TestCase):

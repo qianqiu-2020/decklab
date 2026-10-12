@@ -86,7 +86,9 @@ class PackageTests(unittest.TestCase):
             self.assertTrue(marker.exists(), 'changed collector must restart')
             code = extracted / 'usr/lib/seriald'
             self.assertTrue((extracted / 'usr/share/doc/seriald/DEVICE_IDENTITY_MATRIX.md').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/seriald/REFACTOR_PLAN.md').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/seriald/index.md').is_file())
+            for name in ('REFACTOR_PLAN', 'OPEN_SOURCE_PLAN', 'RELEASE_ACCEPTANCE', 'BRAND'):
+                self.assertFalse((extracted / ('usr/share/doc/seriald/' + name + '.md')).exists())
             self.assertTrue((extracted / 'usr/share/doc/seriald/CONFIGURATION.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/TRANSFER_ARTIFACTS.md').is_file())
             self.assertTrue((extracted / 'usr/share/doc/seriald/HARDWARE_EXTENSIONS.md').is_file())

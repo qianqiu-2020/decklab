@@ -1,7 +1,7 @@
 """Application actions shared by protocol adapters; no HTTP or global manager."""
 import time
 import re
-from .results import ActionResult, response
+from .results import response
 
 from .config import RESCUE_BIN
 from .transport import try_rescue
