@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parent.parent / 'tools/collect_windows_notices.py'
 spec = importlib.util.spec_from_file_location('windows_notices', SCRIPT)
@@ -111,3 +112,56 @@ class NoticeTests(unittest.TestCase):
         data = path.read_text()
         self.assertIn('Chris Liechti', data)
         self.assertIn('/v3.5/', source)
+
+    def native_bundle(self, versions=('3.0.16', '4.0.3')):
+        bundle = self.destination.parent
+        for relative, version in zip(notices.OPENSSL_PROVIDERS, versions):
+            path = bundle / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'fixture\0OpenSSL ' + version.encode() + b' 11 Feb 2025\0')
+        return bundle
+
+    def test_native_providers_copy_exact_licenses_and_verify_binary_hashes(self):
+        bundle = self.native_bundle()
+        result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
+        self.assertEqual([row['version'] for row in result['native_crypto_providers']], ['3.0.16', '4.0.3'])
+        self.assertEqual(notices.verify(self.destination), result)
+        row = result['native_crypto_providers'][0]
+        (bundle / row['binary']).write_bytes(b'changed provider')
+        with self.assertRaisesRegex(ValueError, 'native provider checksum'):
+            notices.verify(self.destination)
+
+    def test_native_unknown_missing_and_ambiguous_versions_fail_atomically(self):
+        bundle = self.native_bundle()
+        binary = bundle / notices.OPENSSL_PROVIDERS[0]
+        for data in (b'OpenSSL 9.0.0 future', b'no version',
+                     b'OpenSSL 3.0.16 old\0OpenSSL 4.0.3 new'):
+            binary.write_bytes(data)
+            with self.subTest(data=data), self.assertRaises(ValueError):
+                notices.inventory([], self.destination, self.python, native_bundle=bundle)
+            self.assertFalse(self.destination.exists())
+        binary.unlink()
+        with self.assertRaises(OSError):
+            notices.inventory([], self.destination, self.python, native_bundle=bundle)
+        self.assertFalse(self.destination.exists())
+
+    def test_native_shared_version_uses_one_license_and_two_provider_records(self):
+        bundle = self.native_bundle(('3.0.16', '3.0.16'))
+        result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
+        self.assertEqual(len(result['native_crypto_providers']), 2)
+        self.assertEqual(len(list((self.destination / 'native').rglob('LICENSE.txt'))), 1)
+        self.assertEqual(notices.verify(self.destination), result)
+
+    def test_native_pinned_license_tampering_fails_before_publication(self):
+        bundle = self.native_bundle()
+        with patch.object(notices, 'OPENSSL_LICENSE_HASH', '0' * 64):
+            with self.assertRaisesRegex(ValueError, 'pinned OpenSSL license checksum'):
+                notices.inventory([], self.destination, self.python, native_bundle=bundle)
+        self.assertFalse(self.destination.exists())
+
+    def test_native_license_tampering_fails_verification(self):
+        bundle = self.native_bundle()
+        result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
+        (self.destination / result['native_crypto_providers'][0]['file']).write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'notice checksum'):
+            notices.verify(self.destination)

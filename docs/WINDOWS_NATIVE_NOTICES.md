@@ -73,6 +73,19 @@ claimed from an integrity check or a version string.
 5. Review the resulting Setup/ZIP files and verify all notices survive packaging.
    Mark unresolved components explicitly and update the release acceptance audit.
 
+The offline notice collector now inspects the frozen `libcrypto-3.dll` and
+cryptography `_rust.pyd` before publication. It requires one unambiguous OpenSSL
+version per provider and currently supports the observed 3.0.16 and 4.0.3.
+Matching upstream tag licenses are pinned under `packaging/third-party/` and
+checked against their SHA-256 before copying. Missing, ambiguous or newly
+unreviewed versions fail packaging with the provider path; review the new
+upstream version and extend the catalog rather than bypassing the check.
+`inventory.json` links each provider's binary hash to its copied license and
+upstream URL. Installer verification checks both binary and license hashes.
+Tests cover atomic failure, changed providers/notices and a shared version using
+one license with two provider records. This addresses those OpenSSL license
+copies; it does not establish all native components' source/notice requirements.
+
 The existing notice collector remains offline and validates copied notice hashes.
 The complete bundle manifest checks distributed file integrity. Neither check
 proves embedded dependency attribution. See [release acceptance](RELEASE_ACCEPTANCE.md)

@@ -18,6 +18,39 @@ ROOT = Path(__file__).resolve().parent.parent
 FALLBACKS = {('pyserial', '3.5'): (
     ROOT / 'packaging/third-party/pyserial-3.5/LICENSE.txt',
     'https://github.com/pyserial/pyserial/blob/v3.5/LICENSE.txt')}
+OPENSSL_LICENSE_HASH = '7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a'
+OPENSSL_VERSIONS = ('3.0.16', '4.0.3')
+OPENSSL_PROVIDERS = ('_internal/libcrypto-3.dll',
+                     '_internal/cryptography/hazmat/bindings/_rust.pyd')
+
+
+def native_crypto_notices(bundle, destination):
+    """Attribute observed OpenSSL providers; this is not a complete native SBOM."""
+    bundle, destination = Path(bundle), Path(destination)
+    rows = []
+    for relative in OPENSSL_PROVIDERS:
+        binary = bundle / relative
+        if binary.is_symlink() or not binary.resolve().is_relative_to(bundle.resolve()):
+            raise ValueError('native provider escapes bundle')
+        data = binary.read_bytes()
+        versions = set(re.findall(rb'OpenSSL ([0-9]+\.[0-9]+\.[0-9]+)(?= )', data))
+        if len(versions) != 1:
+            raise ValueError('missing or ambiguous OpenSSL version: ' + relative)
+        version = versions.pop().decode('ascii')
+        if version not in OPENSSL_VERSIONS:
+            raise ValueError('unreviewed OpenSSL version %s in %s' % (version, relative))
+        license_data = (ROOT / 'packaging/third-party' / ('openssl-' + version) / 'LICENSE.txt').read_bytes()
+        if hashlib.sha256(license_data).hexdigest() != OPENSSL_LICENSE_HASH:
+            raise ValueError('pinned OpenSSL license checksum mismatch')
+        target = destination / 'native' / ('openssl-' + version) / 'LICENSE.txt'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(license_data)
+        rows.append({'component': 'OpenSSL', 'version': version,
+                     'binary': relative, 'binary_sha256': hashlib.sha256(data).hexdigest(),
+                     'file': target.relative_to(destination).as_posix(),
+                     'sha256': OPENSSL_LICENSE_HASH,
+                     'source': 'https://github.com/openssl/openssl/blob/openssl-%s/LICENSE.txt' % version})
+    return rows
 
 
 def normalized(name):
@@ -34,7 +67,7 @@ def license_file(value):
             or bool(re.match(r'^(license|licence|copying|notice)([._-]|$)', path.name, re.I)))
 
 
-def inventory(distributions, destination, python_license, fallbacks=None):
+def inventory(distributions, destination, python_license, fallbacks=None, native_bundle=None):
     """Build into a private directory; failed collection cannot publish a manifest."""
     fallbacks = FALLBACKS if fallbacks is None else fallbacks
     destination = Path(destination)
@@ -82,11 +115,14 @@ def inventory(distributions, destination, python_license, fallbacks=None):
                                'license': 'Python-LICENSE.txt',
                                'sha256': hashlib.sha256(data).hexdigest()},
                     'distributions': rows}
+        if native_bundle is not None:
+            manifest['native_crypto_providers'] = native_crypto_notices(native_bundle, temporary)
         (temporary / 'inventory.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         (temporary / 'README.txt').write_text(
             'These notices cover all installed Python distributions in the build environment.\n'
             'Some components are build tools and are not shipped as executable modules.\n'
             'inventory.json records exact versions and hashes of copied notices.\n'
+            'native_crypto_providers, when present, links observed OpenSSL binaries to pinned licenses.\n'
             'This is not a complete native-library SBOM; inspect frozen binaries separately.\n', encoding='utf-8')
         temporary.rename(destination)
         return manifest
@@ -108,6 +144,21 @@ def verify(destination):
             raise ValueError('duplicate distribution or missing notices')
         names.add(name)
         entries.extend(row['licenses'])
+    native_files = {}
+    for row in manifest.get('native_crypto_providers', []):
+        relative = row['binary']
+        if relative not in OPENSSL_PROVIDERS:
+            raise ValueError('invalid native provider path')
+        binary = destination.parent / relative
+        if binary.is_symlink() or not binary.resolve().is_relative_to(destination.parent.resolve()):
+            raise ValueError('native provider escapes bundle')
+        if hashlib.sha256(binary.read_bytes()).hexdigest() != row['binary_sha256']:
+            raise ValueError('native provider checksum mismatch: ' + relative)
+        previous = native_files.get(row['file'])
+        if previous is not None and previous['sha256'] != row['sha256']:
+            raise ValueError('conflicting native notices')
+        native_files[row['file']] = row
+    entries.extend(native_files.values())
     files = set()
     for entry in entries:
         relative = entry['file']
@@ -129,10 +180,12 @@ def main():
     parser.add_argument('destination', type=Path)
     parser.add_argument('--verify', action='store_true')
     parser.add_argument('--python-license', type=Path, default=Path(sys.base_prefix) / 'LICENSE.txt')
+    parser.add_argument('--bundle', type=Path, help='Inspect frozen OpenSSL providers and copy pinned licenses')
     args = parser.parse_args()
     try:
         manifest = (verify(args.destination) if args.verify else
-                    inventory(metadata.distributions(), args.destination, args.python_license))
+                    inventory(metadata.distributions(), args.destination, args.python_license,
+                              native_bundle=args.bundle))
     except (ValueError, OSError, KeyError, TypeError) as error:
         parser.exit(1, 'Notice collection failed: %s\n' % error)
     print('Collected notices for %d installed distributions' % len(manifest['distributions']))

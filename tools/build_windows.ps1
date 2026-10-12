@@ -86,7 +86,7 @@ try {
         seriald_windows.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 
-    & $python tools/collect_windows_notices.py (Join-Path $bundle 'third-party')
+    & $python tools/collect_windows_notices.py (Join-Path $bundle 'third-party') --bundle $bundle
     if ($LASTEXITCODE -ne 0) { throw 'Third-party notice collection failed; refusing to publish incomplete packages.' }
 
     $launchers = Join-Path $root 'tools\windows-launchers'
