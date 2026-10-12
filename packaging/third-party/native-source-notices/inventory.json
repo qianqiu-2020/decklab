@@ -1682,12 +1682,20 @@
     "cffi-2.1.1-libffi/ffitarget.h.NOTICE.txt": "59e7ec578560c3995fbfff42f3312ebfe481e405ae2a547851ced35656172dd6",
     "cffi-2.1.1-libffi/prep_cif.c.NOTICE.txt": "2b71bf25b279761e8782fac3a8995574361e32b0d72572c654c7bbe8a28e11a0",
     "cffi-2.1.1-libffi/types.c.NOTICE.txt": "a8ccb5fa14b2991bbcc3ed848ee17a4b85bbf56bfde2e22d23b9131c8087576b",
-    "cffi-2.1.1-libffi/win32.c.NOTICE.txt": "b0e93b0dd383db3378833d099e120db2a4399eeb93afc9238078e87c0f2a0282"
+    "cffi-2.1.1-libffi/win32.c.NOTICE.txt": "b0e93b0dd383db3378833d099e120db2a4399eeb93afc9238078e87c0f2a0282",
+    "rust-1.90.0/LICENSE-MIT": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+    "rust-1.90.0/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "rust-1.90.0/COPYRIGHT": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+    "rust-1.90.0/COPYRIGHT-library.html": "025c0dd1236493fcd5b6386b68453852e6528722bd5f8dce5949e94d225e7a60",
+    "rust-1.98.1/LICENSE-MIT": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+    "rust-1.98.1/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "rust-1.98.1/COPYRIGHT": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+    "rust-1.98.1/COPYRIGHT-library.html": "68129500b616d5838629e68f55ff3aed5e096dacf60ce9eb41bbe599a563afa6"
   },
   "limitations": [
     "Modeled from corresponding source locks; actual wheel build feature flags are not attested.",
     "Includes build-time and target-independent source dependencies; does not claim all crates ship.",
-    "Rust toolchain/standard-library and corresponding-source review remain separate."
+    "Generated Rust library notices are a source coverage superset; full compiler binaries are not shipped."
   ],
   "embedded_cffi_source_headers": {
     "archive": "cffi-2.1.1.tar.gz",
@@ -1743,5 +1751,71 @@
         "sha256": "b0e93b0dd383db3378833d099e120db2a4399eeb93afc9238078e87c0f2a0282"
       }
     ]
-  }
+  },
+  "rust_toolchains": [
+    {
+      "version": "1.90.0",
+      "commit": "1159e78c4747b02ef996e55082b704c09b970588",
+      "provider": "_internal/bcrypt/_bcrypt.pyd",
+      "binary_evidence": "embedded rustc path matched official channel git_commit_hash",
+      "archive": "https://static.rust-lang.org/dist/2025-09-18/rustc-1.90.0-x86_64-pc-windows-msvc.tar.xz",
+      "archive_sha256": "a18b3912905f154c34a7572954dda9e9849ac6411a1e02fa390bf742f918fbcb",
+      "channel_sha256": "489c19f20d331765ab2835661eb546de90f6446a107a8db83045e7371e45cae2",
+      "notices": [
+        {
+          "file": "rust-1.90.0/LICENSE-MIT",
+          "source_member": "rustc-1.90.0-x86_64-pc-windows-msvc/LICENSE-MIT",
+          "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+        },
+        {
+          "file": "rust-1.90.0/LICENSE-APACHE",
+          "source_member": "rustc-1.90.0-x86_64-pc-windows-msvc/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "file": "rust-1.90.0/COPYRIGHT",
+          "source_member": "rustc-1.90.0-x86_64-pc-windows-msvc/COPYRIGHT",
+          "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af"
+        },
+        {
+          "file": "rust-1.90.0/COPYRIGHT-library.html",
+          "source_member": "rustc-1.90.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/COPYRIGHT-library.html",
+          "sha256": "025c0dd1236493fcd5b6386b68453852e6528722bd5f8dce5949e94d225e7a60"
+        }
+      ],
+      "scope": "standard-library-notices-from-observed-compiler-release"
+    },
+    {
+      "version": "1.98.1",
+      "commit": "48a229ceaefd4985c50990b14116b6d856af0985",
+      "provider": "_internal/cryptography/hazmat/bindings/_rust.pyd",
+      "binary_evidence": "embedded rustc path matched official channel git_commit_hash",
+      "archive": "https://static.rust-lang.org/dist/2026-09-03/rustc-1.98.1-x86_64-pc-windows-msvc.tar.xz",
+      "archive_sha256": "cb5370843a9d15ce6e6cf6461b4c997722220d268d0d813c2b2b86f3ed59ac24",
+      "channel_sha256": "a7c8774a5fd8441c997d94c029776cbc5eb111e9d72ab5d256fa69866644347e",
+      "notices": [
+        {
+          "file": "rust-1.98.1/LICENSE-MIT",
+          "source_member": "rustc-1.98.1-x86_64-pc-windows-msvc/LICENSE-MIT",
+          "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+        },
+        {
+          "file": "rust-1.98.1/LICENSE-APACHE",
+          "source_member": "rustc-1.98.1-x86_64-pc-windows-msvc/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "file": "rust-1.98.1/COPYRIGHT",
+          "source_member": "rustc-1.98.1-x86_64-pc-windows-msvc/COPYRIGHT",
+          "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af"
+        },
+        {
+          "file": "rust-1.98.1/COPYRIGHT-library.html",
+          "source_member": "rustc-1.98.1-x86_64-pc-windows-msvc/rustc/share/doc/rust/COPYRIGHT-library.html",
+          "sha256": "68129500b616d5838629e68f55ff3aed5e096dacf60ce9eb41bbe599a563afa6"
+        }
+      ],
+      "scope": "standard-library-notices-from-observed-compiler-release"
+    }
+  ]
 }

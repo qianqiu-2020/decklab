@@ -276,8 +276,15 @@ build script parses on PowerShell; native execution remains unverified.
 
 ## Current remaining gate
 
-Finish Rust standard-library/toolchain attribution and applicable corresponding-
-source/rebuild requirements. The modeled Windows Rust registry graph now has
+Verify the newest native-package attribution/source additions in actual Windows
+outputs and the next tagged release. Rust compiler commits embedded in the two
+extensions match official 1.90.0/1.98.1 channel metadata; verified official
+compiler archives supply original MIT/Apache/COPYRIGHT and generated library-only
+copyright summaries. Paramiko's bundled upstream source has 44 Python modules
+matching its reviewed wheel. The builder now supports an explicit replacement
+source archive, installs a private snapshot before freezing and preserves that
+snapshot/version/hash in its output. Native CI exercises this source-install
+path with the reviewed archive; its new run is still required. The modeled Windows Rust registry graph now has
 67 package/version pairs and 132 pinned original notice files; eight CFFI/libffi
 source headers are also collected. All three frozen provider hashes match before
 copying this catalog. Twenty notice tests and an actual frozen-provider copy

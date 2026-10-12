@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-param([switch]$UseCurrentPython, [switch]$PortableOnly)
+param([switch]$UseCurrentPython, [switch]$PortableOnly, [string]$ParamikoSource)
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') {
@@ -7,6 +7,13 @@ if ($env:OS -ne 'Windows_NT') {
 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if ($ParamikoSource) {
+    $ParamikoSource = (Resolve-Path -LiteralPath $ParamikoSource).Path
+    if (-not (Test-Path -LiteralPath $ParamikoSource -PathType Leaf) -or
+        $ParamikoSource -notmatch '\.(tar\.gz|zip)$') {
+        throw 'ParamikoSource must be a .tar.gz or .zip source archive.'
+    }
+}
 Push-Location $root
 try {
     & (Join-Path $PSScriptRoot 'test_windows_compiler_discovery.ps1')
@@ -19,12 +26,22 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is required (install it with the py launcher).' }
     $python = Join-Path $root 'build\windows-venv\Scripts\python.exe'
     $pyinstaller = Join-Path $root 'build\windows-venv\Scripts\pyinstaller.exe'
+    if ($ParamikoSource) {
+        $sourceSuffix = if ($ParamikoSource.ToLowerInvariant().EndsWith('.tar.gz')) { '.tar.gz' } else { '.zip' }
+        $sourceSnapshot = Join-Path $root ('build\windows-venv\paramiko-source' + $sourceSuffix)
+        Copy-Item -LiteralPath $ParamikoSource -Destination $sourceSnapshot
+        $ParamikoSource = $sourceSnapshot
+    }
 
     & $python -c 'import sys; sys.exit(0 if sys.maxsize > 2**32 else 1)'
     if ($LASTEXITCODE -ne 0) { throw 'The Windows x64 package requires 64-bit Python.' }
 
     & $python -m pip install -r requirements-windows.txt
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+    if ($ParamikoSource) {
+        & $python -m pip install --no-deps --force-reinstall $ParamikoSource
+        if ($LASTEXITCODE -ne 0) { throw 'Replacement Paramiko source installation failed.' }
+    }
     & $python tools/check_public_docs.py
     if ($LASTEXITCODE -ne 0) { throw 'Public API/configuration documentation inventory failed.' }
     & $python -m unittest discover -s tests -p test_request_json.py
@@ -86,7 +103,9 @@ try {
         seriald_windows.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 
-    & $python tools/collect_windows_notices.py (Join-Path $bundle 'third-party') --bundle $bundle
+    $noticeArguments = @('tools/collect_windows_notices.py', (Join-Path $bundle 'third-party'), '--bundle', $bundle)
+    if ($ParamikoSource) { $noticeArguments += @('--paramiko-source', $ParamikoSource) }
+    & $python @noticeArguments
     if ($LASTEXITCODE -ne 0) { throw 'Third-party notice collection failed; refusing to publish incomplete packages.' }
 
     $launchers = Join-Path $root 'tools\windows-launchers'

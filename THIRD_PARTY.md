@@ -32,6 +32,11 @@ license hashes. The reviewed CPython 3.12.10 source baseline also contributes
 Expat, zlib 1.3.1 and XZ 5.2.5 source notices under `third-party/runtime-source/`.
 These supplemental source notices are explicitly separate from binary provider
 identification; they do not identify every component in an arbitrary Python build.
+The native source catalog also retains modeled Rust dependency notices, CFFI's
+libffi source headers and observed Rust standard-library release declarations.
+Windows packages include Paramiko's corresponding source archive; the
+[rebuild guide](docs/WINDOWS_REBUILD.md) explains replacing that library before
+freezing and preserving the supplied source in the resulting package.
 
 This inventory does not replace review of native libraries embedded in Python
 or dependency wheels (for example crypto libraries), PyInstaller's frozen output,

@@ -29,7 +29,56 @@ RUNTIME_SOURCE_NOTICES = (
      'https://github.com/python/cpython-source-deps/blob/zlib-1.3.1/LICENSE'),
     ('xz-COPYING', 'bcb02973ef6e87ea73d331b3a80df7748407f17efdb784b61b47e0e610d3bb5c',
      'https://github.com/python/cpython-source-deps/blob/xz-5.2.5/COPYING'))
-NATIVE_SOURCE_CATALOG_HASH = '80c2da5cf616467448c7106ffaa811b7fee4d44ddc07ba259e2e9caeddef50dc'
+NATIVE_SOURCE_CATALOG_HASH = '0b7c0ecc475b987eabe20c9165cdd3793853d007b4ae33f126a60b2daae02b51'
+PARAMIKO_SOURCE_HASH = '6a25f07b380cc9c9a88d2b920ad37167ac4667f8d9886ccebd8f90f654b5d69f'
+
+
+def paramiko_source_notices(distributions, destination, override=None):
+    """Preserve the source archive used for an optional local library replacement."""
+    versions = [row['version'] for row in distributions if normalized(row['name']) == 'paramiko']
+    if not versions:
+        if override is not None:
+            raise ValueError('Paramiko source supplied without installed Paramiko')
+        return []
+    if override is None:
+        if versions != ['4.0.0']:
+            raise ValueError('unreviewed Paramiko corresponding source version')
+        source = ROOT / 'packaging/third-party/paramiko-4.0.0/paramiko-4.0.0.tar.gz'
+        provenance = 'https://pypi.org/project/paramiko/4.0.0/'
+        scope = 'unmodified-upstream-source-distribution'
+    else:
+        source = Path(override)
+        provenance = 'local-build-source-archive'
+        scope = 'user-supplied-source-installed-by-builder'
+    if source.is_symlink() or not source.is_file():
+        raise ValueError('Paramiko source must be a regular archive')
+    if not source.name.endswith(('.tar.gz', '.zip')):
+        raise ValueError('Paramiko source must be a .tar.gz or .zip source archive')
+    data = source.read_bytes()
+    checksum = hashlib.sha256(data).hexdigest()
+    if not data or (override is None and checksum != PARAMIKO_SOURCE_HASH):
+        raise ValueError('Paramiko source archive checksum mismatch')
+    if checksum == PARAMIKO_SOURCE_HASH and versions == ['4.0.0']:
+        provenance = 'https://pypi.org/project/paramiko/4.0.0/'
+        scope = 'unmodified-upstream-source-distribution'
+    suffix = '.tar.gz' if source.name.endswith('.tar.gz') else '.zip'
+    relative = 'sources/paramiko-source' + suffix
+    target = Path(destination) / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return [{'file': relative, 'sha256': checksum, 'installed_version': versions[0],
+             'source': provenance, 'scope': scope}]
+
+
+def verify_native_providers(bundle, providers):
+    for relative, checksum in providers.items():
+        path = PurePosixPath(relative)
+        if path.is_absolute() or '..' in path.parts or '\\' in relative or ':' in relative:
+            raise ValueError('invalid native source provider path')
+        binary = Path(bundle) / relative
+        if (binary.is_symlink() or not binary.resolve().is_relative_to(Path(bundle).resolve())
+                or hashlib.sha256(binary.read_bytes()).hexdigest() != checksum):
+            raise ValueError('unreviewed native source provider: ' + relative)
 
 
 def native_source_notices(bundle, destination):
@@ -39,11 +88,7 @@ def native_source_notices(bundle, destination):
     if hashlib.sha256(data).hexdigest() != NATIVE_SOURCE_CATALOG_HASH:
         raise ValueError('pinned native source catalog checksum mismatch')
     catalog = json.loads(data)
-    for relative, checksum in catalog['providers'].items():
-        binary = Path(bundle) / relative
-        if (binary.is_symlink() or not binary.resolve().is_relative_to(Path(bundle).resolve())
-                or hashlib.sha256(binary.read_bytes()).hexdigest() != checksum):
-            raise ValueError('unreviewed native source provider: ' + relative)
+    verify_native_providers(bundle, catalog['providers'])
     entries = []
     files = dict(catalog['files'], **{'inventory.json': NATIVE_SOURCE_CATALOG_HASH})
     for relative, checksum in files.items():
@@ -122,9 +167,12 @@ def license_file(value):
             or bool(re.match(r'^(license|licence|copying|notice)([._-]|$)', path.name, re.I)))
 
 
-def inventory(distributions, destination, python_license, fallbacks=None, native_bundle=None):
+def inventory(distributions, destination, python_license, fallbacks=None, native_bundle=None,
+              paramiko_source=None):
     """Build into a private directory; failed collection cannot publish a manifest."""
     fallbacks = FALLBACKS if fallbacks is None else fallbacks
+    if paramiko_source is not None and native_bundle is None:
+        raise ValueError('Paramiko replacement source requires a frozen bundle')
     destination = Path(destination)
     if destination.exists():
         raise ValueError('notice destination already exists; use a fresh bundle')
@@ -174,6 +222,7 @@ def inventory(distributions, destination, python_license, fallbacks=None, native
             manifest['native_crypto_providers'] = native_crypto_notices(native_bundle, temporary)
             manifest['runtime_source_notices'] = runtime_source_notices(temporary)
             manifest['native_source_notices'] = native_source_notices(native_bundle, temporary)
+            manifest['corresponding_sources'] = paramiko_source_notices(rows, temporary, paramiko_source)
         (temporary / 'inventory.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         (temporary / 'README.txt').write_text(
             'These notices cover all installed Python distributions in the build environment.\n'
@@ -220,6 +269,7 @@ def verify(destination):
     entries.extend(native_files.values())
     entries.extend(manifest.get('runtime_source_notices', []))
     entries.extend(manifest.get('native_source_notices', []))
+    entries.extend(manifest.get('corresponding_sources', []))
     files = set()
     for entry in entries:
         relative = entry['file']
@@ -233,6 +283,12 @@ def verify(destination):
             raise ValueError('notice escapes bundle')
         if hashlib.sha256(target.read_bytes()).hexdigest() != entry['sha256']:
             raise ValueError('notice checksum mismatch: ' + relative)
+    if manifest.get('native_source_notices'):
+        catalog_path = 'native-source/inventory.json'
+        if catalog_path not in files:
+            raise ValueError('native source catalog missing from notice inventory')
+        catalog = json.loads((destination / catalog_path).read_text(encoding='utf-8'))
+        verify_native_providers(destination.parent, catalog['providers'])
     return manifest
 
 
@@ -242,11 +298,12 @@ def main():
     parser.add_argument('--verify', action='store_true')
     parser.add_argument('--python-license', type=Path, default=Path(sys.base_prefix) / 'LICENSE.txt')
     parser.add_argument('--bundle', type=Path, help='Inspect frozen OpenSSL providers and copy pinned licenses')
+    parser.add_argument('--paramiko-source', type=Path, help='Source archive installed by the replacement builder')
     args = parser.parse_args()
     try:
         manifest = (verify(args.destination) if args.verify else
                     inventory(metadata.distributions(), args.destination, args.python_license,
-                              native_bundle=args.bundle))
+                              native_bundle=args.bundle, paramiko_source=args.paramiko_source))
     except (ValueError, OSError, KeyError, TypeError) as error:
         parser.exit(1, 'Notice collection failed: %s\n' % error)
     print('Collected notices for %d installed distributions' % len(manifest['distributions']))

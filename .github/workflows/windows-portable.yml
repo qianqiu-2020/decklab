@@ -57,7 +57,8 @@ jobs:
         run: .\tools\install_inno_build_tool.ps1
       - name: Build setup EXE and portable ZIP
         shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File .\tools\build_windows.ps1
+        # Exercise the replacement-source path with the reviewed upstream archive.
+        run: powershell -ExecutionPolicy Bypass -File .\tools\build_windows.ps1 -ParamikoSource .\packaging\third-party\paramiko-4.0.0\paramiko-4.0.0.tar.gz
       - name: Smoke test portable host
         shell: pwsh
         run: |

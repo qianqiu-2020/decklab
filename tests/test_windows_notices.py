@@ -207,6 +207,38 @@ class NoticeTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), original)
         self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), notices.OPENSSL_LICENSE_HASH)
 
+    def test_paramiko_corresponding_source_is_version_specific_and_hash_pinned(self):
+        rows = notices.paramiko_source_notices([{'name': 'paramiko', 'version': '4.0.0'}], self.destination)
+        self.assertEqual(rows[0]['scope'], 'unmodified-upstream-source-distribution')
+        self.assertEqual(hashlib.sha256((self.destination / rows[0]['file']).read_bytes()).hexdigest(),
+                         notices.PARAMIKO_SOURCE_HASH)
+        with self.assertRaisesRegex(ValueError, 'unreviewed Paramiko'):
+            notices.paramiko_source_notices([{'name': 'paramiko', 'version': '4.1.0'}], self.destination)
+        with patch.object(notices, 'PARAMIKO_SOURCE_HASH', '0' * 64):
+            with self.assertRaisesRegex(ValueError, 'source archive checksum'):
+                notices.paramiko_source_notices([{'name': 'paramiko', 'version': '4.0.0'}], self.destination)
+
+    def test_local_replacement_source_is_copied_and_labeled_without_upstream_claim(self):
+        archive = self.root / 'modified-source.tar.gz'
+        archive.write_bytes(b'local source archive fixture')
+        rows = notices.paramiko_source_notices([{'name': 'Paramiko', 'version': '4.0.0+modified'}],
+                                              self.destination, archive)
+        self.assertEqual(rows[0]['scope'], 'user-supplied-source-installed-by-builder')
+        self.assertEqual(rows[0]['installed_version'], '4.0.0+modified')
+        self.assertEqual((self.destination / rows[0]['file']).read_bytes(), archive.read_bytes())
+        with self.assertRaisesRegex(ValueError, 'without installed Paramiko'):
+            notices.paramiko_source_notices([], self.destination, archive)
+
+    def test_paramiko_source_is_verified_with_other_bundle_notices(self):
+        bundle = self.native_bundle()
+        file = self.write('paramiko/LICENSE', 'fixture license')
+        result = notices.inventory([self.distribution('Paramiko', [file], '4.0.0')],
+                                   self.destination, self.python, native_bundle=bundle)
+        self.assertEqual(notices.verify(self.destination), result)
+        (self.destination / result['corresponding_sources'][0]['file']).write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'notice checksum'):
+            notices.verify(self.destination)
+
 
 class NativeSourceNoticeTests(unittest.TestCase):
     def setUp(self):
@@ -221,7 +253,7 @@ class NativeSourceNoticeTests(unittest.TestCase):
         self.binary.write_bytes(b'fixture binary')
         self.license = self.source / 'LICENSE.txt'
         self.license.write_bytes(b'fixture license')
-        self.destination = self.root / 'notices'
+        self.destination = self.bundle / 'third-party'
 
     def catalog(self, file='LICENSE.txt'):
         data = json.dumps({'providers': {'provider.pyd': hashlib.sha256(self.binary.read_bytes()).hexdigest()},
@@ -262,5 +294,20 @@ class NativeSourceNoticeTests(unittest.TestCase):
         catalog = json.loads(data)
         self.assertEqual(len(catalog['crates']), 67)
         self.assertEqual(len(catalog['embedded_cffi_source_headers']['headers']), 8)
+        self.assertEqual([row['version'] for row in catalog['rust_toolchains']], ['1.90.0', '1.98.1'])
         for relative, checksum in catalog['files'].items():
             self.assertEqual(hashlib.sha256((source / relative).read_bytes()).hexdigest(), checksum)
+
+    def test_installed_notice_verifier_rechecks_source_catalog_provider_binding(self):
+        with patch.object(notices, 'ROOT', self.root), self.catalog():
+            rows = notices.native_source_notices(self.bundle, self.destination)
+        (self.destination / 'Python-LICENSE.txt').write_bytes(b'fixture Python notice')
+        manifest = {'schema': 1, 'scope': 'installed-build-environment-superset',
+                    'python': {'license': 'Python-LICENSE.txt',
+                               'sha256': hashlib.sha256(b'fixture Python notice').hexdigest()},
+                    'distributions': [], 'native_source_notices': rows}
+        (self.destination / 'inventory.json').write_text(json.dumps(manifest))
+        self.assertEqual(notices.verify(self.destination), manifest)
+        self.binary.write_bytes(b'changed after notice publication')
+        with self.assertRaisesRegex(ValueError, 'unreviewed native source provider'):
+            notices.verify(self.destination)

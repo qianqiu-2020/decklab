@@ -118,11 +118,26 @@ Those providers must match before the collector copies supplements into
 `third-party/native-source/`; a different wheel binary requires review and a
 catalog update. No crate build scripts were run during this source inspection.
 
-This closes the collected notice-text gaps for the modeled registry graph and
-CFFI source headers. It does not identify Rust's standard-library/toolchain
-contributions or satisfy corresponding-source/rebuild requirements by itself.
-Those remain release review work; the already published 1.5.0 draft predates
-these supplements and must not be described as containing them.
+The compiler commits embedded in bcrypt and cryptography match official Rust
+1.90.0 and 1.98.1 channel metadata respectively. Official Windows compiler
+archives were checked against their channel SHA-256; their MIT/Apache notices,
+copyright statement and generated `COPYRIGHT-library.html` are retained.
+The library-only summaries cover source contributors and dependency notices for
+the observed standard-library releases; full compiler binaries are not shipped.
+The catalog records commit/provider associations, archive URLs/checksums and
+each original notice member/hash.
+
+Paramiko's unmodified 4.0.0 source archive is included with its hash and license.
+All 44 Python modules match the reviewed wheel byte-for-byte. The builder can
+install a supplied source archive before freezing and retain that same archive
+in the bundle; see [replacement/rebuild guide](WINDOWS_REBUILD.md). CI exercises
+this path with the reviewed upstream archive. Modified sources retain their own
+hash/version and are not labeled unmodified upstream unless bytes match exactly.
+
+Native packaging and final release inspection still need to verify these newest
+additions. The already published 1.5.0 draft predates them and must not be
+described as containing them. Attribution remains a reviewed source coverage
+superset, not an assertion of exactly activated upstream wheel build features.
 
 The existing notice collector remains offline and validates copied notice hashes.
 The complete bundle manifest checks distributed file integrity. Neither check

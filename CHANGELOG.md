@@ -5,6 +5,9 @@
 - Add reviewed Windows Rust source-graph notices and CFFI/libffi source headers.
   Pin the catalog to three observed frozen provider hashes; reject stale source
   notices and changed binaries instead of silently reusing old attribution.
+- Include observed Rust standard-library copyright summaries and Paramiko's
+  corresponding source archive. Allow replacing Paramiko from an explicit source
+  archive in the isolated builder and retain that same archive in the output.
 
 ## 1.5.0
 
