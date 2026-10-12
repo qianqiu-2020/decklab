@@ -511,6 +511,12 @@ def parser():
 
 
 def main(argv=None):
+    # Agents consume JSON through pipes, where Windows otherwise uses the
+    # legacy locale encoding even though API/archive text is UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        configure = getattr(stream, 'reconfigure', None)
+        if callable(configure):
+            configure(encoding='utf-8')
     p = parser()
     args = p.parse_args(argv)
     try:

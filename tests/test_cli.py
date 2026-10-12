@@ -4,6 +4,8 @@ import contextlib
 import http.client
 import io
 import json
+import os
+import sys
 import subprocess
 import tempfile
 import hashlib
@@ -22,6 +24,20 @@ def response(data):
 
 
 class ClientTests(unittest.TestCase):
+    def test_piped_json_preserves_unicode_under_legacy_output_encoding(self):
+        for failed in (False, True):
+            script = ("from unittest.mock import patch\nimport serialctl as c\n"
+                      + ("with patch.object(c.Client, 'get', side_effect=c.ClientError('连接失败')):\n"
+                         if failed else "with patch.object(c.Client, 'get', return_value={'message':'中文'}):\n")
+                      + "    raise SystemExit(c.main(['capabilities']))\n")
+            result = subprocess.run([sys.executable, '-c', script],
+                cwd=Path(__file__).resolve().parents[1],
+                env=dict(os.environ, PYTHONIOENCODING='ascii', PYTHONUTF8='0'),
+                capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 1 if failed else 0, result.stderr)
+            payload = json.loads(result.stdout.decode('utf-8'))
+            self.assertEqual(payload['error' if failed else 'message'], '连接失败' if failed else '中文')
+
     def test_foreground_task_wait_polls_one_id_and_returns_collector_result(self):
         client = mock.Mock()
         client.get.side_effect = [{'task': {'id': 'copy', 'state': 'running'}},
