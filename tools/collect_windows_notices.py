@@ -22,6 +22,29 @@ OPENSSL_LICENSE_HASH = '7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516b
 OPENSSL_VERSIONS = ('3.0.16', '4.0.3')
 OPENSSL_PROVIDERS = ('_internal/libcrypto-3.dll',
                      '_internal/cryptography/hazmat/bindings/_rust.pyd')
+RUNTIME_SOURCE_NOTICES = (
+    ('expat-COPYING', '122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534',
+     'https://github.com/python/cpython/blob/v3.12.10/Modules/expat/COPYING'),
+    ('zlib-LICENSE', '845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243',
+     'https://github.com/python/cpython-source-deps/blob/zlib-1.3.1/LICENSE'),
+    ('xz-COPYING', 'bcb02973ef6e87ea73d331b3a80df7748407f17efdb784b61b47e0e610d3bb5c',
+     'https://github.com/python/cpython-source-deps/blob/xz-5.2.5/COPYING'))
+
+
+def runtime_source_notices(destination):
+    """Conservative source notices, explicitly scoped to the reviewed baseline."""
+    rows = []
+    for name, checksum, url in RUNTIME_SOURCE_NOTICES:
+        data = (ROOT / 'packaging/third-party/cpython-3.12.10' / name).read_bytes()
+        if hashlib.sha256(data).hexdigest() != checksum:
+            raise ValueError('pinned runtime source notice checksum mismatch: ' + name)
+        relative = 'runtime-source/cpython-3.12.10/' + name
+        target = Path(destination) / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        rows.append({'file': relative, 'sha256': checksum, 'source': url,
+                     'scope': 'CPython-3.12.10-source-baseline-not-binary-identification'})
+    return rows
 
 
 def native_crypto_notices(bundle, destination):
@@ -117,12 +140,14 @@ def inventory(distributions, destination, python_license, fallbacks=None, native
                     'distributions': rows}
         if native_bundle is not None:
             manifest['native_crypto_providers'] = native_crypto_notices(native_bundle, temporary)
+            manifest['runtime_source_notices'] = runtime_source_notices(temporary)
         (temporary / 'inventory.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         (temporary / 'README.txt').write_text(
             'These notices cover all installed Python distributions in the build environment.\n'
             'Some components are build tools and are not shipped as executable modules.\n'
             'inventory.json records exact versions and hashes of copied notices.\n'
             'native_crypto_providers, when present, links observed OpenSSL binaries to pinned licenses.\n'
+            'runtime_source_notices covers a named CPython source baseline, not arbitrary runtime versions.\n'
             'This is not a complete native-library SBOM; inspect frozen binaries separately.\n', encoding='utf-8')
         temporary.rename(destination)
         return manifest
@@ -159,6 +184,7 @@ def verify(destination):
             raise ValueError('conflicting native notices')
         native_files[row['file']] = row
     entries.extend(native_files.values())
+    entries.extend(manifest.get('runtime_source_notices', []))
     files = set()
     for entry in entries:
         relative = entry['file']

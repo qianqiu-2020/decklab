@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - '.gitattributes'
       - 'seriald_windows.py'
       - 'seriald_demo.py'
       - 'seriald_core/**'

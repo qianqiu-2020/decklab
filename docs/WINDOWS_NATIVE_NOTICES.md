@@ -86,6 +86,18 @@ Tests cover atomic failure, changed providers/notices and a shared version using
 one license with two provider records. This addresses those OpenSSL license
 copies; it does not establish all native components' source/notice requirements.
 
+The collector also copies hash-pinned Expat, zlib and XZ source notices from the
+reviewed CPython 3.12.10 baseline. Its upstream
+[Windows dependency configuration](https://github.com/python/cpython/blob/v3.12.10/PCbuild/python.props)
+selects zlib 1.3.1 and XZ 5.2.5; Expat's notice comes from that CPython source tag.
+`runtime_source_notices` identifies this baseline explicitly and does not infer
+the same versions for other interpreters. Missing or modified reference texts
+fail collection atomically; installer checks verify the copied hashes. The XZ
+notice distinguishes liblzma from its separately licensed tools and scripts;
+copying it does not claim those tools ship. Python's existing license retains
+the runtime's libffi, bzip2 and Microsoft terms. Remaining binary/source matching
+and compiled Rust dependency review still require evidence.
+
 The existing notice collector remains offline and validates copied notice hashes.
 The complete bundle manifest checks distributed file integrity. Neither check
 proves embedded dependency attribution. See [release acceptance](RELEASE_ACCEPTANCE.md)

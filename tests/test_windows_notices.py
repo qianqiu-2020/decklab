@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -125,6 +126,9 @@ class NoticeTests(unittest.TestCase):
         bundle = self.native_bundle()
         result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
         self.assertEqual([row['version'] for row in result['native_crypto_providers']], ['3.0.16', '4.0.3'])
+        self.assertEqual(len(result['runtime_source_notices']), 3)
+        self.assertTrue(all(row['scope'].endswith('not-binary-identification')
+                            for row in result['runtime_source_notices']))
         self.assertEqual(notices.verify(self.destination), result)
         row = result['native_crypto_providers'][0]
         (bundle / row['binary']).write_bytes(b'changed provider')
@@ -165,3 +169,37 @@ class NoticeTests(unittest.TestCase):
         (self.destination / result['native_crypto_providers'][0]['file']).write_bytes(b'changed')
         with self.assertRaisesRegex(ValueError, 'notice checksum'):
             notices.verify(self.destination)
+
+    def test_runtime_source_notice_tampering_is_detected(self):
+        bundle = self.native_bundle()
+        result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
+        (self.destination / result['runtime_source_notices'][0]['file']).write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'notice checksum'):
+            notices.verify(self.destination)
+
+    def test_runtime_source_catalog_tampering_fails_atomically(self):
+        bundle = self.native_bundle()
+        name, checksum, url = notices.RUNTIME_SOURCE_NOTICES[0]
+        with patch.object(notices, 'RUNTIME_SOURCE_NOTICES', [(name, '0' * 64, url)]):
+            with self.assertRaisesRegex(ValueError, 'pinned runtime source notice checksum'):
+                notices.inventory([], self.destination, self.python, native_bundle=bundle)
+        self.assertFalse(self.destination.exists())
+
+    def test_windows_autocrlf_checkout_preserves_pinned_upstream_bytes(self):
+        repository = self.root / 'checkout-fixture'
+        repository.mkdir()
+        (repository / '.gitattributes').write_bytes((notices.ROOT / '.gitattributes').read_bytes())
+        relative = 'packaging/third-party/openssl-3.0.16/LICENSE.txt'
+        original = (notices.ROOT / relative).read_bytes()
+        target = repository / relative
+        target.parent.mkdir(parents=True)
+        target.write_bytes(original)
+        def git(*args):
+            subprocess.run(['git', '-c', 'core.autocrlf=true', *args], cwd=repository,
+                           check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        git('init', '--quiet')
+        git('add', '.gitattributes', relative)
+        target.unlink()
+        git('checkout-index', '--all')
+        self.assertEqual(target.read_bytes(), original)
+        self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), notices.OPENSSL_LICENSE_HASH)

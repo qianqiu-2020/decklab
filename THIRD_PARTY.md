@@ -26,6 +26,13 @@ https://github.com/pyserial/pyserial/blob/v3.5/LICENSE.txt. Missing notices for
 other versions/components stop the build; the collector never fetches arbitrary
 licenses during packaging.
 
+Frozen OpenSSL providers are inspected during Windows packaging. Their observed
+versions select pinned upstream licenses, and the inventory records provider and
+license hashes. The reviewed CPython 3.12.10 source baseline also contributes
+Expat, zlib 1.3.1 and XZ 5.2.5 source notices under `third-party/runtime-source/`.
+These supplemental source notices are explicitly separate from binary provider
+identification; they do not identify every component in an arbitrary Python build.
+
 This inventory does not replace review of native libraries embedded in Python
 or dependency wheels (for example crypto libraries), PyInstaller's frozen output,
 or bundled frontend assets. Such binary attribution remains a release gate;
