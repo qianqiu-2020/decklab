@@ -46,8 +46,14 @@ try {
     if ((Get-FileHash -LiteralPath $iconPath).Hash -ne (Get-FileHash -LiteralPath $sourceIcon).Hash) { throw 'Installed shortcut icon is wrong.' }
     $shell = New-Object -ComObject WScript.Shell
     $group = Join-Path ([Environment]::GetFolderPath('Programs')) 'DeckLab'
-    $launchLinks = @(Get-ChildItem -LiteralPath $group -Filter '*.lnk' | ForEach-Object {
-        $shortcut = $shell.CreateShortcut($_.FullName)
+    $shortcutFiles = @(Get-ChildItem -LiteralPath $group -Filter '*.lnk')
+    $launchLinks = @($shortcutFiles | ForEach-Object {
+        # Inspect identical bytes under an ASCII filename: WScript on some
+        # Windows locales silently treats Unicode link names as new links.
+        $inspectionPath = Join-Path $env:TEMP ('decklab-shortcut-' + [guid]::NewGuid().ToString('N') + '.lnk')
+        Copy-Item -LiteralPath $_.FullName -Destination $inspectionPath
+        try { $shortcut = $shell.CreateShortcut($inspectionPath) }
+        finally { Remove-Item -LiteralPath $inspectionPath }
         Write-Host "Shortcut $($_.Name): target=$($shortcut.TargetPath); args=$($shortcut.Arguments); icon=$($shortcut.IconLocation)"
         if ($shortcut.TargetPath -like '*Start-seriald*.cmd') { $shortcut }
     })
