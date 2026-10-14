@@ -6,6 +6,8 @@ It does not replace the licenses of the following components.
 | Component | Files / distribution | License and attribution |
 | --- | --- | --- |
 | xterm.js and fit addon | `vendor/xterm.js`, `vendor/xterm.css`, `vendor/addon-fit.js` | MIT; xterm.js authors, Christopher Jeffrey. Full notice retained in `vendor/xterm.css`. Upstream: https://github.com/xtermjs/xterm.js |
+| xterm headless 5.5.0 and serialize addon 0.13.0 | `vendor/terminal/` | MIT; exact upstream notices and package integrity in the adjacent LICENSE/source files. Same xterm version as the browser. |
+| Node.js | System package on Ubuntu; `_internal/runtime/` in Windows bundles | Windows Node 22.23.3 archive pinned by SHA-256; original LICENSE includes upstream dependency notices. Source and executable/license digests are in `runtime/source.json`. https://nodejs.org/ |
 | Tabler Icons | Selected SVG symbols in `static/icons.svg` | MIT; see `static/icons-LICENSE.txt`. Upstream: https://github.com/tabler/tabler-icons |
 | Inno Setup Chinese translation | `packaging/inno-languages/` | Upstream license and translator credits retained alongside the resource. |
 | Inno Setup | Windows installer build tool | https://github.com/jrsoftware/issrc; used to generate installers, not part of the Python service. |
@@ -52,3 +54,13 @@ sizes and SHA-256 for every distribution file, with EXE/DLL/PYD files marked
 from the installed-Python distribution inventory. It does not identify embedded
 libraries, determine licenses or authenticate the publisher; those still need
 review and trusted release checksums/signatures.
+
+The Python distribution inventory excludes the separate Node executable.
+The complete bundle manifest covers that executable, its license and provenance.
+The runtime does not open network or serial connections; it parses streams supplied by the
+collector. `tools/prepare_terminal_runtime.py` verifies the official archive before
+extracting only node.exe and LICENSE. `tools/prepare_terminal_assets.py` reproduces
+the two headless assets from integrity-pinned npm packages using esbuild 0.25.11,
+lowering syntax to Ubuntu 22.04's Node 12. It does not alter terminal behavior.
+Upstream asset hashes, transformed hashes and compiler options are recorded;
+ordinary package builds use the committed assets without running npm.

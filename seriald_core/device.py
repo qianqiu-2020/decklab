@@ -12,6 +12,7 @@ from .config import ANSI, BY_PATH, HOST_PATTERNS, LOG_ROOT, SCROLLBACK, SSH_IDLE
 from .transport import write_serial
 from .console_protocol import ConsoleProtocol
 from .terminal_state import SerialTerminalState
+from .terminal_backend import control_session
 from .serial_log import SerialLog
 from .protocol import PROBE_CMD, RE_LOGIN, RE_PROMPT, SSH_CMD, parse_probe
 if sys.platform == 'win32':
@@ -193,6 +194,7 @@ class Device:
             self.buf += ('\r\n--- 以下为历史串口日志(%s) ---\r\n' % files[-1]).encode()
             self.buf += tail
             self.buf += '\r\n--- 历史结束 ---\r\n'.encode()
+            self.terminal.screen.feed(bytes(self.buf), self.base + len(self.buf), live=False)
             # 历史装饰文字不能参与提示符判断;只用新收到的 console_tail 确认现场。
         except OSError:
             pass
@@ -223,6 +225,8 @@ class Device:
         self.record = None
         self.newline = self.profile.line_ending
         self.connection_id = secrets.token_hex(12)
+        self.terminal.screen.close()
+        self.terminal = SerialTerminalState(self)
         self.hostname = ''
         self.probe_info = {}
         self.reported_serial = ''
@@ -319,6 +323,7 @@ class Device:
                 # Local status belongs only in archives, never in the UART bytes.
                 return
             with self.cv:
+                terminal, connection = self.terminal, self.connection_id
                 self.terminal.observe(b)
                 self.buf += b
                 if len(self.buf) > SCROLLBACK:
@@ -332,7 +337,27 @@ class Device:
                     self.console_tail = (self.console_tail + text)[-4096:]
                     self.sniff(self.console_tail)
                     self._maybe_auto_identify(self.console_tail)
+                end_off = self.base + len(self.buf)
+                replies = terminal.screen.feed(b, end_off)
                 self.cv.notify_all()
+        for reply in replies:
+            self._protocol_reply(reply, connection)
+
+    def _protocol_reply(self, text, connection=None):
+        # System replies use the same write lock and pinned connection, but do
+        # not claim user input, change termios or become command-history entries.
+        with self.write_lock:
+            if (self.stop.is_set() or not self.present or self.fd is None
+                    or connection is not None and connection != self.connection_id):
+                return False
+            if sys.platform == 'win32':
+                try:
+                    encoded = text.encode('utf-8')
+                    return self.fd.write(encoded) == len(encoded)
+                except (OSError, SerialException):
+                    return False
+            return write_serial(os.path.join(BY_PATH, self.by_path), text,
+                                identity=self.identity, cancel=self.stop)[0]
 
     def close_log(self):
         self.log.close()
@@ -366,6 +391,7 @@ class Device:
                 with self.cv:
                     self.terminal.input_pending = True
                     self.terminal.authority = (lease.actor, lease.client_id)
+                    self.terminal.screen.control(lease.actor, lease.client_id, takeover=True)
                 return self._write(text)
         except TransactionError as error:
             return False, str(error)
@@ -581,6 +607,7 @@ class Device:
             session = SshSession(sid, ip, self.label, self.stable_dir(), **session_args)
             session.auto_configured = bool(auto_configure and denied)
             session.actor, session.title = actor, title
+            control_session(session, actor, self.transactions.client_id)
             session.persistent = persistent
             if self.manager and self.serial:
                 session.store = self.manager.store

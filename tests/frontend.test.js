@@ -82,7 +82,7 @@ function harness(options = {}) {
       this.csi = new Map();
       this.parser = {
         registerCsiHandler: (id, fn) => {
-          const key = (id.prefix || '') + id.final, previous = this.csi.get(key);
+          const key = (id.prefix || '') + (id.intermediates || '') + id.final, previous = this.csi.get(key);
           this.csi.set(key, params => fn(params) || (previous && previous(params)));
         },
         registerOscHandler() {}, registerDcsHandler() {},
@@ -122,6 +122,7 @@ function harness(options = {}) {
         for (const match of text.matchAll(/\x1b\[8;(\d+);(\d+)t/g))
           this.csi.get('t')?.([8, Number(match[1]), Number(match[2])]);
         if (text.includes('\x1b[6n') && !this.csi.get('n')?.([6])) this.data('\x1b[1;184R');
+        if (text.includes('\x1b[?12$p') && !this.csi.get('?$p')?.([12])) this.data('\x1b[?12;1$y');
         if (callback) callback();
       }
     }
@@ -1316,6 +1317,64 @@ test('passive serial size probes do not move the cursor but firmware positions s
     assert.ok(!terminal.csi.get(final)?.([1, 1]), 'retain cursor home');
   }
   assert.equal(h.sends().length, 0);
+});
+
+test('managed shared SSH suppresses all protocol replies and updates quiet takeover state', async () => {
+  const h = await setup({sse:true}); h.select('A');
+  h.take('/api/sessions').resolve({key:'A',sessions:[{sid:'serial',kind:'serial'}, {sid:'ssh1',kind:'ssh',actor:'web'}]}); await drain();
+  h.get('d-tabs').children.find(b=>b.dataset.kind==='ssh').click();
+  const terminal=h.terminals.at(-1), stream=h.streams.at(-1);
+  const packet=readResponse('A','\x1b[6n\x1b[?12$p',20,'ssh1');
+  packet.terminal_state={managed:true,revision:1,geometry:{cols:160,rows:50},phase:'application',control_revision:2};
+  packet.terminal_writable=false;
+  stream.emit(packet); terminal.flush(); await drain();
+  assert.equal(terminal.cols,160); assert.equal(terminal.rows,50);
+  assert.equal(terminal.csi.get('?$p')([12]),true);
+  assert.equal(terminal.csi.get('$p')([4]),true);
+  assert.equal(h.sends().length,0);
+  assert.equal(h.get('d-in').disabled,true);
+  assert.equal(h.get('b-takeover').hidden,false);
+  assert.equal(h.timer(250),undefined,'an observer does not resize the source PTY');
+  stream.emit({...packet,data_b64:'',terminal_writable:true,
+    terminal_state:{...packet.terminal_state,control_revision:3}});
+  assert.equal(h.get('d-in').disabled,false,'same-offset metadata grants input immediately');
+  stream.emit({...packet,data_b64:''});
+  assert.equal(h.get('d-in').disabled,false,'stale controller metadata cannot undo takeover');
+  terminal.data('live input'); await drain();
+  assert.equal(h.sends().at(-1).body.data,'live input');
+});
+
+test('managed snapshots preserve fragmented bytes and wait behind queued screen output', async () => {
+  const h=await setup({sse:true}), terminal=h.select('A'), stream=h.streams.at(-1);
+  const state={managed:true,revision:1,geometry:{cols:100,rows:30},phase:'shell',control_revision:0};
+  stream.emit({...readResponse('A','old',3),terminal_state:state});
+  const prefix=Buffer.from('汉').subarray(0,1), suffix=Buffer.from('汉').subarray(1);
+  stream.emit({...readResponse('A','',9),terminal_state:{...state,revision:2,geometry:{cols:120,rows:40}},
+    terminal_snapshot:{data:Buffer.from('fresh').toString('base64'),pending:prefix.toString('base64'),geometry:{cols:120,rows:40}}});
+  assert.equal(terminal.cols,100,'a newer geometry waits for the queued older write');
+  terminal.flush(); await drain();
+  stream.emit({...readResponse('A',suffix,11),terminal_state:{...state,revision:2,geometry:{cols:120,rows:40}}});
+  terminal.flush(); await drain();
+  assert.equal(terminal.cols,120); assert.equal(terminal.rows,40);
+  assert.ok(terminal.parsed.endsWith('fresh汉')); assert.ok(!terminal.parsed.includes('old'));
+});
+
+test('first serial command waits for board dimensions and environment setup', async () => {
+  const h=await setup({sse:true}), terminal=h.select('A'), stream=h.streams.at(-1);
+  const state={managed:true,revision:1,geometry:{cols:80,rows:24},phase:'shell',control_revision:0,
+    serial_ready:true,serial_configured:false};
+  stream.emit({...readResponse('A','root@board:~# ',14),terminal_state:state});
+  terminal.flush(); await drain();
+  terminal.data('vim file\r'); await drain();
+  assert.equal(h.sends().length,0,'queue input until the board stty/TERM barrier completes');
+  h.take('/api/session-resize').resolve({ok:true,pending:true}); await drain();
+  stream.emit({...readResponse('A','',20),terminal_state:{...state,revision:2,geometry:{cols:140,rows:42}}});
+  terminal.flush(); await drain();
+  assert.equal(h.sends().length,0,'geometry alone does not mean TERM setup finished');
+  stream.emit({...readResponse('A','',21),terminal_state:{...state,serial_configured:true,
+    revision:2,geometry:{cols:140,rows:42}}});
+  await drain();
+  assert.equal(h.sends().at(-1).body.data,'vim file\r');
 });
 
 test('Linux boot restores the normal serial font after an uncleared EDK2 screen', async () => {

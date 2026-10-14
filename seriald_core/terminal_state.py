@@ -3,11 +3,13 @@ import re
 
 from .config import ANSI
 from .transactions import TransactionError
+from .terminal_backend import SharedTerminal
 
 
 class SerialTerminalState:
     def __init__(self, device):
         self.device = device
+        self.screen = SharedTerminal('serial')
         self.tail = b''
         self.geometry = None
         self.history = []
@@ -76,6 +78,8 @@ class SerialTerminalState:
                 if automatic and (self.authority not in (None, client)
                                   or self.attempted and self.geometry is None):
                     return {'ok': True, 'skipped': True, 'geometry': self.geometry}
+                if not self.screen.control(actor, lease.client_id, takeover=not automatic):
+                    return {'ok': True, 'skipped': True, 'geometry': self.geometry}
                 target = {'cols': cols, 'rows': rows}
                 if automatic and self.geometry == target and self.attempted and not self.environment_pending:
                     return {'ok': True, 'skipped': True, 'geometry': self.geometry}
@@ -92,6 +96,8 @@ class SerialTerminalState:
                 self.input_pending = True
                 if self.geometry is None:
                     self.history.append((d.base + len(d.buf), {'cols': 80, 'rows': 24}))
+                    self.screen.resize(80, 24)
+                self.screen.control(actor, lease.client_id, takeover=True)
             # Keep baud/parity/raw modes untouched. TERM is changed only if the
             # board actually has the matching terminfo. No extra Enter/probe.
             flow = ' -ixon -ixoff' if d.profile.serial.flow_control != 'xonxoff' else ''
@@ -106,3 +112,16 @@ class SerialTerminalState:
             if ok:
                 d.record_input('serial', actor, command + '\r')
             return {'ok': ok, 'error': error, 'pending': ok}
+
+    def presentation(self, cols, rows):
+        """Use the available width for boot text without typing into a board."""
+        d = self.device
+        actor, client = d.transactions.source_actor, d.transactions.client_id
+        with d.cv:
+            state = self.screen.metadata()
+            if (state.get('phase') != 'text' or self.input_pending or self.geometry
+                    or not self.screen.control(actor, client)):
+                return {'ok': True, 'skipped': True}
+            ok = self.screen.resize(cols, rows)
+            d.cv.notify_all()
+        return {'ok': ok, 'terminal_state': self.screen.metadata()}

@@ -19,6 +19,7 @@
   var pollDevices = deviceDirectory.poll, markSelected = deviceDirectory.markSelected, adoptKey = deviceDirectory.adopt;
   var terminalView = window.SerialdTerminalView.create({
     byId: $, fetch: fetch, ownsInput: ownsInput, setInputMode: setInputMode,
+    onControlChange: function () { renderTabs(); },
     board: function (key) { return deviceDirectory.items.find(function (board) { return board.key === key; }); },
     session: function (sid) { return sessions.find(function (session) { return session.sid === sid; }); },
     takenOver: function (sid) { return !!takenOver[sid]; },
@@ -242,7 +243,9 @@
       b.dataset.kind = s.kind;
       b.textContent = s.kind === 'serial' ? '串口'
         : (s.kind === 'log' ? s.label : ('SSH ' + (s.actor ? s.actor + ' · ' : '') + (s.ip || s.sid)));
-      if (s.kind === 'log' || (s.actor && s.actor !== 'web' && !takenOver[s.sid])) b.textContent += ' · 只读';
+      var readonly = s.kind === 'log' || (s.sid === ctx.sid && ctx.readonly)
+        || (s.sid !== ctx.sid && s.actor && s.actor !== 'web' && !takenOver[s.sid]);
+      if (readonly) b.textContent += ' · 只读';
       if (s.log_error) b.textContent += ' · 日志写入失败';
       b.title = s.kind === 'serial' ? '板子控制台（实时输出）'
         : (s.kind === 'log' ? '归档日志快照，只读显示在终端中'
@@ -619,11 +622,15 @@
       .then(function (result) {
         if (!isCurrent(ctx)) return;
         if (!result.ok) throw new Error(result.error || '介入失败');
-        takenOver[ctx.sid] = true;
-        ctx.readonly = false; ctx.canTakeover = false;
+        terminalView.updateState(ctx, result);
+        if (typeof result.terminal_writable !== 'boolean') {
+          ctx.readonly = false; ctx.canTakeover = false;
+        }
+        takenOver[ctx.sid] = !ctx.readonly;
         setInputMode(ctx);
         renderTabs();
-        $('d-status').textContent = ' 已介入 agent SSH，会话输入和输出继续记录';
+        terminalView.resize();
+        $('d-status').textContent = ' 已介入 SSH 会话，输入和输出继续记录';
       }).catch(function (error) {
         if (isCurrent(ctx)) $('d-status').textContent = ' 介入失败：' + error.message;
       });

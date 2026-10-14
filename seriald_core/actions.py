@@ -10,13 +10,15 @@ from .file_transfer import TransferError
 from .transactions import transactions_for, TransactionError
 from . import __version__
 from .hardware import ACTIONS, host_adapter
+from .terminal_backend import SharedTerminal, control_session, screen_for
+from .session_base import SessionBase
 
 
 def capabilities():
     """Protocol features, not a promise that a particular board supports a shell."""
     return response(200, {
         'api_version': 1, 'version': __version__,
-        'features': {'serial': True, 'ssh': True, 'sse_offsets': True,
+        'features': {'serial': True, 'ssh': True, 'sse_offsets': True, 'shared_terminal': True,
                      'boot_archives': True, 'boot_compare': True,
                      'operation_status': True, 'operation_cancel': True, 'durable_tasks': True},
         'tasks': {'kinds': ['identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download']
@@ -225,7 +227,11 @@ class DeviceActions:
                     return response(404, {'error': 'no such session'})
                 if actor != s.actor and actor not in s.takeovers:
                     return response(403, {'ok': False, 'error': '先介入该 SSH 会话才能输入'})
-                ok, err = (s.write(text), '')
+                if not control_session(s, actor, transactions_for(d).client_id):
+                    return response(409, {'ok': False, 'error': '另一客户端正在控制 SSH；请先介入此会话', 'code': 'session-controlled'})
+                ok = (s.write(text, actor=actor, client_id=transactions_for(d).client_id)
+                      if isinstance(s, SessionBase) else s.write(text))
+                err = ''
             if ok:
                 if d.serial:
                     self.manager.store.event(d.serial, actor, 'session-send', 'request: sid=' + sid)
@@ -237,9 +243,19 @@ class DeviceActions:
             s = d.get_session(sid)
             if not d.serial or not s:
                 return response(404, {'ok': False, 'error': 'no such active SSH session'})
-            s.takeovers.add(actor)
+            if isinstance(s, SessionBase):
+                s.takeover(actor, transactions_for(d).client_id)
+            else:
+                s.takeovers.add(actor)
+                control_session(s, actor, transactions_for(d).client_id, takeover=True)
             self.manager.store.event(d.serial, actor, 'session-takeover', sid)
-            return response(200, {'ok': True, 'sid': sid})
+            terminal = screen_for(s)
+            result = {'ok': True, 'sid': sid}
+            if isinstance(terminal, SharedTerminal):
+                state = terminal.metadata()
+                result.update(terminal_state=state, terminal_writable=state['controller'] == {
+                    'actor': actor, 'client_id': transactions_for(d).client_id})
+            return response(200, result)
 
         if action == 'session-resize':
             sid = str(payload.get('sid') or '')
@@ -251,9 +267,12 @@ class DeviceActions:
             if sid == 'serial':
                 if (not 20 <= cols <= 500 or not 2 <= rows <= 200
                         or type(payload.get('observed_off')) is not int
-                        or type(payload.get('automatic', False)) is not bool):
+                        or type(payload.get('automatic', False)) is not bool
+                        or type(payload.get('presentation', False)) is not bool):
                     return response(400, {'error': 'bad serial terminal dimensions or offset'})
                 try:
+                    if payload.get('presentation') is True:
+                        return response(200, d.terminal.presentation(cols, rows))
                     result = d.terminal.configure(cols, rows, payload['observed_off'], payload.get('automatic', False))
                     return response(200 if result['ok'] else 503, result)
                 except TransactionError as error:
@@ -263,7 +282,12 @@ class DeviceActions:
                 return response(404, {'error': 'no such session'})
             if actor != s.actor and actor not in s.takeovers:
                 return response(403, {'ok': False, 'error': '先介入该 SSH 会话才能调整终端大小'})
-            return response(200, {'ok': s.resize(cols, rows), 'cols': s.cols, 'rows': s.rows})
+            if not control_session(s, actor, transactions_for(d).client_id):
+                return response(200, {'ok': True, 'skipped': True, 'cols': s.cols, 'rows': s.rows,
+                                      'terminal_state': screen_for(s).metadata()})
+            ok = (s.resize(cols, rows, actor=actor, client_id=transactions_for(d).client_id)
+                  if isinstance(s, SessionBase) else s.resize(cols, rows))
+            return response(200, {'ok': ok, 'cols': s.cols, 'rows': s.rows})
 
         if action == 'session-close':
             sid = str(payload.get('sid') or '')
@@ -272,6 +296,8 @@ class DeviceActions:
                 return response(404, {'error': 'no such session'})
             if actor != s.actor and actor not in s.takeovers:
                 return response(403, {'ok': False, 'error': '先介入该 SSH 会话才能关闭'})
+            if not control_session(s, actor, transactions_for(d).client_id):
+                return response(409, {'ok': False, 'error': '另一客户端正在控制 SSH；请先介入此会话', 'code': 'session-controlled'})
             if not d.close_session(sid):
                 return response(404, {'error': 'no such session'})
             return response(200, {'ok': True})

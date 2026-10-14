@@ -2,7 +2,9 @@
   'use strict';
   function install(ctx, options) {
     function suppressReply() {
-      return ctx.sid === 'serial' || ctx.readonly || !ctx.initialRendered;
+      // The collector owns protocol replies for every shared live session.
+      // Browsers retain keyboard/mouse input, never answer historical queries.
+      return true;
     }
     function guardCsi(id, queries) {
       ctx.term.parser.registerCsiHandler(id, function (params) {
@@ -16,11 +18,14 @@
         // systemd probes size by jumping to INT16_MAX-1 before requesting CPR.
         // With replies suppressed it cannot restore the original cursor, so
         // suppress that probe move too. Ordinary menu/application CUP remains.
-        return suppressReply() && params.length === 2
+        return !ctx.screenManaged && suppressReply() && params.length === 2
           && params[0] === 32766 && params[1] === 32766;
       });
     });
     ['', '>', '='].forEach(function (prefix) { guardCsi({ prefix: prefix, final: 'c' }); });
+    ['', '?'].forEach(function (prefix) {
+      guardCsi({prefix: prefix, intermediates: '$', final: 'p'});
+    });
     guardCsi({ final: 't' }, [14, 16, 18, 20, 21]);
     [4, 10, 11, 12].forEach(function (id) {
       ctx.term.parser.registerOscHandler(id, function (data) {

@@ -49,6 +49,22 @@ os.chmod(socket_dir, 0o750)
 environment = dict(os.environ, SERIALD_BASE=str(base), SERIALD_STATIC='/usr/lib/seriald',
                    SERIALD_SOCKET='/run/seriald/collector.sock', SERIALD_BY_PATH=str(empty),
                    SERIALD_AUTH_TOKEN='', SERIALD_BIND='127.0.0.1', SERIALD_PORT='18898')
+terminal_probe = r"""
+import sys
+sys.path.insert(0, '/usr/lib/seriald')
+from seriald_core.terminal_backend import SharedTerminal
+t = SharedTerminal('ssh', 120, 32)
+assert t.feed(b'\x1b[32766;32766H\x1b[6n', 21) == ['\x1b[32;120R'], t.metadata()
+snapshot = t.snapshot()
+u = SharedTerminal('ssh')
+assert u.restore(snapshot), u.metadata()
+assert u.metadata()['geometry'] == {'cols': 120, 'rows': 32}
+t.close()
+u.close()
+print('PASS: installed canonical terminal parser, replies and snapshots')
+"""
+subprocess.run(['sudo', '-u', 'seriald', '--preserve-env', 'python3', '-c', terminal_probe],
+               env=environment, check=True)
 workers = []
 os.umask(0o007)  # Match the packaged systemd units for newly created runtime files.
 def start(program):

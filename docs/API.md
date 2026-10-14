@@ -37,6 +37,8 @@ Errors contain `error` and `code`. Generic codes include `invalid-argument`,
 include `not-idle`, `cancelled`, `stale`, `disconnected` and `transfer-busy`. Inspect HTTP
 status as well as JSON: success of an input request does not prove command
 completion, and cancellation is not rollback.
+`session-controlled` means another client controls this shared SSH terminal;
+explicit takeover is required before writing, resizing or closing it.
 Some synchronous operations return HTTP 200 with `ok=false` and a failure code;
 check both fields. JSON errors are not guaranteed after a streaming response has
 begun: a truncated download or dropped SSE connection requires client recovery.
@@ -71,6 +73,20 @@ Serial SSE packets also carry
 output bytes. Quiet serial streams check this state within about one second;
 device-list polling remains a fallback. Reconnect reads do not send board input.
 Use archives for earlier output that no longer fits the live buffer.
+Browsers opt into canonical presentation with `screen=1&terminal_rev=<revision>`
+and their per-page `client_id`. The packet includes `terminal_state` (geometry,
+revision, phase, cursor, modes, controller and control_revision). A new/evicted
+cursor or changed geometry returns `terminal_snapshot`: base64 `data`, followed
+by base64 `pending` (unfinished UTF-8/control prefix), with its own `off` and
+geometry. Reset the local emulator before applying it. Otherwise `data_b64`
+contains ordered presentation bytes; their length can differ from raw captured
+bytes, so use the returned `off`, never compute the next cursor from that length.
+Apply metadata even at unchanged offsets. `terminal_writable` tells an SSH
+viewer whether its actor/client can input. Screen reads check quiet state at
+least once a second. Raw CLI reads without `screen=1` retain byte/gap semantics.
+Only the backend responds to live terminal protocol queries; viewers must
+suppress automatic replies, including DSR, DA and terminal-mode queries.
+
 `off=0` returns an immediate buffered snapshot. A cursor at the current end can
 long-poll for up to 15 seconds while the stream is alive; there is no public
 `wait` parameter. `/api/operation` and `/api/hardware` require `key` and support
@@ -113,10 +129,10 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | `/api/send` | `data`; literal serial input |
 | `/api/session-send` | `sid`, `data`; serial or SSH input |
 | `/api/ssh-connect` | Optional `title`, `ssh_user`, `ssh_password`; returns sid and persistence policy |
-| `/api/session-resize` | `sid`, `cols`, `rows`; serial also requires `observed_off`, with optional `automatic` boolean and per-page `client_id` |
+| `/api/session-resize` | `sid`, `cols`, `rows`; serial also requires `observed_off`, with optional `automatic` boolean, `presentation` boolean and per-page `client_id` |
 | `/api/session-close` | `sid` |
 | `/api/session-result` | `sid`, `completed`, `exit_code`; records command outcome |
-| `/api/session-takeover` | `sid`; explicit human intervention in an agent session |
+| `/api/session-takeover` | `sid`; take control of shared SSH input and dimensions |
 | `/api/input-claim` | Optional human `takeover=true`; returns ownership ID |
 | `/api/input-release` | Ownership `id` |
 | `/api/operation-cancel` | Active operation `id` |
@@ -131,11 +147,19 @@ For long identify/SSH operations, prefer background tasks. Non-web actors reuse
 persistent SSH terminals, but CLI `exec` executes each command in a child `sh -c`.
 It preserves the terminal, not changes made to the child shell's directory or
 variables. Use one command for dependent steps, or interactive session input.
-SSH output can be read by collaborators, but input, resize and close require
-the session's actor or explicit takeover. Resize/close/takeover select an SSH
+SSH output can be read by collaborators. Input, resize and close require both
+session access and the current controlling actor/client. Another page using
+the same web actor still needs explicit takeover. Resize/close/takeover select an SSH
 `sid`; they do not close or resize the physical serial collector. Root SSH
 authentication-denial recovery follows the configured profile password and
 provisioning policy; different per-request credentials do not trigger provisioning.
+
+SSH resizes the actual PTY/channel and canonical screen; applications receive
+the normal window-size change. Pure UART has no out-of-band window-size message.
+Serial size setup requires a fresh idle Linux shell prompt and matching offset;
+it completes stty/TERM setup before queued browser input. Busy applications
+retain the established grid. `presentation=true` adjusts boot-text display only,
+writes nothing to the board, and is ignored during firmware or active programs.
 
 ## Tasks, file transfer and sharing
 

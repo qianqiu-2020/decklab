@@ -5,8 +5,10 @@ import os
 import pty
 import re
 import select
+import signal
 import struct
 import subprocess
+import sys
 import termios
 
 from .session_base import SessionBase
@@ -53,7 +55,8 @@ class SshSession(SessionBase):
             os.set_blocking(master, False)
             self._set_winsize(slave)
             self.proc = subprocess.Popen(
-                self.argv, stdin=slave, stdout=slave, stderr=slave,
+                [sys.executable, os.path.join(os.path.dirname(__file__), 'ssh_pty.py')] + self.argv,
+                stdin=slave, stdout=slave, stderr=slave,
                 start_new_session=True, env=dict(os.environ, TERM='xterm-256color',
                                                  SSHPASS=self.password), close_fds=True)
             return master
@@ -70,14 +73,15 @@ class SshSession(SessionBase):
                 pass
 
     def _set_winsize(self, fd):
-        try:
-            fcntl.ioctl(fd, termios.TIOCSWINSZ,
-                        struct.pack('HHHH', self.rows, self.cols, 0, 0))
-        except OSError:
-            pass
+        fcntl.ioctl(fd, termios.TIOCSWINSZ,
+                    struct.pack('HHHH', self.rows, self.cols, 0, 0))
 
     def _resize(self, fd):
         self._set_winsize(fd)
+        # sshpass's outer PTY need not be its controlling terminal. Notify the
+        # wrapper explicitly so it forwards the new size to its SSH child PTY.
+        if self.proc and self.proc.poll() is None:
+            self.proc.send_signal(signal.SIGWINCH)
 
     def _receive(self, fd):
         ready, _, _ = select.select([fd], [], [], 0.25)

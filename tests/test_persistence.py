@@ -315,6 +315,7 @@ class PersistenceTests(unittest.TestCase):
         d = self.connection('usb-1')
         self.identify(d)
         d.identity = (1, 2, 3)
+        d.append(b'\x1b[8;42;140t\x1b[?1049h\x1b[5;8Hvim')
         handoff = self.manager.close()
         self.assertEqual(handoff[0]['serial'], 'SN001')
 
@@ -335,6 +336,10 @@ class PersistenceTests(unittest.TestCase):
         same = scan(restored, (1, 2, 3))
         self.assertEqual(same.serial, 'SN001')
         self.assertEqual(same.probe_info['serial_source'], 'device-tree')
+        if d.terminal.screen.metadata()['managed']:
+            self.assertEqual(same.terminal.geometry, {'cols': 140, 'rows': 42})
+            self.assertEqual(same.terminal.screen.metadata()['cursor']['buffer'], 'alternate')
+            self.assertEqual(same.now_off(), d.now_off())
         changed = devices.Manager(self.store, handoff)
         replacement = scan(changed, (1, 22, 3))
         self.assertEqual(replacement.serial, '')
@@ -344,6 +349,7 @@ class PersistenceTests(unittest.TestCase):
         old = self.connection('usb-1')
         self.identify(old)
         old.identity = (1, 2, 3)
+        old.append(b'\x1b[8;42;140t\x1b[?1049h\x1b[5;8Hvim')
         old.fd = None
         session = object()
         old.ssh_sessions['ssh-existing'] = session
@@ -366,6 +372,9 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(replacement.snapshot()['state'], 'offline')  # fake reader has not opened
         self.assertEqual(replacement.stable_dir(), old.stable_dir())
         self.assertIs(replacement.ssh_sessions['ssh-existing'], session)
+        if old.terminal.screen.metadata()['managed']:
+            self.assertEqual(replacement.terminal.screen.metadata()['geometry'], {'cols': 140, 'rows': 42})
+            self.assertEqual(replacement.terminal.screen.metadata()['cursor']['buffer'], 'alternate')
 
     def test_armed_board_swap_does_not_keep_old_identity_on_reenumeration(self):
         old = self.connection('usb-1')

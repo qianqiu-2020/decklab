@@ -8,6 +8,7 @@ from .archive_io import open_archive
 from .config import LOG_ROOT
 from .log_archive import read_epoch, search_epochs
 from .boot_compare import MAX_BOOT_BYTES, compare_boots
+from .terminal_backend import terminal_payload
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,8 @@ class SessionQueries:
             return response(404, {'error': 'not found'})
         try:
             offset = int(params.get('off', '0') or 0)
-            if offset < 0:
+            revision = int(params.get('terminal_rev', '0'))
+            if offset < 0 or revision < 0:
                 raise ValueError
         except ValueError:
             return response(400, {'error': 'bad offset'})
@@ -47,7 +49,7 @@ class SessionQueries:
         stream = device if sid == 'serial' else device.get_session(sid)
         if not stream:
             return response(404, {'error': 'no such session'})
-        offset, data, alive = stream.read(offset)
+        offset, data, alive = stream.read(offset, wait=1) if params.get('screen') == '1' else stream.read(offset)
         result = {'off': offset, 'alive': alive,
                   'data_b64': base64.b64encode(data).decode('ascii'),
                   'data': data.decode('utf-8', 'replace')}
@@ -58,6 +60,9 @@ class SessionQueries:
             result['terminal_initial_geometry'] = terminal.geometry_at(offset - len(data)) if terminal else None
         else:
             result['ip'] = stream.ip
+        terminal_payload(stream, result, int(params.get('off', '0') or 0),
+                         screen=params.get('screen') == '1', revision=revision,
+                         actor=params.get('actor', 'web'), client_id=params.get('client_id', ''))
         if action == 'serial':
             result['key'] = device.key
         else:

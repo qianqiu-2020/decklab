@@ -12,6 +12,9 @@ lists current guides; Git history retains completed plans and old investigations
   connection buffers and guarded writes; it must not open another serial reader.
   `serial_log.py` owns archive text state and writing; Device retains the live
   byte buffer. Identity migration and retention use the writer's same lock.
+  `terminal_backend.py` connects to one isolated Node parser process;
+  `terminal_worker.js` owns per-stream xterm state and live protocol replies.
+  `terminal_snapshot.js` isolates the pinned xterm snapshot adapter.
   HTTP collectors receive their Manager through `server.manager`; importing
   `web.py` must not initialize runtime state or read board profile files.
 - `seriald.py` / `seriald_windows.py`: Linux control and Windows host entry points.
@@ -27,7 +30,9 @@ lists current guides; Git history retains completed plans and old investigations
 ## Development checks
 
 Use Python 3.10+ on Linux, Python 3.12 x64 for Windows packaging, and Node.js 22
-for browser checks. Backend tests that exercise Windows adapters need pySerial
+for development/browser checks. The installed collector also needs Node (Ubuntu
+22.04's packaged Node 12 is supported); Windows installers bundle it.
+Backend tests that exercise Windows adapters need pySerial
 and Paramiko even on Linux:
 
 ```sh
@@ -47,6 +52,10 @@ git diff --check
 `node tools/demo_smoke.js` exercises the real HTTP/SSE service with simulated
 boards. Run `python3 seriald_demo.py` for interactive hardware-free development;
 see `docs/DEMO.md` for its supported commands and virtual files.
+`node tools/shared_terminal_smoke.js` runs real Vim on disposable local PTYs
+with two differently sized browser tabs. It needs Linux and Vim, and never
+discovers boards or opens hardware. It checks serial/SSH late joins, paste,
+takeover, resize, redraw and alternate-screen exit.
 set `CHROME_BIN` if Chrome is not at `/usr/bin/google-chrome`. No test should
 open a real serial port, execute recovery, or modify a board. Never start a
 second collector on an active host.

@@ -79,7 +79,15 @@
       }
       return output;
     }
-    return { rewrite: rewrite, active: function () { return !!sourceRows; } };
+    return { rewrite: rewrite, active: function () { return !!sourceRows; },
+      snapshot: function () { return {pending: pending, candidate: candidate.slice(), sourceRows: sourceRows,
+        knownRows: knownRows, targetRows: targetRows, opaque: opaque, opaqueEscape: opaqueEscape}; },
+      restore: function (state) {
+        pending = state.pending; candidate = state.candidate.slice(); sourceRows = state.sourceRows;
+        knownRows = state.knownRows; targetRows = state.targetRows;
+        opaque = state.opaque; opaqueEscape = state.opaqueEscape;
+      }
+    };
   }
   global.SerialdSerialProgress = { create: create };
 })(window);

@@ -1,0 +1,20 @@
+{
+  "package": "@xterm/addon-serialize",
+  "version": "0.13.0",
+  "integrity": "sha512-kGs8o6LWAmN1l2NpMp01/YkpxbmO4UrfWybeGu79Khw5K9+Krp7XhXbBTOTc3GJRRhd6EmILjpR8k5+odY39YQ==",
+  "license_url": "https://raw.githubusercontent.com/xtermjs/xterm.js/9ba6c00a195c95fcf8292a2b9084d91450e5daae/LICENSE",
+  "license_sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
+  "url": "https://registry.npmjs.org/@xterm/addon-serialize/-/addon-serialize-0.13.0.tgz",
+  "upstream_js_sha256": "fc432359a02f7482bdccd7b8ac46dc917c2d05ea540737900ded8d9cd150b633",
+  "js_sha256": "a66e294c3204f720fcff0b22a0296182ebf07820da465d617de0373f74dea755",
+  "transform": {
+    "tool": "esbuild",
+    "version": "0.25.11",
+    "target": "node12",
+    "options": [
+      "--platform=node",
+      "--format=cjs",
+      "--minify"
+    ]
+  }
+}

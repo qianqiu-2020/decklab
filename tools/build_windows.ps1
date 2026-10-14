@@ -38,6 +38,8 @@ try {
 
     & $python -m pip install -r requirements-windows.txt
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+    & $python tools/prepare_terminal_runtime.py
+    if ($LASTEXITCODE -ne 0) { throw 'Verified terminal runtime preparation failed.' }
     if ($ParamikoSource) {
         & $python -m pip install --no-deps --force-reinstall $ParamikoSource
         if ($LASTEXITCODE -ne 0) { throw 'Replacement Paramiko source installation failed.' }
@@ -66,7 +68,8 @@ try {
                          'test_transfer_artifacts.py', 'test_file_tasks.py',
                          'test_transfer_tasks.py', 'test_input_ownership.py',
                          'test_models.py', 'test_maintenance.py', 'test_agent_grants.py',
-                         'test_ui_language.py', 'test_boot_compare.py', 'test_sse.py')) {
+                         'test_ui_language.py', 'test_boot_compare.py', 'test_sse.py',
+                         'test_terminal_backend.py', 'test_terminal_runtime.py')) {
         & $python -m unittest discover -s tests -p $suite
         if ($LASTEXITCODE -ne 0) { throw "Native storage/task/collaboration tests failed: $suite" }
     }
@@ -99,6 +102,9 @@ try {
         --add-data 'index.html;.' `
         --add-data 'static;static' `
         --add-data 'vendor;vendor' `
+        --add-data 'seriald_core/terminal_worker.js;seriald_core' `
+        --add-data 'seriald_core/terminal_snapshot.js;seriald_core' `
+        --add-data 'build/terminal-runtime;runtime' `
         --add-data 'serialctl.py;.' `
         --add-data 'skills/seriald-board/SKILL.md;skills/seriald-board' `
         --add-data 'skills/seriald-board/SKILL.zh-CN.md;skills/seriald-board' `

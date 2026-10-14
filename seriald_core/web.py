@@ -21,6 +21,7 @@ from .task_actions import TaskActions
 from .artifact_actions import ArtifactActions, body_limit
 from .tasks import TaskError
 from .request_json import load_object
+from .terminal_backend import screen_for, terminal_payload
 
 MGR = None  # Direct-handler fixtures may inject a manager; production uses server.manager.
 STARTED = time.time()
@@ -46,7 +47,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(404, {'error': 'no such session'})
         try:
             off = int(self.headers.get('Last-Event-ID') or (q.get('off') or ['0'])[0])
-            if off < 0:
+            terminal_revision = int((q.get('terminal_rev') or ['0'])[0])
+            if off < 0 or terminal_revision < 0:
                 raise ValueError
         except ValueError:
             return self._json(400, {'error': 'bad offset'})
@@ -59,16 +61,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.flush()
         last_owner = object()
+        last_terminal = object()
         keepalive = time.monotonic()
         try:
             while d.key == expected_key:
                 owner = transactions_for(d).ownership() if sid == 'serial' else None
+                terminal = screen_for(stream)
+                state = terminal.metadata() if hasattr(terminal, 'metadata') else None
                 # Ownership is independent of byte offsets, including on a quiet
                 # board. Bound the wait; only changed state emits a data event.
-                wait = (0 if owner != last_owner else 1) if sid == 'serial' else 15
+                wait = 0 if owner != last_owner or state != last_terminal else 1
                 new_off, data, alive = stream.read(off, wait=wait)
                 owner = transactions_for(d).ownership() if sid == 'serial' else None
-                if data or not alive or sid == 'serial' and owner != last_owner:
+                state = terminal.metadata() if hasattr(terminal, 'metadata') else None
+                if data or not alive or owner != last_owner or state != last_terminal:
                     payload = {'sid': sid, 'key': d.key, 'off': new_off, 'alive': alive,
                                'data_b64': base64.b64encode(data).decode('ascii')}
                     if sid == 'serial':
@@ -80,6 +86,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         last_owner = owner
                     else:
                         payload['ip'] = stream.ip
+                    terminal_payload(stream, payload, off, screen=(q.get('screen') or [''])[0] == '1',
+                                     revision=terminal_revision, actor=self.headers.get('X-Seriald-Actor') or 'web',
+                                     client_id=(q.get('client_id') or [''])[0])
+                    new_off = payload['off']
+                    last_terminal = state
+                    terminal_revision = (last_terminal or {}).get('revision', 0)
+                    last_owner = owner
                     body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
                     self.wfile.write(b'id: %d\ndata: ' % new_off + body + b'\n\n')
                     self.wfile.flush()
@@ -254,8 +267,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             device = self._dev(q)
             if not device:
                 return self._json(404, {'error': 'no such device'})
-            result = SessionQueries().execute(route.removeprefix('/api/'),
-                                              {key: values[0] for key, values in q.items()}, device)
+            params = {key: values[0] for key, values in q.items()}
+            params['actor'] = self.headers.get('X-Seriald-Actor') or 'web'
+            result = SessionQueries().execute(route.removeprefix('/api/'), params, device)
             return self._json(result.status, result.payload)
 
         if route == '/api/session-events':

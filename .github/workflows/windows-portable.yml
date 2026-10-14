@@ -28,6 +28,8 @@ on:
       - 'tools/package_docs.py'
       - 'tools/collect_windows_notices.py'
       - 'tools/prepare_windows_build.py'
+      - 'tools/prepare_terminal_runtime.py'
+      - 'tools/prepare_terminal_assets.py'
       - 'tools/check_public_docs.py'
       - 'tools/bundle_manifest.py'
       - 'tools/windows-launchers/**'
@@ -108,6 +110,10 @@ jobs:
             if (-not $ready) { throw 'Packaged demo did not expose three simulated boards' }
             $logs = Invoke-RestMethod 'http://127.0.0.1:18899/api/logs?key=demo-k1' -TimeoutSec 5
             if ($logs.boots.Count -ne 2) { throw 'Packaged demo archives unavailable' }
+            $screen = Invoke-RestMethod 'http://127.0.0.1:18899/api/session?key=demo-k1&sid=serial&screen=1' -TimeoutSec 5
+            if (-not $screen.terminal_state.managed -or -not $screen.terminal_snapshot.data) {
+              throw 'Packaged Node parser/screen snapshot is unavailable'
+            }
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }

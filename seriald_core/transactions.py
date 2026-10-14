@@ -73,6 +73,10 @@ class SerialTransactions:
     def client_id(self):
         return getattr(self._local, 'client_id', '')
 
+    @property
+    def source_actor(self):
+        return getattr(self._local, 'actor', 'service')
+
     @staticmethod
     def _same(owner, actor, client_id):
         return owner['actor'] == actor and (actor != 'web' or owner.get('client_id', '') == client_id)

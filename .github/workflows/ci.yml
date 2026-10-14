@@ -47,6 +47,11 @@ jobs:
       - name: Real browser against the simulated host
         if: matrix.python == '3.12'
         run: node tools/demo_smoke.js
+      - name: Shared SSH and serial screens with real Vim on local PTYs
+        if: matrix.python == '3.12'
+        run: |
+          sudo apt-get install -y vim
+          node tools/shared_terminal_smoke.js
       - name: Build Linux package
         if: matrix.python == '3.12'
         run: |

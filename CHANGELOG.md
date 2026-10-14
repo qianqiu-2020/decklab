@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 1.6.0
+
+- Maintain one canonical terminal per serial connection or SSH session in an
+  isolated backend xterm parser. Answer live terminal queries once without a
+  browser; history and screen snapshots never send protocol replies.
+- Restore the screen, alternate buffer, scrolling margins, saved cursor, input
+  modes and fragmented UTF-8/control bytes when viewers join or redraw.
+  Share ordered presentation corrections without changing raw captures or logs.
+- Coordinate shared SSH input and PTY dimensions by actor and browser client.
+  Push quiet takeover changes to observers; notify running applications of
+  controller resizing. Observers scale the same logical grid.
+- Give the Linux sshpass wrapper a controlling PTY so window changes reach SSH
+  applications; use an exec helper instead of a threaded preexec callback.
+- Finish idle serial shell size/environment setup before queued input. Keep
+  active serial applications on their established grid; preserve the screen on
+  confirmed re-enumeration and clean same-connection collector handoff.
+- Declare Ubuntu's Node runtime dependency and bundle a verified Windows Node
+  runtime with its complete upstream license. Add real Vim/local-PTY two-browser
+  regression checks and installed-parser checks on supported Ubuntu baselines.
+
 ## 1.5.8
 
 - Suppress the far-bottom cursor move used by systemd size probes whenever

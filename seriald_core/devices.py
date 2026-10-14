@@ -288,6 +288,7 @@ class Manager:
                 if d is None:
                     with self.lock:
                         record = None
+                        entry = None
                         previous = existing.get(key)
                         armed = self.armed_paths.get(key, 0) >= time.monotonic()
                         board = self.boards.get(previous.serial) if previous and previous.serial else None
@@ -303,6 +304,16 @@ class Manager:
                                 record = self.store.get(entry['serial'])
                         board = self.boards.get(record['serial']) if record else None
                         d = Device(key, dev, self if self.store else None, record, board=board)
+                        snapshot = entry.get('terminal_snapshot') if entry and record else None
+                        geometry = entry.get('terminal_geometry') if entry and record else None
+                        if previous and record is previous.record and not armed:
+                            snapshot = previous.terminal.screen.snapshot()
+                            geometry = previous.terminal.geometry
+                        if snapshot and d.terminal.screen.restore(snapshot):
+                            d.base = snapshot['off']
+                            d.terminal.geometry = geometry
+                            d.terminal.input_pending = bool(previous and previous.terminal.input_pending)
+                            d.history_loaded = True
                         if record:
                             d.board.attach(d)
                             self.boards[record['serial']] = d.board
@@ -427,6 +438,7 @@ class Manager:
                 d.dead = True
                 d.present = False
                 d.close_log()
+                d.terminal.screen.close()
                 if self.store and d.serial:
                     d.record['last_seen'] = self.store.touch(d.serial)
 
@@ -489,7 +501,7 @@ class Manager:
             views = [self._board_view(board) for board in self.boards.values()]
             devices = list({id(d): d for d in list(self.devices.values()) + views}.values())
             handoff = [{'by_path': d.by_path, 'dev': d.dev, 'serial': d.serial,
-                        'identity': list(d.identity)}
+                        'identity': list(d.identity), 'device': d}
                        for d in self.devices.values()
                        if d.present and d.serial and d.identity]
         for d in devices:
@@ -502,6 +514,12 @@ class Manager:
             for s in list(d.ssh_sessions):
                 d.close_session(s)
             d.close_log()
+            d.terminal.screen.close()
+        for entry in handoff:
+            device = entry.pop('device')
+            snapshot = device.terminal.screen.snapshot()
+            if snapshot:
+                entry.update(terminal_snapshot=snapshot, terminal_geometry=device.terminal.geometry)
         return handoff
 
     def loop(self):

@@ -20,6 +20,11 @@ def collector_build_id(root=ROOT):
     sources = [path for path in (root / 'seriald_core').glob('*.py')
                if path.name not in excluded]
     sources.append(root / 'packaging/seriald-collector.service')
+    for source in (root / 'seriald_core/terminal_worker.js', root / 'seriald_core/terminal_snapshot.js',
+                   root / 'static/serial-progress.js'):
+        if source.is_file():
+            sources.append(source)
+    sources.extend((root / 'vendor/terminal').glob('*.js'))
     digest = hashlib.sha256()
     for path in sorted(sources):
         relative = path.relative_to(root).as_posix().encode('utf-8')
@@ -72,7 +77,7 @@ def build(output, version):
         for name in ('postinst', 'prerm', 'postrm'):
             put('packaging/' + name, 'DEBIAN/' + name, 0o755)
         write('DEBIAN/conffiles', '/etc/seriald/seriald.env\n/etc/sudoers.d/seriald-rescue\n')
-        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: all\nMaintainer: seriald contributors <root@localhost>\nDepends: python3 (>= 3.10), openssh-client, sshpass, sudo, adduser, init-system-helpers\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n' % version)
+        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: all\nMaintainer: seriald contributors <root@localhost>\nDepends: python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n' % version)
         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)
     return artifact
 

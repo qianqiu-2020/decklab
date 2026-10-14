@@ -11,9 +11,59 @@ from urllib.parse import quote
 
 from seriald_core import control_server, device as device_module, devices, web
 from seriald_core.httpd import BoundedThreadingTCPServer
+from seriald_core.sessions_windows import SshSession
+from seriald_core.terminal_backend import node_binary
 
 
 class SseTests(unittest.TestCase):
+    @unittest.skipUnless(node_binary(), 'requires the packaged Node terminal runtime')
+    def test_shared_ssh_snapshot_and_quiet_takeover_are_forwarded_without_replaying_bytes(self):
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(device_module, 'LOG_ROOT', root):
+            manager = devices.Manager()
+            board = device_module.Device('fake-port', 'COM7', manager)
+            board.fd, board.present = object(), True
+            manager.devices[board.by_path] = board
+            session = SshSession('fixture-ssh', '192.0.2.1', 'fixture', root)
+            session.fd = object()
+            board.ssh_sessions[session.sid] = session
+            with mock.patch.object(session, '_send'), mock.patch.object(session, '_dispose_transport'), \
+                    mock.patch.object(session, '_interrupt_transport'), \
+                    mock.patch.object(web, 'MGR', manager), \
+                    BoundedThreadingTCPServer(('127.0.0.1', 0), web.Handler) as collector, \
+                    BoundedThreadingTCPServer(('127.0.0.1', 0), control_server.ControlHandler) as control, \
+                    mock.patch.object(control_server.ControlHandler, 'auth_token', ''), \
+                    mock.patch.object(control_server.ControlHandler, 'collector_socket', collector.server_address):
+                session.terminal.control('web', 'first')
+                session._append(b'\x1b[?1049h\x1b[5;8Hvim')
+                workers = [threading.Thread(target=server.serve_forever, daemon=True) for server in (collector, control)]
+                for worker in workers:
+                    worker.start()
+                conn = http.client.HTTPConnection('127.0.0.1', control.server_address[1], timeout=3)
+                try:
+                    conn.request('GET', '/api/session-events?key=%s&sid=%s&screen=1&client_id=first' % (
+                        quote(board.key), session.sid))
+                    response = conn.getresponse()
+                    self.assertEqual(response.status, 200)
+                    initial = self._event(response, include_empty=True)
+                    self.assertEqual(initial['terminal_snapshot']['cursor']['buffer'], 'alternate')
+                    self.assertTrue(initial['terminal_writable'])
+                    started = time.monotonic()
+                    session.takeover('web', 'second')
+                    changed = self._event(response, include_empty=True)
+                    self.assertLess(time.monotonic() - started, 2)
+                    self.assertEqual(changed['off'], initial['off'])
+                    self.assertEqual(changed['data_b64'], '')
+                    self.assertNotIn('terminal_snapshot', changed)
+                    self.assertFalse(changed['terminal_writable'])
+                    self.assertEqual(changed['terminal_state']['controller']['client_id'], 'second')
+                finally:
+                    conn.close()
+                    session.close()
+                    for server in (collector, control):
+                        server.shutdown()
+                    for worker in workers:
+                        worker.join(3)
+
     def test_live_output_and_last_event_id_resume_through_proxy(self):
         with tempfile.TemporaryDirectory() as root, \
                 mock.patch.object(device_module, 'LOG_ROOT', root):

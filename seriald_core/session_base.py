@@ -6,6 +6,7 @@ import threading
 import time
 
 from .config import ANSI, DATE_FMT, SCROLLBACK
+from .terminal_backend import SharedTerminal
 
 
 class SessionBase:
@@ -28,6 +29,7 @@ class SessionBase:
         self.fd = None
         self.started, self.last_touch = time.time(), time.monotonic()
         self.cols, self.rows = 120, 32
+        self.terminal = SharedTerminal('ssh', self.cols, self.rows)
         self.takeovers = set()
         self.transport_error = ''
         self._logdir, self._logday = logdir, time.strftime(DATE_FMT)
@@ -91,7 +93,7 @@ class SessionBase:
             self._log_finished = True
             self._release_log_handle()
 
-    def _append(self, data):
+    def _append(self, data, live=True):
         chunk = data if isinstance(data, bytes) else data.encode('utf-8', 'replace')
         self._log(chunk)
         with self.cv:
@@ -100,7 +102,10 @@ class SessionBase:
                 drop = len(self.buf) - SCROLLBACK
                 del self.buf[:drop]
                 self.base += drop
+            replies = self.terminal.feed(chunk, self.base + len(self.buf), live=live)
             self.cv.notify_all()
+        for reply in replies:
+            self.write(reply)
 
     def ensure(self):
         with self._lifecycle_lock:
@@ -114,13 +119,13 @@ class SessionBase:
                     self.fd = fd
                     self.last_touch = time.monotonic()
                 self._append('\r\n*** 已建立 SSH 会话 %s@%s (%dx%d) ***\r\n'
-                             % (self.user, self.ip, self.cols, self.rows))
+                             % (self.user, self.ip, self.cols, self.rows), live=False)
                 self._thread = threading.Thread(target=self._reader, args=(fd,), daemon=True)
                 self._thread.start()
                 return True
             except self.transport_errors as error:
                 self.transport_error = str(error)
-                self._append('\r\n*** 建立 SSH 会话失败: %s ***\r\n' % error)
+                self._append('\r\n*** 建立 SSH 会话失败: %s ***\r\n' % error, live=False)
                 self._thread = None
                 self._finish()
                 return False
@@ -142,7 +147,7 @@ class SessionBase:
                 self._append(data)
         finally:
             try:
-                self._append('\r\n*** SSH 会话已结束 ***\r\n')
+                self._append('\r\n*** SSH 会话已结束 ***\r\n', live=False)
             except self.transport_errors as error:
                 self.transport_error = str(error)
             finally:
@@ -164,6 +169,7 @@ class SessionBase:
                 self.transport_error = str(error)
             finally:
                 self._close_log()
+                self.terminal.close()
                 self._disposed.set()
                 if self.store:
                     self.store.close_session(self.sid)
@@ -197,8 +203,10 @@ class SessionBase:
             start = max(off - self.base, 0) if off > self.base else 0
             return self.base + len(self.buf), bytes(self.buf[start:]), self.fd is not None and not self.closed
 
-    def write(self, text):
+    def write(self, text, actor=None, client_id=''):
         with self.write_lock:
+            if actor is not None and not self.terminal.control(actor, client_id):
+                return False
             with self.cv:
                 if self.closed or self.fd is None:
                     return False
@@ -210,28 +218,36 @@ class SessionBase:
             except self.transport_errors:
                 return False
 
-    def resize(self, cols, rows):
+    def resize(self, cols, rows, actor=None, client_id=''):
         if cols < 20 or rows < 5 or cols > 500 or rows > 200:
             return False
         with self.write_lock:
+            if actor is not None and not self.terminal.control(actor, client_id):
+                return False
             with self.cv:
                 if self.closed or self.fd is None:
                     return False
+                previous = self.cols, self.rows
                 self.cols, self.rows = cols, rows
                 self.last_touch = time.monotonic()
                 fd = self.fd
-            try:
-                self._resize(fd)
-                return True
-            except self.transport_errors:
-                return False
+                try:
+                    # Publish the grid before a SIGWINCH-triggered repaint can
+                    # enter the parser. Readers publish under this same lock.
+                    self._resize(fd)
+                    self.terminal.resize(cols, rows)
+                    self.cv.notify_all()
+                    return True
+                except self.transport_errors:
+                    self.cols, self.rows = previous
+                    return False
 
     def is_idle(self, now, ttl):
         with self.cv:
             return self.closed or now - self.last_touch >= ttl
 
     def append_marker(self, text):
-        self._append('\r\n%s\r\n' % text)
+        self._append('\r\n%s\r\n' % text, live=False)
 
     def snapshot(self):
         with self.cv:
@@ -239,7 +255,15 @@ class SessionBase:
                     'actor': self.actor, 'title': self.title, 'persistent': self.persistent,
                     'log_error': self.log_error, 'transport_error': self.transport_error,
                     'alive': self.fd is not None and not self.closed,
-                    'started': self.started, 'bytes': len(self.buf)}
+                    'started': self.started, 'bytes': len(self.buf),
+                    'terminal_state': self.terminal.metadata()}
+
+    def takeover(self, actor, client_id):
+        with self.write_lock:
+            self.takeovers.add(actor)
+            self.terminal.control(actor, client_id, takeover=True)
+            with self.cv:
+                self.cv.notify_all()
 
     def _open_transport(self):
         raise NotImplementedError

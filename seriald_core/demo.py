@@ -18,6 +18,7 @@ from .devices import Manager
 from .profiles import ProfileBook
 from .config import SSH_LIMIT
 from .storage import IdentityError
+from .terminal_backend import SharedTerminal
 
 
 def _digest(data):
@@ -78,6 +79,11 @@ class DemoDevice(Device):
     def _write(self, text):
         with self.write_lock:
             return self._write_input(text)
+
+    def _protocol_reply(self, text, connection=None):
+        # The closed simulated shell does not consume protocol responses.
+        # Never pass an object() fixture to a real UART writer on either host.
+        return False
 
     def _write_input(self, text):
         if self.stop.is_set() or not self.present or self.fd is None:
@@ -199,6 +205,7 @@ class DemoSession(DemoDevice):
         self.actor, self.title = actor, title
         self.ip = '192.0.2.10'
         self.cols, self.rows = 80, 24
+        self.terminal.screen = SharedTerminal('ssh', self.cols, self.rows)
         self.closed = False
         self._stop = self.stop
         self.persistent = actor != 'web'
@@ -225,6 +232,9 @@ class DemoSession(DemoDevice):
         if self.closed or not 2 <= cols <= 500 or not 2 <= rows <= 500:
             return False
         self.cols, self.rows = cols, rows
+        self.terminal.screen.resize(cols, rows)
+        with self.cv:
+            self.cv.notify_all()
         return True
 
     def is_idle(self, now, ttl):
@@ -240,6 +250,7 @@ class DemoSession(DemoDevice):
         self.stop.set()
         self.fd = None
         self.close_log()
+        self.terminal.screen.close()
         self.manager.store.close_session(self.sid)
         with self.cv:
             self.cv.notify_all()

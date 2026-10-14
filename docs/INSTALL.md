@@ -2,11 +2,15 @@
 
 支持 Ubuntu 22.04 / 24.04 的 Python 3.10+ 环境，包为 `Architecture: all`，适用于 amd64、arm64 等架构。构建不访问网络、不需要 root；安装依赖由 apt 处理。
 
+统一终端解析需要发行版 `nodejs`（Node 12+）；`apt install ./dist/…deb` 会一并安装。
+如果用 `dpkg -i` 安装且提示缺少依赖，执行一次 `sudo apt -f install`。
+Windows 安装器已内置该运行时，使用者无需额外安装。
+
 ## 构建和安装
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.5.8_all.deb
+sudo apt install ./dist/seriald_1.6.0_all.deb
 systemctl status seriald
 serialctl devices
 ```

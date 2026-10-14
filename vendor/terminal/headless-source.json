@@ -1,0 +1,20 @@
+{
+  "package": "@xterm/headless",
+  "version": "5.5.0",
+  "integrity": "sha512-5xXB7kdQlFBP82ViMJTwwEc3gKCLGKR/eoxQm4zge7GPBl86tCdI0IdPJjoKd8mUSFXz5V7i/25sfsEkP4j46g==",
+  "license_url": "https://raw.githubusercontent.com/xtermjs/xterm.js/9ba6c00a195c95fcf8292a2b9084d91450e5daae/LICENSE",
+  "license_sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
+  "url": "https://registry.npmjs.org/@xterm/headless/-/headless-5.5.0.tgz",
+  "upstream_js_sha256": "f8d9074ece1bd853cf85fa93a02862e4bd88181d57cb43cdbff63944a23f25b9",
+  "js_sha256": "0c0f233cfcf12ae9b4324b9c432bc978029f5fbc54138885cdd865684de5fb98",
+  "transform": {
+    "tool": "esbuild",
+    "version": "0.25.11",
+    "target": "node12",
+    "options": [
+      "--platform=node",
+      "--format=cjs",
+      "--minify"
+    ]
+  }
+}
