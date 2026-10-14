@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.5.4
+
+- Preserve the large live serial viewport while mapping APT's reserved progress
+  row and scroll region to its bottom. Restore full-screen scrolling when APT
+  finishes, including streamed escape sequences and redraws. Captured logs remain
+  unchanged.
+
 ## 1.5.3
 
 - Allow vertical wheel scrolling over boot comparison text and inline highlights

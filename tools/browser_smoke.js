@@ -9,6 +9,7 @@ const {launchBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'seriald-browser-'));
 const posts = [], errors = [];
+let serialPayload = null;
 const fixtures = [
   { key: 'musepi2', serial: '5b9d4a0a6f5e25a8', state: 'online', alive: true, dev: '/dev/ttyUSB0', hostname: 'bianbu-k3' },
   { key: 'riscv-118', serial: '26abd51e5bc2dbe1', state: 'offline', alive: false, last_dev: '/dev/ttyUSB4' },
@@ -30,7 +31,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST') { posts.push(u.pathname); json({ ok: false, error: 'read-only fixture' }); return; }
   if (u.pathname === '/api/devices') return json({ devices: fixtures });
   if (u.pathname === '/api/session') {
-    const bytes = u.searchParams.get('off') === '0' ? Buffer.from(
+    const bytes = u.searchParams.get('off') === '0' ? Buffer.from(serialPayload ||
       'root@bianbu:~# \x1b[6n\x1b[?6n\x1b[c\x1b]11;?\x07'.repeat(15)
       + Array.from({length:80},(_,i)=>'\r\nserial line '+i).join('')
       + '\x1b[2J\x1b[50;1Hlast firmware row') : Buffer.alloc(0);
@@ -63,7 +64,7 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/api/log') return json({ data: log, off: log.length, start_off: 0, size: log.length, more: false });
   if (u.pathname === '/api/access') return json({ share_enabled: false });
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, route)));
 });
@@ -366,6 +367,25 @@ let chrome, ws;
   assert.ok(await evaluate('document.querySelector("#d-term .xterm-viewport").scrollTop > 0'),
     'clicking the visible serial scrollbar must move through history: ' + JSON.stringify(track));
   assert.deepEqual(errors,[]);
+  // Reproduce apt's ioctl-sized 80x24 terminal: save/restore cursor, reserve
+  // the final row, redraw progress, then restore the full scroll region.
+  serialPayload = 'Linux version 6.18.0\r\n'
+    + Array.from({length:80},(_,i)=>'apt preamble '+i+'\r\n').join('')
+    + '\n\x1b7\x1b[0;23r\x1b8\x1b[1A'
+    + '\x1b7\x1b[24;0fProgress: [ 88%]\x1b8'
+    + Array.from({length:40},(_,i)=>'Unpacking package '+i+'\r\n').join('')
+    + '\n\x1b7\x1b[0;24r\x1b8\x1b[1A\x1b[J'
+    + Array.from({length:30},(_,i)=>'post-install line '+i+'\r\n').join('')
+    + 'root@ubuntu:~# ';
+  await evaluate('document.querySelector("#b-redraw").click()');
+  for(let n=0;n<30 && !await evaluate(`testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+testTerm.buffer.active.cursorY)?.translateToString().includes('root@ubuntu')`);n++)await delay(100);
+  const aptScreen=await evaluate(`(() => {const b=testTerm.buffer.active;return {rows:testTerm.rows,fontSize:testTerm.options.fontSize,cursor:b.cursorY,lines:Array.from({length:testTerm.rows},(_,i)=>b.getLine(b.baseY+i)?.translateToString())};})()`);
+  assert.equal(aptScreen.fontSize,14.5,'APT must not shrink the terminal font');
+  assert.ok(aptScreen.rows > 24,'serial must retain the large browser viewport');
+  assert.equal(aptScreen.cursor,aptScreen.rows-1,'ordinary output must return to the bottom row after apt');
+  assert.ok(aptScreen.lines[aptScreen.rows-1].includes('root@ubuntu:~#'));
+  assert.ok(aptScreen.lines[aptScreen.rows-2].includes('post-install line 29'));
+  assert.ok(!aptScreen.lines.some(line=>line.includes('Progress:')),'finished progress must not remain in the middle');
   console.log('Browser smoke passed: real xterm query suppression, read-only agent/archive tabs, desktop/mobile layout.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(ws)ws.close(); if(chrome){chrome.kill('SIGTERM');await delay(500);}server.close();

@@ -57,6 +57,7 @@
                   lastSel: '', searchQuery: '', searchMatch: -1,
                   serialRows: 24, bootScanTail: '', phaseScanTail: '', linuxConsole: false };
       view = ctx;
+      resetProgress(ctx);
       options.setInputMode(ctx);
       term = ctx.term = new Terminal({
         // 归档文件常用单独 LF；xterm 的 LF 默认不回到第 1 列，会呈现阶梯状。
@@ -116,6 +117,17 @@
       return ctx;
     }
 
+    function resetProgress(ctx) {
+      if (ctx.sid !== 'serial' || !window.SerialdSerialProgress) return;
+      ctx.progress = window.SerialdSerialProgress.create({
+        rows: function () { return ctx.term.rows; },
+        onStart: function () {
+          ctx.linuxConsole = true; ctx.serialRows = 24;
+          fitTerminal(ctx); syncTerminalLayers(ctx);
+        }
+      });
+    }
+
     function redrawTerminal() {
       var ctx = view;
       if (!isCurrent(ctx)) return;
@@ -132,6 +144,7 @@
       ctx.navRendered = false;
       options.renderCommandNav(ctx);
       ctx.off = 0; ctx.initialRendered = false;
+      resetProgress(ctx);
       $('d-status').textContent = ' 正在从采集缓冲完整重绘…';
       if (ctx.kind === 'log') {
         var archived = options.session(ctx.sid);
@@ -299,6 +312,7 @@
         ctx.phaseScanTail = '';
         ctx.linuxConsole = false;
         ctx.initialRendered = false;
+        resetProgress(ctx);
         return raw.slice(cut);
       }
       function prepareSerialGeometry(raw) {
@@ -350,6 +364,7 @@
         var raw = atob(payload.data_b64);
         raw = newestBootCycle(raw);
         prepareSerialGeometry(raw);
+        if (ctx.progress) raw = ctx.progress.rewrite(raw);
         // Firmware menus paint the screen with cursor positioning and erases.
         // xterm normally tracks dirty rows, but a large sequence split across
         // HTTP reads can leave canvas layers visually stale until the next input.
@@ -361,6 +376,7 @@
       } else if (payload.data) {
         var text = newestBootCycle(payload.data);
         prepareSerialGeometry(text);
+        if (ctx.progress) text = ctx.progress.rewrite(text);
         redraw = /\x1b(?:\[[0-9;?]*[ABCDEFGHJKSTfhl]|[78])/.test(text);
         ctx.term.write(text, written);
       } else ctx.initialRendered = true;

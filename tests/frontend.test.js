@@ -1,3 +1,4 @@
+require('./serial-progress.test.js');
 'use strict';
 
 // 无浏览器、无网络、无 tty：执行页面原脚本，用可控的延迟模拟最危险的交错。
@@ -8,7 +9,7 @@ const vm = require('node:vm');
 require('./i18n.test.js');
 const { TextDecoder } = require('node:util');
 
-const script = ['ui-common.js', 'terminal-policy.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'tasks.js', 'app.js'].map(name =>
+const script = ['ui-common.js', 'terminal-policy.js', 'serial-progress.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'tasks.js', 'app.js'].map(name =>
   fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
 
 class Element {

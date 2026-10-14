@@ -64,6 +64,13 @@ unprovisioned until identified through a supported explicit workflow.
 
 ## Per-board profiles
 
+Live serial keeps the browser's available height and an 80-column layout,
+matching conventional board consoles. UART does not negotiate shell dimensions.
+APT's specific reserved-bottom-row sequences are mapped to the viewer's bottom
+for display only; captured bytes and archives remain unchanged. Ordinary firmware
+cursor positioning is preserved, including detected 80×50 screens. SSH sessions
+negotiate their dimensions normally.
+
 Built-in defaults follow the SpacemiT K3/Bianbu development workflow: 115200,
 8N1, no flow control, console/SSH `root` with password `bianbu`, Linux probes
 and automatic SSH configuration enabled. Profiles are generic settings, not
