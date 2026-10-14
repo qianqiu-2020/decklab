@@ -81,7 +81,10 @@ function harness(options = {}) {
       } };
       this.csi = new Map();
       this.parser = {
-        registerCsiHandler: (id, fn) => this.csi.set((id.prefix || '') + id.final, fn),
+        registerCsiHandler: (id, fn) => {
+          const key = (id.prefix || '') + id.final, previous = this.csi.get(key);
+          this.csi.set(key, params => fn(params) || (previous && previous(params)));
+        },
         registerOscHandler() {}, registerDcsHandler() {},
       };
     }
@@ -95,6 +98,7 @@ function harness(options = {}) {
     clearSelection() { this.selected = undefined; }
     select(col, row, length) { this.selected = { col, row, length }; }
     scrollToLine(row) { this.scrolledToLine = row; }
+    scrollLines(lines) { this.scrolledLines = (this.scrolledLines || 0) + lines; }
     focus() {}
     refresh() { this.refreshes = (this.refreshes || 0) + 1; }
     resize(cols, rows) { this.cols = cols; this.rows = rows; }
@@ -114,6 +118,8 @@ function harness(options = {}) {
       for (const { data, callback } of this.queued.splice(0)) {
         const text = typeof data === 'string' ? data : this.decoder.decode(data, { stream: true });
         this.parsed += text;
+        for (const match of text.matchAll(/\x1b\[8;(\d+);(\d+)t/g))
+          this.csi.get('t')?.([8, Number(match[1]), Number(match[2])]);
         if (text.includes('\x1b[6n') && !this.csi.get('n')?.([6])) this.data('\x1b[1;184R');
         if (callback) callback();
       }
@@ -1137,6 +1143,47 @@ test('terminal search selects matches and wraps in both directions', async () =>
   assert.equal(h.get('terminal-search-status').textContent, '');
   assert.equal(terminal.selected, undefined);
   assert.equal(terminal.options.theme.selectionBackground, '#E6B45D');
+});
+
+test('serial size sync requires an idle prompt and shared output updates every viewer', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  h.get('b-serial-size').click();
+  assert.equal(h.sends().length, 0, 'do not inject commands into unknown programs');
+  h.take('/api/session').resolve(readResponse('A', 'root@ubuntu:~# '));
+  await drain(); terminal.flush();
+  h.get('b-serial-size').click();
+  assert.equal(h.sends().length, 1);
+  assert.equal(h.sends()[0].body.data, "stty echoctl rows 42 cols 140 && printf '\\033[8;42;140t'\r");
+  assert.equal(terminal.cols, 80, 'wait for successful stty output before resizing');
+  terminal.write('\x1b[8;42;140t'); terminal.flush();
+  assert.equal(terminal.cols, 140);
+  assert.equal(terminal.rows, 42);
+  assert.equal(terminal.options.fontSize, 14.5);
+  h.get('b-redraw').click();
+  h.take('/api/session').resolve(readResponse('A', 'root@ubuntu:~# \x1b[8;42;140t'));
+  await drain(); terminal.flush();
+  assert.equal(terminal.cols, 140, 'shared resize marker survives replay');
+  assert.ok(h.sends().length === 1, 'replay must not write to the board');
+  h.fire(h.timer(10)[0]);
+  h.take('/api/session').resolve(readResponse('A', '\x1b[2J', 200));
+  await drain(); terminal.flush();
+  assert.equal(terminal.cols, 140, 'clear does not change board dimensions');
+  assert.equal(terminal.rows, 42);
+  h.fire(h.timer(10)[0]);
+  h.take('/api/session').resolve(readResponse('A', 'Linux version 6.18.0\r\n', 300));
+  await drain(); terminal.flush();
+  assert.equal(terminal.cols, 80, 'a new kernel boot discards shell size synchronization');
+});
+
+test('APT preserves arrow input and refuses shell commands while installing', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  h.take('/api/session').resolve(readResponse('A', '\x1b7\x1b[0;23r\x1b8\x1b[1A'));
+  await drain(); terminal.flush();
+  assert.equal(terminal.key({type: 'keydown', key: 'ArrowUp'}), true);
+  assert.equal(terminal.key({type: 'keydown', key: 'ArrowDown'}), true);
+  h.get('b-serial-size').click(); assert.equal(h.sends().length, 0, 'do not resize during APT');
+  terminal.data('\x1b[A');
+  assert.equal(h.sends()[0].body.data, '\x1b[A', 'preserve normal terminal passthrough');
 });
 
 test('live serial stays at firmware-compatible 80 columns and redraw replays from zero', async () => {

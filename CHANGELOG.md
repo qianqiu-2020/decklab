@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.5.5
+
+- Add explicit idle-shell size synchronization for wide serial terminals.
+  Enable visible control-character echo with `stty echoctl` so echoed arrows
+  cannot move the output cursor during installation; retain keyboard passthrough.
+  Apply shared resize markers only after successful board-side `stty`; preserve
+  dimensions across browser viewers and buffered replay.
+
 ## 1.5.4
 
 - Preserve the large live serial viewport while mapping APT's reserved progress

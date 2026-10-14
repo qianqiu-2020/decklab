@@ -36,6 +36,8 @@
     '启动对比': 'Compare boots', '文件传输': 'File transfer',
     '通过串口上传、下载或在开发板之间复制文件': 'Upload, download or copy files between boards over serial',
     '从采集缓冲重绘全屏终端': 'Redraw the terminal from captured bytes', '重绘': 'Redraw',
+    '同步尺寸': 'Sync size', '在空闲 Linux shell 同步板端尺寸，启用宽屏串口': 'Sync board dimensions at an idle Linux shell to enable a wide serial terminal',
+    '请在空闲 Linux shell 提示符处同步尺寸': 'Sync dimensions at an idle Linux shell prompt',
     '放大终端': 'Expand terminal', '放大': 'Expand', '还原工作台': 'Restore workbench', '还原': 'Restore',
     '键盘直通': 'Direct keyboard', '或在此整行输入后回车': 'Or type a command here and press Enter',
     '发送': 'Send', '只发一个回车（唤醒板子 / 看是否还活着）': 'Send Enter to wake the console',

@@ -64,12 +64,16 @@ unprovisioned until identified through a supported explicit workflow.
 
 ## Per-board profiles
 
-Live serial keeps the browser's available height and an 80-column layout,
-matching conventional board consoles. UART does not negotiate shell dimensions.
-APT's specific reserved-bottom-row sequences are mapped to the viewer's bottom
-for display only; captured bytes and archives remain unchanged. Ordinary firmware
-cursor positioning is preserved, including detected 80×50 screens. SSH sessions
-negotiate their dimensions normally.
+Live serial initially uses 80 columns for conventional firmware and shell
+compatibility. At an empty Linux shell prompt, click **Sync size** to run `stty`
+with the available viewport dimensions and enable wider columns. A shared resize
+marker updates other viewers and survives buffered replay; no command is injected
+on connection or window resize. Repeat synchronization after changing the layout.
+Synchronization also enables `stty echoctl` so echoed direction keys appear as
+visible text rather than moving the output cursor. Keyboard passthrough is kept.
+APT's reserved progress row is mapped to the viewer's bottom for display only.
+Captured logs remain unchanged.
+SSH sessions negotiate their dimensions normally.
 
 Built-in defaults follow the SpacemiT K3/Bianbu development workflow: 115200,
 8N1, no flow control, console/SSH `root` with password `bianbu`, Linux probes

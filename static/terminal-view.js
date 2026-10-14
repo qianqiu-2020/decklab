@@ -59,6 +59,7 @@
       view = ctx;
       resetProgress(ctx);
       options.setInputMode(ctx);
+      $('b-serial-size').hidden = sid !== 'serial';
       term = ctx.term = new Terminal({
         // 归档文件常用单独 LF；xterm 的 LF 默认不回到第 1 列，会呈现阶梯状。
         // 实时串口/pty 保留原始 CR/LF，避免改变全屏终端协议。
@@ -66,6 +67,7 @@
         scrollback: 8000,
         cursorBlink: !ctx.readonly,
         allowProposedApi: true,
+        windowOptions: {setWinSizeChars: sid === 'serial'},
         fontFamily: 'ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace',
         fontSize: DEFAULT_TERMINAL_FONT_SIZE,
         theme: { background: '#0F151D', foreground: '#DCE5F0', cursor: '#82C5FF',
@@ -77,6 +79,17 @@
       $('d-command-nav').textContent = '';
       $('command-nav-count').textContent = '0 条';
       ctx.term.open($('d-term'));
+      if (sid === 'serial') ctx.term.parser.registerCsiHandler({final: 't'}, function (params) {
+        // A shell-issued resize marker follows successful stty and reaches every
+        // viewer through the shared stream. Never answer a UART window query.
+        if (!isCurrent(ctx) || params[0] !== 8 || params.length !== 3) return false;
+        var rows = params[1], cols = params[2];
+        if (rows < 2 || rows > 200 || cols < 20 || cols > 500) return true;
+        ctx.linuxConsole = true; ctx.serialRows = rows; ctx.serialCols = cols;
+        ctx.term.options.fontSize = DEFAULT_TERMINAL_FONT_SIZE;
+        ctx.term.resize(cols, rows); syncTerminalLayers(ctx);
+        return true;
+      });
       // Some Chromium/Linux themes expose an overlay scrollbar whose track
       // accepts wheel input but ignores a track click.  Keep native dragging,
       // and provide the expected page jump when the click lands on xterm's
@@ -122,7 +135,7 @@
       ctx.progress = window.SerialdSerialProgress.create({
         rows: function () { return ctx.term.rows; },
         onStart: function () {
-          ctx.linuxConsole = true; ctx.serialRows = 24;
+          ctx.linuxConsole = true; if (!ctx.serialCols) ctx.serialRows = 24;
           fitTerminal(ctx); syncTerminalLayers(ctx);
         }
       });
@@ -144,6 +157,7 @@
       ctx.navRendered = false;
       options.renderCommandNav(ctx);
       ctx.off = 0; ctx.initialRendered = false;
+      ctx.serialCols = null; ctx.serialRows = 24; ctx.linuxConsole = false;
       resetProgress(ctx);
       $('d-status').textContent = ' 正在从采集缓冲完整重绘…';
       if (ctx.kind === 'log') {
@@ -155,6 +169,27 @@
         return;
       }
       startStream(ctx);
+    }
+
+    function syncSerialSize() {
+      var ctx = view;
+      if (!isCurrent(ctx) || ctx.sid !== 'serial' || ctx.readonly) return;
+      var b = ctx.term.buffer.active;
+      var line = b.getLine(b.baseY + b.cursorY);
+      var prompt = line && line.translateToString(true);
+      if ((ctx.progress && ctx.progress.active()) || !/^[^\s@]+@[^\s]+[#$]\s*$/.test(prompt || '')) {
+        $('d-status').textContent = ' 请在空闲 Linux shell 提示符处同步尺寸';
+        return;
+      }
+      ctx.linuxConsole = true;
+      if (!ctx.serialCols) ctx.serialRows = 24;
+      fitTerminal(ctx);
+      var dimensions = ctx.fit.proposeDimensions();
+      if (!dimensions) return;
+      var rows = Math.max(2, Math.min(200, visibleTerminalRows(ctx, dimensions)));
+      var cols = Math.max(20, Math.min(500, dimensions.cols));
+      // No command injection on attach, window resize, firmware or busy shells.
+      send("stty echoctl rows " + rows + " cols " + cols + " && printf '\\033[8;" + rows + ";" + cols + "t'\r", ctx);
     }
 
     function resizeTerm() {
@@ -184,10 +219,10 @@
       // UART has no PTY window-size negotiation. Linux serial consoles,
       // readline, EDK2 and GRUB normally lay out against 80 columns; fitting
       // xterm to a wide browser makes wrapped input and cursor-left disagree
-      // about the visual row. Keep only the live serial console at 80 columns.
+      // about the visual row. Use 80 columns until explicit shell size sync.
       if (ctx.sid === 'serial') {
         var required = ctx.serialRows || 24;
-        var cap = required >= 40 && document.body.classList.contains('terminal-max')
+        var cap = !ctx.linuxConsole && required >= 40 && document.body.classList.contains('terminal-max')
           ? 10 : DEFAULT_TERMINAL_FONT_SIZE;
         if (ctx.term.options.fontSize !== cap) ctx.term.options.fontSize = cap;
         var dimensions = ctx.fit.proposeDimensions ? ctx.fit.proposeDimensions() : null;
@@ -196,7 +231,7 @@
         // Shrink only a firmware-sized screen until the requested rows fit.
         // A phone may have less than 350px for 50 firmware rows; an 8px
         // floor clips the menu. Ordinary Linux/SSH text retains its normal size.
-        if (required >= 40 && dimensions && dimensions.rows) {
+        if (!ctx.linuxConsole && required >= 40 && dimensions && dimensions.rows) {
           var fontSize = cap;
           while (visibleRows < required && fontSize > 4) {
             fontSize = Math.max(4, Math.min(fontSize - .5,
@@ -207,8 +242,9 @@
             visibleRows = visibleTerminalRows(ctx, dimensions);
           }
         }
-        var rows = Math.max(required, visibleRows);
-        if (ctx.term.cols !== 80 || ctx.term.rows !== rows) ctx.term.resize(80, rows);
+        var rows = ctx.serialCols ? required : Math.max(required, visibleRows);
+        var cols = ctx.serialCols || 80;
+        if (ctx.term.cols !== cols || ctx.term.rows !== rows) ctx.term.resize(cols, rows);
         return;
       }
       if (ctx.term.options.fontSize !== DEFAULT_TERMINAL_FONT_SIZE)
@@ -308,7 +344,7 @@
         if (cut < 0) return raw;
         options.clearCommandDecorations(ctx);
         try { ctx.term.reset(); ctx.term.clear(); ctx.term.clearSelection(); } catch (e) {}
-        ctx.serialRows = 24;
+        ctx.serialRows = 24; ctx.serialCols = null;
         ctx.phaseScanTail = '';
         ctx.linuxConsole = false;
         ctx.initialRendered = false;
@@ -332,11 +368,11 @@
           if (match.index + match[0].length <= prefix.length) continue;
           if (match[0].startsWith('Linux version ')) {
             ctx.linuxConsole = true;
-            rows = 24;
+            ctx.serialCols = null; rows = 24;
             continue;
           }
           if (!match[1]) {
-            rows = 24;
+            if (!ctx.serialCols) rows = 24;
             try { ctx.term.clearSelection(); } catch (e) {}
             continue;
           }
@@ -509,7 +545,7 @@
 
     var controller = {
       isCurrent: isCurrent, create: createView, dispose: disposeView,
-      resize: resizeTerm, redraw: redrawTerminal,
+      resize: resizeTerm, redraw: redrawTerminal, syncSerialSize: syncSerialSize,
       write: writeTerminalPayload, start: startStream, send: send
     };
     Object.defineProperty(controller, 'current', { get: function () { return view; } });

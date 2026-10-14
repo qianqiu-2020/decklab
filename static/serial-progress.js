@@ -71,7 +71,7 @@
       }
       return output;
     }
-    return { rewrite: rewrite };
+    return { rewrite: rewrite, active: function () { return !!sourceRows; } };
   }
   global.SerialdSerialProgress = { create: create };
 })(window);

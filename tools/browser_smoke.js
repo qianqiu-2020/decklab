@@ -373,8 +373,21 @@ let chrome, ws;
     + Array.from({length:80},(_,i)=>'apt preamble '+i+'\r\n').join('')
     + '\n\x1b7\x1b[0;23r\x1b8\x1b[1A'
     + '\x1b7\x1b[24;0fProgress: [ 88%]\x1b8'
-    + Array.from({length:40},(_,i)=>'Unpacking package '+i+'\r\n').join('')
-    + '\n\x1b7\x1b[0;24r\x1b8\x1b[1A\x1b[J'
+    + Array.from({length:40},(_,i)=>'Unpacking package '+i+'\r\n').join('');
+  await evaluate('document.querySelector("#b-redraw").click()');
+  for(let n=0;n<30 && !await evaluate(`Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+i)?.translateToString()||'').some(s=>s.includes('Progress:'))`);n++)await delay(100);
+  const cursorBefore = await evaluate('testTerm.buffer.active.cursorY');
+  const postsBefore = posts.length;
+  await evaluate('testTerm.focus()');
+  for (const [key, code] of [['ArrowUp',38],['ArrowDown',40]]) {
+    await rpc('Input.dispatchKeyEvent',{type:'keyDown',key,code:key,windowsVirtualKeyCode:code});
+    await rpc('Input.dispatchKeyEvent',{type:'keyUp',key,code:key,windowsVirtualKeyCode:code});
+  }
+  await delay(150);
+  assert.ok(posts.length > postsBefore,'APT arrows retain normal board passthrough');
+  await evaluate("new Promise(resolve => testTerm.write('^[[A^[[B', resolve))");
+  assert.equal(await evaluate('testTerm.buffer.active.cursorY'),cursorBefore,'visible arrow echo must not move stdout cursor');
+  serialPayload += '\n\x1b7\x1b[0;24r\x1b8\x1b[1A\x1b[J'
     + Array.from({length:30},(_,i)=>'post-install line '+i+'\r\n').join('')
     + 'root@ubuntu:~# ';
   await evaluate('document.querySelector("#b-redraw").click()');
@@ -386,6 +399,20 @@ let chrome, ws;
   assert.ok(aptScreen.lines[aptScreen.rows-1].includes('root@ubuntu:~#'));
   assert.ok(aptScreen.lines[aptScreen.rows-2].includes('post-install line 29'));
   assert.ok(!aptScreen.lines.some(line=>line.includes('Progress:')),'finished progress must not remain in the middle');
+  // Shared stty marker: use real viewport measurements, then check wrapping.
+  await evaluate('if(!document.querySelector("#d-records").hidden)document.querySelector("#b-records-close").click()');
+  await delay(100);
+  const wideCols = await evaluate(`(() => {const v=testTerm.element.querySelector('.xterm-viewport');const c=testTerm._core._renderService.dimensions.css.cell.width;return Math.floor((v.clientWidth-24)/c);})()`);
+  assert.ok(wideCols>80,'desktop serial viewport should support wider columns');
+  await evaluate(`new Promise(resolve => testTerm.write(String.fromCharCode(27)+'[8;32;${wideCols}t', resolve))`);
+  assert.equal(await evaluate('testTerm.cols'),wideCols);
+  assert.equal(await evaluate('testTerm.rows'),32);
+  const wideBounds = await evaluate(`(() => {const v=testTerm.element.querySelector('.xterm-viewport');const c=testTerm._core._renderService.dimensions.css.cell.width;return {drawn:testTerm.cols*c,visible:v.clientWidth-16};})()`);
+  assert.ok(wideBounds.drawn <= wideBounds.visible,'wide serial columns must remain visible');
+  await evaluate(`new Promise(resolve => {testTerm.reset();testTerm.write('X'.repeat(${wideCols-1})+'YZ',resolve);})`);
+  assert.ok(await evaluate(`testTerm.buffer.active.getLine(0)?.translateToString(true).endsWith('Y')`));
+  assert.ok(await evaluate(`testTerm.buffer.active.getLine(1)?.translateToString(true).startsWith('Z')`));
+  assert.deepEqual(errors,[]);
   console.log('Browser smoke passed: real xterm query suppression, read-only agent/archive tabs, desktop/mobile layout.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(ws)ws.close(); if(chrome){chrome.kill('SIGTERM');await delay(500);}server.close();

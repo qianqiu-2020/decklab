@@ -75,7 +75,7 @@
   };
 
   function setInputMode(ctx) {
-    ['d-in', 'd-kbd', 'd-slow-paste', 'b-send', 'b-cr', 'b-ctrlc', 'b-paste'].forEach(function (id) {
+    ['b-serial-size', 'd-in', 'd-kbd', 'd-slow-paste', 'b-send', 'b-cr', 'b-ctrlc', 'b-paste'].forEach(function (id) {
       $(id).disabled = ctx.readonly;
     });
     $('slow-paste-option').hidden = ctx.sid !== 'serial';
@@ -485,6 +485,7 @@
   $('event-next').addEventListener('click', function () { eventPage++; loadActivity(); });
   $('terminal-search-next').addEventListener('click', function () { searchTerminal(1); });
   $('terminal-search-prev').addEventListener('click', function () { searchTerminal(-1); });
+  $('b-serial-size').addEventListener('click', terminalView.syncSerialSize);
   $('b-redraw').addEventListener('click', redrawTerminal);
   $('b-info').addEventListener('click', function () {
     var open = $('detail').classList.toggle('info-open');
