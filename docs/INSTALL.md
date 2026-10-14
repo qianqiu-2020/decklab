@@ -10,7 +10,7 @@ Windows 安装器已内置该运行时，使用者无需额外安装。
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.6.2_all.deb
+sudo apt install ./dist/seriald_1.6.3_all.deb
 systemctl status seriald
 serialctl devices
 ```

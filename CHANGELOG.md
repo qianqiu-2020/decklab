@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.6.3
+
+- Treat serial-size synchronization's idle-prompt races as waiting, then clear
+  its notice when the shared stream confirms the requested grid is configured.
+- Ignore delayed setup failures after success, and preserve newer action notices
+  and actual input errors. Notice ownership survives UI language changes.
+
 ## 1.6.2
 
 - Verify idle Linux serial consoles hourly with a nonce-framed, side-effect-free

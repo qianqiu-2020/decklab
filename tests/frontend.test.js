@@ -29,8 +29,12 @@ class Element {
       remove: name => classes.delete(name),
     };
   }
-  set textContent(value) { this._text = value; this.children = []; }
+  set textContent(value) {
+    this._text = value; this.children = [];
+    this._textNode = value ? { nodeType: 3, nodeValue: String(value) } : null;
+  }
   get textContent() { return String(this._text) + this.children.map(child => child.textContent || '').join(''); }
+  get firstChild() { return this._textNode || this.children[0] || null; }
   set innerHTML(value) { this.textContent = value; }
   appendChild(child) { this.children.push(child); return child; }
   addEventListener(name, fn) { (this.events[name] ||= []).push(fn); }
@@ -1420,6 +1424,70 @@ test('first serial command waits for board dimensions and environment setup', as
     revision:2,geometry:{cols:140,rows:42}}});
   await drain();
   assert.equal(h.sends().at(-1).body.data,'vim file\r');
+});
+
+test('serial size waiting notice clears when a quiet shared state confirms success', async () => {
+  const h=await setup({sse:true}), terminal=h.select('A'), stream=h.streams.at(-1);
+  const state={managed:true,revision:1,geometry:{cols:80,rows:24},phase:'shell',
+    serial_ready:true,serial_configured:false};
+  stream.emit({...readResponse('A','root@board:~# ',14),terminal_state:state});
+  terminal.flush(); await drain();
+  h.get('b-serial-size').click();
+  h.take('/api/session-resize').resolve({ok:false,code:'not-idle',error:'等待新的空闲 Linux shell 提示符'},409);
+  await drain();
+  assert.ok(h.get('d-status').textContent.includes('等待'));
+  assert.ok(!h.get('d-status').textContent.includes('写入失败'), 'an idle-prompt race is a deferred setup');
+  const waiting=h.get('d-status').textContent;
+  stream.emit({...readResponse('A','',20),terminal_state:{...state,serial_configured:true,
+    internal_output:true,geometry:{cols:140,rows:42},revision:2}});
+  await drain();
+  assert.equal(h.get('d-status').textContent,waiting,'internal helper output does not confirm completion');
+  h.get('d-status').firstChild.nodeValue='Waiting for an idle console to synchronize size';
+  stream.emit({...readResponse('A','',30),terminal_state:{...state,serial_configured:true,
+    geometry:{cols:140,rows:42},revision:2}});
+  await drain();
+  assert.equal(h.get('d-status').textContent,'', 'metadata alone clears the completed setup notice');
+});
+
+test('late serial resize failure cannot undo success or overwrite a newer action notice', async () => {
+  for(const newerNotice of ['', '识别完成']) {
+    const h=await setup({sse:true}), terminal=h.select('A'), stream=h.streams.at(-1);
+    const state={managed:true,revision:1,geometry:{cols:80,rows:24},phase:'shell',
+      serial_ready:true,serial_configured:false};
+    stream.emit({...readResponse('A','root@board:~# ',14),terminal_state:state});
+    terminal.flush(); await drain(); h.get('b-serial-size').click();
+    const request=h.take('/api/session-resize');
+    if(newerNotice) h.get('d-status').textContent=newerNotice;
+    stream.emit({...readResponse('A','',30),terminal_state:{...state,serial_configured:true,
+      geometry:{cols:140,rows:42},revision:2}});
+    await drain();
+    // A user command can make the shell busy again before the old HTTP result.
+    stream.emit({...readResponse('A','',31),terminal_state:{...state,serial_configured:true,
+      serial_ready:false,geometry:{cols:140,rows:42},revision:2}});
+    request.resolve({ok:false,code:'not-idle',error:'等待新的空闲 Linux shell 提示符'},409);
+    await drain();
+    assert.equal(h.get('d-status').textContent,newerNotice);
+  }
+});
+
+test('completed serial size sync preserves unrelated failures and verifies the requested grid', async () => {
+  const h=await setup({sse:true}), terminal=h.select('A'), stream=h.streams.at(-1);
+  const state={managed:true,revision:1,geometry:{cols:80,rows:24},phase:'shell',
+    serial_ready:true,serial_configured:false};
+  stream.emit({...readResponse('A','root@board:~# ',14),terminal_state:state});
+  terminal.flush(); await drain(); h.get('b-serial-size').click();
+  h.take('/api/session-resize').resolve({ok:false,code:'not-idle',error:'等待新的空闲 Linux shell 提示符'},409);
+  await drain();
+  const waiting=h.get('d-status').textContent;
+  stream.emit({...readResponse('A','',20),terminal_state:{...state,serial_configured:true,
+    geometry:{cols:100,rows:30},revision:2}});
+  await drain();
+  assert.equal(h.get('d-status').textContent,waiting,'a different grid does not satisfy the request');
+  h.get('d-status').textContent=' 写入失败：实际串口输入失败';
+  stream.emit({...readResponse('A','',30),terminal_state:{...state,serial_configured:true,
+    geometry:{cols:140,rows:42},revision:3}});
+  await drain();
+  assert.equal(h.get('d-status').textContent,' 写入失败：实际串口输入失败');
 });
 
 test('Linux boot restores the normal serial font after an uncleared EDK2 screen', async () => {

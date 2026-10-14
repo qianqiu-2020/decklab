@@ -90,6 +90,8 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   await delay(700);
   const serialBefore=await a.evaluate(screen);
   assert.ok(serialBefore.lines.some(line=>line.includes('SERIAL-ROUNDTRIP')));
+  assert.equal(await a.evaluate('document.querySelector("#d-status").textContent'), '',
+    'completed serial setup must clear its notice in the real browser');
   // Return to a quiet UART without sending Enter or triggering more output.
   // Exercise both kinds of inactive tabs; no source resize should be needed.
   for(const destination of ['log','ssh','log']) {

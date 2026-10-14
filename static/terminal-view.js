@@ -192,9 +192,32 @@
       var line = b.getLine(b.baseY + b.cursorY);
       return !!line && /^(?:[^\s@]+@[^\s]+[#$]|\[[^\]\r\n]*@[^\]\r\n]+\][#$])\s*$/.test(line.translateToString(true));
     }
+    function serialSizeStatus(ctx, text, initial) {
+      var status = $('d-status');
+      if (!initial && (!ctx.serialSizeNotice || status.firstChild !== ctx.serialSizeNotice)) return;
+      status.textContent = text;
+      // Text-node identity survives translation; another action replaces it.
+      ctx.serialSizeNotice = status.firstChild;
+    }
+    function clearSerialSizeStatus(ctx) {
+      var status = $('d-status');
+      if (ctx.serialSizeNotice && status.firstChild === ctx.serialSizeNotice) status.textContent = '';
+      ctx.serialSizeNotice = null;
+    }
+    function completeSerialSize(ctx, geometry, offset) {
+      var request = ctx.serialSizeRequest;
+      if (request && (!geometry || geometry.cols !== request.cols || geometry.rows !== request.rows
+          || typeof offset !== 'number' || offset < request.off)) return;
+      if (request) request.completed = true;
+      clearSerialSizeStatus(ctx);
+    }
     function requestSerialSize(ctx, automatic) {
-      if (!idleSerialPrompt(ctx) || ctx.serialSizePending) {
-        if (!automatic && isCurrent(ctx)) $('d-status').textContent = ' 请在空闲 Linux shell 提示符处同步尺寸';
+      if (!isCurrent(ctx) || ctx.serialSizePending) return;
+      if (!idleSerialPrompt(ctx)) {
+        if (!automatic) {
+          ctx.serialSizeRequest = null;
+          serialSizeStatus(ctx, ' 请在空闲 Linux shell 提示符处同步尺寸', true);
+        }
         return;
       }
       var dimensions = ctx.fit.proposeDimensions();
@@ -210,20 +233,30 @@
       if (automatic && signature === ctx.autoSizeAttempt) return;
       ctx.autoSizeAttempt = signature; ctx.serialSizePending = true;
       var sizeGeometryGen = ctx.geometryGen;
+      var request = ctx.serialSizeRequest = {cols: cols, rows: rows, off: ctx.off};
+      if (!automatic) serialSizeStatus(ctx, ' 正在同步串口终端尺寸…', true);
       fetch('/api/session-resize', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({key: ctx.key, serial: ctx.serial, sid: 'serial',
           cols: cols, rows: rows, observed_off: ctx.off, automatic: automatic})})
         .then(function (r) { return r.json(); }).then(function (d) {
           if (!isCurrent(ctx)) return;
           if (ctx.geometryGen !== sizeGeometryGen) return;
+          if (request.completed) return; // A fresh stream state can arrive before this HTTP result.
           if (d.geometry && !ctx.screenManaged) applySerialGeometry(ctx, d.geometry);
           if (ctx.serialStartupPending && (!d.ok || d.skipped)) {
             ctx.serialStartupPending = false; flushInput(ctx);
           }
-          if (!d.ok && !automatic) $('d-status').textContent = ' 写入失败：' + (d.error || '');
+          if (d.ok && !d.pending) {
+            request.completed = true;
+            clearSerialSizeStatus(ctx);
+          } else if (!d.ok && !automatic) {
+            serialSizeStatus(ctx, d.code === 'not-idle' || d.code === 'busy'
+              ? ' 等待空闲控制台同步尺寸' : ' 尺寸同步失败：' + (d.error || ''));
+          }
         }).catch(function (e) {
+          if (!isCurrent(ctx) || ctx.geometryGen !== sizeGeometryGen || request.completed) return;
           if (isCurrent(ctx) && ctx.serialStartupPending) { ctx.serialStartupPending = false; flushInput(ctx); }
-          if (!automatic && isCurrent(ctx)) $('d-status').textContent = ' 写入失败：' + e.message;
+          if (!automatic) serialSizeStatus(ctx, ' 尺寸同步失败：' + e.message);
         }).finally(function () { ctx.serialSizePending = false; });
     }
     function syncSerialSize() { requestSerialSize(view, false); }
@@ -235,6 +268,7 @@
     function applySerialGeometry(ctx, geometry) {
       if (ctx.sid !== 'serial' || !geometry || geometry.rows < 2 || geometry.rows > 200
           || geometry.cols < 20 || geometry.cols > 500) return;
+      if (!ctx.screenManaged) completeSerialSize(ctx, geometry, ctx.off);
       if (ctx.serialMode === 'shell' && ctx.serialRows === geometry.rows && ctx.serialCols === geometry.cols) return;
       ctx.serialRows = geometry.rows; ctx.serialCols = geometry.cols;
       ctx.serialMode = 'shell'; ctx.linuxConsole = true;
@@ -259,6 +293,10 @@
         }
       }
       ctx.serialConfigured = state.serial_configured;
+      if (ctx.sid === 'serial' && state.serial_ready && state.serial_configured
+          && !state.internal_output && !state.error) {
+        completeSerialSize(ctx, state.geometry, payload.off);
+      }
       if (ctx.serialStartupPending && state.serial_configured && state.serial_ready) {
         ctx.serialStartupPending = false; flushInput(ctx);
       }
