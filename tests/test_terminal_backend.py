@@ -20,6 +20,14 @@ class SharedTerminalTests(unittest.TestCase):
         self.addCleanup(terminal.close)
         return terminal
 
+    def session(self, adapter=SshSession):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        session = adapter('fixture', '192.0.2.1', 'board', temporary.name)
+        self.addCleanup(session.terminal.close)
+        self.addCleanup(session._close_log)
+        return session
+
     def test_live_queries_have_one_responder_without_any_browser(self):
         terminal = self.terminal()
         replies = []
@@ -142,66 +150,56 @@ class SharedTerminalTests(unittest.TestCase):
         self.assertFalse(terminal.control('web', 'page-a'))
 
     def test_takeover_is_serialized_with_pending_writes_and_resizes(self):
-        with tempfile.TemporaryDirectory() as root:
-            session = SshSession('fixture', '192.0.2.1', 'board', root)
-            session.fd = object()
-            self.addCleanup(session.terminal.close)
-            self.addCleanup(session._close_log)
-            session.terminal.control('web', 'page-a')
-            entered, release, taken = threading.Event(), threading.Event(), threading.Event()
-            def send(*_):
-                entered.set()
-                self.assertTrue(release.wait(2))
-            with mock.patch.object(session, '_send', side_effect=send) as writer, mock.patch.object(session, '_resize') as resize:
-                thread = threading.Thread(target=session.write, args=('before', 'web', 'page-a'))
-                thread.start()
-                self.assertTrue(entered.wait(2))
-                takeover = threading.Thread(target=lambda: (session.takeover('web', 'page-b'), taken.set()))
-                takeover.start()
-                self.assertFalse(taken.wait(.05))
-                release.set()
-                thread.join(2); takeover.join(2)
-                self.assertFalse(session.write('late', 'web', 'page-a'))
-                self.assertFalse(session.resize(80, 24, 'web', 'page-a'))
-                self.assertEqual(writer.call_count, 1)
-                resize.assert_not_called()
+        session = self.session()
+        session.fd = object()
+        session.terminal.control('web', 'page-a')
+        entered, release, taken = threading.Event(), threading.Event(), threading.Event()
+        def send(*_):
+            entered.set()
+            self.assertTrue(release.wait(2))
+        with mock.patch.object(session, '_send', side_effect=send) as writer, mock.patch.object(session, '_resize') as resize:
+            thread = threading.Thread(target=session.write, args=('before', 'web', 'page-a'))
+            thread.start()
+            self.assertTrue(entered.wait(2))
+            takeover = threading.Thread(target=lambda: (session.takeover('web', 'page-b'), taken.set()))
+            takeover.start()
+            self.assertFalse(taken.wait(.05))
+            release.set()
+            thread.join(2); takeover.join(2)
+            self.assertFalse(session.write('late', 'web', 'page-a'))
+            self.assertFalse(session.resize(80, 24, 'web', 'page-a'))
+            self.assertEqual(writer.call_count, 1)
+            resize.assert_not_called()
 
     def test_failed_transport_resize_keeps_the_previous_canonical_grid(self):
-        with tempfile.TemporaryDirectory() as root:
-            session = SshSession('fixture', '192.0.2.1', 'board', root)
-            session.fd = object()
-            self.addCleanup(session.terminal.close)
-            self.addCleanup(session._close_log)
-            session.terminal.feed(b'prompt', 6)
-            with mock.patch.object(session, '_resize', side_effect=OSError('channel closed')):
-                self.assertFalse(session.resize(140, 50))
-            self.assertEqual((session.cols, session.rows), (120, 32))
-            self.assertEqual(session.terminal.metadata()['geometry'], {'cols': 120, 'rows': 32})
+        session = self.session()
+        session.fd = object()
+        session.terminal.feed(b'prompt', 6)
+        with mock.patch.object(session, '_resize', side_effect=OSError('channel closed')):
+            self.assertFalse(session.resize(140, 50))
+        self.assertEqual((session.cols, session.rows), (120, 32))
+        self.assertEqual(session.terminal.metadata()['geometry'], {'cols': 120, 'rows': 32})
 
     @unittest.skipIf(sys.platform == 'win32', 'Linux sshpass wrapper signaling')
     def test_linux_resize_explicitly_notifies_the_sshpass_wrapper(self):
         import signal
         from seriald_core.sessions import SshSession as LinuxSession
-        with tempfile.TemporaryDirectory() as root:
-            session = LinuxSession('fixture', '192.0.2.1', 'board', root)
-            self.addCleanup(session._close_log)
-            session.proc = mock.Mock()
-            session.proc.poll.return_value = None
-            with mock.patch.object(session, '_set_winsize') as resize:
-                session._resize(98765)
-                resize.assert_called_once_with(98765)
-                session.proc.send_signal.assert_called_once_with(signal.SIGWINCH)
+        session = self.session(LinuxSession)
+        session.proc = mock.Mock()
+        session.proc.poll.return_value = None
+        with mock.patch.object(session, '_set_winsize') as resize:
+            session._resize(98765)
+            resize.assert_called_once_with(98765)
+            session.proc.send_signal.assert_called_once_with(signal.SIGWINCH)
 
     def test_parser_failure_preserves_capture_and_archive_output(self):
-        with tempfile.TemporaryDirectory() as root:
-            session = SshSession('fixture', '192.0.2.1', 'board', root)
-            self.addCleanup(session._close_log)
-            with mock.patch.object(ENGINE, 'call', side_effect=RuntimeError('worker unavailable')):
-                session._append(b'captured even when parser fails\r\n')
-            self.assertIn(b'captured even when parser fails', session.read(0)[1])
-            self.assertIn('worker unavailable', session.terminal.metadata()['error'])
-            self.assertFalse(session.terminal.metadata()['managed'])
-            self.assertIn('captured even when parser fails', Path(session.logpath).read_text())
+        session = self.session()
+        with mock.patch.object(ENGINE, 'call', side_effect=RuntimeError('worker unavailable')):
+            session._append(b'captured even when parser fails\r\n')
+        self.assertIn(b'captured even when parser fails', session.read(0)[1])
+        self.assertIn('worker unavailable', session.terminal.metadata()['error'])
+        self.assertFalse(session.terminal.metadata()['managed'])
+        self.assertIn('captured even when parser fails', Path(session.logpath).read_text())
 
     def test_uart_protocol_replies_are_connection_pinned_and_not_user_commands(self):
         device = Device('fake', '/fake/tty')

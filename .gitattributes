@@ -1,2 +1,3 @@
 # Upstream notice bytes are pinned by SHA-256; never rewrite their line endings.
 packaging/third-party/** -text
+vendor/terminal/** -text
