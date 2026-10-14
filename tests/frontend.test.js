@@ -117,7 +117,8 @@ function harness(options = {}) {
       // 故意允许 dispose 后仍执行旧解析器，验证回调自身也能拦住 CSI 6n 应答。
       while (this.queued.length) for (const { data, callback } of this.queued.splice(0)) {
         const text = typeof data === 'string' ? data : this.decoder.decode(data, { stream: true });
-        this.parsed += text;
+        const reset = text.lastIndexOf('\x1bc');
+        this.parsed = reset < 0 ? this.parsed + text : text.slice(reset + 2);
         for (const match of text.matchAll(/\x1b\[>(\d+)z/g)) this.csi.get('>z')?.([Number(match[1])]);
         for (const match of text.matchAll(/\x1b\[8;(\d+);(\d+)t/g))
           this.csi.get('t')?.([8, Number(match[1]), Number(match[2])]);
@@ -1352,11 +1353,37 @@ test('managed snapshots preserve fragmented bytes and wait behind queued screen 
   stream.emit({...readResponse('A','',9),terminal_state:{...state,revision:2,geometry:{cols:120,rows:40}},
     terminal_snapshot:{data:Buffer.from('fresh').toString('base64'),pending:prefix.toString('base64'),geometry:{cols:120,rows:40}}});
   assert.equal(terminal.cols,100,'a newer geometry waits for the queued older write');
+  assert.equal(terminal.wasReset, undefined, 'do not blank the terminal before queued snapshot bytes parse');
   terminal.flush(); await drain();
   stream.emit({...readResponse('A',suffix,11),terminal_state:{...state,revision:2,geometry:{cols:120,rows:40}}});
   terminal.flush(); await drain();
   assert.equal(terminal.cols,120); assert.equal(terminal.rows,40);
   assert.ok(terminal.parsed.endsWith('fresh汉')); assert.ok(!terminal.parsed.includes('old'));
+  assert.ok(terminal.refreshes > 0, 'paint a recovered screen even when no new output follows');
+});
+
+test('managed fitting uses fresh character metrics and keeps a quiet grid stable', async () => {
+  const h=await setup({sse:true}), terminal=h.select('A'), stream=h.streams.at(-1);
+  const viewport={clientWidth:900,clientHeight:700,style:{}};
+  terminal.element={querySelector:()=>viewport};
+  let font=terminal.options.fontSize;
+  const changes=[];
+  Object.defineProperty(terminal.options,'fontSize',{get:()=>font,set:value=>{font=value;changes.push(value);}});
+  terminal._core={_charSizeService:{get width(){return font*.6;},get height(){return font*1.2;}},
+    _renderService:{dimensions:{css:{cell:{width:18,height:36}}}}};
+  const state={managed:true,revision:1,geometry:{cols:205,rows:52},phase:'application',control_revision:0};
+  for(let off=1;off<=5;off++) {
+    stream.emit({...readResponse('A','x',off),terminal_state:state});
+    terminal.flush(); await drain();
+  }
+  assert.equal(font,7, 'lagging renderer measurements must not shrink text to one pixel');
+  assert.deepEqual(changes,[7], 'output and paint callbacks do not repeatedly reset the font');
+  assert.equal(terminal.cols,205); assert.equal(terminal.rows,52);
+  viewport.clientWidth=400;
+  stream.emit({...readResponse('A','x',6),terminal_state:state});
+  terminal.flush(); await drain();
+  assert.ok(font<7, 'a real viewport change still refits the same logical grid');
+  assert.equal(h.sends().length,0, 'fitting never sends a key to the board');
 });
 
 test('first serial command waits for board dimensions and environment setup', async () => {

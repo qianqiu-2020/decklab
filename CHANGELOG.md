@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.6.1
+
+- Restore shared terminal snapshots through the ordered parser queue, cancel
+  incomplete control strings and repaint even when the source remains quiet.
+  Switching back from SSH or archived logs no longer needs an extra Enter.
+- Keep unchanged terminal fits stable and use current character measurements
+  when scaling a shared grid, avoiding repeated font resets and excessive shrink.
+- Exercise quiet serial/SSH/archive switching and interrupted control strings
+  with the bundled xterm renderer and disposable local PTYs.
+
 ## 1.6.0
 
 - Maintain one canonical terminal per serial connection or SSH session in an

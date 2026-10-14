@@ -60,6 +60,7 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   await input(a, '\x1b');
   await wait(async()=>JSON.stringify(await a.evaluate(screen))===JSON.stringify(await b.evaluate(screen)), 'live screens converge after escape');
   assert.deepEqual(await b.evaluate(screen),await a.evaluate(screen),'incremental output has the same cursor and modes');
+  await b.evaluate('new Promise(resolve=>testTerm.write(new Uint8Array([27,80,43,113,65]),resolve))');
   await b.evaluate('document.querySelector("#b-redraw").click()');
   await wait(()=>b.evaluate('testTerm.buffer.active.type==="alternate"'),'observer redraw restores Vim');
   await wait(async()=>JSON.stringify(await a.evaluate(screen))===JSON.stringify(await b.evaluate(screen)), 'snapshot screen converges');
@@ -81,6 +82,27 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   await wait(()=>a.evaluate('testTerm.buffer.active.type==="normal"'),'Vim exit restores the normal screen');
   await a.evaluate('Array.from(document.querySelectorAll("#d-tabs button")).find(b=>b.dataset.kind==="serial").click()');
   await wait(()=>a.evaluate('testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+testTerm.buffer.active.cursorY)?.translateToString().includes("root@fixture")'),'serial root prompt');
+  await input(a, 'printf "SERIAL-ROUNDTRIP\\n"\r');
+  await wait(()=>a.evaluate('Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+i)?.translateToString()||"").some(line=>line.includes("SERIAL-ROUNDTRIP"))'),'serial roundtrip marker');
+  await a.evaluate('document.querySelector("#b-records").click()');
+  await wait(()=>a.evaluate('!!document.querySelector("#d-logs .log-row button")'),'serial archive');
+  await wait(()=>a.evaluate('testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+testTerm.buffer.active.cursorY)?.translateToString().trim()==="root@fixture:~#"'),'serial setup finishes after opening sidebar');
+  await delay(700);
+  const serialBefore=await a.evaluate(screen);
+  assert.ok(serialBefore.lines.some(line=>line.includes('SERIAL-ROUNDTRIP')));
+  // Return to a quiet UART without sending Enter or triggering more output.
+  // Exercise both kinds of inactive tabs; no source resize should be needed.
+  for(const destination of ['log','ssh','log']) {
+    if(destination==='log') await a.evaluate('document.querySelector("#d-logs .log-row button").click()');
+    else await a.evaluate('Array.from(document.querySelectorAll("#d-tabs button")).find(b=>b.dataset.kind==="ssh").click()');
+    await delay(200);
+    await a.evaluate('Array.from(document.querySelectorAll("#d-tabs button")).find(b=>b.dataset.kind==="serial").click()');
+    await wait(()=>a.evaluate('testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+testTerm.buffer.active.cursorY)?.translateToString().trim()==="root@fixture:~#"'),'quiet serial snapshot after '+destination);
+    await delay(200);
+    assert.deepEqual(await a.evaluate(screen),serialBefore,'switching from '+destination+' restores the complete quiet UART');
+    assert.ok(await a.evaluate('testTerm.options.fontSize>=10'),'sidebar fitting must not collapse text into a thin strip');
+  }
+  await a.evaluate('document.querySelector("#b-records-close").click()');
   await input(a, 'vim -Nu NONE -n sample.txt\r');
   await wait(()=>a.evaluate('testTerm.buffer.active.type==="alternate"'),'serial Vim');
   await b.evaluate('Array.from(document.querySelectorAll("#d-tabs button")).find(b=>b.dataset.kind==="serial").click()');
@@ -89,7 +111,7 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   assert.deepEqual(await b.evaluate(screen),await a.evaluate(screen),'serial Vim has the same grid and screen for both viewers');
   await input(a, '\x1b:q!\r');
   await wait(()=>a.evaluate('testTerm.buffer.active.type==="normal"'),'serial Vim exit');
-  console.log('Shared terminal smoke passed: real Vim over serial/SSH PTYs, late join, live edits, takeover, resize and exit.');
+  console.log('Shared terminal smoke passed: real Vim over serial/SSH PTYs, late join, live edits, takeover, resize, quiet tab restoration and exit.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   for(const socket of sockets)socket.close();
   if(chrome){chrome.kill('SIGTERM');await delay(500);}if(fixture){fixture.kill('SIGTERM');await delay(700);}

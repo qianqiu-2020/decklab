@@ -305,6 +305,15 @@
       var viewport = ctx.term.element && ctx.term.element.querySelector('.xterm-viewport');
       var render = ctx.term._core && ctx.term._core._renderService;
       var cell = render && render.dimensions.css && render.dimensions.css.cell;
+      // CharSizeService measures synchronously when fontSize changes. Renderer
+      // dimensions can still describe the previous font until the next frame;
+      // using those in the fitting loop repeatedly shrinks an already-fit grid.
+      var chars = ctx.term._core && ctx.term._core._charSizeService;
+      if (chars && chars.width > 0 && chars.height > 0) {
+        var dpr = window.devicePixelRatio || 1;
+        cell = {width: chars.width + Math.round(ctx.term.options.letterSpacing || 0) / dpr,
+          height: Math.floor(Math.ceil(chars.height * dpr) * (ctx.term.options.lineHeight || 1)) / dpr};
+      }
       if (viewport && cell && cell.width && cell.height) return {
         cols: Math.floor((viewport.clientWidth - 17) / cell.width),
         rows: Math.floor((viewport.clientHeight - 2) / cell.height)
@@ -320,11 +329,20 @@
         var required = ctx.screenManaged ? ctx.screenGeometry.rows : ctx.serialRows || 24;
         var cap = !ctx.linuxConsole && required >= 40 && document.body.classList.contains('terminal-max')
           ? 10 : DEFAULT_TERMINAL_FONT_SIZE;
-        ctx.term.options.fontSize = cap;
+        var requiredCols = ctx.screenManaged ? ctx.screenGeometry.cols : ctx.serialCols || 80;
+        var viewport = ctx.term.element && ctx.term.element.querySelector('.xterm-viewport');
+        var signature = viewport && viewport.clientWidth && viewport.clientHeight
+          ? [viewport.clientWidth, viewport.clientHeight, requiredCols, required, cap,
+            ctx.term.options.fontFamily, ctx.term.options.lineHeight, ctx.term.options.letterSpacing,
+            window.devicePixelRatio || 1].join(':') : '';
+        if (signature && signature === ctx.fixedFitSignature) {
+          if (ctx.term.cols !== requiredCols || ctx.term.rows !== required) ctx.term.resize(requiredCols, required);
+          return;
+        }
+        if (ctx.term.options.fontSize !== cap) ctx.term.options.fontSize = cap;
         var dimensions = ctx.fit.proposeDimensions ? ctx.fit.proposeDimensions() : null;
         var capacity = serialCapacity(ctx, dimensions);
         var visibleRows = capacity.rows;
-        var requiredCols = ctx.screenManaged ? ctx.screenGeometry.cols : ctx.serialCols || 80;
         // Shared UART has one logical grid. Fit the same grid in a smaller
         // viewer by changing only pixels, never terminal rows/columns.
         var fontSize = cap;
@@ -341,8 +359,10 @@
         var rows = required;
         var cols = requiredCols;
         if (ctx.term.cols !== cols || ctx.term.rows !== rows) ctx.term.resize(cols, rows);
+        ctx.fixedFitSignature = signature;
         return;
       }
+      ctx.fixedFitSignature = '';
       if (ctx.term.options.fontSize !== DEFAULT_TERMINAL_FONT_SIZE)
         ctx.term.options.fontSize = DEFAULT_TERMINAL_FONT_SIZE;
       // FitAddon calculates width from the host and subtracts a scrollbar even
@@ -441,15 +461,18 @@
       if (payload.terminal_state && payload.terminal_state.managed) {
         updateTerminalState(ctx, payload);
         var snapshot = payload.terminal_snapshot;
-        var raw = snapshot ? '\x1bc' + atob(snapshot.data || '') + atob(snapshot.pending || '') : atob(payload.data_b64 || '');
+        var raw = snapshot ? '\x18\x1bc' + atob(snapshot.data || '') + atob(snapshot.pending || '') : atob(payload.data_b64 || '');
         if (snapshot) {
           options.clearCommandDecorations(ctx);
-          ctx.term.reset(); ctx.term.clearSelection();
+          // Reset inside the ordered write, not between asynchronous xterm
+          // writes. CAN also cancels an unfinished OSC/DCS before replaying RIS.
+          ctx.term.clearSelection();
           applyManagedGeometry(ctx, snapshot.geometry);
         }
         var written = function () {
           if (!isCurrent(ctx) || epoch !== ctx.renderEpoch) return;
           ctx.initialRendered = true;
+          scheduleFullRefresh(ctx);
           scheduleSerialSize(ctx); pushSize(ctx);
           if (ctx.sid === 'serial' && ctx.screenPhase === 'text' && !ctx.readonly
               && !ctx.inputQueue.length && !ctx.inputSending) {
