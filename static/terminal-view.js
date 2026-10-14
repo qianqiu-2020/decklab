@@ -158,10 +158,17 @@
       ctx.navRendered = false;
       options.renderCommandNav(ctx);
       ctx.off = 0; ctx.initialRendered = false; ctx.geometryGen++;
-      ctx.renderEpoch++; ctx.renderQueue = []; ctx.renderBusy = false; ctx.lastRenderedOff = null;
-      ctx.term.write('\x1bc');
-      ctx.serialCols = null; ctx.serialRows = 24; ctx.serialMode = 'text'; ctx.linuxConsole = false;
-      resetProgress(ctx);
+      ctx.renderEpoch++; ctx.renderQueue = []; ctx.renderBusy = true; ctx.lastRenderedOff = null;
+      var epoch = ctx.renderEpoch;
+      // A reset must finish parsing after old queued writes before replay can
+      // apply its initial geometry. Keep this barrier outside the UART bytes.
+      ctx.term.write('\x1bc', function () {
+        if (!isCurrent(ctx) || epoch !== ctx.renderEpoch) return;
+        ctx.serialCols = null; ctx.serialRows = 24; ctx.serialMode = 'text'; ctx.linuxConsole = false;
+        ctx.bootScanTail = ''; ctx.phaseScanTail = '';
+        resetProgress(ctx);
+        ctx.renderBusy = false; drainRenderQueue(ctx);
+      });
       $('d-status').textContent = ' 正在从采集缓冲完整重绘…';
       if (ctx.kind === 'log') {
         var archived = options.session(ctx.sid);
@@ -490,10 +497,8 @@
         // HTTP reads can leave canvas layers visually stale until the next input.
         redraw = /\x1b(?:\[[0-9;?]*[ABCDEFGHJKSTfhl]|[78])/.test(raw);
         if (raw.length) {
-          if (payload.terminal_initial_geometry && ctx.sid === 'serial' && !raw.startsWith('\x1bc')) {
-            var initial = payload.terminal_initial_geometry;
-            raw = '\x1b[8;' + initial.rows + ';' + initial.cols + 't' + raw;
-          }
+          // Initial geometry was applied outside the ordered byte stream above.
+          // A CSI prefix here would interrupt split OSC/DCS and UTF-8 characters.
           ctx.term.write(Uint8Array.from(raw, function (c) { return c.charCodeAt(0); }),
             written);
         } else written();

@@ -1279,6 +1279,45 @@ test('serial replay queues geometry changes until prior bytes have parsed', asyn
   assert.ok(terminal.parsed.indexOf('first packet') < terminal.parsed.indexOf('second packet'));
 });
 
+test('shared geometry metadata never interrupts fragmented OSC, CSI or UTF-8 bytes', async () => {
+  const h = await setup({sse: true}); const terminal = h.select('A'); const stream = h.streams.at(-1);
+  const raw = Buffer.from('\x1b]3008;start=test;machineid=board;cwd=/root\x1b\\\x1b[1;2H中文\x1b]3008;end=test;exit=success\x1b\\root@ubuntu:~# ');
+  const boundaries = [0, 20, raw.indexOf(Buffer.from('\x1b\\')) + 1,
+    raw.indexOf(Buffer.from('2H')), raw.indexOf(Buffer.from('中文')) + 1, raw.length];
+  for(let n=1;n<boundaries.length;n++) {
+    const frame = readResponse('A', raw.subarray(boundaries[n-1], boundaries[n]), boundaries[n]);
+    frame.terminal_initial_geometry = frame.terminal_geometry = {cols: 140, rows: 42};
+    stream.emit(frame);
+  }
+  terminal.flush(); await drain();
+  assert.equal(terminal.parsed, raw.toString(), 'metadata must not insert control bytes into the UART stream');
+  assert.equal(h.sends().length, 0);
+});
+
+test('redraw waits for queued writes and reset before applying replay geometry', async () => {
+  const h = await setup({sse: true}); const terminal = h.select('A'); const oldStream = h.streams.at(-1);
+  oldStream.emit(readResponse('A', '\x1b[8;54;200told queued bytes'));
+  h.get('b-redraw').click();
+  const fresh = readResponse('A', 'fresh bytes');
+  fresh.terminal_initial_geometry = fresh.terminal_geometry = {cols: 100, rows: 30};
+  h.streams.at(-1).emit(fresh);
+  assert.ok(!terminal.queued.some(({data})=>Buffer.from(data).toString().includes('fresh bytes')),
+    'fresh metadata and bytes must wait behind the reset barrier');
+  terminal.flush(); await drain();
+  assert.equal(terminal.cols, 100); assert.equal(terminal.rows, 30);
+  assert.ok(terminal.parsed.endsWith('fresh bytes'));
+});
+
+test('passive serial size probes do not move the cursor but firmware positions still work', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  for(const final of ['H', 'f']) {
+    assert.equal(terminal.csi.get(final)?.([32766, 32766]), true);
+    assert.ok(!terminal.csi.get(final)?.([50, 1]), 'retain real EDK2 row 50 positioning');
+    assert.ok(!terminal.csi.get(final)?.([1, 1]), 'retain cursor home');
+  }
+  assert.equal(h.sends().length, 0);
+});
+
 test('Linux boot restores the normal serial font after an uncleared EDK2 screen', async () => {
   const h = await setup(); const terminal = h.select('A');
   h.take('/api/session').resolve(readResponse('A', '\x1b[50;27HEDK2', 18));

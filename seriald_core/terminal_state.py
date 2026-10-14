@@ -13,6 +13,7 @@ class SerialTerminalState:
         self.history = []
         self.authority = None
         self.attempted = False
+        self.environment_pending = False
         self.input_pending = False
 
     def observe(self, data):
@@ -33,6 +34,7 @@ class SerialTerminalState:
                 self.history.append((start + match.end() - previous, None))
                 self.authority = None
                 self.attempted = False
+                self.environment_pending = False
         self.tail = joined[-256:]
         if self.prompt():
             self.input_pending = False
@@ -75,9 +77,16 @@ class SerialTerminalState:
                                   or self.attempted and self.geometry is None):
                     return {'ok': True, 'skipped': True, 'geometry': self.geometry}
                 target = {'cols': cols, 'rows': rows}
-                if automatic and self.geometry == target and self.attempted:
+                if automatic and self.geometry == target and self.attempted and not self.environment_pending:
                     return {'ok': True, 'skipped': True, 'geometry': self.geometry}
-                setup_environment = not self.attempted or not automatic
+                if not self.attempted or not automatic:
+                    self.environment_pending = True
+                # Only echo the longer command after stty's marker and a fresh
+                # idle prompt. Bulk typeahead can echo it using the old width.
+                setup_environment = (automatic and self.attempted
+                                     and self.geometry == target and self.environment_pending)
+                if setup_environment:
+                    self.environment_pending = False
                 self.authority = client
                 self.attempted = True
                 self.input_pending = True
@@ -92,9 +101,8 @@ class SerialTerminalState:
             environment = ("if command -v infocmp >/dev/null 2>&1 && infocmp xterm-256color >/dev/null 2>&1; "
                            "then export TERM=xterm-256color; fi; "
                            "case ${LC_ALL:-${LC_CTYPE:-$LANG}} in *UTF-8*|*utf8*|*UTF8*) stty iutf8;; esac")
-            # Establish geometry before echoing the longer environment setup.
-            command = resize + newline + environment if setup_environment else resize
-            ok, error = d._write(command + (d.newline or '\r'))
+            command = environment if setup_environment else resize
+            ok, error = d._write(command + newline)
             if ok:
                 d.record_input('serial', actor, command + '\r')
             return {'ok': ok, 'error': error, 'pending': ok}

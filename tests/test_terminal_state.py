@@ -38,22 +38,61 @@ class SerialTerminalTests(unittest.TestCase):
         self.assertEqual(result.status, 200)
         command = self.write.call_args.args[0]
         self.assertIn('stty echoctl -ixon -ixoff rows 42 cols 140', command)
+        self.assertNotIn('infocmp', command)
+        self.assertTrue(command.endswith('\r'))
+        self.assertTrue(self.device.terminal.environment_pending)
+        self.assertTrue(self.device.terminal.input_pending)
+        self.feed(b'\r\n\x1b[8;42;140t')
+        self.assertEqual(self.resize().status, 409, 'a resize marker alone is not an idle prompt')
+        self.feed(b'root@ubuntu:~# ')
+        self.assertTrue(self.resize().payload['ok'])
+        command = self.write.call_args.args[0]
         self.assertIn('infocmp xterm-256color', command)
         self.assertIn('${LC_ALL:-${LC_CTYPE:-$LANG}}', command)
+        self.assertNotIn('rows 42 cols 140', command)
         self.assertTrue(command.endswith('\r'))
+        self.assertFalse(self.device.terminal.environment_pending)
         self.assertTrue(self.device.terminal.input_pending)
 
     def test_shared_geometry_survives_buffer_eviction_and_deduplicates_viewers(self):
         self.feed(b'root@ubuntu:~# ')
         self.resize()
         self.feed(b'\r\n\x1b[8;42;140troot@ubuntu:~# ')
+        self.resize()
+        self.feed(b'\r\nroot@ubuntu:~# ')
         self.device.buf.clear()
         self.device.base = 1000000
         self.assertEqual(self.resize(client='viewer2', cols=100).payload['geometry'], {'rows': 42, 'cols': 140})
         self.resize()
-        self.assertEqual(self.write.call_count, 1)
-        self.resize(client='viewer2', cols=100, automatic=False)
         self.assertEqual(self.write.call_count, 2)
+        self.resize(client='viewer2', cols=100, automatic=False)
+        self.assertEqual(self.write.call_count, 3)
+
+    def test_deferred_environment_respects_input_and_sizing_authority(self):
+        self.feed(b'root@ubuntu:~# ')
+        self.resize()
+        self.feed(b'\r\n\x1b[8;42;140troot@ubuntu:~# ')
+        self.assertTrue(self.resize(client='viewer2').payload['skipped'])
+        self.assertTrue(self.device.terminal.environment_pending)
+        self.assertEqual(self.resize(observed_off=0).status, 409)
+        self.device.terminal.input_pending = True
+        self.assertEqual(self.resize().status, 409)
+        self.write.assert_called_once()
+        self.feed(b'\r\nroot@ubuntu:~# ')
+        self.assertTrue(self.resize().payload['ok'])
+        self.assertIn('infocmp', self.write.call_args.args[0])
+        self.feed(b'\r\nroot@ubuntu:~# ')
+        self.assertTrue(self.resize().payload['skipped'])
+        self.assertEqual(self.write.call_count, 2)
+
+    def test_existing_geometry_still_requires_initial_terminal_settings(self):
+        self.feed(b'\x1b[8;42;140troot@ubuntu:~# ')
+        self.assertTrue(self.resize().payload['ok'])
+        self.assertIn('stty echoctl', self.write.call_args.args[0])
+        self.assertNotIn('infocmp', self.write.call_args.args[0])
+        self.feed(b'\r\n\x1b[8;42;140troot@ubuntu:~# ')
+        self.assertTrue(self.resize().payload['ok'])
+        self.assertIn('infocmp', self.write.call_args.args[0])
 
     def test_fedora_prompt_and_busy_program_are_distinguished(self):
         self.feed(b'[root@fedora ~]# ')
@@ -124,8 +163,10 @@ class SerialTerminalTests(unittest.TestCase):
         self.assertEqual(state.geometry, {'rows': 42, 'cols': 140})
         state.authority = ('web', 'viewer1')
         state.attempted = True
+        state.environment_pending = True
         state.observe(b'\r\nLinux ver')
         state.observe(b'sion 6.18.0\r\n')
         self.assertIsNone(state.geometry)
         self.assertIsNone(state.authority)
         self.assertFalse(state.attempted)
+        self.assertFalse(state.environment_pending)

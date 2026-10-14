@@ -11,6 +11,15 @@
     }
     guardCsi({ final: 'n' }, [5, 6]);
     guardCsi({ prefix: '?', final: 'n' }, [6]);
+    ['H', 'f'].forEach(function (final) {
+      ctx.term.parser.registerCsiHandler({final: final}, function (params) {
+        // systemd probes size by jumping to INT16_MAX-1 before requesting CPR.
+        // With replies suppressed it cannot restore the original cursor, so
+        // suppress that probe move too. Ordinary menu/application CUP remains.
+        return suppressReply() && params.length === 2
+          && params[0] === 32766 && params[1] === 32766;
+      });
+    });
     ['', '>', '='].forEach(function (prefix) { guardCsi({ prefix: prefix, final: 'c' }); });
     guardCsi({ final: 't' }, [14, 16, 18, 20, 21]);
     [4, 10, 11, 12].forEach(function (id) {

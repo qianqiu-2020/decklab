@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.5.8
+
+- Suppress the far-bottom cursor move used by systemd size probes whenever
+  terminal replies are suppressed, keeping boot messages adjacent without
+  removing real blank lines or changing firmware menu cursor controls.
+- Apply UART geometry outside captured bytes so fragmented OSC/DCS controls,
+  shell context metadata and UTF-8 characters remain intact. Wait for queued
+  writes and terminal reset before applying replay geometry.
+- Send environment setup only after the resize marker and a fresh idle shell
+  prompt, preventing the longer setup line from being echoed at the old width.
+
 ## 1.5.7
 
 - Clear firmware background, cursor and scroll modes on the earliest kernel

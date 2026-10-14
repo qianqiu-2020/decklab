@@ -32,12 +32,14 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST') { posts.push(u.pathname); json(u.pathname === '/api/session-send' && serialPayload ? {ok:true} : { ok: false, error: 'read-only fixture' }); return; }
   if (u.pathname === '/api/devices') return json({ devices: fixtures });
   if (u.pathname === '/api/session') {
-    const bytes = u.searchParams.get('off') === '0' ? Buffer.from(serialPayload ||
+    const chunk = u.searchParams.get('off') === '0' ? serialPayload ||
       'root@bianbu:~# \x1b[6n\x1b[?6n\x1b[c\x1b]11;?\x07'.repeat(15)
       + Array.from({length:80},(_,i)=>'\r\nserial line '+i).join('')
-      + '\x1b[2J\x1b[50;1Hlast firmware row') : Buffer.from(serialLiveChunks.shift() || '');
+      + '\x1b[2J\x1b[50;1Hlast firmware row' : serialLiveChunks.shift() || '';
+    const bytes = Buffer.from(typeof chunk === 'string' ? chunk : chunk.data);
     return json({ key: u.searchParams.get('key'), sid: u.searchParams.get('sid'), alive: true,
-      off: u.searchParams.get('off') === '0' ? 4096 : Number(u.searchParams.get('off')) + bytes.length, data_b64: bytes.toString('base64') });
+      off: u.searchParams.get('off') === '0' ? 4096 : Number(u.searchParams.get('off')) + bytes.length, data_b64: bytes.toString('base64'),
+      ...(typeof chunk === 'object' ? {terminal_initial_geometry: chunk.geometry, terminal_geometry: chunk.geometry} : {}) });
   }
   if (u.pathname === '/api/sessions') return json({ sessions: [
     { sid: 'serial', kind: 'serial' }, { sid: 'ssh123abc', kind: 'ssh', actor: 'claude-code', ip: '10.0.90.42' }] });
@@ -378,6 +380,15 @@ let chrome, ws;
   assert.ok(await evaluate(`testTerm.buffer.active.getLine(0)?.translateToString().includes('SBI DBCN')`));
   assert.equal(await evaluate('testTerm.buffer.active.getLine(0).getCell(0).getBgColorMode()'),0,'firmware background must reset');
   assert.ok(await evaluate(`Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString()||'').every(s=>!s.includes('last firmware row'))`));
+  // Captured systemd size probe: without a CPR reply it never restores the
+  // original cursor. Merely suppressing replies leaves a screen-sized gap.
+  serialLiveChunks.push('[    1.326449] pcieport: failed with rc=-22\r\n\x1bP+q6E616D65\x1b\\\x1b[6n\x1b[32766;');
+  serialLiveChunks.push('32766H\x1b[6n\x1b[!p\x1b]104\x1b\\\x1b[0m\x1b[?7h\x1b[1G\x1b[0J\x1b]3008;start=test-boot;type=boot\x1b\\[    3.516763] dracut-cmdline: copymods warning\r\n');
+  for(let n=0;n<40 && !await evaluate(`Array.from({length:testTerm.buffer.active.length},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString()||'').some(s=>s.includes('copymods warning'))`);n++)await delay(50);
+  const probeLines=await evaluate(`Array.from({length:testTerm.buffer.active.length},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString(true)||'')`);
+  assert.equal(probeLines.findIndex(s=>s.includes('copymods warning')),probeLines.findIndex(s=>s.includes('pcieport: failed'))+1,
+    'systemd size probe must not insert blank rows between kernel messages');
+  assert.deepEqual(posts,[], 'passive size probes must not send terminal replies to the board');
   await evaluate(`document.querySelector('#d-status').textContent=' 正在从采集缓冲完整重绘…'`);
   await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   await delay(100);
@@ -424,6 +435,23 @@ let chrome, ws;
   assert.deepEqual(observerScreen,{cols:aptScreen.cols,rows:aptScreen.rows,cursor:aptScreen.cursor,lines:aptScreen.lines},'shared replay must not depend on browser resolution');
   const bottomFits=await evaluate(`(() => {const v=testTerm.element.querySelector('.xterm-viewport');const c=testTerm._core._renderService.dimensions.css.cell;return {painted:testTerm.rows*c.height,visible:v.clientHeight,columns:testTerm.cols*c.width,width:v.clientWidth-16};})()`);
   assert.ok(bottomFits.painted <= bottomFits.visible && bottomFits.columns <= bottomFits.width,'last row and rightmost column must remain visible: '+JSON.stringify(bottomFits));
+  // Shared geometry metadata accompanies arbitrary UART fragments, including
+  // fragments inside OSC 3008 and a split string terminator. It is not an ANSI
+  // prefix: injecting CSI here cancels OSC and exposes shell context text.
+  const shellGeometry={cols:aptScreen.cols,rows:aptScreen.rows};
+  const multibyte=Buffer.from('中文');
+  const contextFragments=['\r\n\x1b]3008;start=test-command;machine',
+    'id=marker-device;bootid=marker-boot;cwd=/root\x1b',
+    '\\OSC-replay-output',multibyte.subarray(0,1),multibyte.subarray(1),
+    '\r\n\x1b]3008;end=test-command;exit=su',
+    'ccess\x1b\\root@ubuntu:~# '];
+  for(const data of contextFragments)serialLiveChunks.push({data,geometry:shellGeometry});
+  for(let n=0;n<40 && serialLiveChunks.length;n++)await delay(50);
+  await delay(100);
+  const contextScreen=await evaluate(`Array.from({length:testTerm.buffer.active.length},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString(true)||'').join(String.fromCharCode(10))`);
+  assert.ok(contextScreen.includes('OSC-replay-output中文'), 'metadata must also preserve fragmented UTF-8');
+  assert.ok(!/machineid|marker-device|marker-boot|exit=success|exit=su|cwd=/.test(contextScreen),
+    'split shell context must stay invisible while geometry metadata updates');
   await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
   await delay(100);
   // Shared stty marker: use real viewport measurements, then check wrapping.
