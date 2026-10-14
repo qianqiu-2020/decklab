@@ -96,10 +96,16 @@ class ConsoleVisibility:
     def interrupt_for_system_output(self, data):
         if not self.active:
             return
-        joined = self.tail + data
+        previous = self.tail
+        joined = previous + data
         self.tail = joined[-128:]
-        if SYSTEM_OUTPUT.search(joined):
+        match = SYSTEM_OUTPUT.search(joined)
+        if match:
             self.finish(self.token, discard=True)
+            if match.start() < len(previous):
+                # A kernel/boot header can straddle two collector reads. Its
+                # first fragment was private; restore it before logging the rest.
+                self.device.log.display(previous[match.start():].decode('utf-8', 'replace'))
 
     def finish(self, token, discard=False):
         if token is None:

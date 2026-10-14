@@ -67,4 +67,7 @@ assert.equal(h.diffText.nodeValue, '启动 timeout');
 assert.equal(fixture('en', 'zh-CN').api.locale, 'en');
 assert.equal(fixture('invalid', 'en-US').api.locale, 'en');
 assert.equal(h.api.translate('未知文本'), '未知文本');
+h.api.setLocale('en');
+assert.equal(h.api.translate('串口主动探测失败：等待板子完整响应超时'),
+  'Serial round-trip probe failed: Timed out waiting for a complete board response');
 console.log('ok - UI language defaults, live switching, persistence and raw-content isolation');

@@ -154,6 +154,7 @@
     '串口日志写入失败：': 'Serial log write failed: ', '采集检查：': 'Capture check: ', '上次连接 ': 'Last connected ',
     '串口收发验证：': 'Serial round trip: ', '探测异常': 'Probe failed',
     '串口主动探测失败：': 'Serial round-trip probe failed: ', '等待空闲控制台': 'Waiting for an idle console',
+    '等待板子完整响应超时': 'Timed out waiting for a complete board response',
     '终端配置进行中，请稍后重试': 'Terminal setup is in progress; retry shortly',
     '已连接 · ': 'Connected · ', ' 台设备 · ': ' boards · ', ' 记录': ' captured', '末次 ': 'Last received ',
     '从未': 'Never', ' 秒前': ' seconds ago', ' 分钟前': ' minutes ago', ' 小时前': ' hours ago',

@@ -146,6 +146,15 @@ class ConsoleVisibilityTests(unittest.TestCase):
         self.assertIn('real kernel failure', self.screen())
         self.assertIn('real kernel failure', self.archive())
 
+    def test_fragmented_kernel_header_is_restored_in_the_archive(self):
+        self.device.visibility.begin('file-transfer')
+        self.device.append(b'private protocol\r\n[    0.123')
+        self.device.append(b'456] real kernel failure\r\n')
+        self.assertFalse(self.device.visibility.active)
+        archive = self.archive()
+        self.assertIn('[    0.123456] real kernel failure', archive)
+        self.assertNotIn('private protocol', archive)
+
     def test_failed_parser_does_not_drop_archive_output(self):
         self.device.visibility.begin('file-transfer')
         with mock.patch.object(ENGINE, 'call', side_effect=RuntimeError('worker unavailable')):
