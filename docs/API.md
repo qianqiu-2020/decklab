@@ -34,7 +34,7 @@ not authentication. Avoid putting credentials in URLs, screenshots or issues.
 Errors contain `error` and `code`. Generic codes include `invalid-argument`,
 `unauthorized`, `forbidden`, `not-found`, `conflict`, `too-large`, `input-owned`,
 `internal-error`, `operation-failed`, `remote-failure`, `unavailable` and `timeout`; transaction-specific codes also
-include `cancelled`, `stale`, `disconnected` and `transfer-busy`. Inspect HTTP
+include `not-idle`, `cancelled`, `stale`, `disconnected` and `transfer-busy`. Inspect HTTP
 status as well as JSON: success of an input request does not prove command
 completion, and cancellation is not rollback.
 Some synchronous operations return HTTP 200 with `ok=false` and a failure code;
@@ -61,7 +61,8 @@ Session packets contain `off`, `alive` and `data_b64`. Decode bytes incrementall
 for split UTF-8 characters. `off` is the position after returned bytes; if
 `off - decoded_length` exceeds the requested cursor, output was evicted from
 scrollback. CLI reports this as `gap`. SSE event IDs are byte offsets, with a JSON
-packet in `data:` and comment heartbeats. Serial SSE packets also carry
+packet in `data:` and comment heartbeats. Serial packets also carry nullable `terminal_geometry` (`cols`, `rows`), retained
+beyond live-buffer eviction. Serial SSE packets also carry
 `input_owner` (an owner object or `null`). Ownership changes can produce an empty
 `data_b64` packet with the **same `off`**; apply metadata before deduplicating
 output bytes. Quiet serial streams check this state within about one second;
@@ -109,7 +110,7 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | `/api/send` | `data`; literal serial input |
 | `/api/session-send` | `sid`, `data`; serial or SSH input |
 | `/api/ssh-connect` | Optional `title`, `ssh_user`, `ssh_password`; returns sid and persistence policy |
-| `/api/session-resize` | `sid`, `cols`, `rows` |
+| `/api/session-resize` | `sid`, `cols`, `rows`; serial also requires `observed_off`, with optional `automatic` boolean and per-page `client_id` |
 | `/api/session-close` | `sid` |
 | `/api/session-result` | `sid`, `completed`, `exit_code`; records command outcome |
 | `/api/session-takeover` | `sid`; explicit human intervention in an agent session |

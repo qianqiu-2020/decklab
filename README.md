@@ -36,7 +36,7 @@ Ubuntu packages are built with:
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.5.5_all.deb
+sudo apt install ./dist/seriald_1.5.6_all.deb
 ```
 
 On Windows, build with Python 3.12 x64 and Inno Setup 6.5+ using

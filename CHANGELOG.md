@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.5.6
+
+- Fit early boot and kernel text to the viewport; retain firmware menu coordinates
+  and restore normal geometry on Linux boot.
+- Automatically synchronize serial shell dimensions at a verified idle prompt.
+  Coordinate one sizing authority per connection, preserve shared geometry beyond
+  live-buffer eviction, and block stale, typing, owned and busy-console requests.
+- Configure visible control-character echo, disable software flow control only
+  when the serial profile permits it, enable UTF-8 editing for UTF-8 locales, and
+  select xterm-256color only when matching board terminfo is installed.
+
 ## 1.5.5
 
 - Add explicit idle-shell size synchronization for wide serial terminals.

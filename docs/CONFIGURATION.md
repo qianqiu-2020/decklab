@@ -64,16 +64,23 @@ unprovisioned until identified through a supported explicit workflow.
 
 ## Per-board profiles
 
-Live serial initially uses 80 columns for conventional firmware and shell
-compatibility. At an empty Linux shell prompt, click **Sync size** to run `stty`
-with the available viewport dimensions and enable wider columns. A shared resize
-marker updates other viewers and survives buffered replay; no command is injected
-on connection or window resize. Repeat synchronization after changing the layout.
-Synchronization also enables `stty echoctl` so echoed direction keys appear as
-visible text rather than moving the output cursor. Keyboard passthrough is kept.
-APT's reserved progress row is mapped to the viewer's bottom for display only.
-Captured logs remain unchanged.
-SSH sessions negotiate their dimensions normally.
+Early boot and kernel text fit the viewport. Firmware menu positioning retains
+an 80-column layout and detected row count; a Linux boot banner restores text
+mode. At an empty Linux shell prompt, the UI waits 400 ms before requesting
+automatic size synchronization. The collector verifies the current byte offset,
+input state, Linux profile and transaction/ownership state before writing setup.
+No historical prompt or attachment alone triggers board input.
+
+One viewer coordinates automatic sizing per connection; other viewers follow
+the shared geometry. The actual input writer, explicit **Sync size**, or input ownership changes the
+coordinator. Resize requests wait for the next idle prompt during a running
+program. Geometry survives buffer eviction and resets on detected reboot.
+
+Shell setup enables `echoctl`, UTF-8 editing in UTF-8 locales, and xterm-256color
+only when board terminfo is available. It disables XON/XOFF only for profiles
+without software flow control. Baud, parity and application raw modes stay intact.
+APT's reserved progress row is mapped for display only. Captured bytes remain
+unchanged; SSH negotiates dimensions through its own PTY.
 
 Built-in defaults follow the SpacemiT K3/Bianbu development workflow: 115200,
 8N1, no flow control, console/SSH `root` with password `bianbu`, Linux probes

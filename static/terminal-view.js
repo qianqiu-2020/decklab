@@ -25,6 +25,7 @@
       clearTimeout(old.loopTimer);
       clearTimeout(old.inputTimer);
       clearTimeout(old.sizeTimer);
+      clearTimeout(old.serialSizeTimer);
       clearTimeout(old.selTimer);
       clearTimeout(old.navTimer);
       options.clearCommandDecorations(old);
@@ -55,7 +56,7 @@
                   navEntries: [], navSelected: -1, navTimer: 0, navRendered: false,
                   commandDecorations: [], commandColorSignature: '',
                   lastSel: '', searchQuery: '', searchMatch: -1,
-                  serialRows: 24, bootScanTail: '', phaseScanTail: '', linuxConsole: false };
+                  geometryGen: 0, serialRows: 24, serialMode: 'text', bootScanTail: '', phaseScanTail: '', linuxConsole: false };
       view = ctx;
       resetProgress(ctx);
       options.setInputMode(ctx);
@@ -85,7 +86,7 @@
         if (!isCurrent(ctx) || params[0] !== 8 || params.length !== 3) return false;
         var rows = params[1], cols = params[2];
         if (rows < 2 || rows > 200 || cols < 20 || cols > 500) return true;
-        ctx.linuxConsole = true; ctx.serialRows = rows; ctx.serialCols = cols;
+        ctx.linuxConsole = true; ctx.serialMode = 'shell'; ctx.serialRows = rows; ctx.serialCols = cols;
         ctx.term.options.fontSize = DEFAULT_TERMINAL_FONT_SIZE;
         ctx.term.resize(cols, rows); syncTerminalLayers(ctx);
         return true;
@@ -156,8 +157,8 @@
       try { ctx.term.reset(); ctx.term.clear(); } catch (e) {}
       ctx.navRendered = false;
       options.renderCommandNav(ctx);
-      ctx.off = 0; ctx.initialRendered = false;
-      ctx.serialCols = null; ctx.serialRows = 24; ctx.linuxConsole = false;
+      ctx.off = 0; ctx.initialRendered = false; ctx.geometryGen++;
+      ctx.serialCols = null; ctx.serialRows = 24; ctx.serialMode = 'text'; ctx.linuxConsole = false;
       resetProgress(ctx);
       $('d-status').textContent = ' 正在从采集缓冲完整重绘…';
       if (ctx.kind === 'log') {
@@ -171,25 +172,54 @@
       startStream(ctx);
     }
 
-    function syncSerialSize() {
-      var ctx = view;
-      if (!isCurrent(ctx) || ctx.sid !== 'serial' || ctx.readonly) return;
+    function idleSerialPrompt(ctx) {
+      if (!isCurrent(ctx) || ctx.sid !== 'serial' || ctx.readonly || ctx.inputSending
+          || ctx.inputQueue.length || (ctx.progress && ctx.progress.active())) return false;
       var b = ctx.term.buffer.active;
+      if (b.type === 'alternate') return false;
       var line = b.getLine(b.baseY + b.cursorY);
-      var prompt = line && line.translateToString(true);
-      if ((ctx.progress && ctx.progress.active()) || !/^[^\s@]+@[^\s]+[#$]\s*$/.test(prompt || '')) {
-        $('d-status').textContent = ' 请在空闲 Linux shell 提示符处同步尺寸';
+      return !!line && /^(?:[^\s@]+@[^\s]+[#$]|\[[^\]\r\n]*@[^\]\r\n]+\][#$])\s*$/.test(line.translateToString(true));
+    }
+    function requestSerialSize(ctx, automatic) {
+      if (!idleSerialPrompt(ctx) || ctx.serialSizePending) {
+        if (!automatic && isCurrent(ctx)) $('d-status').textContent = ' 请在空闲 Linux shell 提示符处同步尺寸';
         return;
       }
       ctx.linuxConsole = true;
-      if (!ctx.serialCols) ctx.serialRows = 24;
+      if (!ctx.serialCols) ctx.serialMode = 'text';
       fitTerminal(ctx);
       var dimensions = ctx.fit.proposeDimensions();
       if (!dimensions) return;
-      var rows = Math.max(2, Math.min(200, visibleTerminalRows(ctx, dimensions)));
+      var rows = Math.max(2, Math.min(200, dimensions.rows));
       var cols = Math.max(20, Math.min(500, dimensions.cols));
-      // No command injection on attach, window resize, firmware or busy shells.
-      send("stty echoctl rows " + rows + " cols " + cols + " && printf '\\033[8;" + rows + ";" + cols + "t'\r", ctx);
+      var signature = ctx.off + ':' + cols + ':' + rows;
+      if (automatic && signature === ctx.autoSizeAttempt) return;
+      ctx.autoSizeAttempt = signature; ctx.serialSizePending = true;
+      var sizeGeometryGen = ctx.geometryGen;
+      fetch('/api/session-resize', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({key: ctx.key, serial: ctx.serial, sid: 'serial',
+          cols: cols, rows: rows, observed_off: ctx.off, automatic: automatic})})
+        .then(function (r) { return r.json(); }).then(function (d) {
+          if (!isCurrent(ctx)) return;
+          if (ctx.geometryGen !== sizeGeometryGen) return;
+          if (d.geometry) applySerialGeometry(ctx, d.geometry);
+          if (!d.ok && !automatic) $('d-status').textContent = ' 写入失败：' + (d.error || '');
+        }).catch(function (e) {
+          if (!automatic && isCurrent(ctx)) $('d-status').textContent = ' 写入失败：' + e.message;
+        }).finally(function () { ctx.serialSizePending = false; });
+    }
+    function syncSerialSize() { requestSerialSize(view, false); }
+    function scheduleSerialSize(ctx) {
+      clearTimeout(ctx.serialSizeTimer);
+      if (!idleSerialPrompt(ctx)) return;
+      ctx.serialSizeTimer = setTimeout(function () { requestSerialSize(ctx, true); }, 400);
+    }
+    function applySerialGeometry(ctx, geometry) {
+      if (ctx.sid !== 'serial' || !geometry || geometry.rows < 2 || geometry.rows > 200
+          || geometry.cols < 20 || geometry.cols > 500) return;
+      ctx.serialRows = geometry.rows; ctx.serialCols = geometry.cols;
+      ctx.serialMode = 'shell'; ctx.linuxConsole = true;
+      fitTerminal(ctx); syncTerminalLayers(ctx);
     }
 
     function resizeTerm() {
@@ -202,6 +232,7 @@
         pushSize(ctx);
       });
       pushSize(ctx);
+      scheduleSerialSize(ctx);
       options.scheduleCommandNav(ctx);
     }
     function visibleTerminalRows(ctx, dimensions) {
@@ -220,7 +251,7 @@
       // readline, EDK2 and GRUB normally lay out against 80 columns; fitting
       // xterm to a wide browser makes wrapped input and cursor-left disagree
       // about the visual row. Use 80 columns until explicit shell size sync.
-      if (ctx.sid === 'serial') {
+      if (ctx.sid === 'serial' && ctx.serialMode !== 'text') {
         var required = ctx.serialRows || 24;
         var cap = !ctx.linuxConsole && required >= 40 && document.body.classList.contains('terminal-max')
           ? 10 : DEFAULT_TERMINAL_FONT_SIZE;
@@ -259,11 +290,13 @@
       var cell = renderDimensions && renderDimensions.css && renderDimensions.css.cell
         && renderDimensions.css.cell.width;
       if (!viewport || !viewport.clientWidth || !cell) {
-        ctx.fit.fit();
+        var fallback = ctx.fit.proposeDimensions();
+        if (ctx.sid === 'serial' && fallback) ctx.term.resize(fallback.cols, fallback.rows);
+        else ctx.fit.fit();
         return;
       }
       var proposed = ctx.fit.proposeDimensions();
-      var cols = Math.max(2, Math.floor((viewport.clientWidth - 1) / cell));
+      var cols = Math.max(2, Math.floor((viewport.clientWidth - (ctx.sid === 'serial' ? 17 : 1)) / cell));
       var rows = Math.max(1, visibleTerminalRows(ctx, proposed));
       if (ctx.term.cols !== cols || ctx.term.rows !== rows) ctx.term.resize(cols, rows);
     }
@@ -344,7 +377,7 @@
         if (cut < 0) return raw;
         options.clearCommandDecorations(ctx);
         try { ctx.term.reset(); ctx.term.clear(); ctx.term.clearSelection(); } catch (e) {}
-        ctx.serialRows = 24; ctx.serialCols = null;
+        ctx.serialRows = 24; ctx.serialCols = null; ctx.serialMode = 'text'; ctx.geometryGen++;
         ctx.phaseScanTail = '';
         ctx.linuxConsole = false;
         ctx.initialRendered = false;
@@ -362,25 +395,28 @@
         // mode even if firmware never sent a final clear-screen sequence.
         var prefix = ctx.phaseScanTail || '';
         var joined = prefix + raw;
-        var pattern = /\x1b\[(?:([0-9]{1,3})(?:;[0-9]{0,3})?[Hf]|2J)|Linux version [0-9]/g;
-        var match, rows = ctx.serialRows || 24;
+        var pattern = /\x1b\[(?:([0-9]{1,3})(?:;[0-9]{0,3})?[Hf]|2J)|(?:^|\r?\n)(?:\[[^\r\n]{1,40}\]\s*)?Linux version [0-9]/g;
+        var match, rows = ctx.serialRows || 24, oldMode = ctx.serialMode, oldCols = ctx.serialCols;
         while ((match = pattern.exec(joined))) {
           if (match.index + match[0].length <= prefix.length) continue;
-          if (match[0].startsWith('Linux version ')) {
-            ctx.linuxConsole = true;
-            ctx.serialCols = null; rows = 24;
+          if (/Linux version [0-9]/.test(match[0])) {
+            ctx.linuxConsole = true; ctx.geometryGen++;
+            ctx.serialCols = null; ctx.serialMode = 'text'; rows = 24;
             continue;
           }
           if (!match[1]) {
             if (!ctx.serialCols) rows = 24;
+            if (!ctx.linuxConsole) ctx.serialMode = 'firmware';
             try { ctx.term.clearSelection(); } catch (e) {}
             continue;
           }
           var row = Number(match[1] || 1);
-          if (!ctx.linuxConsole && row >= 1 && row <= 200) rows = Math.max(rows, row);
+          if (!ctx.linuxConsole && row >= 1 && row <= 200) {
+            ctx.serialMode = 'firmware'; rows = Math.max(rows, row);
+          }
         }
         ctx.phaseScanTail = joined.slice(-32);
-        if (rows !== ctx.serialRows) {
+        if (rows !== ctx.serialRows || oldMode !== ctx.serialMode || oldCols !== ctx.serialCols) {
           ctx.serialRows = rows;
           fitTerminal(ctx);
           syncTerminalLayers(ctx);
@@ -389,6 +425,8 @@
       function written() {
         if (!isCurrent(ctx)) return;
         ctx.initialRendered = true;
+        if (payload.terminal_geometry && ctx.serialMode !== 'firmware') applySerialGeometry(ctx, payload.terminal_geometry);
+        scheduleSerialSize(ctx);
         if (ctx.archiveSearchQuery) {
           $('terminal-search').value = ctx.archiveSearchQuery;
           ctx.archiveSearchQuery = ''; options.searchTerminal(1);
@@ -408,14 +446,14 @@
         if (raw.length) {
           ctx.term.write(Uint8Array.from(raw, function (c) { return c.charCodeAt(0); }),
             written);
-        } else ctx.initialRendered = true;
+        } else written();
       } else if (payload.data) {
         var text = newestBootCycle(payload.data);
         prepareSerialGeometry(text);
         if (ctx.progress) text = ctx.progress.rewrite(text);
         redraw = /\x1b(?:\[[0-9;?]*[ABCDEFGHJKSTfhl]|[78])/.test(text);
         ctx.term.write(text, written);
-      } else ctx.initialRendered = true;
+      } else written();
     }
 
     function scheduleFullRefresh(ctx) {
@@ -535,6 +573,7 @@
         $('d-status').textContent = ctx.kind === 'log' ? ' 当前是只读归档日志' : ' 当前正在只读查看 agent 会话';
         return;
       }
+      clearTimeout(ctx.serialSizeTimer);
       // Preserve order.  Ordinary keystrokes coalesce during a network round
       // trip; firmware paste deliberately stays one character per write.
       var last = ctx.inputQueue[ctx.inputQueue.length - 1];

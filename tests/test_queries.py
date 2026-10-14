@@ -24,7 +24,7 @@ class QueryTests(unittest.TestCase):
         self.file.write_bytes(self.data)
         self.boot = {'id': 'boot1', 'number': 1, 'size': len(self.data), 'started': '2026-10-01',
                      'parts': [{'file': self.file.name, 'start': 0, 'end': len(self.data)}]}
-        self.device = mock.Mock(key='board', label='board', serial='SN1', dev='/fake/tty')
+        self.device = mock.Mock(key='board', label='board', serial='SN1', dev='/fake/tty', terminal=None)
         self.device.log_files.return_value = [{'name': self.file.name, 'size': len(self.data)}]
         self.device.boot_epochs.return_value = [self.boot]
         self.device.stable_dir.return_value = str(self.root)

@@ -24,7 +24,7 @@ class HandlerTests(unittest.TestCase):
     def setUp(self):
         self.manager = Manager()
         self.manager.store = mock.Mock()
-        self.device = mock.Mock(key='board-key', serial='SN1', dev='/fake/ttyUSB0')
+        self.device = mock.Mock(key='board-key', serial='SN1', dev='/fake/ttyUSB0', terminal=None)
         self.device.sessions_lock = threading.RLock()
         self.device.file_transfer.active = False
         board = Board({'serial': 'SN1', 'label': 'board-key', 'info': {}})

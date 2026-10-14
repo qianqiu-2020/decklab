@@ -11,6 +11,7 @@ import sys
 from .config import ANSI, BY_PATH, HOST_PATTERNS, LOG_ROOT, SCROLLBACK, SSH_IDLE, SSH_LIMIT
 from .transport import write_serial
 from .console_protocol import ConsoleProtocol
+from .terminal_state import SerialTerminalState
 from .serial_log import SerialLog
 from .protocol import PROBE_CMD, RE_LOGIN, RE_PROMPT, SSH_CMD, parse_probe
 if sys.platform == 'win32':
@@ -75,6 +76,7 @@ class Device:
         self.identity = None
         self.present = False
         self.console_tail = ''
+        self.terminal = SerialTerminalState(self)
         self.newline = None            # 收到新提示符后才确认本连接的 CR/LF 策略
         self.probe_info = dict(record['info']) if record else {}
         # preload 可能在没有日志时早退;所有状态必须先初始化。
@@ -317,6 +319,7 @@ class Device:
                 # Local status belongs only in archives, never in the UART bytes.
                 return
             with self.cv:
+                self.terminal.observe(b)
                 self.buf += b
                 if len(self.buf) > SCROLLBACK:
                     drop = len(self.buf) - SCROLLBACK
@@ -334,6 +337,8 @@ class Device:
         self.log.close()
 
     def _write(self, text):
+        with self.cv:
+            self.terminal.input_pending = True
         with self.write_lock:
             lease = self.transactions.current
             if lease:
@@ -356,7 +361,10 @@ class Device:
         if self.file_transfer.active:
             return False, '串口文件传输中，请完成或取消后再输入'
         try:
-            with self.transactions.begin('input', 5):
+            with self.transactions.begin('input', 5) as lease:
+                with self.cv:
+                    self.terminal.input_pending = True
+                    self.terminal.authority = (lease.actor, lease.client_id)
                 return self._write(text)
         except TransactionError as error:
             return False, str(error)

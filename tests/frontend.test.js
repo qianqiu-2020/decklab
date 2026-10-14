@@ -1145,6 +1145,26 @@ test('terminal search selects matches and wraps in both directions', async () =>
   assert.equal(terminal.options.theme.selectionBackground, '#E6B45D');
 });
 
+test('automatic serial resize waits for idle prompt, cancels on typing and uses backend arbitration', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  assert.equal(h.timer(400), undefined);
+  h.take('/api/session').resolve(readResponse('A', 'root@ubuntu:~# '));
+  await drain(); terminal.flush();
+  assert.ok(h.timer(400));
+  terminal.data('u');
+  assert.equal(h.timer(400), undefined, 'typing must cancel queued setup');
+  const h2 = await setup(); const t2 = h2.select('A');
+  h2.take('/api/session').resolve(readResponse('A', 'root@ubuntu:~# '));
+  await drain(); t2.flush();
+  h2.fire(h2.timer(400)[0]);
+  const request = h2.take('/api/session-resize');
+  assert.equal(request.body.automatic, true);
+  assert.ok(request.body.client_id);
+  request.resolve({ok: true, skipped: true, geometry: {cols: 100, rows: 30}});
+  await drain();
+  assert.equal(t2.cols, 100); assert.equal(t2.rows, 30, 'viewers follow the shared board size');
+});
+
 test('serial size sync requires an idle prompt and shared output updates every viewer', async () => {
   const h = await setup(); const terminal = h.select('A');
   h.get('b-serial-size').click();
@@ -1152,9 +1172,11 @@ test('serial size sync requires an idle prompt and shared output updates every v
   h.take('/api/session').resolve(readResponse('A', 'root@ubuntu:~# '));
   await drain(); terminal.flush();
   h.get('b-serial-size').click();
-  assert.equal(h.sends().length, 1);
-  assert.equal(h.sends()[0].body.data, "stty echoctl rows 42 cols 140 && printf '\\033[8;42;140t'\r");
-  assert.equal(terminal.cols, 80, 'wait for successful stty output before resizing');
+  const resize = h.take('/api/session-resize');
+  assert.equal(resize.body.cols, 140); assert.equal(resize.body.rows, 42);
+  assert.equal(resize.body.automatic, false);
+  assert.equal(resize.body.observed_off, 15);
+  resize.resolve({ok: true, pending: true}); await drain();
   terminal.write('\x1b[8;42;140t'); terminal.flush();
   assert.equal(terminal.cols, 140);
   assert.equal(terminal.rows, 42);
@@ -1163,7 +1185,7 @@ test('serial size sync requires an idle prompt and shared output updates every v
   h.take('/api/session').resolve(readResponse('A', 'root@ubuntu:~# \x1b[8;42;140t'));
   await drain(); terminal.flush();
   assert.equal(terminal.cols, 140, 'shared resize marker survives replay');
-  assert.ok(h.sends().length === 1, 'replay must not write to the board');
+  assert.equal(h.sends().length, 0, 'replay must not type shell commands');
   h.fire(h.timer(10)[0]);
   h.take('/api/session').resolve(readResponse('A', '\x1b[2J', 200));
   await drain(); terminal.flush();
@@ -1172,7 +1194,7 @@ test('serial size sync requires an idle prompt and shared output updates every v
   h.fire(h.timer(10)[0]);
   h.take('/api/session').resolve(readResponse('A', 'Linux version 6.18.0\r\n', 300));
   await drain(); terminal.flush();
-  assert.equal(terminal.cols, 80, 'a new kernel boot discards shell size synchronization');
+  assert.equal(terminal.cols, 140, 'a new kernel boot discards shell size synchronization');
 });
 
 test('APT preserves arrow input and refuses shell commands while installing', async () => {
@@ -1186,9 +1208,9 @@ test('APT preserves arrow input and refuses shell commands while installing', as
   assert.equal(h.sends()[0].body.data, '\x1b[A', 'preserve normal terminal passthrough');
 });
 
-test('live serial stays at firmware-compatible 80 columns and redraw replays from zero', async () => {
+test('early serial fills the available width and redraw replays from zero', async () => {
   const h = await setup(); const terminal = h.select('A');
-  assert.equal(terminal.cols, 80);
+  assert.equal(terminal.cols, 140);
   assert.equal(terminal.rows, 42, 'height should still follow the available terminal area');
   const firstRead = h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1);
   h.get('b-redraw').click();

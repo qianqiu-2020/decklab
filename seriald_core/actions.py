@@ -248,6 +248,16 @@ class DeviceActions:
                 rows = int(payload.get('rows') or 0)
             except (TypeError, ValueError, OverflowError):
                 return response(400, {'error': 'bad cols/rows'})
+            if sid == 'serial':
+                if (not 20 <= cols <= 500 or not 2 <= rows <= 200
+                        or type(payload.get('observed_off')) is not int
+                        or type(payload.get('automatic', False)) is not bool):
+                    return response(400, {'error': 'bad serial terminal dimensions or offset'})
+                try:
+                    result = d.terminal.configure(cols, rows, payload['observed_off'], payload.get('automatic', False))
+                    return response(200 if result['ok'] else 503, result)
+                except TransactionError as error:
+                    return response(error.status, {'ok': False, 'code': error.code, 'error': str(error)})
             s = d.get_session(sid)
             if not s:
                 return response(404, {'error': 'no such session'})

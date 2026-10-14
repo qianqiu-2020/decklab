@@ -40,6 +40,10 @@ class DemoDevice(Device):
         return 'root@%s:~# ' % self.hostname
 
     def command(self, command):
+        if command.startswith('if command -v infocmp '):
+            dimensions = re.search(r'stty echoctl(?: -ixon -ixoff)? rows (\d+) cols (\d+)', command)
+            if dimensions:
+                return '\x1b[8;%s;%st' % dimensions.groups(), 0
         try:
             words = shlex.split(command)
         except ValueError:
