@@ -73,7 +73,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                'data_b64': base64.b64encode(data).decode('ascii')}
                     if sid == 'serial':
                         payload['dev'] = d.dev
-                        payload['terminal_geometry'] = getattr(getattr(d, 'terminal', None), 'geometry', None)
+                        terminal = getattr(d, 'terminal', None)
+                        payload['terminal_geometry'] = getattr(terminal, 'geometry', None)
+                        payload['terminal_initial_geometry'] = terminal.geometry_at(new_off - len(data)) if terminal else None
                         payload['input_owner'] = owner
                         last_owner = owner
                     else:

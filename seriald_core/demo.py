@@ -41,6 +41,8 @@ class DemoDevice(Device):
 
     def command(self, command):
         if command.startswith('if command -v infocmp '):
+            return '', 0
+        if command.startswith('stty echoctl'):
             dimensions = re.search(r'stty echoctl(?: -ixon -ixoff)? rows (\d+) cols (\d+)', command)
             if dimensions:
                 return '\x1b[8;%s;%st' % dimensions.groups(), 0

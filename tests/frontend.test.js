@@ -115,9 +115,10 @@ function harness(options = {}) {
     write(data, callback) { this.queued.push({ data, callback }); }
     flush() {
       // 故意允许 dispose 后仍执行旧解析器，验证回调自身也能拦住 CSI 6n 应答。
-      for (const { data, callback } of this.queued.splice(0)) {
+      while (this.queued.length) for (const { data, callback } of this.queued.splice(0)) {
         const text = typeof data === 'string' ? data : this.decoder.decode(data, { stream: true });
         this.parsed += text;
+        for (const match of text.matchAll(/\x1b\[>(\d+)z/g)) this.csi.get('>z')?.([Number(match[1])]);
         for (const match of text.matchAll(/\x1b\[8;(\d+);(\d+)t/g))
           this.csi.get('t')?.([8, Number(match[1]), Number(match[2])]);
         if (text.includes('\x1b[6n') && !this.csi.get('n')?.([6])) this.data('\x1b[1;184R');
@@ -1257,22 +1258,38 @@ test('full clear lets GRUB leave the previous EDK2 50-row screen', async () => {
   h.take('/api/session').resolve(readResponse('A',
     '\x1b[0m\x1b[37m\x1b[40m\x1b[2J\x1b[01;01H\x1b[?25l', 54));
   await drain();
-  assert.equal(terminal.rows, 42, 'a new lower screen must discard EDK2 logical height');
+  assert.equal(terminal.rows, 24, 'a new lower screen must discard EDK2 logical height');
   terminal.flush(); await drain();
   assert.ok(terminal.refreshes > 0);
+});
+
+test('serial replay queues geometry changes until prior bytes have parsed', async () => {
+  const h = await setup({sse: true}); const terminal = h.select('A'); const stream = h.streams.at(-1);
+  const first = readResponse('A', 'first packet\r\n', 14);
+  first.terminal_initial_geometry = first.terminal_geometry = {cols: 80, rows: 24};
+  stream.emit(first);
+  const second = readResponse('A', '\x1b[8;54;200tsecond packet\r\n', 50);
+  second.terminal_initial_geometry = {cols: 80, rows: 24};
+  second.terminal_geometry = {cols: 200, rows: 54};
+  stream.emit(second);
+  assert.equal(terminal.cols, 80, 'later frames must not resize an unparsed earlier frame');
+  assert.equal(terminal.rows, 24);
+  terminal.flush();
+  assert.equal(terminal.cols, 200); assert.equal(terminal.rows, 54);
+  assert.ok(terminal.parsed.indexOf('first packet') < terminal.parsed.indexOf('second packet'));
 });
 
 test('Linux boot restores the normal serial font after an uncleared EDK2 screen', async () => {
   const h = await setup(); const terminal = h.select('A');
   h.take('/api/session').resolve(readResponse('A', '\x1b[50;27HEDK2', 18));
-  await drain();
+  await drain(); terminal.flush();
   assert.equal(terminal.rows, 50);
   const poll = h.timer(10); assert.ok(poll); h.fire(poll[0]);
   h.take('/api/session').resolve(readResponse('A', '\r\n[    0.000000] Linux ver', 46));
-  await drain();
+  await drain(); terminal.flush();
   const next = h.timer(10); assert.ok(next); h.fire(next[0]);
   h.take('/api/session').resolve(readResponse('A', 'sion 6.18.3+\r\n\x1b[50;01Hfedora login:', 90));
-  await drain();
+  await drain(); terminal.flush();
   assert.equal(terminal.rows, 42);
   assert.equal(terminal.options.fontSize, 14.5);
 });

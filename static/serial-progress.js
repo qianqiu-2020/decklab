@@ -3,11 +3,12 @@
 (function (global) {
   'use strict';
   function create(options) {
-    var pending = '', candidate = [], sourceRows = 0, targetRows = 0, opaque = false, opaqueEscape = false;
+    var pending = '', candidate = [], sourceRows = 0, knownRows = 0, targetRows = 0, opaque = false, opaqueEscape = false;
     function rewrite(raw) {
       pending += raw;
+      if (!sourceRows && !knownRows && options.sourceRows) knownRows = options.sourceRows() || 0;
       var output = '';
-      if (sourceRows && !opaque && targetRows !== options.rows()) {
+      if (!options.canonical && sourceRows && !opaque && targetRows !== options.rows()) {
         targetRows = options.rows();
         output += '\x1b7\x1b[0;' + (targetRows - 1) + 'r\x1b8';
       }
@@ -21,10 +22,15 @@
         if (candidate.length === 3 && token === '\x1b[1A') {
           var bottom = Number(candidate[1].slice(4, -1));
           if (bottom >= 2 && bottom <= 199) {
-            var ending = sourceRows && bottom === sourceRows;
+            var ending = sourceRows ? bottom === sourceRows : options.canonical && knownRows && bottom === knownRows;
             if (!ending) {
-              sourceRows = bottom + 1;
-              if (options.onStart) options.onStart();
+              sourceRows = bottom + 1; knownRows = sourceRows;
+              if (!options.canonical && options.onStart) options.onStart();
+            }
+            if (options.canonical) {
+              output += (ending ? '' : '\x1b[>' + sourceRows + 'z') + candidate.join('') + token;
+              if (ending) sourceRows = 0;
+              candidate = []; return;
             }
             targetRows = options.rows();
             output += '\x1b7\x1b[0;' + (options.rows() - (ending ? 0 : 1)) + 'r\x1b8\x1b[1A';
@@ -33,12 +39,14 @@
           }
         }
         flush();
+        var geometry = /^\x1b\[8;([0-9]{1,3});[0-9]{1,3}t$/.exec(token);
+        if (geometry) knownRows = Number(geometry[1]);
         var position = /^\x1b\[([0-9]{1,3});0f$/.exec(token);
-        if (sourceRows && position && Number(position[1]) === sourceRows) {
+        if (!options.canonical && sourceRows && position && Number(position[1]) === sourceRows) {
           output += '\x1b[' + options.rows() + ';0f';
         } else {
           output += token;
-          if (token === '\x1b[r' || token === '\x1bc') sourceRows = 0;
+          if (token === '\x1b[r' || token === '\x1bc') { sourceRows = 0; if (token === '\x1bc') knownRows = 0; }
         }
       }
       while (pending) {

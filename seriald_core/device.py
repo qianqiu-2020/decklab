@@ -325,6 +325,7 @@ class Device:
                     drop = len(self.buf) - SCROLLBACK
                     del self.buf[:drop]
                     self.base += drop
+                self.terminal.prune(self.base)
                 if received:
                     self.bytes += len(b)
                     self.last_rx = time.time()

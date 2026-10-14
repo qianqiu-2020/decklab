@@ -10,6 +10,7 @@ class SerialTerminalState:
         self.device = device
         self.tail = b''
         self.geometry = None
+        self.history = []
         self.authority = None
         self.attempted = False
         self.input_pending = False
@@ -17,7 +18,8 @@ class SerialTerminalState:
     def observe(self, data):
         joined = self.tail + data
         previous = len(self.tail)
-        pattern = rb'\x1b\[8;(\d{1,3});(\d{1,3})t|(?:^|[\r\n])(?:\[[^\r\n]{1,40}\]\s*)?Linux version \d|\x00sys:\s*0x[0-9a-f]+|(?:^|[\r\n])U-Boot(?: SPL)? \d{4}\.\d{2}'
+        start = self.device.base + len(self.device.buf)
+        pattern = rb'\x1b\[8;(\d{1,3});(\d{1,3})t|(?:^|[\r\n])(?:\[[^\r\n]{1,40}\]\s*)?Linux version \d|(?:^|[\r\n])\[\s*0\.000000\] |\x00sys:\s*0x[0-9a-f]+|(?:^|[\r\n])U-Boot(?: SPL)? \d{4}\.\d{2}'
         for match in re.finditer(pattern, joined):
             if match.end() <= previous:
                 continue
@@ -25,13 +27,34 @@ class SerialTerminalState:
                 rows, cols = int(match[1]), int(match[2])
                 if 2 <= rows <= 200 and 20 <= cols <= 500:
                     self.geometry = {'rows': rows, 'cols': cols}
+                    self.history.append((start + match.end() - previous, self.geometry))
             else:
                 self.geometry = None
+                self.history.append((start + match.end() - previous, None))
                 self.authority = None
                 self.attempted = False
         self.tail = joined[-256:]
         if self.prompt():
             self.input_pending = False
+
+    def geometry_at(self, offset):
+        geometry = None
+        for position, value in self.history:
+            if position > offset:
+                break
+            geometry = value
+        return geometry
+
+    def prune(self, base):
+        # Retain the state immediately before the first captured byte, plus all
+        # changes inside the buffer. Every viewer can replay the same timeline.
+        prior = -1
+        for index, (position, _) in enumerate(self.history):
+            if position > base:
+                break
+            prior = index
+        if prior > 0:
+            self.history = self.history[prior:]
 
     def prompt(self):
         tail = ANSI.sub('', self.tail.decode('utf-8', 'replace')).split('\n')[-1].split('\r')[-1]
@@ -52,19 +75,25 @@ class SerialTerminalState:
                                   or self.attempted and self.geometry is None):
                     return {'ok': True, 'skipped': True, 'geometry': self.geometry}
                 target = {'cols': cols, 'rows': rows}
-                if self.geometry == target and self.attempted:
+                if automatic and self.geometry == target and self.attempted:
                     return {'ok': True, 'skipped': True, 'geometry': self.geometry}
+                setup_environment = not self.attempted or not automatic
                 self.authority = client
                 self.attempted = True
                 self.input_pending = True
+                if self.geometry is None:
+                    self.history.append((d.base + len(d.buf), {'cols': 80, 'rows': 24}))
             # Keep baud/parity/raw modes untouched. TERM is changed only if the
             # board actually has the matching terminfo. No extra Enter/probe.
             flow = ' -ixon -ixoff' if d.profile.serial.flow_control != 'xonxoff' else ''
-            command = ("if command -v infocmp >/dev/null 2>&1 && infocmp xterm-256color >/dev/null 2>&1; "
-                       "then export TERM=xterm-256color; fi; "
-                       "case ${{LC_ALL:-${{LC_CTYPE:-$LANG}}}} in *UTF-8*|*utf8*|*UTF8*) stty iutf8;; esac; "
-                       "stty echoctl{flow} rows {rows} cols {cols} && "
-                       "printf '\\033[8;{rows};{cols}t'").format(flow=flow, rows=rows, cols=cols)
+            newline = d.newline or '\r'
+            resize = ("stty echoctl{flow} rows {rows} cols {cols} && "
+                      "printf '\\033[8;{rows};{cols}t'").format(flow=flow, rows=rows, cols=cols)
+            environment = ("if command -v infocmp >/dev/null 2>&1 && infocmp xterm-256color >/dev/null 2>&1; "
+                           "then export TERM=xterm-256color; fi; "
+                           "case ${LC_ALL:-${LC_CTYPE:-$LANG}} in *UTF-8*|*utf8*|*UTF8*) stty iutf8;; esac")
+            # Establish geometry before echoing the longer environment setup.
+            command = resize + newline + environment if setup_environment else resize
             ok, error = d._write(command + (d.newline or '\r'))
             if ok:
                 d.record_input('serial', actor, command + '\r')

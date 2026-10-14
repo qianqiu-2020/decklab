@@ -62,7 +62,10 @@ for split UTF-8 characters. `off` is the position after returned bytes; if
 `off - decoded_length` exceeds the requested cursor, output was evicted from
 scrollback. CLI reports this as `gap`. SSE event IDs are byte offsets, with a JSON
 packet in `data:` and comment heartbeats. Serial packets also carry nullable `terminal_geometry` (`cols`, `rows`), retained
-beyond live-buffer eviction. Serial SSE packets also carry
+beyond live-buffer eviction. `terminal_initial_geometry` describes dimensions
+before the first returned byte; apply it before replay, then process in-stream
+resize markers. Do not use the final geometry to reinterpret earlier controls.
+Serial SSE packets also carry
 `input_owner` (an owner object or `null`). Ownership changes can produce an empty
 `data_b64` packet with the **same `off`**; apply metadata before deduplicating
 output bytes. Quiet serial streams check this state within about one second;

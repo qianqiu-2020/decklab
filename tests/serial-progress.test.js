@@ -29,3 +29,18 @@ assert.equal(resize.rewrite('\x1b[24;0fbar'), '\x1b7\x1b[0;54r\x1b8\x1b[55;0fbar
 resize.rewrite(end);
 assert.equal(resize.rewrite('\x1b[24;0fplain'), '\x1b[24;0fplain');
 console.log('Serial progress stream tests passed');
+
+const canonicalExpected = raw.replace(begin, '\x1b[>24z' + begin);
+for (let split = 0; split <= raw.length; split++) {
+  const mapper = window.SerialdSerialProgress.create({rows: () => 54, canonical: true});
+  assert.equal(mapper.rewrite(raw.slice(0, split)) + mapper.rewrite(raw.slice(split)), canonicalExpected,
+    'canonical replay must preserve source coordinates across all frame boundaries');
+}
+
+const partial = window.SerialdSerialProgress.create({canonical: true, sourceRows: () => 54});
+const finishOnly = '\x1b7\x1b[0;54r\x1b8\x1b[1A\x1b[Jroot@ubuntu:~# ';
+assert.equal(partial.rewrite(finishOnly), finishOnly, 'an evicted APT start must not turn its end into a new 55-row progress region');
+assert.equal(partial.active(), false);
+const transition = window.SerialdSerialProgress.create({canonical: true, sourceRows: () => 24});
+assert.equal(transition.rewrite('\x1b[8;54;208t' + finishOnly), '\x1b[8;54;208t' + finishOnly);
+assert.equal(transition.active(), false);

@@ -10,6 +10,7 @@ const root = path.resolve(__dirname, '..');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'seriald-browser-'));
 const posts = [], errors = [];
 let serialPayload = null;
+const serialLiveChunks = [];
 const fixtures = [
   { key: 'musepi2', serial: '5b9d4a0a6f5e25a8', state: 'online', alive: true, dev: '/dev/ttyUSB0', hostname: 'bianbu-k3' },
   { key: 'riscv-118', serial: '26abd51e5bc2dbe1', state: 'offline', alive: false, last_dev: '/dev/ttyUSB4' },
@@ -28,15 +29,15 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   res.setHeader('Cache-Control', 'no-store');
   const json = data => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); };
-  if (req.method === 'POST') { posts.push(u.pathname); json({ ok: false, error: 'read-only fixture' }); return; }
+  if (req.method === 'POST') { posts.push(u.pathname); json(u.pathname === '/api/session-send' && serialPayload ? {ok:true} : { ok: false, error: 'read-only fixture' }); return; }
   if (u.pathname === '/api/devices') return json({ devices: fixtures });
   if (u.pathname === '/api/session') {
     const bytes = u.searchParams.get('off') === '0' ? Buffer.from(serialPayload ||
       'root@bianbu:~# \x1b[6n\x1b[?6n\x1b[c\x1b]11;?\x07'.repeat(15)
       + Array.from({length:80},(_,i)=>'\r\nserial line '+i).join('')
-      + '\x1b[2J\x1b[50;1Hlast firmware row') : Buffer.alloc(0);
+      + '\x1b[2J\x1b[50;1Hlast firmware row') : Buffer.from(serialLiveChunks.shift() || '');
     return json({ key: u.searchParams.get('key'), sid: u.searchParams.get('sid'), alive: true,
-      off: 4096, data_b64: bytes.toString('base64') });
+      off: u.searchParams.get('off') === '0' ? 4096 : Number(u.searchParams.get('off')) + bytes.length, data_b64: bytes.toString('base64') });
   }
   if (u.pathname === '/api/sessions') return json({ sessions: [
     { sid: 'serial', kind: 'serial' }, { sid: 'ssh123abc', kind: 'ssh', actor: 'claude-code', ip: '10.0.90.42' }] });
@@ -367,12 +368,27 @@ let chrome, ws;
   assert.ok(await evaluate('document.querySelector("#d-term .xterm-viewport").scrollTop > 0'),
     'clicking the visible serial scrollbar must move through history: ' + JSON.stringify(track));
   assert.deepEqual(errors,[]);
-  // Reproduce apt's ioctl-sized 80x24 terminal: save/restore cursor, reserve
-  // the final row, redraw progress, then restore the full scroll region.
-  serialPayload = 'Linux version 6.18.0\r\n'
+  // Live handoff without Linux version: clear all old firmware cells/attributes
+  // on the earliest kernel clock, including an incomplete header across reads.
+  await evaluate("new Promise(resolve => testTerm.write(String.fromCharCode(27)+'[47m'+String.fromCharCode(27)+'[2J'+String.fromCharCode(27)+'[50;1Hlast firmware row', resolve))");
+  assert.notEqual(await evaluate('testTerm.buffer.active.getLine(testTerm.buffer.active.baseY).getCell(0).getBgColorMode()'),0,'fixture must actually contain a firmware background');
+  serialLiveChunks.push('\r\n[    0.000');
+  serialLiveChunks.push('000] SBI DBCN extension detected\r\n[    0.000000] earlycon: sbi0 enabled\r\n');
+  for(let n=0;n<40 && !await evaluate(`testTerm.buffer.active.getLine(0)?.translateToString().includes('SBI DBCN')`);n++)await delay(50);
+  assert.ok(await evaluate(`testTerm.buffer.active.getLine(0)?.translateToString().includes('SBI DBCN')`));
+  assert.equal(await evaluate('testTerm.buffer.active.getLine(0).getCell(0).getBgColorMode()'),0,'firmware background must reset');
+  assert.ok(await evaluate(`Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(i)?.translateToString()||'').every(s=>!s.includes('last firmware row'))`));
+  await evaluate(`document.querySelector('#d-status').textContent=' 正在从采集缓冲完整重绘…'`);
+  await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+  await delay(100);
+  const sourceRows=await evaluate(`(() => {const v=testTerm.element.querySelector('.xterm-viewport');return Math.floor((v.clientHeight-2)/testTerm._core._renderService.dimensions.css.cell.height);})()`), sourceCols=await evaluate(`(() => {const v=testTerm.element.querySelector('.xterm-viewport');return Math.floor((v.clientWidth-17)/testTerm._core._renderService.dimensions.css.cell.width);})()`);
+  const preMetrics=await evaluate(`({font:testTerm.options.fontSize,cols:testTerm.cols,rows:testTerm.rows,cell:testTerm._core._renderService.dimensions.css.cell,width:testTerm.element.querySelector('.xterm-viewport').clientWidth,height:testTerm.element.querySelector('.xterm-viewport').clientHeight})`);
+  assert.ok(sourceRows>24,'kernel text retains the large viewport');
+  // A board already synchronized to the primary window now starts APT.
+  serialPayload = 'Linux version 6.18.0\r\n' + '\x1b[8;'+sourceRows+';'+sourceCols+'t'
     + Array.from({length:80},(_,i)=>'apt preamble '+i+'\r\n').join('')
-    + '\n\x1b7\x1b[0;23r\x1b8\x1b[1A'
-    + '\x1b7\x1b[24;0fProgress: [ 88%]\x1b8'
+    + '\n\x1b7\x1b[0;'+(sourceRows-1)+'r\x1b8\x1b[1A'
+    + '\x1b7\x1b['+sourceRows+';0fProgress: [ 88%]\x1b8'
     + Array.from({length:40},(_,i)=>'Unpacking package '+i+'\r\n').join('');
   await evaluate('document.querySelector("#b-redraw").click()');
   for(let n=0;n<30 && !await evaluate(`Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+i)?.translateToString()||'').some(s=>s.includes('Progress:'))`);n++)await delay(100);
@@ -387,18 +403,29 @@ let chrome, ws;
   assert.ok(posts.length > postsBefore,'APT arrows retain normal board passthrough');
   await evaluate("new Promise(resolve => testTerm.write('^[[A^[[B', resolve))");
   assert.equal(await evaluate('testTerm.buffer.active.cursorY'),cursorBefore,'visible arrow echo must not move stdout cursor');
-  serialPayload += '\n\x1b7\x1b[0;24r\x1b8\x1b[1A\x1b[J'
+  serialPayload += '\n\x1b7\x1b[0;'+sourceRows+'r\x1b8\x1b[1A\x1b[J'
     + Array.from({length:30},(_,i)=>'post-install line '+i+'\r\n').join('')
     + 'root@ubuntu:~# ';
   await evaluate('document.querySelector("#b-redraw").click()');
   for(let n=0;n<30 && !await evaluate(`testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+testTerm.buffer.active.cursorY)?.translateToString().includes('root@ubuntu')`);n++)await delay(100);
-  const aptScreen=await evaluate(`(() => {const b=testTerm.buffer.active;return {rows:testTerm.rows,fontSize:testTerm.options.fontSize,cursor:b.cursorY,lines:Array.from({length:testTerm.rows},(_,i)=>b.getLine(b.baseY+i)?.translateToString())};})()`);
-  assert.equal(aptScreen.fontSize,14.5,'APT must not shrink the terminal font');
+  const aptScreen=await evaluate(`(() => {const b=testTerm.buffer.active;return {cols:testTerm.cols,rows:testTerm.rows,fontSize:testTerm.options.fontSize,cursor:b.cursorY,lines:Array.from({length:testTerm.rows},(_,i)=>b.getLine(b.baseY+i)?.translateToString())};})()`);
+  assert.equal(aptScreen.fontSize,14.5,'APT must not shrink the terminal font: '+JSON.stringify({sourceRows,sourceCols,preMetrics,current:await evaluate(`({font:testTerm.options.fontSize,cols:testTerm.cols,rows:testTerm.rows,cell:testTerm._core._renderService.dimensions.css.cell,width:testTerm.element.querySelector('.xterm-viewport').clientWidth,height:testTerm.element.querySelector('.xterm-viewport').clientHeight})`)}));
   assert.ok(aptScreen.rows > 24,'serial must retain the large browser viewport');
   assert.equal(aptScreen.cursor,aptScreen.rows-1,'ordinary output must return to the bottom row after apt');
   assert.ok(aptScreen.lines[aptScreen.rows-1].includes('root@ubuntu:~#'));
   assert.ok(aptScreen.lines[aptScreen.rows-2].includes('post-install line 29'));
   assert.ok(!aptScreen.lines.some(line=>line.includes('Progress:')),'finished progress must not remain in the middle');
+  // Re-open the same capture in a shorter/narrower desktop window. The logical
+  // screen and cursor must be identical; only font pixels adapt to its viewport.
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1100,height:620,deviceScaleFactor:1,mobile:false});
+  await evaluate('document.querySelector(\'[data-key="milkv2"]\').click()');
+  for(let n=0;n<40 && !await evaluate(`testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+testTerm.buffer.active.cursorY)?.translateToString().includes('root@ubuntu')`);n++)await delay(50);
+  const observerScreen=await evaluate(`(() => {const b=testTerm.buffer.active;return {cols:testTerm.cols,rows:testTerm.rows,cursor:b.cursorY,lines:Array.from({length:testTerm.rows},(_,i)=>b.getLine(b.baseY+i)?.translateToString())};})()`);
+  assert.deepEqual(observerScreen,{cols:aptScreen.cols,rows:aptScreen.rows,cursor:aptScreen.cursor,lines:aptScreen.lines},'shared replay must not depend on browser resolution');
+  const bottomFits=await evaluate(`(() => {const v=testTerm.element.querySelector('.xterm-viewport');const c=testTerm._core._renderService.dimensions.css.cell;return {painted:testTerm.rows*c.height,visible:v.clientHeight,columns:testTerm.cols*c.width,width:v.clientWidth-16};})()`);
+  assert.ok(bottomFits.painted <= bottomFits.visible && bottomFits.columns <= bottomFits.width,'last row and rightmost column must remain visible: '+JSON.stringify(bottomFits));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
+  await delay(100);
   // Shared stty marker: use real viewport measurements, then check wrapping.
   await evaluate('if(!document.querySelector("#d-records").hidden)document.querySelector("#b-records-close").click()');
   await delay(100);

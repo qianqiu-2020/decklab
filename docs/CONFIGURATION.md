@@ -74,13 +74,19 @@ No historical prompt or attachment alone triggers board input.
 One viewer coordinates automatic sizing per connection; other viewers follow
 the shared geometry. The actual input writer, explicit **Sync size**, or input ownership changes the
 coordinator. Resize requests wait for the next idle prompt during a running
-program. Geometry survives buffer eviction and resets on detected reboot.
+program. Geometry survives buffer eviction and resets on detected reboot. Replay starts
+with the geometry at its first byte and applies subsequent changes in order.
+Smaller viewing windows scale the same logical grid, including its bottom row;
+they do not rewrite cursor coordinates or force their own row count.
 
 Shell setup enables `echoctl`, UTF-8 editing in UTF-8 locales, and xterm-256color
 only when board terminfo is available. It disables XON/XOFF only for profiles
 without software flow control. Baud, parity and application raw modes stay intact.
-APT's reserved progress row is mapped for display only. Captured bytes remain
-unchanged; SSH negotiates dimensions through its own PTY.
+APT keeps its source coordinates. On the earliest kernel timestamp, the viewer
+clears the preceding firmware screen, attributes and cursor/scroll modes. Setup
+sends the short resize command before environment configuration; automatic later
+resizes omit the longer environment command. Captured bytes remain unchanged;
+SSH negotiates dimensions through its own PTY.
 
 Built-in defaults follow the SpacemiT K3/Bianbu development workflow: 115200,
 8N1, no flow control, console/SSH `root` with password `bianbu`, Linux probes

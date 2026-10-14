@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.5.7
+
+- Clear firmware background, cursor and scroll modes on the earliest kernel
+  timestamp, including split headers without a Linux version banner.
+- Replay the shared UART geometry from the first captured byte, with subsequent
+  resize and APT controls applied in stream order. Smaller viewers scale pixels
+  instead of changing logical rows or remapping progress coordinates.
+- Fit the complete shared grid to the real viewport with bottom/scrollbar
+  clearance. Establish board dimensions before echoing environment setup; run
+  the longer environment command only initially or on explicit retry.
+
 ## 1.5.6
 
 - Fit early boot and kernel text to the viewport; retain firmware menu coordinates

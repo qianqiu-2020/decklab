@@ -61,6 +61,22 @@ class SerialTerminalTests(unittest.TestCase):
         self.feed(b'\r\nInstalling packages...')
         self.assertEqual(self.resize().status, 409)
 
+    def test_replay_geometry_is_selected_at_the_first_byte_not_latest_state(self):
+        from seriald_core.queries import SessionQueries
+        self.feed(b'root@ubuntu:~# ')
+        self.resize()
+        old_start = self.device.now_off()
+        self.feed(b'echoed setup\r\n\x1b[8;42;140t')
+        new_start = self.device.now_off()
+        self.feed(b'root@ubuntu:~# \x1b[8;54;200tmore output')
+        first = SessionQueries().execute('session', {'off': old_start}, self.device).payload
+        second = SessionQueries().execute('session', {'off': new_start}, self.device).payload
+        self.assertEqual(first['terminal_initial_geometry'], {'cols': 80, 'rows': 24})
+        self.assertEqual(second['terminal_initial_geometry'], {'cols': 140, 'rows': 42})
+        self.assertEqual(first['terminal_geometry'], {'cols': 200, 'rows': 54})
+        self.device.terminal.prune(new_start)
+        self.assertEqual(self.device.terminal.geometry_at(new_start), {'cols': 140, 'rows': 42})
+
     def test_pending_input_ownership_and_transactions_block_setup(self):
         self.feed(b'root@ubuntu:~# ')
         self.device.terminal.input_pending = True

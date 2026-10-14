@@ -53,7 +53,9 @@ class SessionQueries:
                   'data': data.decode('utf-8', 'replace')}
         if sid == 'serial':
             result['dev'] = device.dev
-            result['terminal_geometry'] = getattr(getattr(device, 'terminal', None), 'geometry', None)
+            terminal = getattr(device, 'terminal', None)
+            result['terminal_geometry'] = getattr(terminal, 'geometry', None)
+            result['terminal_initial_geometry'] = terminal.geometry_at(offset - len(data)) if terminal else None
         else:
             result['ip'] = stream.ip
         if action == 'serial':
