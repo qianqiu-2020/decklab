@@ -52,6 +52,7 @@ class SerialFileTransfer:
         self._opening_connection = None
         self._opening_actor = 'web'
         self._opening_client = ''
+        self._opening_visibility = None
         self.lock = threading.RLock()
         self.state = None
         self._expiry_timer = None
@@ -61,8 +62,11 @@ class SerialFileTransfer:
         with self.lock:
             return self.state is not None
 
-    def _run(self, command, timeout=45):
+    def _run(self, command, timeout=45, keep_private=False):
         device = self.device
+        visibility = getattr(device, 'visibility', None)
+        token = None
+        ok = False
         try:
             state = self.state
             with self.transactions.begin('file-transfer', timeout,
@@ -71,8 +75,17 @@ class SerialFileTransfer:
                     expected_connection=state['connection_id'] if state else self._opening_connection):
                 device.probing = True
                 try:
+                    if visibility:
+                        token = visibility.begin('file-transfer')
                     ok, output = device._run_cmd_locked(command, timeout, ensure_shell=state is None)
+                    if visibility:
+                        visibility.report(output, command)
                 finally:
+                    if visibility:
+                        if keep_private and ok:
+                            self._opening_visibility = token
+                        else:
+                            visibility.finish(token)
                     device.probing = False
         except TransactionError as error:
             raise TransferError(str(error), 502 if error.code == 'timeout' else error.status) from None
@@ -99,6 +112,8 @@ class SerialFileTransfer:
         if self._expiry_timer is not None:
             self._expiry_timer.cancel()
             self._expiry_timer = None
+        if self.state and getattr(self.device, 'visibility', None):
+            self.device.visibility.finish(self.state.get('visibility_token'))
         self.state = None
 
     def release_local(self, transfer_id, connection_id):
@@ -177,6 +192,8 @@ class SerialFileTransfer:
             self._opening_client = self.transactions.client_id if actor == 'web' else ''
             if self.state:
                 raise TransferError('此串口已有文件传输，请完成或取消后再试', 409)
+            visibility = getattr(self.device, 'visibility', None)
+            self._opening_visibility = None
             transfer_id = secrets.token_hex(12)
             state = {'id': transfer_id, 'direction': direction, 'path': path,
                      'connection_id': connection_id, 'actor': actor,
@@ -194,7 +211,7 @@ class SerialFileTransfer:
                     dst=quoted,
                     exists=('false' if overwrite else '[ -e {0} ] || [ -L {0} ]'.format(quoted)),
                     tmp=shlex.quote(temp))
-                output = self._run(command)
+                output = self._run(command, keep_private=True)
                 if _field(output, 'SD_OK') != '1':
                     raise TransferError('无法创建板端临时文件：' + (_field(output, 'SD_ERROR') or output[-200:]), 409)
                 state.update(temp=temp, size=size, hasher=hashlib.sha256(), overwrite=bool(overwrite),
@@ -205,20 +222,29 @@ class SerialFileTransfer:
                            'if command -v gzip >/dev/null 2>&1; then g=1; else g=0; fi; '
                            'printf "SD_SIZE=%s\\nSD_SHA=%s\\nSD_GZIP=%s\\n" "$s" "$h" "$g"; '
                            'else printf "SD_ERROR=unreadable\\n"; fi').format(quoted)
-                output = self._run(command, timeout=120)
+                output = self._run(command, timeout=120, keep_private=True)
                 raw_size, digest = _field(output, 'SD_SIZE'), _field(output, 'SD_SHA')
                 if not raw_size or not raw_size.isdigit() or not digest or not HEX_SHA256.fullmatch(digest):
                     raise TransferError('板端文件不可读，或缺少 wc/sha256sum：'
                                         + (_field(output, 'SD_ERROR') or output[-200:]), 409)
                 state.update(size=int(raw_size), sha256=digest,
                              gzip=_field(output, 'SD_GZIP') == '1', compress=False)
+            if self._opening_visibility:
+                state['visibility_token'] = self._opening_visibility
             self.state = state
+            if hasattr(self.device, '_say'):
+                self.device._say('串口文件%s：%s · %s bytes' % (
+                    '上传' if direction == 'upload' else '下载', path, state['size']))
             self._schedule_expiry(transfer_id)
             return {'id': transfer_id, 'direction': direction, 'path': path,
                     'size': state['size'], 'sha256': state.get('sha256'),
                     'chunk_size': CHUNK_SIZE, 'batch_size': BATCH_SIZE, 'offset': 0,
                     'gzip_available': state['gzip']}
         finally:
+            token = self._opening_visibility
+            if token and (not self.state or self.state.get('visibility_token') != token):
+                visibility.finish(token)
+            self._opening_visibility = None
             self.lock.release()
 
     def _state(self, transfer_id, connection_id, allow_failed=False):
@@ -413,6 +439,9 @@ class SerialFileTransfer:
                 if _field(output, 'SD_SIZE') != str(state['size']) or _field(output, 'SD_SHA') != digest:
                     raise TransferError('板端文件在传输期间发生变化', 409)
             self._release()
+            if hasattr(self.device, '_say'):
+                self.device._say('串口文件传输完成：%s · %s bytes · SHA-256 %s' % (
+                    state['path'], state['size'], digest))
             return {'id': transfer_id, 'path': state['path'], 'size': state['size'],
                     'sha256': digest, 'direction': state['direction']}
         finally:
@@ -425,6 +454,8 @@ class SerialFileTransfer:
             state = self._state(transfer_id, connection_id, allow_failed=True)
             self._cleanup(state)
             self._release()
+            if hasattr(self.device, '_say'):
+                self.device._say('串口文件传输已取消：' + state['path'])
             return {'id': transfer_id, 'aborted': True}
         finally:
             self.lock.release()

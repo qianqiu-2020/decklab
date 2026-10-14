@@ -3,6 +3,7 @@ import io
 import json
 import os
 import threading
+import tempfile
 import time
 import types
 import unittest
@@ -19,7 +20,14 @@ class TransactionTests(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        logs = mock.patch('seriald_core.device.LOG_ROOT', temporary.name)
+        logs.start()
+        self.addCleanup(logs.stop)
         self.device = Device('fake-usb', '/fake/tty')
+        self.addCleanup(self.device.terminal.screen.close)
+        self.addCleanup(self.device.close_log)
         self.device.fd, self.device.present, self.device.newline = 98765, True, '\r'
 
     def test_exclusion_is_local_to_involved_device(self):

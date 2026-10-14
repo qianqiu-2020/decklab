@@ -169,6 +169,8 @@ class ConsoleProtocol:
         # echo characters directly before a marker. The random marker is split
         # in the command text, so an echo cannot contain it in full.
         if not device._wait(base, re.escape(end) + r'\r?\n', timeout):
+            if device.visibility.active:
+                device.visibility.report(device._since(base), framed)
             return False, '等待板子完整响应超时'
         # Firmware/shells can emit a standalone CR or XON/XOFF around a marker.
         # Normalize only this command's parsed copy; the shared terminal keeps
@@ -179,6 +181,8 @@ class ConsoleProtocol:
         match = re.search(re.escape(begin) + r'\n([\s\S]*?)'
                           + re.escape(end) + r'\n', raw)
         if not match:
+            if device.visibility.active:
+                device.visibility.report(device._since(base), framed)
             with device.cv:
                 truncated = base < device.base
             return False, ('响应帧超出缓冲上限' if truncated else '响应起始帧缺失或行结束符异常')

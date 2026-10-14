@@ -185,6 +185,7 @@
 
     function idleSerialPrompt(ctx) {
       if (!isCurrent(ctx) || ctx.sid !== 'serial' || ctx.readonly || ctx.inputSending
+          || ctx.internalOutput
           || ctx.inputQueue.length && !ctx.serialStartupPending || (ctx.progress && ctx.progress.active())) return false;
       var b = ctx.term.buffer.active;
       if (b.type === 'alternate') return false;
@@ -248,6 +249,7 @@
     function updateTerminalState(ctx, payload, metadataOnly) {
       if (!isCurrent(ctx) || !payload.terminal_state) return;
       var state = payload.terminal_state;
+      ctx.internalOutput = !!state.managed && !!state.internal_output;
       if (state.managed) {
         ctx.terminalRevision = state.revision;
         if (!metadataOnly) {
@@ -472,9 +474,9 @@
         var written = function () {
           if (!isCurrent(ctx) || epoch !== ctx.renderEpoch) return;
           ctx.initialRendered = true;
-          scheduleFullRefresh(ctx);
+          if (snapshot) scheduleFullRefresh(ctx);
           scheduleSerialSize(ctx); pushSize(ctx);
-          if (ctx.sid === 'serial' && ctx.screenPhase === 'text' && !ctx.readonly
+          if (ctx.sid === 'serial' && ctx.screenPhase === 'text' && !ctx.readonly && !ctx.internalOutput
               && !ctx.inputQueue.length && !ctx.inputSending) {
             var capacity = serialCapacity(ctx, ctx.fit.proposeDimensions());
             var ratio = ctx.term.options.fontSize / DEFAULT_TERMINAL_FONT_SIZE;

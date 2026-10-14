@@ -98,6 +98,14 @@ writes. Inspect `logging_ok`, `log_errors` and `storage.warning`. If disk status
 cannot be read, `storage.available=false`, `reason=unavailable` and the legacy
 `disk_total`/`disk_free` fields are zero; zero here is not a capacity measurement.
 
+Each `/api/devices` entry includes `serial_health`: `status` (`pending`, `waiting`,
+`ok`, `error`), `running`, `reason`, `last_attempt`, `last_success` and `next_check`
+(Unix timestamps). The collector verifies an idle Linux shell hourly; busy or
+owned input defers the check by a minute. A valid host-side handle alone does not
+prove board responsiveness. Internal setup, probe and transfer echoes are hidden
+from managed screens and serial archives; raw session cursors remain available
+for protocol clients.
+
 ## Archives and history
 
 Archive/history routes take `key`; include expected `serial` to protect against

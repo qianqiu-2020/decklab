@@ -36,7 +36,7 @@ Ubuntu packages are built with:
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.6.1_all.deb
+sudo apt install ./dist/seriald_1.6.2_all.deb
 ```
 
 On Windows, build with Python 3.12 x64 and Inno Setup 6.5+ using
@@ -50,6 +50,12 @@ python3 serialctl.py --url http://127.0.0.1:8898 devices
 
 The web UI can generate agent access instructions with hosted client and skill
 links. Serial input is shared; coordinate interactive work with other users.
+
+The collector checks host serial handles every 30 seconds and verifies idle
+Linux consoles with an hourly round trip. Busy or owned input defers verification;
+failed probes remain visible on device cards. Automatic setup and transfer
+protocol echoes stay out of shared screens and archives; errors and kernel
+messages remain visible.
 
 ## Board support and defaults
 

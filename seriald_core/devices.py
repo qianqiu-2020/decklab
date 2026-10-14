@@ -528,6 +528,7 @@ class Manager:
                 self.scan()
                 for d in self.all_devices():
                     d.reap_sessions()
+                    d.health.tick()
                     if self.store and d.serial and d.present:
                         d.record['last_seen'] = self.store.touch(d.serial)
                 self.maintenance.run_due(self, LOG_ROOT)

@@ -56,12 +56,9 @@ class SerialLog:
                         pass
                 self.logf = None
 
-    def consume(self, data, received=True):
+    def display(self, text):
+        """Append presentation text without touching the raw UTF-8 decoder."""
         with self.log_lock:
-            if not received:
-                self.text(data.decode('utf-8', 'replace'))
-                return None
-            text = self.decoder.decode(data)
             self.log_pending += text
             lines = self.log_pending.split('\n')
             self.log_pending = lines.pop()
@@ -70,6 +67,15 @@ class SerialLog:
             if len(self.log_pending) > 8192:
                 self.text(self.log_pending)
                 self.log_pending = ''
+
+    def consume(self, data, received=True, internal=False):
+        with self.log_lock:
+            if not received:
+                self.text(data.decode('utf-8', 'replace'))
+                return None
+            text = self.decoder.decode(data)
+            if not internal:
+                self.display(text)
             return text
 
     def close(self):
@@ -85,4 +91,3 @@ class SerialLog:
                 except OSError:
                     pass
                 self.logf = None
-

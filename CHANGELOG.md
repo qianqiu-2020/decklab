@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.6.2
+
+- Verify idle Linux serial consoles hourly with a nonce-framed, side-effect-free
+  round trip over the existing collector. Defer while input is owned or busy,
+  including firmware menus, full-screen applications and file transfers; show
+  persistent device-card warnings when the board does not respond.
+- Hide automatic terminal setup and file-transfer protocol echoes from shared
+  screens and serial archives. Preserve raw protocol bytes and terminal replies,
+  file-transfer summaries, unexpected errors and asynchronous kernel messages.
+- Restore shared screen state when internal operations finish, preserving updated
+  dimensions, input modes, partial prompts and unfinished terminal controls.
+
 ## 1.6.1
 
 - Restore shared terminal snapshots through the ordered parser queue, cancel

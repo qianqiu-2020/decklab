@@ -29,11 +29,15 @@
       if (!list.length) { g.innerHTML = '<p class="empty">没有匹配的设备。新串口连接后将显示在待识别列表。</p>'; return; }
       g.textContent = '';
       list.forEach(function (d) {
+        var health = d.serial_health || {};
+        var healthFailed = d.alive && health.status === 'error';
         var card = document.createElement('div');
         card.className = 'dev' + (!d.alive ? ' offline' : '') + (d.key === selKey ? ' sel' : '');
         card.dataset.key = d.key;          // 供 markSelected() 就地改高亮用
         card.title = (d.by_path || d.last_path || '')
-          + (d.alive ? '\n采集检查：' + ago(d.last_health_check) : '');
+          + (d.alive ? '\n采集检查：' + ago(d.last_health_check)
+            + '\n串口收发验证：' + ago(health.last_success)
+            + (health.reason ? '\n' + health.reason : '') : '');
         card.tabIndex = 0;
         card.addEventListener('click', function () { options.open(d.key); });
         card.addEventListener('keydown', function (e) {
@@ -50,8 +54,8 @@
           nm.appendChild(pendingLabel); nm.appendChild(portLabel);
         } else nm.textContent = d.label;
         var st = document.createElement('span');
-        st.className = 'pill ' + (d.state === 'pending' ? 'pending' : (d.alive ? 'live' : 'dead'));
-        st.textContent = d.state === 'pending' ? 'USB 临时身份' : (d.alive ? '在线' : '历史设备');
+        st.className = 'pill ' + (healthFailed ? 'dead' : (d.state === 'pending' ? 'pending' : (d.alive ? 'live' : 'dead')));
+        st.textContent = healthFailed ? '探测异常' : (d.state === 'pending' ? 'USB 临时身份' : (d.alive ? '在线' : '历史设备'));
         r1.appendChild(nm); r1.appendChild(st);
         if (d.hostname && d.hostname !== d.label) {
           var sn = document.createElement('span'); sn.className = 'pill sniff';
@@ -93,6 +97,11 @@
           var logWarning = document.createElement('div'); logWarning.className = 'identity-error';
           logWarning.textContent = '串口日志写入失败：' + d.log_error;
           card.appendChild(logWarning);
+        }
+        if (healthFailed) {
+          var healthWarning = document.createElement('div'); healthWarning.className = 'identity-error';
+          healthWarning.textContent = health.reason;
+          card.appendChild(healthWarning);
         }
         var inf = d.info || {};
         if (d.identity_error || (d.needs_provisioning && Object.keys(inf).length)

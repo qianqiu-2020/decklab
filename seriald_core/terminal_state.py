@@ -108,9 +108,14 @@ class SerialTerminalState:
                            "then export TERM=xterm-256color; fi; "
                            "case ${LC_ALL:-${LC_CTYPE:-$LANG}} in *UTF-8*|*utf8*|*UTF8*) stty iutf8;; esac")
             command = environment if setup_environment else resize
-            ok, error = d._write(command + newline)
-            if ok:
-                d.record_input('serial', actor, command + '\r')
+            token = d.visibility.begin('terminal-setup', command, timeout=3)
+            try:
+                ok, error = d._write(command + newline)
+            except Exception:
+                d.visibility.finish(token)
+                raise
+            if not ok:
+                d.visibility.finish(token)
             return {'ok': ok, 'error': error, 'pending': ok}
 
     def presentation(self, cols, rows):
@@ -119,7 +124,7 @@ class SerialTerminalState:
         actor, client = d.transactions.source_actor, d.transactions.client_id
         with d.cv:
             state = self.screen.metadata()
-            if (state.get('phase') != 'text' or self.input_pending or self.geometry
+            if (state.get('phase') != 'text' or state.get('internal_output') or self.input_pending or self.geometry
                     or not self.screen.control(actor, client)):
                 return {'ok': True, 'skipped': True}
             ok = self.screen.resize(cols, rows)

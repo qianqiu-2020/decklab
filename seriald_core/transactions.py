@@ -179,6 +179,9 @@ class SerialTransactions:
                     raise TransactionError('stale', '设备连接已变化，取消旧任务')
             if expected_connection is not None and expected_connection != self.device.connection_id:
                 raise TransactionError('stale', '设备连接已变化，取消旧操作')
+            visibility = getattr(self.device, 'visibility', None)
+            if visibility and visibility.kind == 'terminal-setup' and visibility.active:
+                raise TransactionError('busy', '终端配置进行中，请稍后重试')
             if not allow_transfer and self.device.file_transfer.active:
                 raise TransactionError('transfer-busy', '串口文件传输中，请完成或取消后再操作')
             lease = ConsoleLease(self.device, kind, timeout,

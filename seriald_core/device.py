@@ -13,6 +13,8 @@ from .transport import write_serial
 from .console_protocol import ConsoleProtocol
 from .terminal_state import SerialTerminalState
 from .terminal_backend import control_session
+from .console_visibility import ConsoleVisibility
+from .serial_health import SerialHealth
 from .serial_log import SerialLog
 from .protocol import PROBE_CMD, RE_LOGIN, RE_PROMPT, SSH_CMD, parse_probe
 if sys.platform == 'win32':
@@ -78,6 +80,7 @@ class Device:
         self.present = False
         self.console_tail = ''
         self.terminal = SerialTerminalState(self)
+        self.visibility = ConsoleVisibility(self)
         self.newline = None            # 收到新提示符后才确认本连接的 CR/LF 策略
         self.probe_info = dict(record['info']) if record else {}
         # preload 可能在没有日志时早退;所有状态必须先初始化。
@@ -85,6 +88,7 @@ class Device:
         self.history_loaded = record is None
         self.input_lines = {}
         self.input_sensitive = set()
+        self.health = SerialHealth(self)
 
     @property
     def log_lock(self):
@@ -222,6 +226,7 @@ class Device:
 
     def detach_identity(self):
         """Start a new logical connection on the same UART before a physical board swap."""
+        self.visibility.finish(self.visibility.token, discard=True)
         self.record = None
         self.newline = self.profile.line_ending
         self.connection_id = secrets.token_hex(12)
@@ -236,6 +241,7 @@ class Device:
         self.bytes = 0
         self.last_rx = 0.0
         self.last_health_check = 0.0
+        self.health.reset()
         self.console_tail = ''
         self.history_loaded = True
         self.logpath = None
@@ -318,7 +324,10 @@ class Device:
     def append(self, data, received=True):
         b = data if isinstance(data, bytes) else data.encode('utf-8', 'replace')
         with self.log_lock:
-            text = self.log.consume(b, received)
+            if received:
+                self.visibility.interrupt_for_system_output(b)
+            internal = self.visibility.active
+            text = self.log.consume(b, received, internal=internal)
             if not received:
                 # Local status belongs only in archives, never in the UART bytes.
                 return
@@ -339,6 +348,12 @@ class Device:
                     self._maybe_auto_identify(self.console_tail)
                 end_off = self.base + len(self.buf)
                 replies = terminal.screen.feed(b, end_off)
+                if internal and terminal.screen.error:
+                    self.log.display(text)
+                    self.visibility.finish(self.visibility.token)
+                if (self.visibility.active and self.visibility.kind == 'terminal-setup'
+                        and not terminal.input_pending and terminal.prompt()):
+                    self.visibility.finish(self.visibility.token)
                 self.cv.notify_all()
         for reply in replies:
             self._protocol_reply(reply, connection)
@@ -360,6 +375,7 @@ class Device:
                                 identity=self.identity, cancel=self.stop)[0]
 
     def close_log(self):
+        self.visibility.finish(self.visibility.token)
         self.log.close()
 
     def _write(self, text):
@@ -704,6 +720,7 @@ class Device:
                 'hostname': self.hostname, 'alive': self.fd is not None and self.present,
                 'bytes': self.bytes, 'last_rx': self.last_rx,
                 'last_health_check': self.last_health_check, 'capture_started': self.started,
+                'serial_health': self.health.snapshot(),
                 'capture_paused': self.capture_paused.is_set(),
                 'last_line': tail, 'log': os.path.basename(self.logpath or ''),
                 'log_error': self.log_error,

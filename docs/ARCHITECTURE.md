@@ -68,6 +68,8 @@ Agent 分享令牌由 control 保存在独立的 `agent-grants.sqlite3`（仅令
 | `seriald_core/device.py` | 连接的实时字节流、身份发布、会话编排以及协议/日志组件入口 |
 | `seriald_core/serial_log.py` | 串口档案写入组件：独立持有增量解码器、半行缓存、文件句柄、按日轮转、写入错误和可重入锁；目录由调用方提供，不访问串口或注册表 |
 | `seriald_core/console_protocol.py` | 独立控制台协议服务：登录、nonce 命令帧、响应等待及显式 SSH 配置；只使用连接的既有缓冲与受事务保护的写入口 |
+| `seriald_core/console_visibility.py` | 自动终端配置、串口传输及保活的展示隔离；隐藏协议回显，保留错误与异步内核输出，不改变原始响应缓冲 |
+| `seriald_core/serial_health.py` | 每小时空闲 shell 收发验证；后台等待响应，遵循输入占用、事务互斥及连接代次，不阻塞唯一采集线程 |
 | `seriald_core/terminal_backend.py` / `terminal_worker.js` | 每串口连接、每 SSH 会话的统一终端状态；一个独立 Node 解析进程，不访问串口或网络，实时查询应答由既有写入口回传 |
 | `seriald_core/terminal_snapshot.js` | 固定 xterm 版本的快照适配：补充滚动区域、保存的光标、制表位和鼠标编码；不修改 vendor 代码 |
 | `seriald_core/models.py` | 持久 Board 身份、可替换连接绑定与独立会话所有权 |

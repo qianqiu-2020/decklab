@@ -44,11 +44,12 @@ function carryAfter(previous, bytes) {
 }
 
 function info(s) {
+  if (s.internal) return {...s.internal.info, off: s.off, internal_output: true};
   const b = s.term.buffer.active;
   return {geometry: {cols: s.term.cols, rows: s.term.rows},
     phase: b.type === 'alternate' || s.progress && s.progress.active() ? 'application' : s.phase,
     revision: s.revision, off: s.off, modes: s.term.modes,
-    cursor: {x: b.cursorX, y: b.cursorY, buffer: b.type}};
+    cursor: {x: b.cursorX, y: b.cursorY, buffer: b.type}, internal_output: false};
 }
 function resize(s, cols, rows) {
   if (cols >= 20 && cols <= 500 && rows >= 2 && rows <= 200
@@ -115,7 +116,41 @@ async function handle(m) {
   const s = m.action === 'create' ? create(m) : terminals.get(m.sid);
   if (!s) throw new Error('terminal does not exist');
   let bytesForRender;
-  if (m.action === 'feed') {
+  let logPrompt;
+  if (m.action === 'begin_internal') {
+    if (!s.internal && s.term.buffer.active.type === 'normal') {
+      s.internal = {info: info(s), data: serialize(s.term, s.serializer, {scrollback: 8000}),
+        pending: s.carry.toString('base64')};
+    }
+  } else if (m.action === 'end_internal' && s.internal) {
+    const saved = s.internal;
+    s.internal = null;
+    if (!m.discard) {
+      const geometry = {cols: s.term.cols, rows: s.term.rows}, phase = s.phase;
+      const modes = s.term.modes;
+      let settings = '';
+      for (const [name, code] of [['applicationCursorKeysMode', 1], ['applicationKeypadMode', 66],
+        ['bracketedPasteMode', 2004], ['reverseWraparoundMode', 45], ['sendFocusMode', 1004], ['wraparoundMode', 7]]) {
+        settings += '\x1b[?' + code + (modes[name] ? 'h' : 'l');
+      }
+      settings += '\x1b[4' + (modes.insertMode ? 'h' : 'l');
+      const b = s.term.buffer.active;
+      // The frame terminator may be followed by only part of the next prompt.
+      // Preserve that prefix too, so its next UART fragment does not lose letters.
+      const prompt = b.getLine(b.baseY + b.cursorY).translateToString(false, 0, Math.min(b.cursorX, s.term.cols));
+      const pending = s.carry;
+      s.restoring = true; s.live = false;
+      resize(s, saved.info.geometry.cols, saved.info.geometry.rows);
+      await new Promise(resolve => s.term.write(Buffer.from('\x18\x1bc' + saved.data), resolve));
+      resize(s, geometry.cols, geometry.rows);
+      const output = String(m.output || '').replace(/\r?\n/g, '\r\n');
+      const display = settings + '\r\x1b[2K' + (output ? output + '\r\n' : '') + prompt;
+      await new Promise(resolve => s.term.write(Buffer.concat([Buffer.from(display), pending]), resolve));
+      s.restoring = false; s.phase = phase;
+      logPrompt = prompt;
+    }
+    s.revision++;
+  } else if (m.action === 'feed') {
     let bytes = Buffer.from(m.data, 'base64');
     s.live = m.live === true; s.replies = [];
     if (s.kind === 'serial') {
@@ -130,6 +165,7 @@ async function handle(m) {
         cut = match.index;
       }
       if (cut >= 0) {
+        s.internal = null;
         s.term.reset(); s.phase = 'text'; s.linux = linux;
         resize(s, 80, 24);
         bytes = Buffer.from(joined.slice(cut), 'latin1');
@@ -163,11 +199,12 @@ async function handle(m) {
   const result = info(s);
   if (m.action === 'feed') {
     result.replies = s.replies;
-    result.render_data = bytesForRender.toString('base64');
+    result.render_data = s.internal ? '' : bytesForRender.toString('base64');
   }
+  if (logPrompt !== undefined) result.log_prompt = logPrompt;
   if (m.action === 'snapshot') {
-    result.data = Buffer.from(serialize(s.term, s.serializer, {scrollback: 8000}), 'utf8').toString('base64');
-    result.pending = s.carry.toString('base64');
+    result.data = Buffer.from(s.internal ? s.internal.data : serialize(s.term, s.serializer, {scrollback: 8000}), 'utf8').toString('base64');
+    result.pending = s.internal ? s.internal.pending : s.carry.toString('base64');
     result.adapter_state = {phase: s.phase, linux: s.linux, scan: s.scan,
       progress: s.progress ? s.progress.snapshot() : null};
   }

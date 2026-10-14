@@ -133,6 +133,18 @@ class SharedTerminal:
         with self.lock:
             return self._call('resize', cols=cols, rows=rows) is not None
 
+    def begin_internal(self):
+        with self.lock:
+            state = self._call('begin_internal')
+            return bool(state and state.get('internal_output'))
+
+    def end_internal(self, output='', discard=False):
+        with self.lock:
+            state = self._call('end_internal', output=output, discard=discard)
+            self.deltas.clear()
+            self.delta_bytes = 0
+            return state.pop('log_prompt', '') if state else ''
+
     def metadata(self):
         with self.lock:
             result = dict(self.state or {})

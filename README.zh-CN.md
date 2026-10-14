@@ -48,7 +48,7 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.6.1_all.deb
+sudo apt install ./dist/seriald_1.6.2_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
@@ -60,7 +60,7 @@ sudo apt install ./dist/seriald_1.6.1_all.deb
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
 
 Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。安装构建依赖后，
-双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.6.1-windows-x64-setup.exe`：
+双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.6.2-windows-x64-setup.exe`：
 首次选择安装目录，后续升级记住原目录，保留 `data/`，无需手动解压覆盖。首次从便携版迁移时选中原目录。
 开始菜单提供本机、局域网无密码、局域网有密码三个入口。详见 [Windows 构建与安装](docs/WINDOWS.md)。
 也支持 Windows Docker 容器构建；IT 可按 EXE SHA-256 审批防火墙规则，升级后需重新审批。
@@ -88,7 +88,10 @@ serialctl --device riscv-118 file-get --remote /tmp/boot.log --local ./boot.log
 “文件传输”通过现有串口连接上传、下载或跨板复制，无需板子联网。
 日志面板打开时会刷新启动索引，此后每 15 秒更新；打开日期或启动归档时保留侧栏，方便连续切换，终端显示全文。
 采集器每 30 秒被动检查无输出的串口句柄，失效后自动等待重新枚举；页面同时显示最近收包与采集检查时间。
-完全静默的板子与硬件链路故障无法仅凭主机端检查区分，必要时可手动探测或使用 USB 自愈。
+每小时还会在已确认空闲的 Linux shell 执行无副作用命令，验证串口收发；失败时设备列表显示“探测异常”。
+在启动菜单、Vim、输入占用或文件传输期间延后一分钟重试，不盲发回车、登录或重启设备。
+没有空闲 shell 时，主机检查只能证明串口句柄有效，不能证明板子仍在响应。
+自动尺寸配置、保活探测和文件传输协议回显不进入网页终端或串口归档；传输摘要、错误与内核输出继续记录。
 
 [传输速率基线与排查方法](docs/TRANSFER_PERFORMANCE.md)
 

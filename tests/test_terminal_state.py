@@ -1,5 +1,6 @@
 """Automatic UART setup must never type into stale, owned or active consoles."""
 import unittest
+import tempfile
 from unittest import mock
 
 from seriald_core.actions import DeviceActions
@@ -9,6 +10,11 @@ from seriald_core.terminal_state import SerialTerminalState
 
 class SerialTerminalTests(unittest.TestCase):
     def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        logs = mock.patch('seriald_core.device.LOG_ROOT', temporary.name)
+        logs.start()
+        self.addCleanup(logs.stop)
         self.device = Device('fixture-port', '/fake/tty', record={
             'serial': 'SN-terminal', 'label': 'board', 'info': {}})
         self.device.fd, self.device.present = 98765, True
@@ -19,10 +25,14 @@ class SerialTerminalTests(unittest.TestCase):
         self.recorder = mock.patch.object(self.device, 'record_input')
         self.recorder.start()
         self.addCleanup(self.recorder.stop)
+        self.addCleanup(self.device.terminal.screen.close)
+        self.addCleanup(self.device.close_log)
+        replies = mock.patch.object(self.device, '_protocol_reply', return_value=True)
+        replies.start()
+        self.addCleanup(replies.stop)
 
     def feed(self, data):
-        self.device.terminal.observe(data)
-        self.device.buf += data
+        self.device.append(data)
 
     def resize(self, client='viewer1', **extra):
         payload = {'sid': 'serial', 'cols': 140, 'rows': 42, 'automatic': True,
@@ -42,6 +52,7 @@ class SerialTerminalTests(unittest.TestCase):
         self.assertTrue(command.endswith('\r'))
         self.assertTrue(self.device.terminal.environment_pending)
         self.assertTrue(self.device.terminal.input_pending)
+        self.device.record_input.assert_not_called()
         self.feed(b'\r\n\x1b[8;42;140t')
         self.assertEqual(self.resize().status, 409, 'a resize marker alone is not an idle prompt')
         self.feed(b'root@ubuntu:~# ')

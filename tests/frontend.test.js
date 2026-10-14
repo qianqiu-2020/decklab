@@ -414,6 +414,24 @@ test('provisional identity is labeled as a candidate and warns about archive pro
   assert.ok(cardText.includes('尚未正式确认'));
 });
 
+test('hourly serial probe failures remain visible on device cards until recovery', async () => {
+  const h = harness();
+  const device = { key: 'A', label: 'A', serial: 'SN-A', alive: true, state: 'online',
+    serial_health: { status: 'error', reason: '串口主动探测失败：等待板子完整响应超时', last_success: 0 } };
+  h.take('/api/devices').resolve({ devices: [device] });
+  await drain();
+  let card = h.get('grid').children[0];
+  assert.ok(card.textContent.includes('探测异常'));
+  assert.ok(card.textContent.includes('等待板子完整响应超时'));
+  assert.ok(card.title.includes('串口收发验证：'));
+  h.intervals.find(interval => interval.delay === 3000).fn();
+  h.take('/api/devices').resolve({ devices: [{ ...device,
+    serial_health: { status: 'ok', reason: '', last_success: Date.now() / 1000 } }] });
+  await drain(); card = h.get('grid').children[0];
+  assert.ok(!card.textContent.includes('探测异常'));
+  assert.ok(card.textContent.includes('在线'));
+});
+
 test('switching pending and confirmed devices never reuses identity details', async () => {
   const h = harness();
   h.take('/api/devices').resolve({ devices: [
