@@ -8,6 +8,8 @@
   its notice when the shared stream confirms the requested grid is configured.
 - Ignore delayed setup failures after success, and preserve newer action notices
   and actual input errors. Notice ownership survives UI language changes.
+- Read UTF-8 serial archives explicitly in Windows package validation instead
+  of relying on the runner's system encoding.
 
 ## 1.6.2
 

@@ -34,6 +34,13 @@ jobs:
         with:
           node-version: '22'
       - run: python -m pip install 'pyserial>=3.5,<4' 'paramiko>=3.4,<5'
+      - name: Check UART archives with a non-UTF-8 locale
+        env:
+          LC_ALL: C
+          PYTHONUTF8: '0'
+          PYTHONCOERCECLOCALE: '0'
+          PYTHONPATH: tests
+        run: python -m unittest test_console_visibility test_serial_health
       - run: python -m unittest discover -s tests
       - run: python tools/check_public_docs.py
       - run: node tests/frontend.test.js

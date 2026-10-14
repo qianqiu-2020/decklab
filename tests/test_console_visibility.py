@@ -48,7 +48,8 @@ class ConsoleVisibilityTests(unittest.TestCase):
 
     def archive(self):
         self.device.close_log()
-        return '\n'.join(path.read_text() for path in Path(self.device.stable_dir()).glob('*.log'))
+        return '\n'.join(path.read_text(encoding='utf-8')
+                         for path in Path(self.device.stable_dir()).glob('*.log'))
 
     def test_setup_echo_is_hidden_but_geometry_raw_capture_and_user_commands_remain(self):
         def write(text):
