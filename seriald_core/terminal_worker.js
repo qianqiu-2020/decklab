@@ -57,13 +57,17 @@ function resize(s, cols, rows) {
     s.term.resize(cols, rows); s.revision++;
   }
 }
+function validGeometry(geometry) {
+  return geometry && Number.isInteger(geometry.cols) && Number.isInteger(geometry.rows)
+    && geometry.cols >= 20 && geometry.cols <= 500 && geometry.rows >= 2 && geometry.rows <= 200;
+}
 function create(m) {
   const term = new Terminal({cols: m.cols, rows: m.rows, scrollback: 8000,
     allowProposedApi: true, windowOptions: {setWinSizeChars: true, getWinSizeChars: true}});
   const serializer = new SerializeAddon(); term.loadAddon(serializer);
   const s = {term, serializer, kind: m.kind, phase: m.kind === 'serial' ? 'text' : 'shell',
     revision: 1 + require('crypto').randomBytes(4).readUInt32BE(), off: m.off || 0,
-    replies: [], live: false, scan: '', carry: Buffer.alloc(0)};
+    replies: [], live: false, scan: '', carry: Buffer.alloc(0), textGeometry: null};
   term.onData(data => { if (s.live && data.length <= 8192) s.replies.push(data); });
   term.parser.registerCsiHandler({final: 't'}, p => {
     if (p[0] === 18) {
@@ -167,7 +171,10 @@ async function handle(m) {
       if (cut >= 0) {
         s.internal = null;
         s.term.reset(); s.phase = 'text'; s.linux = linux;
-        resize(s, 80, 24);
+        // Firmware owns its fixed grid. Plain boot text reuses the controller's
+        // approved viewport without sending any input or stty to the board.
+        const geometry = s.textGeometry || {cols: 80, rows: 24};
+        resize(s, geometry.cols, geometry.rows);
         bytes = Buffer.from(joined.slice(cut), 'latin1');
         s.revision++; s.carry = Buffer.alloc(0);
         s.progress = window.SerialdSerialProgress.create({canonical: true, sourceRows: () => s.term.rows});
@@ -190,10 +197,15 @@ async function handle(m) {
     const adapter = m.snapshot.adapter_state || {};
     s.phase = adapter.phase || (s.kind === 'serial' ? 'text' : 'shell');
     s.linux = !!adapter.linux; s.scan = adapter.scan || '';
+    s.textGeometry = validGeometry(adapter.text_geometry) ? adapter.text_geometry : null;
     if (s.progress && adapter.progress) s.progress.restore(adapter.progress);
     s.carry = Buffer.from(m.snapshot.pending || '', 'base64');
-  } else if (m.action === 'resize') resize(s, m.cols, m.rows);
-  else if (m.action === 'dispose') {
+  } else if (m.action === 'resize') {
+    resize(s, m.cols, m.rows);
+    if (s.kind === 'serial' && m.presentation === true && validGeometry(m)) {
+      s.textGeometry = {cols: m.cols, rows: m.rows};
+    }
+  } else if (m.action === 'dispose') {
     const result = info(s); s.term.dispose(); terminals.delete(m.sid); return result;
   }
   const result = info(s);
@@ -206,7 +218,7 @@ async function handle(m) {
     result.data = Buffer.from(s.internal ? s.internal.data : serialize(s.term, s.serializer, {scrollback: 8000}), 'utf8').toString('base64');
     result.pending = s.internal ? s.internal.pending : s.carry.toString('base64');
     result.adapter_state = {phase: s.phase, linux: s.linux, scan: s.scan,
-      progress: s.progress ? s.progress.snapshot() : null};
+      text_geometry: s.textGeometry, progress: s.progress ? s.progress.snapshot() : null};
   }
   return result;
 }

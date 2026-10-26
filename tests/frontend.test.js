@@ -1384,6 +1384,31 @@ test('managed snapshots preserve fragmented bytes and wait behind queued screen 
   assert.ok(terminal.refreshes > 0, 'paint a recovered screen even when no new output follows');
 });
 
+test('managed serial reuses the viewport width after GRUB hands off to a Debian kernel', async () => {
+  const h=await setup({sse:true}), terminal=h.select('A'), stream=h.streams.at(-1);
+  function emit(phase, cols, rows, revision, off, text) {
+    stream.emit({...readResponse('A',text,off),terminal_state:{managed:true,phase,
+      geometry:{cols,rows},revision,control_revision:1}});
+    terminal.flush();
+  }
+  emit('text',80,24,1,10,'early boot'); await drain();
+  const first=h.take('/api/session-resize',r=>r.body.presentation);
+  assert.equal(first.body.cols,140); first.resolve({ok:true}); await drain();
+  emit('text',140,42,2,20,'wide boot'); await drain();
+  emit('firmware',80,24,3,30,'GRUB menu'); await drain();
+  emit('text',80,24,4,300,'[    0.000000] Linux version 6.18.3+deb13+4-k3-uefi\r\n');
+  await drain();
+  const resize=h.take('/api/session-resize',r=>r.body.presentation);
+  assert.equal(resize.body.cols,140);
+  assert.equal(resize.body.rows,42);
+  resize.resolve({ok:true}); await drain();
+  emit('text',140,42,5,330,'[    0.100000] more kernel output\r\n'); await drain();
+  emit('text',140,42,5,360,'[    0.200000] more kernel output\r\n'); await drain();
+  assert.equal(h.requests.filter(r=>r.body && r.body.presentation).length,2,
+    'a matching shared grid does not produce more resize requests');
+  assert.equal(h.sends().length,0,'boot layout changes must not type stty into firmware or the kernel');
+});
+
 test('managed fitting uses fresh character metrics and keeps a quiet grid stable', async () => {
   const h=await setup({sse:true}), terminal=h.select('A'), stream=h.streams.at(-1);
   const viewport={clientWidth:900,clientHeight:700,style:{}};

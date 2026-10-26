@@ -519,8 +519,11 @@
             var capacity = serialCapacity(ctx, ctx.fit.proposeDimensions());
             var ratio = ctx.term.options.fontSize / DEFAULT_TERMINAL_FONT_SIZE;
             var cols = Math.floor(capacity.cols * ratio), rows = Math.floor(capacity.rows * ratio);
-            var size = cols + ':' + rows;
-            if (ctx.presentationAttempt !== size) {
+            // A firmware/boot reset can replace the shared grid while this
+            // viewport stays unchanged. Retry once for that screen revision.
+            var size = cols + ':' + rows + ':' + ctx.terminalRevision;
+            if ((ctx.screenGeometry.cols !== cols || ctx.screenGeometry.rows !== rows)
+                && ctx.presentationAttempt !== size) {
               ctx.presentationAttempt = size;
               fetch('/api/session-resize', {method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({key: ctx.key, serial: ctx.serial, sid: 'serial', cols: cols, rows: rows,

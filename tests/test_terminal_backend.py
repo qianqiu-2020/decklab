@@ -142,6 +142,33 @@ class SharedTerminalTests(unittest.TestCase):
         self.assertEqual(original.feed(suffix, len(prefix) + len(suffix)), resumed.feed(suffix, len(prefix) + len(suffix)))
         self.assertFalse(self.terminal().restore({'geometry': {'cols': 'bad'}}))
 
+    def test_debian_kernel_restores_approved_text_width_after_firmware(self):
+        terminal = self.terminal('serial', 80, 24)
+        terminal.resize(205, 52, presentation=True)
+        terminal.feed(b'\x1b[47m\x1b[2J\x1b[50;27HEDK2', 100)
+        self.assertEqual(terminal.metadata()['geometry'], {'cols': 80, 'rows': 50})
+        terminal.feed(b'\x1b[2J\x1b[1;1HGRUB', 200)
+        banner = (b'\r\n[    0.000000] Linux version 6.18.3+deb13+4-k3-uefi '
+                  b'(weizhi.li@spacemit.com) (riscv64-linux-gnu-gcc-14 (Debian 14.2.0-19) 14.2.0, '
+                  b'GNU ld (GNU Binutils for Debian) 2.44) #1 SMP PREEMPT_DYNAMIC '
+                  b'Debian 6.18.3-1+spacemit8 (2026-10-23)\r\n')
+        for offset, byte in enumerate(banner, 201):
+            terminal.feed(bytes([byte]), offset)
+        state = terminal.snapshot()
+        self.assertEqual(state['phase'], 'text')
+        self.assertEqual(state['geometry'], {'cols': 205, 'rows': 52})
+        self.assertNotIn(b'EDK2', base64.b64decode(state['data']))
+        self.assertNotIn(b'\x1b[47m', base64.b64decode(state['data']))
+
+    def test_text_width_preference_survives_clean_handoff_from_firmware(self):
+        original, resumed = self.terminal('serial'), self.terminal('serial')
+        original.resize(205, 52, presentation=True)
+        original.feed(b'\x1b[2J\x1b[50;27HEDK2', 100)
+        self.assertTrue(resumed.restore(original.snapshot()))
+        self.assertEqual(resumed.metadata()['geometry'], {'cols': 80, 'rows': 50})
+        resumed.feed(b'\r\n[    0.000000] Linux version 6.18.3+deb13+4-k3-uefi\r\n', 200)
+        self.assertEqual(resumed.metadata()['geometry'], {'cols': 205, 'rows': 52})
+
     def test_shared_ssh_controller_guards_size_and_can_be_taken_over(self):
         terminal = self.terminal()
         self.assertTrue(terminal.control('web', 'page-a'))

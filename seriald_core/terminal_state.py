@@ -127,6 +127,6 @@ class SerialTerminalState:
             if (state.get('phase') != 'text' or state.get('internal_output') or self.input_pending or self.geometry
                     or not self.screen.control(actor, client)):
                 return {'ok': True, 'skipped': True}
-            ok = self.screen.resize(cols, rows)
+            ok = self.screen.resize(cols, rows, presentation=True)
             d.cv.notify_all()
         return {'ok': ok, 'terminal_state': self.screen.metadata()}

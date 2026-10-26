@@ -167,6 +167,19 @@ class SerialTerminalTests(unittest.TestCase):
         self.assertTrue(self.resize().payload['skipped'])
         self.write.assert_called_once()
 
+    def test_boot_presentation_remembers_controller_grid_without_board_input(self):
+        self.feed(b'\x00sys: 0x1\r\n')
+        result = self.resize(presentation=True)
+        self.assertEqual(result.payload['terminal_state']['geometry'], {'cols': 140, 'rows': 42})
+        self.assertIsNone(self.device.terminal.geometry, 'presentation does not configure the board tty')
+        self.assertTrue(self.resize(client='viewer2', cols=100, presentation=True).payload['skipped'])
+        self.feed(b'\x1b[2J\x1b[50;27HEDK2')
+        self.assertTrue(self.resize(presentation=True).payload['skipped'])
+        self.assertEqual(self.device.terminal.screen.metadata()['geometry'], {'cols': 80, 'rows': 50})
+        self.feed(b'\r\n[    0.000000] Linux version 6.18.3+deb13+4-k3-uefi\r\n')
+        self.assertEqual(self.device.terminal.screen.metadata()['geometry'], {'cols': 140, 'rows': 42})
+        self.write.assert_not_called()
+
     def test_split_resize_and_boot_reset(self):
         state = SerialTerminalState(self.device)
         state.observe(b'\x1b[8;42;')

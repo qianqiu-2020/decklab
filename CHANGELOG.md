@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.6.4
+
+- Restore the controller's approved text width when firmware menus hand off to
+  Linux, including Debian kernel banners split across serial reads. Preserve
+  this preference across clean collector handoffs without sending board input.
+- Retry browser presentation sizing after a shared-screen reset, while keeping
+  firmware menu coordinates and avoiding repeated requests for a matching grid.
+
 ## 1.6.3
 
 - Treat serial-size synchronization's idle-prompt races as waiting, then clear

@@ -129,9 +129,9 @@ class SharedTerminal:
                     self.delta_bytes -= len(self.deltas.popleft()[2])
             return state.get('replies', []) if state else []
 
-    def resize(self, cols, rows):
+    def resize(self, cols, rows, *, presentation=False):
         with self.lock:
-            return self._call('resize', cols=cols, rows=rows) is not None
+            return self._call('resize', cols=cols, rows=rows, presentation=presentation) is not None
 
     def begin_internal(self):
         with self.lock:
