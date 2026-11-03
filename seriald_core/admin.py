@@ -58,7 +58,7 @@ def correct_serial(base, old_serial, new_serial, apply=False):
     if not usable_serial(new_serial) or old_serial == new_serial:
         raise ValueError('需要经过核实的新唯一序列号')
     database = base / 'registry.sqlite3'
-    with sqlite3.connect(database.as_uri() + '?mode=ro', uri=True) as reader:
+    with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as reader:
         old = reader.execute('SELECT label,info FROM boards WHERE serial=?', (old_serial,)).fetchone()
         if not old or reader.execute('SELECT 1 FROM boards WHERE serial=?', (new_serial,)).fetchone():
             raise ValueError('旧档案不存在，或目标序列号已存在')
@@ -88,7 +88,7 @@ def confirm_serial(base, serial, apply=False):
     """Promote a verified provisional identity and migrate its archive in place."""
     base = Path(base).resolve()
     database = base / 'registry.sqlite3'
-    with sqlite3.connect(database.as_uri() + '?mode=ro', uri=True) as reader:
+    with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as reader:
         row = reader.execute('SELECT label,info FROM boards WHERE serial=?', (serial,)).fetchone()
         conflict = reader.execute('SELECT 1 FROM identity_conflicts WHERE serial=?', (serial,)).fetchone()
     if not row or conflict:

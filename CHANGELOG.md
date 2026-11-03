@@ -12,6 +12,8 @@
   confirm archive associations.
 - Add an offline `resolve-conflict` preview/apply command and a packaged Windows
   administration entry point for verified recovery without changing board serials.
+- Close read-only registry connections after archive correction and confirmation,
+  including validation failures, so Windows can release the database file.
 
 ## 1.6.4
 
