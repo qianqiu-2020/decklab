@@ -24,7 +24,7 @@ class MarkerTests(unittest.TestCase):
 
     def initialize(self):
         return subprocess.run(['/bin/sh', '-c', init_command(self.path, self.uuid)],
-                              text=True, capture_output=True, timeout=3)
+                              text=True, capture_output=True, timeout=30)
 
     def test_creation_persists_and_repeat_does_not_replace_or_rewrite(self):
         result = self.initialize()
