@@ -95,6 +95,32 @@ py serialctl.py devices
 
 开发者可独立使用源码与临时 `SERIALD_BASE` 运行 `seriald_windows.py --no-browser`，但日常实机验收应先构建并安装，再通过安装目录的三个入口测试。PyInstaller 必须在 Windows 上生成 Windows 可执行文件；GitLab 不运行仓库中的 GitHub Actions 工作流。
 
+## 核实后解除旧序列号冲突
+
+两块板曾上报相同编号时，服务会持久保存冲突；另一块板改号或离线后不会自动解除。
+例如 COM6 改为新编号后，COM5 可以保留原编号，并在网页确认关联原档案：
+
+1. 对 COM5 的待识别连接点击“识别设备”，查看提示中的旧编号、标签、主机名及最后串口位置。
+2. 确认 COM5 是该档案原来的板子、COM6 已使用独立编号，填写核实原因并确认关联。
+3. 服务重新探测 COM5，验证连接、编号、档案和冲突状态未变后，保留原标签及历史日志并恢复绑定，记录核实原因。
+
+仍有另一个在线串口报告相同编号时，不提供确认入口；不能仅凭另一块板离线来判断编号唯一。
+确认十分钟内有效，断开重连或状态变化后重新识别。普通无冲突的离线设备仍直接接续同编号档案，不必每次确认。
+
+网页无法操作时，可关闭 seriald 窗口并备份安装目录的 `data\`，使用离线命令作为备用。
+在安装目录打开 PowerShell，先预览，再执行：
+
+```powershell
+.\seriald-admin.cmd resolve-conflict --serial VERIFIED_SERIAL --reason '已核实其他板已改为独立编号，原档案属于保留编号的板子'
+.\seriald-admin.cmd resolve-conflict --serial VERIFIED_SERIAL --reason '已核实其他板已改为独立编号，原档案属于保留编号的板子' --apply
+```
+
+`VERIFIED_SERIAL` 换成已核实的原编号。命令仅解除指定编号的旧冲突并记录原因，不改板载序列号、标签或日志。
+重新启动服务后，对对应待识别串口点击“识别设备”。若仍有两个在线串口报告同一编号，服务会重新记录冲突并拒绝合并。
+`seriald-admin.cmd` 等同于 `seriald.exe admin`，默认使用安装目录的 `data\`；
+自定义存储时在 `resolve-conflict` 前添加 `--base 'D:\seriald-data'`。
+源码环境使用 `py seriald_windows.py admin`，更多规则见[硬件身份说明](HARDWARE_ID.md)。
+
 ## 可选硬件命令
 
 Windows 10+ 可用 `SERIALD_HARDWARE` 配置按板子序列号绑定的电源、复位及外部刷机 EXE。

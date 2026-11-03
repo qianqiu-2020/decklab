@@ -5,7 +5,7 @@ from .results import response
 
 from .config import RESCUE_BIN
 from .transport import try_rescue
-from .storage import IdentityError
+from .storage import IdentityError, validate_conflict_reason
 from .file_transfer import TransferError
 from .transactions import transactions_for, TransactionError
 from . import __version__
@@ -34,6 +34,30 @@ def capabilities():
     })
 
 
+
+
+def validate_identify_request(payload, actor):
+    """Association is a human confirmation, never an agent or implicit action."""
+    init_marker = payload.get('init_boot_marker', False)
+    if type(init_marker) is not bool:
+        return response(400, {'ok': False, 'error': 'init_boot_marker must be a boolean'})
+    if 'association' not in payload:
+        return None
+    if actor != 'web':
+        return response(403, {'ok': False, 'error': '只有网页操作者可以确认关联历史档案'})
+    association = payload['association']
+    if (not isinstance(association, dict) or set(association) != {'nonce', 'serial', 'reason'}
+            or any(not isinstance(association.get(key), str) or not association[key].strip()
+                   for key in ('nonce', 'serial', 'reason'))
+            or len(association['nonce']) > 128 or len(association['serial'].encode('utf-8')) > 100):
+        return response(400, {'ok': False, 'error': 'invalid identity association confirmation'})
+    if init_marker:
+        return response(400, {'ok': False, 'error': '关联历史档案时不能同时创建身份标记'})
+    try:
+        validate_conflict_reason(association['reason'])
+    except IdentityError as error:
+        return response(400, {'ok': False, 'error': str(error)})
+    return None
 
 
 class DeviceActions:
@@ -303,10 +327,17 @@ class DeviceActions:
             return response(200, {'ok': True})
 
         if action == 'identify':
+            invalid = validate_identify_request(payload, actor)
+            if invalid is not None:
+                return invalid
             init_marker = payload.get('init_boot_marker', False)
-            if type(init_marker) is not bool:
-                return response(400, {'ok': False, 'error': 'init_boot_marker must be a boolean'})
-            info = d.run_probe(init_boot_marker=True) if init_marker else d.run_probe()
+            if 'association' in payload:
+                info = d.run_probe(association=payload['association'], actor=actor)
+            else:
+                info = d.run_probe(init_boot_marker=True) if init_marker else d.run_probe()
+            if actor != 'web':
+                info = dict(info)
+                info.pop('identity_confirmation', None)
             if init_marker and info.get('ok'):
                 self.manager.store.event(d.serial, actor, 'boot-marker-initialized', '/boot/seriald-id')
             return response(200 if info.get('ok') else 502, dict(info, device_key=d.key))

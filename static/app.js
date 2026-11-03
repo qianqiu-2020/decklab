@@ -13,7 +13,8 @@
     byId: $, fetch: fetch, formatBytes: fmt, age: ago,
     getView: function () { return terminalView.current; },
     isCurrent: function (ctx) { return isCurrent(ctx); },
-    open: select, renderInfo: renderInfo, loadSessions: loadSessions, loadActivity: loadActivity,
+    open: select, renderInfo: function (info) { checkIdentityAssociation(); renderInfo(info); },
+    loadSessions: loadSessions, loadActivity: loadActivity,
     updateInputOwner: updateInputOwner
   });
   var pollDevices = deviceDirectory.poll, markSelected = deviceDirectory.markSelected, adoptKey = deviceDirectory.adopt;
@@ -23,7 +24,9 @@
     board: function (key) { return deviceDirectory.items.find(function (board) { return board.key === key; }); },
     session: function (sid) { return sessions.find(function (session) { return session.sid === sid; }); },
     takenOver: function (sid) { return !!takenOver[sid]; },
-    onSelect: function (key, sid) { deviceDirectory.selectionChanged(key); curSid = sid; },
+    onSelect: function (key, sid) {
+      closeIdentityAssociation(); deviceDirectory.selectionChanged(key); curSid = sid;
+    },
     clearTerminalSearch: function (focus) { clearTerminalSearch(focus); },
     clearCommandDecorations: function (ctx) { clearCommandDecorations(ctx); },
     renderCommandNav: function (ctx) { renderCommandNav(ctx); },
@@ -462,7 +465,8 @@
         var eventBox = $('d-events'); eventBox.textContent = '';
         var actionNames = { identified: '识别完成', identify: '识别请求',
           'identity-promoted': '身份升级', 'identity-corrected': '身份更正',
-          'identity-confirmed': '身份确认', 'boot-marker-initialized': '初始化 /boot 标记',
+          'identity-confirmed': '身份确认', 'identity-conflict-resolved': '解除身份冲突',
+          'boot-marker-initialized': '初始化 /boot 标记',
           rescue: '串口自愈', 'ssh-enable': '启用 SSH', 'session-takeover': '人工介入 SSH',
           'ssh-auto-config': '自动配置 SSH', 'switch-armed': '准备更换设备' };
         (d.events || []).forEach(function (entry) {
@@ -732,13 +736,76 @@
       box.appendChild(d);
     });
   }
-  function postAction(path, label) {
-    var ctx = terminalView.current;
+  var identityAssociation = null;
+  function closeIdentityAssociation() {
+    identityAssociation = null;
+    var dialog = $('identity-association-dialog');
+    if (dialog.open) dialog.close();
+  }
+  function associationIsCurrent(state) {
+    if (!state || !isCurrent(state.ctx) || state.ctx.connectionId !== state.offer.connection_id) return false;
+    var board = deviceDirectory.find(state.ctx.key);
+    return !!board && board.connection_id === state.offer.connection_id && !board.serial;
+  }
+  function checkIdentityAssociation() {
+    if (identityAssociation && !associationIsCurrent(identityAssociation)) closeIdentityAssociation();
+  }
+  function updateIdentityAssociation() {
+    $('ia-confirm').disabled = !associationIsCurrent(identityAssociation)
+      || !$('ia-verified').checked || !$('ia-reason').value.trim();
+  }
+  function cancelIdentityAssociation() {
+    var state = identityAssociation;
+    closeIdentityAssociation();
+    if (associationIsCurrent(state)) $('d-status').textContent = ' 已取消关联，设备保持待识别';
+  }
+  function openIdentityAssociation(ctx, offer) {
+    closeIdentityAssociation();
+    var state = { ctx: ctx, offer: offer };
+    if (!offer || !offer.nonce || !offer.serial || !offer.connection_id || !associationIsCurrent(state)) return false;
+    identityAssociation = state;
+    var board = deviceDirectory.find(ctx.key);
+    $('ia-port').textContent = board.dev || board.by_path || ctx.key;
+    $('ia-board').textContent = offer.label + (offer.hostname && offer.hostname !== offer.label ? ' · ' + offer.hostname : '');
+    $('ia-serial').textContent = offer.serial;
+    $('ia-last').textContent = (offer.last_seen ? new Date(offer.last_seen * 1000).toLocaleString() : '—')
+      + ' · ' + (offer.last_dev || offer.last_path || '—');
+    $('ia-verified').checked = false;
+    $('ia-reason').value = '';
+    $('ia-status').textContent = '';
+    updateIdentityAssociation();
+    $('identity-association-dialog').showModal();
+    $('ia-cancel').focus();
+    $('d-status').textContent = ' 请核实后确认关联已有档案';
+    return true;
+  }
+  ['ia-close', 'ia-cancel'].forEach(function (id) {
+    $(id).addEventListener('click', cancelIdentityAssociation);
+  });
+  $('identity-association-dialog').addEventListener('cancel', cancelIdentityAssociation);
+  $('identity-association-dialog').addEventListener('close', function () {
+    if (!$('identity-association-dialog').open) identityAssociation = null;
+  });
+  $('ia-verified').addEventListener('change', updateIdentityAssociation);
+  $('ia-reason').addEventListener('input', updateIdentityAssociation);
+  $('ia-confirm').addEventListener('click', function () {
+    var state = identityAssociation;
+    updateIdentityAssociation();
+    if ($('ia-confirm').disabled) { checkIdentityAssociation(); return; }
+    // Consume the dialog before submission. A lost response never repeats this action.
+    var association = { nonce: state.offer.nonce, serial: state.offer.serial, reason: $('ia-reason').value.trim() };
+    closeIdentityAssociation();
+    postAction('/api/identify', '确认关联并重新识别', state.ctx, { association: association });
+  });
+  function postAction(path, label, ctx, extra) {
+    ctx = ctx || terminalView.current;
     if (!isCurrent(ctx)) return;
+    var connection = ctx.connectionId;
+    function current() { return isCurrent(ctx) && ctx.connectionId === connection; }
     $('d-status').textContent = ' ' + label + '…（要往板子控制台打字，最多可能等一两分钟）';
-    taskUI.run(path.replace('/api/', ''), ctx)
+    taskUI.run(path.replace('/api/', ''), ctx, extra)
       .then(function (d) {
-        if (!isCurrent(ctx)) return;
+        if (!current()) return;
         if (!d.ok) { $('d-status').textContent = ' 失败：' + (d.error || ''); return; }
         if (d.serial !== undefined || d.ips !== undefined) {
           if (d.ok && d.device_key) adoptKey(ctx, d.device_key, d.serial);
@@ -749,7 +816,10 @@
         pollDevices();
       })
       .catch(function (e) {
-        if (isCurrent(ctx)) $('d-status').textContent = ' 请求失败：' + e.message;
+        if (!current()) return;
+        if (!extra && path === '/api/identify' && e.result && e.result.code === 'identity-confirmation-required'
+            && openIdentityAssociation(ctx, e.result.identity_confirmation)) return;
+        $('d-status').textContent = ' 请求失败：' + e.message;
       });
   }
   $('b-identify').addEventListener('click', function () { postAction('/api/identify', '识别设备'); });
@@ -779,6 +849,7 @@
   }
   $('d-term').addEventListener('click', function () { if (terminalView.current) terminalView.current.term.focus(); });
   $('b-close').addEventListener('click', function () {
+    closeIdentityAssociation();
     disposeView(); deviceDirectory.selectionChanged(null); $('detail').hidden = true;
     $('workspace').classList.toggle('selected', false);
     document.body.classList.toggle('detail-open', false);

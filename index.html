@@ -152,6 +152,21 @@
 
   </div>
 </div>
+<dialog id="identity-association-dialog" class="identity-association-dialog" aria-labelledby="ia-title" aria-describedby="ia-intro ia-warning">
+  <div class="agent-share-head"><strong id="ia-title">关联已有设备档案</strong><button id="ia-close" type="button" aria-label="关闭">关闭</button></div>
+  <p id="ia-intro">当前编号曾发生冲突。请核实此连接对应的开发板与已有档案属于同一块硬件。</p>
+  <dl class="ia-details">
+    <div><dt>当前串口</dt><dd id="ia-port" data-i18n-ignore></dd></div>
+    <div><dt>已有档案</dt><dd id="ia-board" data-i18n-ignore></dd></div>
+    <div><dt>板卡序列号</dt><dd id="ia-serial" data-i18n-ignore></dd></div>
+    <div><dt>最近连接</dt><dd id="ia-last" data-i18n-ignore></dd></div>
+  </dl>
+  <p id="ia-warning">确认后将重新读取板载编号，保留原标签，并把本次连接的日志关联到该档案。仍有其他在线串口报告相同编号时会拒绝关联。</p>
+  <label class="ia-check"><input id="ia-verified" type="checkbox">我已核实旧日志属于此板，其他重复板已使用独立编号</label>
+  <label class="ft-field">核实说明<input id="ia-reason" type="text" maxlength="600" placeholder="填写如何确认板卡与档案归属" autocomplete="off"></label>
+  <p id="ia-status" role="status"></p>
+  <div class="ft-actions"><button id="ia-cancel" type="button">取消</button><button id="ia-confirm" class="pri" type="button" disabled>确认关联并重新识别</button></div>
+</dialog>
 <dialog id="file-transfer-dialog" class="file-transfer-dialog" aria-labelledby="ft-title">
   <div class="ft-head" title="拖动标题可移动窗口"><div><strong id="ft-title">串口文件传输</strong><small id="ft-board"></small></div><button id="ft-close" type="button">关闭</button></div>
   <p class="ft-intro">经串口传输，无需开发板联网。板子需进入 Linux shell，并具备 base64、sha256sum、dd；有 gzip 时自动压缩适合的分块。传输时暂停涉及串口的其他输入。板间复制在后台执行，关闭面板或刷新后可在“任务”中查看。</p>

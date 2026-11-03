@@ -56,6 +56,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Packaging environment isolation tests failed.' }
     & $python -m unittest discover -s tests -p test_windows_portable.py
     if ($LASTEXITCODE -ne 0) { throw 'Windows portable tests failed.' }
+    & $python -m unittest discover -s tests -p test_windows_entrypoint.py
+    if ($LASTEXITCODE -ne 0) { throw 'Windows offline administration entrypoint tests failed.' }
     & $python -m unittest discover -s tests -p test_session_contract.py
     if ($LASTEXITCODE -ne 0) { throw 'Shared SSH lifecycle and archive tests failed.' }
     & $python -m unittest discover -s tests -p test_protocol.py
@@ -64,7 +66,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Console transaction tests failed.' }
     & $python -m unittest discover -s tests -p test_profiles.py
     if ($LASTEXITCODE -ne 0) { throw 'Configuration tests failed.' }
-    foreach ($suite in @('test_cli.py', 'test_schema.py', 'test_tasks.py', 'test_task_actions.py',
+    foreach ($suite in @('test_cli.py', 'test_schema.py', 'test_identity.py', 'test_identity_association.py',
+                         'test_tasks.py', 'test_task_actions.py',
                          'test_transfer_artifacts.py', 'test_file_tasks.py',
                          'test_transfer_tasks.py', 'test_input_ownership.py',
                          'test_models.py', 'test_maintenance.py', 'test_agent_grants.py',
@@ -119,7 +122,8 @@ try {
 
     $launchers = Join-Path $root 'tools\windows-launchers'
     foreach ($name in @('Start-seriald.cmd', 'Start-seriald-LAN.cmd', 'Start-seriald-LAN.ps1',
-                       'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN-Open.ps1', 'serialctl.cmd')) {
+                       'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN-Open.ps1',
+                       'serialctl.cmd', 'seriald-admin.cmd')) {
         Copy-Item -LiteralPath (Join-Path $launchers $name) -Destination $bundle
     }
     & $python tools/package_docs.py $bundle --platform windows
@@ -128,6 +132,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }
     & (Join-Path $bundle 'seriald.exe') ctl --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI launcher failed.' }
+    & (Join-Path $bundle 'seriald.exe') admin resolve-conflict --help | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged offline administration launcher failed.' }
 
     # A content-specific ICO path makes shortcuts independent of the EXE icon cache.
     $iconSource = Join-Path $root 'packaging\decklab.ico'

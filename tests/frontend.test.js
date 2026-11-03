@@ -53,6 +53,7 @@ class Element {
   removeAttribute(name) { delete this.attributes[name]; }
   querySelector() { return this.head ||= new Element(); }
   show() { this.open = true; }
+  showModal() { this.open = true; }
   close() { this.open = false; }
 }
 
@@ -1577,6 +1578,127 @@ test('revoked task access stops monitoring and reports failure', async () => {
   h.take('/api/task').resolve({error: 'access revoked'}, 403); await drain();
   assert.ok(h.get('d-status').textContent.includes('access revoked'));
   assert.equal(h.timer(2000), undefined);
+});
+
+async function associationFixture() {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: [
+    {key: 'pending', label: '待识别', dev: 'COM5', alive: true, serial: '', connection_id: 'connection-A'},
+    {key: 'old-board', label: 'old-board', serial: 'SN-OLD', last_dev: 'COM5', alive: false},
+    {key: 'B', label: 'B', dev: 'COM6', serial: 'SN-NEW', alive: true, connection_id: 'connection-B'}]});
+  await drain(); h.select('pending');
+  return h;
+}
+function associationFailure(connection = 'connection-A') {
+  return {id: 'identify-conflict', state: 'failed', error: '编号曾发生冲突', result: {
+    code: 'identity-confirmation-required', identity_confirmation: {
+      nonce: 'confirmation-nonce', serial: 'SN-OLD', label: 'old-board', hostname: 'debian',
+      last_dev: 'COM5', last_seen: 1700000000, connection_id: connection}}};
+}
+async function openAssociation(h) {
+  h.get('b-identify').click();
+  h.take('/api/task-start').resolve({ok: true, task: associationFailure()});
+  await drain();
+}
+function verifyAssociation(h) {
+  h.get('ia-verified').checked = true; h.get('ia-verified').emit('change');
+  h.get('ia-reason').value = '已核实旧日志归属，另一板已改为独立编号'; h.get('ia-reason').emit('input');
+}
+
+test('identify conflict confirms archive ownership then submits one fresh identification', async () => {
+  const h = await associationFixture(); await openAssociation(h);
+  assert.equal(h.get('identity-association-dialog').open, true);
+  assert.equal(h.get('ia-port').textContent, 'COM5');
+  assert.equal(h.get('ia-serial').textContent, 'SN-OLD');
+  assert.ok(h.get('ia-board').textContent.includes('old-board'));
+  assert.ok(h.get('ia-last').textContent.includes('COM5'));
+  assert.equal(h.get('ia-confirm').disabled, true);
+  h.get('ia-verified').checked = true; h.get('ia-verified').emit('change');
+  assert.equal(h.get('ia-confirm').disabled, true, 'verification details are required too');
+  verifyAssociation(h);
+  h.get('ia-confirm').click(); h.get('ia-confirm').click();
+  const start = h.take('/api/task-start');
+  assert.deepEqual(JSON.parse(JSON.stringify(start.body.association)), {
+    nonce: 'confirmation-nonce', serial: 'SN-OLD', reason: '已核实旧日志归属，另一板已改为独立编号'});
+  assert.equal(start.body.connection_id, 'connection-A');
+  assert.equal(h.get('identity-association-dialog').open, false);
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 2);
+  start.resolve({ok: true, task: {id: 'confirm-identified', state: 'completed', result: {
+    ok: true, serial: 'SN-OLD', device_key: 'old-board', hostname: 'debian'}}});
+  await drain();
+  assert.equal(h.get('d-name').textContent, 'old-board');
+  assert.ok(h.get('d-status').textContent.includes('识别完成'));
+  assert.ok(h.requests.some(r => r.url.startsWith('/api/logs?') && r.url.includes('key=old-board')),
+    'successful adoption opens the original archive catalog');
+});
+
+test('cancelling archive association or leaving its device never submits a confirmation', async () => {
+  for (const action of ['ia-cancel', 'ia-close', 'b-close', 'switch', 'escape']) {
+    const h = await associationFixture(); await openAssociation(h); verifyAssociation(h);
+    if (action === 'switch') h.select('B');
+    else if (action === 'escape') h.get('identity-association-dialog').emit('cancel');
+    else h.get(action).click();
+    h.get('ia-confirm').click();
+    assert.equal(h.get('identity-association-dialog').open, false);
+    assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 1, action);
+  }
+});
+
+test('an active duplicate without a recovery offer cannot open archive confirmation', async () => {
+  const h = await associationFixture(); h.get('b-identify').click();
+  h.take('/api/task-start').resolve({ok: true, task: {id: 'duplicate-online', state: 'failed',
+    error: '同一序列号已在另一个串口在线，拒绝合并设备'}});
+  await drain();
+  assert.notEqual(h.get('identity-association-dialog').open, true);
+  assert.ok(h.get('d-status').textContent.includes('另一个串口在线'));
+});
+
+test('late archive offers and stale connection generations cannot associate a replacement board', async () => {
+  for (const switched of [false, true]) {
+    const h = await associationFixture(); h.get('b-identify').click();
+    const start = h.take('/api/task-start');
+    if (switched) h.select('B');
+    start.resolve({ok: true, task: associationFailure(switched ? 'connection-A' : 'old-generation')});
+    await drain();
+    assert.notEqual(h.get('identity-association-dialog').open, true);
+  }
+  const h = await associationFixture(); await openAssociation(h); verifyAssociation(h);
+  h.intervals.find(timer => timer.delay === 3000).fn();
+  h.take('/api/devices').resolve({devices: [
+    {key: 'pending', label: '待识别', alive: true, serial: '', connection_id: 'new-generation'}]});
+  await drain(); h.get('ia-confirm').click();
+  assert.equal(h.get('identity-association-dialog').open, false);
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 1);
+});
+
+test('archive confirmation failure or lost submission never reopens or replays the confirmation', async () => {
+  for (const lost of [false, true]) {
+    const h = await associationFixture(); await openAssociation(h); verifyAssociation(h);
+    h.get('ia-confirm').click();
+    const start = h.take('/api/task-start');
+    if (lost) start.reject(new Error('submission response lost'));
+    else start.resolve({ok: true, task: { ...associationFailure(), id: 'confirm-failed' }});
+    await drain();
+    assert.equal(h.get('identity-association-dialog').open, false);
+    assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 2);
+    assert.ok(h.get('d-status').textContent.includes('请求失败'));
+    assert.equal(h.timer(2000), undefined);
+  }
+});
+
+test('archive confirmation copy is translated while board metadata remains literal', () => {
+  const root = {nodeType: 1, childNodes: [], getAttribute: () => null};
+  const translated = {navigator: {language: 'en-US'},
+    document: {documentElement: root, querySelectorAll: () => []},
+    MutationObserver: class {observe() {}}, CustomEvent: class {}, dispatchEvent() {}};
+  translated.window = translated;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'static/i18n.js'), 'utf8'), translated);
+  assert.equal(translated.SerialdI18n.translate('关联已有设备档案'), 'Link existing board archive');
+  assert.equal(translated.SerialdI18n.translate('确认关联并重新识别'), 'Confirm link and identify again');
+  assert.equal(translated.SerialdI18n.translate('核实说明'), 'Verification details');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  for (const id of ['ia-port', 'ia-board', 'ia-serial', 'ia-last'])
+    assert.match(html, new RegExp('id="' + id + '" data-i18n-ignore'));
 });
 
 test('task history recovers progress on a fresh page and cancels only the selected board', async () => {

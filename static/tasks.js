@@ -10,7 +10,8 @@
         body: JSON.stringify(payload) } : { cache: 'no-store' }).then(function (response) {
         return response.json().then(function (data) {
           if (data.error || data.ok === false || response.ok === false) {
-            var error = new Error(data.error || '任务请求失败'); error.status = response.status; throw error;
+            var error = new Error(data.error || '任务请求失败'); error.status = response.status;
+            error.result = data; throw error;
           }
           return data;
         });
@@ -28,7 +29,10 @@
           }
           if (active(current)) return false;
           if (current.state === 'completed') resolve(current.result || { ok: true });
-          else reject(new Error(current.error || states[current.state] || '任务失败'));
+          else {
+            var failure = new Error(current.error || states[current.state] || '任务失败');
+            failure.result = current.result; failure.permanent = true; reject(failure);
+          }
           return true;
         }
         function monitor() {
@@ -62,10 +66,12 @@
     function scope(ctx) { return ctx ? ctx.serial ? 'serial:' + ctx.serial
       : 'connection:' + (ctx.connectionId || ctx.key) : ''; }
     function sameSelection(selected) { return !!selected && scope(options.getView()) === selected; }
-    function run(kind, ctx) {
+    function run(kind, ctx, extra) {
       var refreshed = false;
-      return client.start({ key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId,
-        kind: kind, actor: 'web' }, function () {
+      var payload = { key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId,
+        kind: kind, actor: 'web' };
+      if (extra && Object.prototype.hasOwnProperty.call(extra, 'association')) payload.association = extra.association;
+      return client.start(payload, function () {
           if (!refreshed) { refreshed = true; refresh(); }
         });
     }

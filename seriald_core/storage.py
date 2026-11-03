@@ -14,6 +14,12 @@ class IdentityError(ValueError):
     pass
 
 
+class IdentityConfirmationRequired(IdentityError):
+    def __init__(self, message, confirmation):
+        super().__init__(message)
+        self.confirmation = confirmation
+
+
 def serial_component(serial):
     """Reversible encoding, with ordinary hardware serials unchanged."""
     if not isinstance(serial, str) or not serial.strip() or len(serial.encode()) > 100:
@@ -44,6 +50,14 @@ def validate_label(label):
     if label.startswith(('pending-', 'unprovisioned-')):
         raise IdentityError('pending- 和 unprovisioned- 前缀保留给待识别连接')
     return label
+
+
+def validate_conflict_reason(reason):
+    if (not isinstance(reason, str) or not reason.strip()
+            or len(reason.encode('utf-8')) > 2048
+            or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in reason)):
+        raise IdentityError('解除冲突须填写核实原因（1–2048 字节，不含控制字符）')
+    return reason.strip()
 
 
 class Store:
@@ -86,11 +100,19 @@ class Store:
         with self.lock:
             return self._board(self.db.execute('SELECT * FROM boards WHERE label=?', (label,)).fetchone())
 
-    def bind(self, info, path, dev, label=None, connection_id=None):
+    def bind(self, info, path, dev, label=None, connection_id=None, conflict_resolution=None):
         serial = str(info.get('serial') or '').strip()
         serial_component(serial)
         explicit_label = label is not None
         with self.lock, self.db:
+            if conflict_resolution is not None:
+                self.db.execute('BEGIN IMMEDIATE')
+                conflict = self.db.execute('SELECT detected FROM identity_conflicts WHERE serial=?',
+                                           (serial,)).fetchone()
+                if conflict is None or conflict['detected'] != conflict_resolution['detected_at']:
+                    raise IdentityError('冲突记录已变化，请重新识别并确认')
+                self._resolve_conflict(serial, conflict_resolution['reason'],
+                                       conflict_resolution['actor'])
             old = self.get(serial)
             if old:
                 label = old['label'] if label is None else validate_label(label)
@@ -230,6 +252,30 @@ class Store:
     def has_conflict(self, serial):
         with self.lock:
             return self.db.execute('SELECT 1 FROM identity_conflicts WHERE serial=?', (serial,)).fetchone() is not None
+
+    def resolve_conflict(self, serial, reason):
+        """Explicit offline recovery after verifying uniqueness and archive ownership."""
+        serial_component(serial)
+        reason = validate_conflict_reason(reason)
+        with self.lock, self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            return self._resolve_conflict(serial, reason, 'admin')
+
+    def _resolve_conflict(self, serial, reason, actor):
+        """Called only inside the caller's registry write transaction."""
+        reason = validate_conflict_reason(reason)
+        if self.get(serial) is None:
+            raise IdentityError('档案不存在，无法核实冲突归属')
+        conflict = self.db.execute('SELECT detected FROM identity_conflicts WHERE serial=?',
+                                   (serial,)).fetchone()
+        if conflict is None:
+            return False
+        detail = json.dumps({'reason': reason, 'detected_at': conflict['detected']},
+                            ensure_ascii=False)
+        self.db.execute('INSERT INTO events(serial,ts,actor,action,detail) VALUES(?,?,?,?,?)',
+                        (serial, time.time(), actor, 'identity-conflict-resolved', detail))
+        self.db.execute('DELETE FROM identity_conflicts WHERE serial=?', (serial,))
+        return True
 
     def open_session(self, sid, serial, actor, title, ip):
         with self.lock, self.db:

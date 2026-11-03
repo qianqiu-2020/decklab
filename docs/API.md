@@ -144,12 +144,25 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | `/api/input-claim` | Optional human `takeover=true`; returns ownership ID |
 | `/api/input-release` | Ownership `id` |
 | `/api/operation-cancel` | Active operation `id` |
-| `/api/identify` | Optional `init_boot_marker=true`; active shell probe, may log in |
+| `/api/identify` | Optional `init_boot_marker=true` or web-only `association={nonce,serial,reason}`; active shell probe, may log in |
 | `/api/probe` | Sends CR to request a prompt; this writes to the shared console |
 | `/api/ssh-enable` | Explicit SSH provisioning permitted by device profile |
 | `/api/label` | `label`; rename without moving archives |
 | `/api/switch-mode` | Prepare this physical attachment for another board |
 | `/api/rescue` | Explicit host USB recovery where supported |
+
+If identification finds an existing offline archive with a previously conflicted
+serial, a web caller can receive `code=identity-confirmation-required` and
+`identity_confirmation`. The offer contains `nonce`, `serial`, `label`, `hostname`,
+`last_seen`, `last_dev`, `last_path`, `detected_at`, `expires_at` and `connection_id`;
+times are Unix seconds. After a human verifies uniqueness and archive ownership,
+submit another identify request for the same pending connection with
+`association={nonce,serial,reason}`. The reason must be nonempty. Only actor `web`
+can confirm; agent callers cannot use this mechanism. Offers last 600 seconds
+and are invalidated by reconnection, collector restart or changed archive/conflict
+state. Confirmation probes the board again before binding and records the reason.
+Another online connection reporting the serial prevents confirmation. Ordinary
+offline reconnects without a recorded conflict need no extra confirmation.
 
 For long identify/SSH operations, prefer background tasks. Non-web actors reuse
 persistent SSH terminals, but CLI `exec` executes each command in a child `sh -c`.

@@ -22,7 +22,7 @@ if sys.platform == 'win32':
     from .sessions_windows import SshSession, check_password_login
 else:
     from .sessions import SshSession, check_password_login
-from .storage import IdentityError
+from .storage import IdentityConfirmationRequired, IdentityError
 from .identity import eeprom_serial, usable_serial
 from .boot_marker import init_command
 from .log_archive import boot_epochs
@@ -62,6 +62,8 @@ class Device:
         self.last_rescue = 0.0            # 上次尝试自愈的时间
         self.rescue_note = ''             # 自愈结果(页面显示用)
         self.identity_error = ''
+        self.identity_association = None
+        self.identity_candidate_serial = ''
         self.reported_serial = ''         # unbound probe result, never a persistence key
         self.auto_identify = False
         self.auto_identify_started = False
@@ -235,6 +237,8 @@ class Device:
         self.hostname = ''
         self.probe_info = {}
         self.reported_serial = ''
+        self.identity_association = None
+        self.identity_candidate_serial = ''
         self.identity_error = '已进入换板识别模式；新板出现登录提示后自动识别一次'
         self.auto_identify_started = False
         self.started = time.time()
@@ -499,7 +503,7 @@ class Device:
     def _run_cmd_locked(self, cmd, timeout, ensure_shell=True):
         return self.console.run_locked(cmd, timeout, ensure_shell)
 
-    def run_probe(self, init_boot_marker=False):
+    def run_probe(self, init_boot_marker=False, association=None, actor='web'):
         """Read identity metadata; create a /boot marker only on explicit request."""
         if self.profile.probe != 'linux':
             return {'ok': False, 'error': '当前配置仅提供原始串口，未启用 Linux shell 探测'}
@@ -525,10 +529,16 @@ class Device:
                 return {'ok': False, 'error': '识别期间设备已重新枚举'}
             if self.manager:
                 try:
-                    self.manager.identify(self, info)
+                    if association is not None:
+                        self.manager.identify(self, info, association=association, actor=actor)
+                    else:
+                        self.manager.identify(self, info)
                 except (IdentityError, OSError) as error:
                     self.identity_error = str(error)
                     self.reported_serial = info.get('serial', '')
+                    if isinstance(error, IdentityConfirmationRequired) and actor == 'web':
+                        return {'ok': False, 'error': str(error), 'code': 'identity-confirmation-required',
+                                'identity_confirmation': error.confirmation}
                     return {'ok': False, 'error': str(error)}
             self.identity_error = ''
             self.reported_serial = info.get('reported_serial', info.get('serial', ''))

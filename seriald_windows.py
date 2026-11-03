@@ -18,6 +18,12 @@ if len(sys.argv) > 1 and sys.argv[1] == 'demo':
     sys.argv.pop(1)
     raise SystemExit(seriald_demo.main())
 
+# Offline administration must not start HTTP servers or discover COM ports.
+if len(sys.argv) > 1 and sys.argv[1] == 'admin':
+    from seriald_core.admin import main as admin_main
+    sys.argv.pop(1)
+    raise SystemExit(admin_main())
+
 import argparse
 import threading
 import webbrowser

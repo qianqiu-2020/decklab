@@ -72,6 +72,75 @@ class TaskActionTests(unittest.TestCase):
         self.assertNotIn('secret', json.dumps(task))
         self.assertNotIn('EEPROM_HEX', task['result'])
 
+    def test_failed_identity_task_retains_only_human_confirmation_metadata(self):
+        confirmation = {'nonce': 'one-time-confirmation', 'serial': 'SN1', 'label': 'board',
+                        'connection_id': self.device.connection_id, 'last_dev': 'COM5',
+                        'detected_at': 123.0, 'expires_at': 456.0, 'password': 'must-not-persist'}
+        failure = {'ok': False, 'error': 'review archive ownership',
+                   'code': 'identity-confirmation-required', 'identity_confirmation': confirmation,
+                   'raw': 'private probe dump'}
+        with mock.patch.object(self.device, 'run_probe', return_value=failure) as probe:
+            result = self.start()
+            self.wait_task(result.payload['task']['id'])
+        probe.assert_called_once_with()
+        task = self.manager.tasks.store.get(result.payload['task']['id'])
+        self.assertEqual(task['state'], 'failed')
+        self.assertEqual(task['error'], failure['error'])
+        self.assertEqual(task['result']['code'], 'identity-confirmation-required')
+        self.assertEqual(task['result']['identity_confirmation'], {
+            key: value for key, value in confirmation.items() if key != 'password'})
+        self.assertNotIn('must-not-persist', json.dumps(task))
+        self.assertNotIn('private probe dump', json.dumps(task))
+        self.assertEqual(self.actions.query(task['id'], actor='agent').status, 404)
+
+    def test_agent_probe_failure_does_not_expose_archive_confirmation(self):
+        failure = {'ok': False, 'error': 'identity conflict',
+                   'code': 'identity-confirmation-required',
+                   'identity_confirmation': {'nonce': 'human-only', 'label': 'private archive'}}
+        with mock.patch.object(self.device, 'run_probe', return_value=failure):
+            code, response = self.http('/api/identify', {'key': 'board', 'actor': 'agent'})
+            self.assertEqual(code, 502)
+            self.assertNotIn('identity_confirmation', response)
+            result = self.actions.start({'kind': 'identify', 'connection_id': self.device.connection_id},
+                                        self.device, 'agent')
+            self.wait_task(result.payload['task']['id'])
+        task = self.manager.tasks.store.get(result.payload['task']['id'])
+        self.assertEqual(task['state'], 'failed')
+        self.assertIsNone(task['result'])
+        self.assertNotIn('private archive', json.dumps(task))
+
+    def test_confirmed_identify_task_passes_explicit_association_to_probe(self):
+        association = {'nonce': 'one-time-confirmation', 'serial': 'SN1',
+                       'reason': 'Verified board identity and archive ownership'}
+        with mock.patch.object(self.device, 'run_probe', return_value={'ok': True, 'serial': 'SN1'}) as probe:
+            result = self.start(association=association)
+            self.wait_task(result.payload['task']['id'])
+        self.assertEqual(result.status, 202)
+        probe.assert_called_once_with(association=association, actor='web')
+        task = self.manager.tasks.store.get(result.payload['task']['id'])
+        self.assertEqual(task['state'], 'completed')
+        self.assertEqual(task['result']['serial'], 'SN1')
+
+    def test_invalid_or_agent_associations_are_rejected_before_task_creation(self):
+        valid = {'nonce': 'one-time-confirmation', 'serial': 'SN1', 'reason': 'Verified ownership'}
+        with mock.patch.object(self.device, 'run_probe') as probe:
+            for association in (None, False, {}, dict(valid, reason=''), dict(valid, nonce=123),
+                                dict(valid, extra='unknown'), dict(valid, reason='a' * 2049)):
+                with self.subTest(association=association):
+                    result = self.start(association=association)
+                    self.assertEqual(result.status, 400)
+            self.assertEqual(self.start(association=valid, init_boot_marker=True).status, 400)
+            for association in (None, {}, valid):
+                payload = {'kind': 'identify', 'connection_id': self.device.connection_id,
+                           'association': association, 'actor': 'web'}
+                result = self.actions.start(payload, self.device, 'agent')
+                self.assertEqual(result.status, 403)
+                code, _ = self.http('/api/identify', {'key': 'board', 'actor': 'agent',
+                                                    'association': association})
+                self.assertEqual(code, 403)
+            probe.assert_not_called()
+        self.assertEqual(self.manager.tasks.store.list(), [])
+
     def test_task_cancel_wakes_real_transaction_wait_and_preserves_client_scope(self):
         ready = threading.Event()
         scopes = []

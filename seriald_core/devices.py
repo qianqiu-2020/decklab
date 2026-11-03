@@ -1,7 +1,9 @@
 """Device discovery, collector ownership and persistent identity binding."""
 import errno
 from contextlib import ExitStack, contextmanager
+import json
 import os
+import secrets
 import select
 import stat
 import sys
@@ -16,7 +18,8 @@ from .archive import finish_staged, stage_logs
 from .config import BY_PATH, LOG_ROOT
 from .device import Device
 from .identity import eeprom_serial, hardware_serial, select_identity
-from .storage import IdentityError, archive_component
+from .storage import (IdentityConfirmationRequired, IdentityError, archive_component,
+                      validate_conflict_reason)
 from .transport import open_serial
 from .boot_marker import marker_serial
 from .profiles import ProfileBook
@@ -79,23 +82,104 @@ class Manager:
         with self.lock:
             return next((d for d in self.all_devices() if d.key == key), None)
 
-    def identify(self, device, info):
+    def _select_identity(self, device, info, resolved_serial=''):
+        def conflicted(serial):
+            return serial != resolved_serial and self.store.has_conflict(serial)
+
+        provisioned = eeprom_serial(info)
+        marker_record = self.store.get(marker_serial(info))
+        known_marker = bool(marker_record and marker_record['info'].get('serial_source') == 'boot-marker')
+        # A copied /boot must not redirect an already known hardware identity into another archive.
+        if known_marker:
+            for candidate in (str(info.get('serial') or '').strip(), hardware_serial(info)):
+                if (candidate != marker_record['serial'] and not conflicted(candidate)
+                        and self.store.get(candidate)):
+                    raise IdentityError('/boot 标记与已有硬件档案冲突，可能复制了其他板子的标记文件')
+        return select_identity(info,
+            conflicted=conflicted(str(info.get('serial') or '').strip()),
+            known_soc=self.store.get(hardware_serial(info)) is not None,
+            known_marker=known_marker,
+            soc_conflicted=conflicted(hardware_serial(info)),
+            eeprom_conflicted=conflicted(provisioned))
+
+    def _other_identity_online(self, device, serial):
+        connections = list(self.devices.values()) + [board.connection for board in self.boards.values()]
+        return any(other is not None and other is not device and other.present
+                   and (other.serial == serial or not other.serial
+                        and (other.reported_serial == serial
+                             or getattr(other, 'identity_candidate_serial', '') == serial))
+                   for other in connections)
+
+    def _association_offer(self, device, info):
+        """Offer only an existing conflicted archive, never guess another serial."""
+        serial = eeprom_serial(info) or str(info.get('serial') or '').strip()
+        record = self.store.get(serial)
+        if (device.serial or not record or not self.store.has_conflict(serial)
+                or not device.present or device.stop.is_set()):
+            return None
+        device.identity_candidate_serial = serial
+        if self._other_identity_online(device, serial):
+            return None
+        try:
+            if self._select_identity(device, info, serial)['serial'] != serial:
+                return None
+        except IdentityError:
+            return None
+        with self.store.lock:
+            conflict = self.store.db.execute('SELECT detected FROM identity_conflicts WHERE serial=?',
+                                             (serial,)).fetchone()
+        if conflict is None:
+            return None
+        offer = {'nonce': secrets.token_hex(24), 'serial': serial, 'label': record['label'],
+                 'hostname': record['info'].get('hostname', ''), 'last_seen': record['last_seen'],
+                 'last_dev': record['last_dev'], 'last_path': record['last_path'],
+                 'detected_at': conflict['detected'], 'expires_at': time.time() + 600,
+                 'connection_id': device.connection_id}
+        device.identity_association = {'offer': offer,
+                                      'record': json.dumps(record, sort_keys=True)}
+        return dict(offer)
+
+    def _confirm_association(self, device, info, association, actor):
+        if actor != 'web':
+            raise IdentityError('只有网页操作者可以确认关联历史档案')
+        if not isinstance(association, dict) or set(association) != {'nonce', 'serial', 'reason'}:
+            raise IdentityError('无效的档案关联确认')
+        reason = validate_conflict_reason(association.get('reason'))
+        state = getattr(device, 'identity_association', None)
+        offer = state and state['offer']
+        if (not offer or association.get('nonce') != offer['nonce']
+                or association.get('serial') != offer['serial']
+                or time.time() >= offer['expires_at'] or device.serial
+                or device.connection_id != offer['connection_id']
+                or not device.present or device.stop.is_set()
+                or self.devices.get(device.by_path) is not device):
+            raise IdentityError('档案关联确认已失效，请重新识别')
+        serial = offer['serial']
+        if json.dumps(self.store.get(serial), sort_keys=True) != state['record']:
+            raise IdentityError('历史档案已变化，请重新识别并确认')
+        with self.store.lock:
+            conflict = self.store.db.execute('SELECT detected FROM identity_conflicts WHERE serial=?',
+                                             (serial,)).fetchone()
+        if conflict is None or conflict['detected'] != offer['detected_at']:
+            raise IdentityError('冲突记录已变化，请重新识别并确认')
+        if self._other_identity_online(device, serial):
+            raise IdentityError('同一序列号仍在另一个串口在线，拒绝关联历史档案')
+        if self._select_identity(device, info, serial)['serial'] != serial:
+            raise IdentityError('重新读取的序列号已变化，请重新识别并确认')
+        return {'serial': serial, 'reason': reason, 'actor': actor,
+                'detected_at': offer['detected_at']}
+
+    def identify(self, device, info, association=None, actor='web'):
         with self.lock:
             provisioned = eeprom_serial(info)
-            marker_record = self.store.get(marker_serial(info))
-            known_marker = bool(marker_record and marker_record['info'].get('serial_source') == 'boot-marker')
-            # A copied /boot must not redirect an already known hardware identity into another archive.
-            if known_marker:
-                for candidate in (str(info.get('serial') or '').strip(), hardware_serial(info)):
-                    if (candidate != marker_record['serial'] and not self.store.has_conflict(candidate)
-                            and self.store.get(candidate)):
-                        raise IdentityError('/boot 标记与已有硬件档案冲突，可能复制了其他板子的标记文件')
-            selected = select_identity(info,
-                conflicted=self.store.has_conflict(str(info.get('serial') or '').strip()),
-                known_soc=self.store.get(hardware_serial(info)) is not None,
-                known_marker=known_marker,
-                soc_conflicted=self.store.has_conflict(hardware_serial(info)),
-                eeprom_conflicted=self.store.has_conflict(provisioned))
+            resolution = self._confirm_association(device, info, association, actor) if association is not None else None
+            try:
+                selected = self._select_identity(device, info, resolution['serial'] if resolution else '')
+            except IdentityError as error:
+                offer = self._association_offer(device, info) if association is None else None
+                if offer:
+                    raise IdentityConfirmationRequired('该序列号已确认不唯一，请核实后确认关联原档案', offer) from error
+                raise
             serial = selected['serial']
             established = self.store.get(serial)
             if (established and established['info'].get('identity_status') == 'confirmed'
@@ -124,24 +208,31 @@ class Manager:
                             raise IdentityError('已发现正式 EEPROM 编号 %s，但该板仍有候选档案 %s；'
                                                 '请停服务后用 correct-serial 迁移' % (serial, alias))
             previous_board = self.boards.get(serial)
+            device.identity_candidate_serial = serial
             previous = previous_board.connection if previous_board else None
             if previous is not None and previous is not device and previous.present:
                 self.store.mark_conflict(serial)
                 raise IdentityError('同一序列号已在另一个串口在线，拒绝合并设备')
-            if self.store.has_conflict(serial) and device.serial != serial:
-                raise IdentityError('该序列号已确认不唯一，需核实真实板载唯一编号后再绑定')
+            if self.store.has_conflict(serial) and device.serial != serial and resolution is None:
+                offer = self._association_offer(device, info)
+                if offer:
+                    raise IdentityConfirmationRequired('该序列号已确认不唯一，请核实后确认关联原档案', offer)
+                raise IdentityError('该序列号已确认不唯一；排除重复并核实档案归属后，'
+                                    '请管理员用 resolve-conflict 解除冲突')
             if device.serial and device.serial != serial:
                 raise IdentityError('当前连接的序列号改变，请重新连接后识别')
-            board = self._bind_identity_archive(device, selected, previous_board, promotion_record)
+            board = self._bind_identity_archive(device, selected, previous_board, promotion_record, resolution)
             if promotion_record:
                 self.boards.pop(promotion_record['serial'], None)
             self.boards[serial] = board
             self.armed_paths.pop(device.by_path, None)
             device.auto_identify = False
+            device.identity_association = None
+            device.identity_candidate_serial = ''
             info.update(selected)
             self.store.event(serial, 'service', 'identified', device.by_path)
 
-    def _bind_identity_archive(self, device, selected, previous_board, promotion_record):
+    def _bind_identity_archive(self, device, selected, previous_board, promotion_record, resolution=None):
         """Commit identity and relocate all live log writers under stable ownership."""
         serial = selected['serial']
         previous_record = self.store.get(serial)
@@ -191,8 +282,10 @@ class Manager:
                             promotion_record['serial'], selected, device.by_path, device.dev,
                             connection_id=device.connection_id)
                     else:
-                        record = self.store.bind(selected, device.by_path, device.dev,
-                                                 connection_id=device.connection_id)
+                        bind_options = {'connection_id': device.connection_id}
+                        if resolution is not None:
+                            bind_options['conflict_resolution'] = resolution
+                        record = self.store.bind(selected, device.by_path, device.dev, **bind_options)
                     relocation.commit()  # Later cleanup failure cannot revert committed log ownership.
                     board = previous_board or device.board or Board(record)
                     board.update(record)

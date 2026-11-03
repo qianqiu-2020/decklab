@@ -1,9 +1,14 @@
 """Identity selection and explicit archive correction, with no board access."""
+from contextlib import redirect_stdout
+import io
+import json
+import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
-from seriald_core.admin import confirm_serial, correct_serial
+from seriald_core.admin import confirm_serial, correct_serial, main, resolve_conflict
 from seriald_core.identity import select_identity
 from seriald_core.protocol import parse_onie_serial, parse_probe
 from seriald_core.storage import IdentityError, Store
@@ -197,6 +202,96 @@ class IdentityCorrectionTests(unittest.TestCase):
         self.assertEqual(self.store.get(self.old)['label'], 'milkv2')
         self.assertEqual(self.store.get(self.new)['label'], 'another-board')
         self.assertEqual(self.store.sessions(self.old)[0]['sid'], 'ssh123')
+
+
+class ConflictResolutionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+        self.store = Store(self.base / 'registry.sqlite3')
+        self.addCleanup(self.store.close)
+        self.serial = '7c2b63fd4b46'
+        self.reason = '已核实两板编号不同，原档案属于保留编号的板子'
+        self.store.bind({'serial': self.serial, 'serial_source': 'eeprom-onie'},
+                        'COM5', 'COM5', 'debian')
+        self.store.mark_conflict(self.serial)
+        self.log = self.base / 'logs' / self.serial / 'serial-test.log'
+        self.log.parent.mkdir(parents=True)
+        self.log.write_bytes(b'original archive\n')
+
+    def test_preview_is_read_only_and_apply_preserves_identity_archives_and_sessions(self):
+        self.store.open_session('ssh123', self.serial, 'agent', 'uname', '192.0.2.1')
+        self.store.close_session('ssh123')
+        original = self.store.get(self.serial)
+        sessions = self.store.sessions(self.serial)
+        before = list(self.store.db.iterdump())
+        with mock.patch('seriald_core.admin.Store', side_effect=AssertionError('preview wrote storage')):
+            preview = resolve_conflict(self.base, self.serial, self.reason)
+        self.assertFalse(preview['applied'])
+        self.assertFalse(preview['resolved'])
+        self.assertTrue(preview['conflicted'])
+        self.assertEqual(preview['label'], 'debian')
+        self.assertEqual(list(self.store.db.iterdump()), before)
+
+        result = resolve_conflict(self.base, self.serial, self.reason, True)
+        self.assertTrue(result['applied'])
+        self.assertTrue(result['resolved'])
+        self.assertFalse(self.store.has_conflict(self.serial))
+        self.assertEqual(self.store.get(self.serial), original)
+        self.assertEqual(self.store.sessions(self.serial), sessions)
+        self.assertEqual(self.log.read_bytes(), b'original archive\n')
+        event = self.store.events(self.serial)[0]
+        self.assertEqual((event['actor'], event['action']), ('admin', 'identity-conflict-resolved'))
+        self.assertEqual(json.loads(event['detail']),
+                         {'reason': self.reason, 'detected_at': preview['detected_at']})
+        again = resolve_conflict(self.base, self.serial, self.reason, True)
+        self.assertFalse(again['resolved'])
+        self.assertFalse(again['conflicted'])
+        self.assertEqual(len(self.store.events(self.serial)), 1)
+
+    def test_invalid_reason_serial_or_missing_archive_cannot_clear_conflict(self):
+        for reason in ('', '  ', 'contains\nnewline', '\x00', '\x7f', '\x85', '核' * 683):
+            for apply in (False, True):
+                with self.subTest(reason=reason, apply=apply), self.assertRaises(ValueError):
+                    resolve_conflict(self.base, self.serial, reason, apply)
+        for serial in ('unknown', '0' * 16, 'unknown-board'):
+            for apply in (False, True):
+                with self.subTest(serial=serial, apply=apply), self.assertRaises(ValueError):
+                    resolve_conflict(self.base, serial, self.reason, apply)
+        self.assertTrue(self.store.has_conflict(self.serial))
+        self.assertEqual(self.store.events(self.serial), [])
+
+    def test_missing_database_is_not_created(self):
+        missing_base = self.base / 'missing'
+        for apply in (False, True):
+            with self.subTest(apply=apply), self.assertRaises(sqlite3.OperationalError):
+                resolve_conflict(missing_base, self.serial, self.reason, apply)
+        self.assertFalse(missing_base.exists())
+
+    def test_failed_conflict_deletion_rolls_back_audit(self):
+        with self.store.db:
+            self.store.db.execute("CREATE TRIGGER prevent_resolution BEFORE DELETE ON identity_conflicts "
+                                  "BEGIN SELECT RAISE(ABORT, 'resolution blocked'); END")
+        with self.assertRaisesRegex(sqlite3.IntegrityError, 'resolution blocked'):
+            self.store.resolve_conflict(self.serial, self.reason)
+        self.assertTrue(self.store.has_conflict(self.serial))
+        self.assertEqual(self.store.events(self.serial), [])
+
+    def test_cli_requires_reason_and_defaults_to_preview(self):
+        args = ['seriald-admin', '--base', str(self.base), 'resolve-conflict',
+                '--serial', self.serial]
+        with mock.patch('sys.argv', args), redirect_stdout(io.StringIO()), \
+                mock.patch('sys.stderr', new_callable=io.StringIO), self.assertRaises(SystemExit) as error:
+            main()
+        self.assertEqual(error.exception.code, 2)
+        for apply in (False, True):
+            argv = args + ['--reason', self.reason] + (['--apply'] if apply else [])
+            with mock.patch('sys.argv', argv), redirect_stdout(io.StringIO()) as output:
+                main()
+            result = json.loads(output.getvalue())
+            self.assertEqual(result['applied'], apply)
+            self.assertEqual(self.store.has_conflict(self.serial), not apply)
 
 
 if __name__ == '__main__':

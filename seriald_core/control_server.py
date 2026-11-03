@@ -270,6 +270,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     payload = load_object(body or b'')
                 except (UnicodeDecodeError, ValueError, AttributeError):
                     return self._json(400, {'error': 'bad json'})
+                if ('association' in payload and (route == '/api/identify'
+                        or route == '/api/task-start')):
+                    return self._json(403, {'error': 'Agent 令牌不能确认关联历史档案'})
                 if grant and grant['scope'] == 'device':
                     if not payload.get('key'):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})

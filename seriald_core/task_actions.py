@@ -1,6 +1,6 @@
 """Async operation adapters; all hardware work still uses DeviceActions."""
 import re
-from .actions import DeviceActions
+from .actions import DeviceActions, validate_identify_request
 from .results import response
 from .tasks import TaskCancelled, TaskError
 from .transactions import transactions_for, TransactionError
@@ -32,6 +32,12 @@ class TaskActions:
                 raise TaskError('unsupported task kind')
             if not isinstance(actor, str) or not actor or len(actor) > 80:
                 raise TaskError('invalid task actor')
+            if kind == 'identify':
+                invalid = validate_identify_request(payload, actor)
+                if invalid is not None:
+                    return invalid
+            elif 'association' in payload:
+                raise TaskError('identity association requires an identify task')
             client = payload.get('client_id', '') if actor == 'web' else ''
             if not isinstance(client, str) or client and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client):
                 raise TaskError('invalid task client')
@@ -98,6 +104,17 @@ class TaskActions:
                     raise
                 if result.status >= 400 or not result.payload.get('ok'):
                     context.check()
+                    confirmation = result.payload.get('identity_confirmation')
+                    if (kind == 'identify' and actor == 'web' and isinstance(confirmation, dict)
+                            and result.payload.get('code') == 'identity-confirmation-required'):
+                        # A failed probe can offer human review without claiming it
+                        # identified a board. Keep only bounded identity metadata.
+                        fields = ('nonce', 'serial', 'label', 'hostname', 'last_seen', 'last_dev',
+                                  'last_path', 'detected_at', 'expires_at', 'connection_id')
+                        self.tasks.store.update(context.id, result={
+                            'code': 'identity-confirmation-required',
+                            'identity_confirmation': {key: confirmation[key] for key in fields
+                                                      if key in confirmation}})
                     raise TaskError(result.payload.get('error', 'operation failed'), result.status)
                 if kind == 'ssh-connect' and context.cancelled.is_set():
                     sid = result.payload.get('sid', '')

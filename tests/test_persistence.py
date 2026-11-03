@@ -280,6 +280,81 @@ class PersistenceTests(unittest.TestCase):
             restored.identify(new, {'serial': 'SN001', 'hostname': 'other'})
         self.assertEqual(new.serial, '')
 
+    def test_resolved_duplicate_reconnects_original_archive_and_detects_new_duplicates(self):
+        original, corrected = self.connection('usb-1'), self.connection('usb-2')
+        self.identify(original)
+        original.append(b'original board history\n')
+        archive = Path(original.stable_dir())
+        with self.assertRaises(IdentityError):
+            self.identify(corrected)
+        self.identify(corrected, 'SN002', 'musepi2')
+        corrected.append(b'corrected board history\n')
+        corrected_archive = Path(corrected.stable_dir())
+        original.close_log()
+        original.present, original.fd = False, None
+
+        reconnected = self.connection('usb-3')
+        with self.assertRaisesRegex(IdentityError, '不唯一'):
+            self.identify(reconnected)
+        self.assertEqual(reconnected.serial, '')
+        self.assertTrue(self.store.has_conflict('SN001'))
+        self.assertTrue(self.store.resolve_conflict(
+            'SN001', 'Verified original board; the other board now reports SN002'))
+        self.identify(reconnected)
+        self.assertEqual(reconnected.key, 'riscv-118')
+        self.assertEqual(Path(reconnected.stable_dir()), archive)
+        self.assertTrue(any('original board history' in p.read_text()
+                            for p in archive.glob('*.log')))
+        self.assertEqual(corrected.serial, 'SN002')
+        self.assertEqual(corrected.key, 'musepi2')
+        self.assertEqual(Path(corrected.stable_dir()), corrected_archive)
+        self.assertTrue(any('corrected board history' in p.read_text()
+                            for p in corrected_archive.glob('*.log')))
+        self.assertEqual(len(self.store.boards()), 2)
+
+        duplicate = self.connection('usb-4')
+        with self.assertRaisesRegex(IdentityError, '另一个串口'):
+            self.identify(duplicate)
+        self.assertEqual(duplicate.serial, '')
+        self.assertTrue(self.store.has_conflict('SN001'))
+        self.assertEqual(self.store.get('SN001')['last_path'], 'usb-3')
+
+    def test_conflict_resolution_and_audit_survive_registry_reopen(self):
+        self.store.bind({'serial': 'SN001'}, 'usb-1', '/fake/ttyUSB0', 'riscv-118')
+        self.store.mark_conflict('SN001')
+        self.store.mark_conflict('SN002')
+        detected_at = self.store.db.execute(
+            'SELECT detected FROM identity_conflicts WHERE serial=?', ('SN001',)).fetchone()[0]
+        reason = 'Verified SN001 after changing the duplicated board to SN002'
+        self.assertTrue(self.store.resolve_conflict('SN001', reason))
+
+        reopened = Store(str(self.root / 'registry.sqlite3'))
+        self.addCleanup(reopened.close)
+        self.assertFalse(reopened.has_conflict('SN001'))
+        self.assertTrue(reopened.has_conflict('SN002'))
+        with mock.patch.object(devices, 'open_serial', side_effect=AssertionError('hardware')):
+            restored = devices.Manager(reopened)
+        self.assertEqual(restored.resolve('riscv-118').serial, 'SN001')
+        events = reopened.events('SN001')
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['action'], 'identity-conflict-resolved')
+        self.assertEqual(events[0]['actor'], 'admin')
+        self.assertEqual(json.loads(events[0]['detail']), {
+            'reason': reason, 'detected_at': detected_at})
+        self.assertFalse(reopened.resolve_conflict('SN001', reason))
+        self.assertEqual(reopened.events('SN001'), events)
+
+    def test_conflict_resolution_requires_existing_archive_and_explanation(self):
+        self.store.bind({'serial': 'SN001'}, 'usb-1', '/fake/ttyUSB0', 'riscv-118')
+        self.store.mark_conflict('SN001')
+        for reason in ('', '   ', None):
+            with self.subTest(reason=reason), self.assertRaises(IdentityError):
+                self.store.resolve_conflict('SN001', reason)
+        with self.assertRaises(IdentityError):
+            self.store.resolve_conflict('missing-board', 'Verified the hardware')
+        self.assertTrue(self.store.has_conflict('SN001'))
+        self.assertEqual(self.store.events('SN001'), [])
+
     def test_distinct_efuse_ids_with_same_firmware_serial_have_separate_archives(self):
         self.store.mark_conflict('0123456789ABCDEF')
         one, two = self.connection('usb-1'), self.connection('usb-2')

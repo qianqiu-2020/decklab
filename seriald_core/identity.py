@@ -76,5 +76,6 @@ def select_identity(info, conflicted=False, known_soc=False, known_marker=False,
         return dict(info, serial=marker, reported_serial=reported, serial_source='boot-marker',
                     identity_status='provisional')
     if conflicted and usable_serial(reported):
-        raise IdentityError('固件序列号已确认不唯一；请写入 EEPROM ONIE TLV 0x23')
+        raise IdentityError('固件序列号已确认不唯一；排除重复并核实档案归属后，'
+                            '请管理员用 resolve-conflict 解除冲突')
     raise IdentityError('EEPROM 尚未写入唯一序列号；当前仅按 USB 插口临时区分，请写入 ONIE TLV 0x23')

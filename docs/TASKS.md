@@ -57,6 +57,23 @@ including leases acquired after an earlier interaction. A cancelled SSH-connect
 task closes a newly created session; an existing reused session remains available.
 Final results contain selected operation metadata, not raw probe dumps.
 
+For `kind=identify`, a web task can finish with `state=failed` and
+`task.result.code=identity-confirmation-required`.
+`task.result.identity_confirmation` contains a 600-second offer to associate the
+current pending connection with its existing conflicted offline archive: `nonce`,
+`serial`, `label`, `hostname`, `last_seen`, `last_dev`, `last_path`, `detected_at`,
+`expires_at` and `connection_id`. Times are Unix seconds. This failed task does
+not clear the conflict or bind the connection. After a human checks the archive
+and supplies a nonempty reason, submit a **new** `kind=identify` task with the
+same pending `key`, expected `serial`/`connection_id` and optional request field
+`association={nonce,serial,reason}`. The serial inside `association` is the offered
+archive identity; the top-level expected serial still describes the pending
+connection. Only actor `web` may confirm. The new task probes identity again and
+rejects expired offers, changed connections, changed archive/conflict state or
+another online connection reporting the same serial. Collector restart also
+invalidates offers. Querying a failed task never replays or confirms it; ordinary
+unconflicted offline reconnects continue without this extra step.
+
 ## Storage and execution
 
 `TaskStore` was introduced in registry schema 3; schema 4 adds transfer artifact metadata; schema 5 adds proven connection identity. It persists a random task ID, operation kind,

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.6.5
+
+- Recover a previously duplicated board serial from the Identify action: review
+  the existing archive, confirm ownership and provide verification details, then
+  read the board identity again before retaining its label and continuing logs.
+- Reject stale confirmations and active duplicates. Commit conflict resolution,
+  its audit reason and the connection binding together; agent grants cannot
+  confirm archive associations.
+- Add an offline `resolve-conflict` preview/apply command and a packaged Windows
+  administration entry point for verified recovery without changing board serials.
+
 ## 1.6.4
 
 - Restore the controller's approved text width when firmware menus hand off to

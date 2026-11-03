@@ -258,6 +258,31 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(connection.request.call_args.kwargs['headers']['Content-Length'],
                          str(len(connection.request.call_args.kwargs['body'])))
 
+    def test_agent_credentials_cannot_confirm_archive_association_even_with_web_actor(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = AgentGrantStore(str(pathlib.Path(folder) / 'grants.sqlite3'))
+            self.addCleanup(store.close)
+            all_token, _ = store.issue('all')
+            device_token, _ = store.issue('device', 'SN1')
+            for token in ('named-agent-token', all_token, device_token):
+                for route in ('/api/identify', '/api/task-start'):
+                    for association in (None, {}, {'nonce': 'challenge', 'serial': 'SN1', 'reason': 'verified'}):
+                        with self.subTest(token_type=token[:10], route=route, association=association):
+                            handler = self.control_handler(route)
+                            handler.auth_token, handler.grant_store = 'owner', store
+                            handler.agent_tokens = {'agent': 'named-agent-token'}
+                            payload = {'key': 'board-key', 'kind': 'identify', 'actor': 'web',
+                                       'association': association}
+                            body = json.dumps(payload).encode()
+                            handler.command = 'POST'
+                            handler.headers = {'Authorization': 'Bearer ' + token,
+                                               'Content-Length': str(len(body))}
+                            handler.rfile = io.BytesIO(body)
+                            with mock.patch.object(control, 'UnixHTTPConnection') as connection:
+                                handler.do_POST()
+                                connection.assert_not_called()
+                            self.assertEqual(self.result(handler)[0], 403)
+
     def test_scoped_agent_grant_filters_devices_and_pins_post_to_serial(self):
         with tempfile.TemporaryDirectory() as folder:
             store = AgentGrantStore(str(pathlib.Path(folder) / 'grants.sqlite3'))

@@ -1,5 +1,6 @@
-"""Explicit, repeatable import of legacy path-based archives; never touches hardware."""
+"""Offline identity repair and archive import; never touches hardware."""
 import argparse
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -7,7 +8,8 @@ import sqlite3
 
 from .archive import copy_atomic, digest, finish_staged
 from .config import BASE
-from .storage import Store, archive_component, serial_component, validate_label
+from .storage import (Store, archive_component, serial_component,
+                      validate_conflict_reason, validate_label)
 from .identity import usable_serial
 
 
@@ -111,6 +113,31 @@ def confirm_serial(base, serial, apply=False):
             'source_dirs_removed': removed}
 
 
+def resolve_conflict(base, serial, reason, apply=False):
+    """Preview or explicitly resolve a verified duplicate, preserving its archive."""
+    reason = validate_conflict_reason(reason)
+    if not usable_serial(serial):
+        raise ValueError('需要经过核实的有效唯一序列号')
+    database = Path(base).resolve() / 'registry.sqlite3'
+    # Preview must not create storage, migrate the schema or modify the registry.
+    with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as reader:
+        row = reader.execute('SELECT b.label,c.detected FROM boards b '
+                             'LEFT JOIN identity_conflicts c ON c.serial=b.serial '
+                             'WHERE b.serial=?', (serial,)).fetchone()
+    if row is None:
+        raise ValueError('档案不存在，无法核实冲突归属')
+    resolved = False
+    if apply:
+        store = Store(str(database))
+        try:
+            resolved = store.resolve_conflict(serial, reason)
+        finally:
+            store.close()
+    return {'applied': apply, 'serial': serial, 'label': row[0],
+            'conflicted': row[1] is not None, 'detected_at': row[1],
+            'reason': reason, 'resolved': resolved}
+
+
 def import_legacy(source, base, mapping, apply=False):
     source = Path(source).resolve()
     plan = []
@@ -162,12 +189,20 @@ def main():
     confirm = commands.add_parser('confirm-serial', help='promote a verified provisional identity')
     confirm.add_argument('--serial', required=True)
     confirm.add_argument('--apply', action='store_true', help='move logs and update registry; stop service first')
+    resolve = commands.add_parser('resolve-conflict', help='resolve a manually verified serial conflict offline')
+    resolve.add_argument('--serial', required=True)
+    resolve.add_argument('--reason', required=True, help='how uniqueness and archive ownership were verified')
+    resolve.add_argument('--apply', action='store_true', help='clear conflict and audit; stop service first; default is dry-run')
     args = parser.parse_args()
     if args.action == 'correct-serial':
         print(json.dumps(correct_serial(args.base, args.old, args.new, args.apply), ensure_ascii=False, indent=2))
         return
     if args.action == 'confirm-serial':
         print(json.dumps(confirm_serial(args.base, args.serial, args.apply), ensure_ascii=False, indent=2))
+        return
+    if args.action == 'resolve-conflict':
+        print(json.dumps(resolve_conflict(args.base, args.serial, args.reason, args.apply),
+                         ensure_ascii=False, indent=2))
         return
     with open(args.mapping, encoding='utf-8') as source:
         mapping = json.load(source)
