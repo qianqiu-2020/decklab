@@ -110,6 +110,9 @@ try {
         --add-data 'seriald_core/terminal_snapshot.js;seriald_core' `
         --add-data 'build/terminal-runtime;runtime' `
         --add-data 'serialctl.py;.' `
+        --add-data 'seriald_mcp.py;.' `
+        --add-data 'requirements-mcp.txt;.' `
+        --add-data 'pyproject.toml;.' `
         --add-data 'skills/seriald-board/SKILL.md;skills/seriald-board' `
         --add-data 'skills/seriald-board/SKILL.zh-CN.md;skills/seriald-board' `
         seriald_windows.py

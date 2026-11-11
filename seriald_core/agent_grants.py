@@ -22,9 +22,12 @@ class AgentGrantStore:
             self.db.close()
             raise
 
-    def issue(self, scope, serial='', ttl=None):
-        if scope not in ('all', 'device') or (scope == 'device' and not serial):
+    def issue(self, scope, serial='', ttl=None, key='', connection_id=''):
+        if scope not in ('all', 'device', 'connection') or (scope == 'device' and not serial):
             raise ValueError('invalid grant scope')
+        if scope == 'connection' and (not isinstance(key, str) or not key or len(key) > 256
+                or not isinstance(connection_id, str) or not connection_id or len(connection_id) > 80):
+            raise ValueError('invalid connection grant target')
         if ttl is not None and (type(ttl) is not int or ttl <= 0):
             raise ValueError('invalid grant lifetime')
         grant_id = secrets.token_hex(8)
@@ -32,11 +35,16 @@ class AgentGrantStore:
         now = int(time.time())
         grant = {'id': grant_id, 'actor': 'shared-agent/' + grant_id,
                  'scope': scope, 'serial': serial if scope == 'device' else '',
+                 'key': key if scope == 'connection' else '',
+                 'connection_id': connection_id if scope == 'connection' else '',
                  'created': now, 'expires': now + ttl if ttl else None, 'revoked': None}
         with self.lock:
-            self.db.execute('INSERT INTO grants VALUES (?,?,?,?,?,?,?,?)',
+            self.db.execute('INSERT INTO grants '
+                            '(id,token_hash,actor,scope,serial,created,expires,revoked,key,connection_id) '
+                            'VALUES (?,?,?,?,?,?,?,?,?,?)',
                             (grant_id, hashlib.sha256(token.encode()).hexdigest(),
-                             grant['actor'], scope, grant['serial'], now, grant['expires'], None))
+                             grant['actor'], scope, grant['serial'], now, grant['expires'], None,
+                             grant['key'], grant['connection_id']))
             self.db.commit()
         return token, grant
 
@@ -45,7 +53,7 @@ class AgentGrantStore:
             return None
         digest = hashlib.sha256(token.encode()).hexdigest()
         with self.lock:
-            row = self.db.execute('SELECT id,actor,scope,serial,created,expires,revoked '
+            row = self.db.execute('SELECT id,actor,scope,serial,created,expires,revoked,key,connection_id '
                                   'FROM grants WHERE token_hash=?', (digest,)).fetchone()
         if not row or row['revoked'] is not None or (row['expires'] is not None and row['expires'] <= time.time()):
             return None
@@ -53,7 +61,7 @@ class AgentGrantStore:
 
     def list(self):
         with self.lock:
-            rows = self.db.execute('SELECT id,actor,scope,serial,created,expires,revoked '
+            rows = self.db.execute('SELECT id,actor,scope,serial,created,expires,revoked,key,connection_id '
                                    'FROM grants ORDER BY created DESC, id DESC LIMIT 200').fetchall()
         return [dict(row) for row in rows]
 

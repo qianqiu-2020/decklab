@@ -46,6 +46,24 @@ def _boolean(value, name):
     return value in ('1', 'true')
 
 
+def validate_probe_settings(document):
+    """Validate human-managed console probing; commands are data until run on the board."""
+    if not isinstance(document, dict) or set(document) - {'mode', 'command'}:
+        raise ValueError('探测设置仅支持 mode 和 command')
+    mode = document.get('mode', 'linux')
+    command = document.get('command', '')
+    if mode not in ('linux', 'custom', 'manual'):
+        raise ValueError('探测模式须为 linux、custom 或 manual')
+    if (not isinstance(command, str) or len(command.encode('utf-8')) > 16384
+            or any(ord(char) < 32 and char not in '\n\t' for char in command)):
+        raise ValueError('探测命令须为不超过 16 KiB 的文本，不含换行、制表以外的控制字符')
+    if mode == 'custom' and not command.strip():
+        raise ValueError('自定义探测命令不能为空')
+    if mode != 'custom' and command:
+        raise ValueError('仅自定义模式可以设置探测命令')
+    return {'mode': mode, 'command': command}
+
+
 @dataclass(frozen=True)
 class BoardProfile:
     name: str = 'default'
@@ -56,13 +74,13 @@ class BoardProfile:
     ssh_password: str = field(default='bianbu', repr=False)
     newline: str = 'auto'
     probe: str = 'linux'
+    probe_command: str = field(default='', repr=False)
     auto_configure_ssh: bool = True
 
     def __post_init__(self):
         if self.newline not in ('auto', 'cr', 'lf', 'crlf'):
             raise ValueError('profile newline must be auto, cr, lf or crlf')
-        if self.probe not in ('linux', 'manual'):
-            raise ValueError('profile probe must be linux or manual')
+        validate_probe_settings({'mode': self.probe, 'command': self.probe_command})
         if type(self.auto_configure_ssh) is not bool:
             raise ValueError('profile auto_configure_ssh must be boolean')
         for key in ('console_user', 'console_password', 'ssh_user', 'ssh_password'):
@@ -75,8 +93,8 @@ class BoardProfile:
             value = getattr(self, key)
             if value.startswith('-') or '@' in value or any(char.isspace() for char in value):
                 raise ValueError('profile ' + key + ' must be an unambiguous login name')
-        if self.probe == 'manual' and self.auto_configure_ssh:
-            raise ValueError('manual profile cannot automatically provision SSH')
+        if self.probe != 'linux' and self.auto_configure_ssh:
+            raise ValueError('non-Linux profile cannot automatically provision SSH')
 
     @property
     def line_ending(self):
@@ -88,12 +106,13 @@ class BoardProfile:
         password = os.environ.get('SERIALD_SSH_PASSWORD', 'bianbu')
         probe = os.environ.get('SERIALD_PROBE', 'linux')
         automatic = _boolean(os.environ.get('SERIALD_AUTO_CONFIGURE_SSH',
-                                            '0' if probe == 'manual' else '1'),
+                                            '0' if probe != 'linux' else '1'),
                              'SERIALD_AUTO_CONFIGURE_SSH')
         return cls(serial=SerialSettings.from_env(), ssh_user=user, ssh_password=password,
                    console_user=os.environ.get('SERIALD_CONSOLE_USER', user),
                    console_password=os.environ.get('SERIALD_CONSOLE_PASSWORD', password),
                    newline=os.environ.get('SERIALD_NEWLINE', 'auto'), probe=probe,
+                   probe_command=os.environ.get('SERIALD_PROBE_COMMAND', ''),
                    auto_configure_ssh=automatic)
 
 
@@ -148,7 +167,7 @@ class ProfileBook:
     def _make(self, name):
         values = self.profiles.get(name, {})
         fields = {'serial', 'console_user', 'console_password', 'ssh_user', 'ssh_password',
-                  'newline', 'probe', 'auto_configure_ssh'}
+                  'newline', 'probe', 'probe_command', 'auto_configure_ssh'}
         if not isinstance(values, dict) or set(values) - fields:
             raise ValueError('invalid fields for profile ' + name)
         values = dict(values)
@@ -156,7 +175,7 @@ class ProfileBook:
         serial = values.pop('serial', {})
         if not isinstance(serial, dict) or set(serial) - set(SerialSettings.__dataclass_fields__):
             raise ValueError('invalid serial fields for profile ' + name)
-        if values.get('probe') == 'manual' and 'auto_configure_ssh' not in values:
+        if values.get('probe') in ('manual', 'custom') and 'auto_configure_ssh' not in values:
             values['auto_configure_ssh'] = False
         return replace(base, name=name, serial=replace(base.serial, **serial), **values)
 

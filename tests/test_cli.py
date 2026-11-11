@@ -5,6 +5,10 @@ import http.client
 import io
 import json
 import os
+import select
+import shutil
+import shlex
+import signal
 import sys
 import subprocess
 import tempfile
@@ -24,6 +28,19 @@ def response(data):
 
 
 class ClientTests(unittest.TestCase):
+    def test_unidentified_selection_pins_regular_reads_and_raw_input_to_connection(self):
+        client = ctl.Client('http://127.0.0.1:8898', token='grant')
+        with mock.patch.object(ctl, 'urlopen', side_effect=[
+                response({'devices': [{'key': 'pending', 'serial': '', 'connection_id': 'attachment-1'}]}),
+                response({'ok': True}), response({'ok': True})]) as request:
+            client.select('pending')
+            client.get('/api/session', sid='serial', off=0)
+            self.assertIn('connection_id=attachment-1', request.call_args.args[0].full_url)
+            client.post('/api/session-send', sid='serial', data='help\r')
+            sent = json.loads(request.call_args.args[0].data)
+            self.assertEqual(sent['connection_id'], 'attachment-1')
+            self.assertNotIn('serial', sent)
+
     def test_piped_json_preserves_unicode_under_legacy_output_encoding(self):
         for failed in (False, True):
             script = ("from unittest.mock import patch\nimport serialctl as c\n"
@@ -433,6 +450,71 @@ class FramingTests(unittest.TestCase):
                 stream = framed.encode() + b'\r\nold output\r\n' + proc.stdout
                 actual, output = ctl.parse_frame(stream, NONCE)
                 self.assertEqual((actual, output), (code, expected))
+
+    @unittest.skipUnless((shutil.which('busybox') or os.environ.get('SERIALD_TEST_BUSYBOX_ARGV')) and os.name == 'posix', 'requires a local BusyBox shell and PTY')
+    def test_execute_long_command_in_actual_busybox_interactive_pty(self):
+        import pty
+        # This is a local child shell, not a managed serial device. The entire
+        # CLI execute path runs against its output and its real line editor.
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.environ.update(PS1='BUSYBOX# ', PS2='> ', ENV='')
+            argv = json.loads(os.environ.get('SERIALD_TEST_BUSYBOX_ARGV', 'null'))
+            argv = argv or [shutil.which('busybox'), 'ash', '-i']
+            os.execvp(argv[0], argv)
+
+        class PTYClient:
+            key, serial, actor, timeout = 'local-fixture', 'FIXTURE', 'test', 3
+            connection_id = 'fixture-generation'
+            ssh_user = ssh_password = None
+            def __init__(self):
+                self.buf = bytearray()
+            def post(self, route, **payload):
+                if route == '/api/ssh-connect':
+                    return {'sid': 'ssh123', 'persistent': True}
+                return {'ok': True}
+            def request(self, route, payload=None, **kwargs):
+                self.assert_route(route)
+                data = payload['data'].encode()
+                while data:
+                    count = os.write(fd, data[:128])
+                    data = data[count:]
+                return {'ok': True}
+            @staticmethod
+            def assert_route(route):
+                if route != '/api/session-send':
+                    raise AssertionError(route)
+            def read(self, sid, off, timeout=None):
+                if select.select([fd], [], [], min(timeout or 1, 1))[0]:
+                    self.buf.extend(os.read(fd, 65536))
+                return {'off': len(self.buf), 'alive': True, 'gap': False}, bytes(self.buf[off:])
+
+        try:
+            value = 'x' * 1800
+            command = "value='" + value + "'; printf '%s' \"${#value}\"; exit 7"
+            framed = ctl.frame_command(command, NONCE)
+            self.assertLessEqual(max(len(line.encode()) for line in framed.split('\n')), 512)
+            result = ctl.execute(PTYClient(), command, 5)
+            self.assertEqual((result['completed'], result['exit_code'], result['output']),
+                             (True, 7, '1800'), result)
+        finally:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            os.close(fd)
+
+    @unittest.skipUnless(Path('/bin/sh').is_file(), 'requires a local POSIX shell')
+    def test_long_quote_and_unicode_frame_preserves_command_bytes(self):
+        value = "'中" * 350
+        command = 'printf %s ' + shlex.quote(value)
+        # Use a byte-bounded value but force heavy shell quoting expansion.
+        while len(command.encode()) > 2048:
+            value = value[:-2]
+            command = 'printf %s ' + shlex.quote(value)
+        framed = ctl.frame_command(command, NONCE).rstrip('\r')
+        self.assertLessEqual(max(len(line.encode()) for line in framed.split('\n')), 512)
+        result = subprocess.run(['/bin/sh'], input=framed.encode(), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=3, env={'PATH': '/usr/bin:/bin'})
+        self.assertEqual(ctl.parse_frame(result.stdout, NONCE), (0, value))
 
     def test_partial_end_marker_and_wrong_nonce_do_not_complete(self):
         begin = ('__SD_AGENT_B_' + NONCE + '__\nhello').encode()

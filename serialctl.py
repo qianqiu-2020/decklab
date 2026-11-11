@@ -53,10 +53,12 @@ class Client:
             payload = dict(payload, actor=self.actor)
             if self.serial and payload.get('key') and route != '/api/task-cancel':
                 payload['serial'] = self.serial
-            if route.startswith('/api/file-transfer/'):
+            if self.connection_id and payload.get('key') and route != '/api/task-cancel':
                 payload.setdefault('connection_id', self.connection_id)
         if query and self.serial and query.get('key') and route not in ('/api/tasks', '/api/task'):
             query = dict(query, serial=self.serial)
+        if query and self.connection_id and query.get('key') and route not in ('/api/tasks', '/api/task'):
+            query = dict(query, connection_id=self.connection_id)
         url = self.url + route
         if query:
             url += '?' + urlencode(query)
@@ -133,9 +135,26 @@ def frame_command(command, nonce):
             "printf '\\n%s%s:%%s\\n' '__SD_AGENT_E_' %s \"$?\"\r")
     line = line % ('%s', '%s', shlex.quote(nonce + '__'), shlex.quote(command),
                    '%s', '%s', shlex.quote(nonce + '__'))
-    if max(len(part.encode('utf-8')) for part in line.split('\n')) > 3500:
-        raise ClientError('Escaped command is too long for a terminal input line')
-    return line
+    if max(len(part.encode('utf-8')) for part in line.split('\n')) <= 512:
+        return line
+    # BusyBox ash's interactive editor can truncate input around 1022 bytes,
+    # even when the kernel canonical limit is larger. Build the exact frame
+    # from short quoted pieces using POSIX builtins. The child sh above still
+    # isolates exit/exec/set -e and retains the original command's exit code.
+    # Assemble inside a subshell to preserve the reused parent shell's state.
+    script = line.rstrip('\r')
+    name = '__seriald_agent_command'
+    prefix = name + '=${' + name + '}'
+    lines = ['(', name + "=''"]
+    offset = 0
+    while offset < len(script):
+        size = min(400, len(script) - offset)
+        while len((prefix + shlex.quote(script[offset:offset + size])).encode('utf-8')) > 512:
+            size //= 2
+        lines.append(prefix + shlex.quote(script[offset:offset + size]))
+        offset += size
+    lines.extend(['eval "$' + name + '"', ')'])
+    return '\n'.join(lines) + '\r'
 
 
 def parse_frame(data, nonce):

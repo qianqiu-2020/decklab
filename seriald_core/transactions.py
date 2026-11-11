@@ -162,6 +162,15 @@ class SerialTransactions:
         finally:
             self._local.task = previous
 
+    def check_context(self):
+        """Recheck a request/task attachment immediately before starting device work."""
+        task = getattr(self._local, 'task', None)
+        if task is not None:
+            if task[0].is_set():
+                raise TransactionError('cancelled', '控制台任务已取消')
+            if self.device.connection_id != task[1] or self.device.stop is not task[2]:
+                raise TransactionError('stale', '设备连接已变化，取消旧任务')
+
     @contextmanager
     def begin(self, kind, timeout, actor=None, allow_transfer=False,
               expected_connection=None, require_open=True, client_id=None):
@@ -172,11 +181,7 @@ class SerialTransactions:
         lease = None
         try:
             task = getattr(self._local, 'task', None)
-            if task is not None:
-                if task[0].is_set():
-                    raise TransactionError('cancelled', '控制台任务已取消')
-                if self.device.connection_id != task[1] or self.device.stop is not task[2]:
-                    raise TransactionError('stale', '设备连接已变化，取消旧任务')
+            self.check_context()
             if expected_connection is not None and expected_connection != self.device.connection_id:
                 raise TransactionError('stale', '设备连接已变化，取消旧操作')
             visibility = getattr(self.device, 'visibility', None)

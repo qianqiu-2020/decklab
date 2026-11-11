@@ -139,7 +139,9 @@ class TaskActions:
             if task_id:
                 task = self.tasks.store.get(task_id)
                 if (actor != 'web' and task['actor'] != actor or serial is not None
-                        and not self.tasks.store.visible_serial(task, serial)):
+                        and not self.tasks.store.visible_serial(task, serial) or connection_id is not None
+                        and (not task['targets'] or any(target['connection_id'] != connection_id
+                                                       for target in task['targets']))):
                     raise TaskError('task not found', 404)
                 return response(200, {'task': task})
             tasks = self.tasks.store.list(actor=actor if actor != 'web' else None,
@@ -149,8 +151,8 @@ class TaskActions:
         except TaskError as error:
             return response(error.status, {'error': str(error)})
 
-    def cancel(self, task_id, actor='web', serial=None):
-        visible = self.query(task_id, actor, serial)
+    def cancel(self, task_id, actor='web', serial=None, connection_id=None):
+        visible = self.query(task_id, actor, serial, connection_id=connection_id)
         if visible.status != 200:
             return visible
         try:

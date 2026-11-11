@@ -1,0 +1,2 @@
+# Optional adapter only; collector/control retain their standard-library runtime.
+mcp==2.3.0

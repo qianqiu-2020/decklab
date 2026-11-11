@@ -48,7 +48,8 @@ def build(output, version):
             destination.write_text(text)
             destination.chmod(mode)
         build_id = collector_build_id()
-        for name in ('seriald.py', 'seriald_demo.py', 'serialctl.py', 'index.html'):
+        for name in ('seriald.py', 'seriald_demo.py', 'serialctl.py', 'seriald_mcp.py',
+                     'requirements-mcp.txt', 'pyproject.toml', 'index.html'):
             put(name, 'usr/lib/seriald/' + name)
         write('usr/lib/seriald/.collector-build-id', build_id + '\n')
         for name in ('seriald_core', 'static', 'vendor'):

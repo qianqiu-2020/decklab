@@ -43,8 +43,9 @@ that bypass. See [installation](INSTALL.md) and [Windows launchers](WINDOWS.md).
 | `SERIALD_NEWLINE` | auto | auto, cr, lf, crlf; generated shell command endings |
 | `SERIALD_SSH_USER` / `SERIALD_SSH_PASSWORD` | root / bianbu | SSH credentials |
 | `SERIALD_CONSOLE_USER` / `SERIALD_CONSOLE_PASSWORD` | SSH credentials | Separate serial login credentials |
-| `SERIALD_PROBE` | linux | linux or manual |
-| `SERIALD_AUTO_CONFIGURE_SSH` | 1 for linux; 0 for manual | 0, 1, false, true |
+| `SERIALD_PROBE` | linux | linux, custom or manual |
+| `SERIALD_PROBE_COMMAND` | empty | POSIX script when `SERIALD_PROBE=custom`; at most 16 KiB |
+| `SERIALD_AUTO_CONFIGURE_SSH` | 1 for linux; 0 otherwise | 0, 1, false, true |
 | `SERIALD_PROFILES` | unset | UTF-8 JSON profile file path; at most 64 KiB |
 
 The existing development workflow retains root/bianbu defaults. After explicit
@@ -60,7 +61,28 @@ provisioned; explicit root setup requires a root SSH profile.
 `manual` provides raw terminal input/output and logging without shell login,
 identity probes or automatic SSH configuration. Use it for firmware-only targets
 and serial protocols that must not receive Linux commands. Such targets remain
-unprovisioned until identified through a supported explicit workflow.
+unprovisioned until identified through a supported explicit workflow, but can
+already be shared with an AI using a grant for that live connection.
+
+The web **Probe settings** dialog is available before identification. Choose the
+built-in Linux probe, a custom POSIX shell script, or manual mode. Saving does not
+send anything to the board; use Identify to run a probe. A custom script may print
+metadata such as `HOST=buildroot`, `MODEL=custom` and `IP=eth0 192.0.2.10/24` without
+a serial. This returns metadata while leaving the connection unbound. Supplying
+`SERIAL=` still requires a valid unique identity and the normal conflict checks.
+Keep credentials out of probe scripts. Non-POSIX firmware uses the raw terminal.
+
+Web preferences are stored in the registry by physical attachment and override
+the profile's probe selection. Review them after replacing the target at that
+port. They do not change baud, login credentials or hardware identity. Custom and
+manual modes disable automatic SSH provisioning. Profile files can also specify
+`probe: "custom"` with `probe_command` (at most 16 KiB); explicitly set
+`auto_configure_ssh: false` for that mode.
+
+Built-in probes use short POSIX shell input lines to accommodate BusyBox ash
+interactive input limits. SSH status detection supports existing sshd/dropbear
+processes when systemd is absent; this does not install or start a service on
+Buildroot automatically.
 
 ## Per-board profiles
 

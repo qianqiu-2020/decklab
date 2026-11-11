@@ -33,3 +33,27 @@ class AgentGrantTests(unittest.TestCase):
             self.assertNotEqual(first['actor'], second['actor'])
             self.assertEqual(store.lookup(first_token)['scope'], 'all')
             store.close()
+
+    def test_connection_grant_persists_attachment_without_inventing_serial(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / 'grants.sqlite3')
+            store = AgentGrantStore(path)
+            token, grant = store.issue('connection', key='unprovisioned-usb', connection_id='attachment-1')
+            self.assertEqual((grant['scope'], grant['serial'], grant['key'], grant['connection_id']),
+                             ('connection', '', 'unprovisioned-usb', 'attachment-1'))
+            store.close()
+            store = AgentGrantStore(path)
+            try:
+                self.assertEqual(store.lookup(token), grant)
+                store.revoke(grant['id'])
+                self.assertIsNone(store.lookup(token))
+            finally:
+                store.close()
+
+    def test_connection_grant_requires_both_target_fields(self):
+        store = AgentGrantStore(':memory:')
+        self.addCleanup(store.close)
+        for target in ({}, {'key': 'port'}, {'connection_id': 'attachment'},
+                       {'key': 'port', 'connection_id': 'x' * 81}):
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                store.issue('connection', **target)

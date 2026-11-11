@@ -73,16 +73,19 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
-    public_agent_files = frozenset(('/serialctl.py', '/skills/seriald-board/SKILL.md'))
+    public_agent_files = frozenset(('/serialctl.py', '/seriald_mcp.py', '/requirements-mcp.txt',
+                                   '/pyproject.toml', '/skills/seriald-board/SKILL.md'))
     agent_denied_posts = frozenset(('/api/label', '/api/switch-mode', '/api/rescue',
-                                    '/api/ssh-enable', '/api/session-takeover'))
+                                    '/api/ssh-enable', '/api/session-takeover', '/api/probe-settings'))
 
     def guess_type(self, path):
         route = urlparse(self.path).path
         if route == '/skills/seriald-board/SKILL.md':
             return 'text/markdown; charset=utf-8'
-        if route == '/serialctl.py':
+        if route in ('/serialctl.py', '/seriald_mcp.py'):
             return 'text/x-python; charset=utf-8'
+        if route in ('/requirements-mcp.txt', '/pyproject.toml'):
+            return 'text/plain; charset=utf-8'
         return super().guess_type(path)
 
     def _json(self, code, payload):
@@ -244,16 +247,42 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             # The grant is already revoked; collector restart also closes sessions.
             return False
 
+    def _live_connection(self, key, connection_id):
+        """Validate the human-selected attachment without opening a serial device."""
+        connection = (http.client.HTTPConnection(*self.collector_socket, timeout=5)
+                      if isinstance(self.collector_socket, tuple)
+                      else UnixHTTPConnection(self.collector_socket, timeout=5))
+        try:
+            connection.request('GET', '/api/devices')
+            result = connection.getresponse()
+            data = result.read(4 * 1024 * 1024 + 1)
+            if result.status != 200 or len(data) > 4 * 1024 * 1024:
+                raise ValueError('collector device list unavailable')
+            payload = json.loads(data)
+            if not isinstance(payload, dict) or not isinstance(payload.get('devices'), list):
+                raise ValueError('collector returned invalid device list')
+            return any(item.get('key') == key and item.get('connection_id') == connection_id
+                       and item.get('alive') is True for item in payload['devices'] if isinstance(item, dict))
+        finally:
+            connection.close()
+
     def _proxy(self):
         connection = None
         headers_sent = False
         try:
             route = urlparse(self.path).path
             grant = self._agent_grant()
+            if self.headers.get('Authorization', '').startswith('Bearer seriald-ag-') and grant is None:
+                return self._json(401, {'error': 'Agent 授权已撤销或过期', 'code': 'unauthorized'})
+            agent_actor = grant['actor'] if grant else self._agent_actor()
+            if agent_actor and route == '/api/probe-settings':
+                return self._json(403, {'error': '只有网页操作者可以管理探测命令'})
             if grant and self.command == 'POST' and route in self.agent_denied_posts:
                 return self._json(403, {'error': 'Agent 分享令牌不能执行平台管理操作'})
-            if grant and grant['scope'] == 'device' and route in ('/api/health', '/api/diagnostics'):
+            if grant and grant['scope'] != 'all' and route in ('/api/health', '/api/diagnostics'):
                 return self._json(403, {'error': '此令牌仅允许访问指定设备'})
+            if grant and grant['scope'] == 'connection' and route == '/api/boot-compare':
+                return self._json(403, {'error': '当前连接授权不允许比较其他设备的启动档案'})
             if self.headers.get('Transfer-Encoding'):
                 return self._json(400, {'error': 'transfer encoding unsupported'})
             length = int(self.headers.get('Content-Length') or 0)
@@ -263,7 +292,6 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             body = self.rfile.read(length) if length else None
             if length and len(body) != length:
                 return self._json(400, {'error': 'incomplete body'})
-            agent_actor = grant['actor'] if grant else self._agent_actor()
             target_path = self.path
             if self.command == 'POST' and agent_actor:
                 try:
@@ -277,7 +305,13 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     if not payload.get('key'):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
                     payload['serial'] = grant['serial']
-                if (grant and grant['scope'] == 'device' and route == '/api/task-start'
+                if grant and grant['scope'] == 'connection':
+                    if not payload.get('key') and route not in ('/api/task-cancel',
+                            '/api/artifact-append', '/api/artifact-seal', '/api/artifact-delete'):
+                        return self._json(403, {'error': '此令牌需要指定设备 key'})
+                    payload.pop('serial', None)
+                    payload['connection_id'] = grant['connection_id']
+                if (grant and grant['scope'] != 'all' and route == '/api/task-start'
                         and payload.get('kind') == 'file-copy'):
                     return self._json(403, {'error': '板间复制需要所有设备范围的令牌'})
                 if grant and route == '/api/identify' and payload.get('init_boot_marker'):
@@ -290,7 +324,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 length = len(body)
                 if length > limit:
                     return self._json(413, {'error': 'body must be at most %d bytes' % limit})
-            elif grant and grant['scope'] == 'device' and route not in ('/api/devices', '/api/capabilities'):
+            elif grant and grant['scope'] != 'all' and route not in ('/api/devices', '/api/capabilities'):
                 parsed = urlparse(self.path)
                 query = parse_qsl(parsed.query, keep_blank_values=True)
                 if route == '/api/boot-compare':
@@ -299,15 +333,22 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     if left != [grant['serial']] or right != [grant['serial']]:
                         return self._json(403, {'error': '此令牌只能比较同一授权设备的启动日志'})
                 else:
-                    if not any(name == 'key' and value for name, value in query):
+                    if (not any(name == 'key' and value for name, value in query)
+                            and not (grant['scope'] == 'connection' and route in (
+                                '/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download'))):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
-                    query = [(name, value) for name, value in query if name != 'serial']
-                    query.append(('serial', grant['serial']))
+                    query = [(name, value) for name, value in query if name not in ('serial', 'connection_id')]
+                    if grant['scope'] == 'device':
+                        query.append(('serial', grant['serial']))
+                    else:
+                        query.append(('connection_id', grant['connection_id']))
                     target_path = urlunparse(parsed._replace(query=urlencode(query)))
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
-            if route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware'):
+            if agent_actor or route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware'):
                 headers['X-Seriald-Actor'] = agent_actor or 'web'
+            if grant and grant['scope'] == 'connection':
+                headers['X-Seriald-Connection'] = grant['connection_id']
             events = self.command == 'GET' and urlparse(self.path).path == '/api/session-events'
             if events and self.headers.get('Last-Event-ID'):
                 headers['Last-Event-ID'] = self.headers['Last-Event-ID']
@@ -328,7 +369,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                           else UnixHTTPConnection(self.collector_socket, timeout=timeout))
             connection.request(self.command, target_path, body=body, headers=headers)
             response = connection.getresponse()
-            if grant and grant['scope'] == 'device' and route == '/api/devices' and response.status == 200:
+            if grant and grant['scope'] != 'all' and route == '/api/devices' and response.status == 200:
                 data = response.read(4 * 1024 * 1024 + 1)
                 if len(data) > 4 * 1024 * 1024:
                     return self._json(413, {'error': 'device list too large'})
@@ -337,7 +378,12 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 except ValueError:
                     return self._json(502, {'error': 'collector returned invalid device list'})
                 devices_payload['devices'] = [item for item in devices_payload.get('devices', [])
-                                              if item.get('serial') == grant['serial']]
+                    if (item.get('serial') == grant['serial'] if grant['scope'] == 'device' else
+                        item.get('connection_id') == grant['connection_id'] and item.get('alive') is True)]
+                # Connection grants reveal their current attachment, not unrelated host storage/path data.
+                if grant['scope'] == 'connection':
+                    devices_payload = {'devices': devices_payload['devices'],
+                                       'server_time': devices_payload.get('server_time')}
                 return self._json(200, devices_payload)
             self.send_response(response.status)
             for name in ('Content-Type', 'Cache-Control', 'Content-Disposition', 'X-Checksum-SHA256'):
@@ -427,10 +473,20 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 return self._json(400, {'error': '无效的授权请求'})
             if route == '/api/agent-share':
                 scope, serial = payload.get('scope'), payload.get('serial', '')
-                if scope not in ('all', 'device') or not isinstance(serial, str) or len(serial) > 128 \
+                if scope not in ('all', 'device', 'connection') or not isinstance(serial, str) or len(serial) > 128 \
                         or (scope == 'device' and not serial):
-                    return self._json(400, {'error': '请选择全部设备或提供设备序列号'})
-                token, grant = self.grant_store.issue(scope, serial)
+                    return self._json(400, {'error': '请选择全部设备、设备序列号或当前连接'})
+                key, connection_id = payload.get('key', ''), payload.get('connection_id', '')
+                if scope == 'connection':
+                    if (not isinstance(key, str) or not key or len(key) > 256
+                            or not isinstance(connection_id, str) or not connection_id or len(connection_id) > 80):
+                        return self._json(400, {'error': '当前连接需要有效的 key 和 connection_id'})
+                    try:
+                        if not self._live_connection(key, connection_id):
+                            return self._json(409, {'error': '设备连接已变化或未在线，请刷新后重新授权'})
+                    except (OSError, http.client.HTTPException, ValueError):
+                        return self._json(503, {'error': '无法核对当前设备连接'})
+                token, grant = self.grant_store.issue(scope, serial, key=key, connection_id=connection_id)
                 return self._json(200, {'token': token, 'grant': grant})
             grant_id = payload.get('id')
             if not isinstance(grant_id, str) or not re.fullmatch(r'[0-9a-f]{16}', grant_id):

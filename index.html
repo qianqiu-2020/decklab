@@ -50,6 +50,7 @@
       <span class="sp">
         <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>识别设备</button>
         <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-info"/></svg>设备信息</button>
+        <button id="b-probe-settings" type="button">探测设置</button>
         <button id="b-device-share" type="button" hidden title="分享链接直接打开当前设备；网页访问授权覆盖整个平台"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>分享设备</button>
         <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>分享给 Agent</button>
         <select id="language-select-detail" aria-label="Language / 语言" title="Language / 语言" data-language-select data-i18n-ignore><option value="zh-CN">中文</option><option value="en">English</option></select>
@@ -182,17 +183,41 @@
   <div id="ft-status" role="status">选择文件或填写绝对路径后开始。</div>
   <div class="ft-actions"><button id="ft-cancel" type="button" disabled>取消传输</button><button class="pri" id="ft-start" type="button">开始传输</button></div>
 </dialog>
+<dialog id="probe-settings-dialog" class="probe-settings-dialog" aria-labelledby="probe-settings-title">
+  <div class="agent-share-head"><strong id="probe-settings-title">探测设置</strong><button id="probe-settings-close" type="button">关闭</button></div>
+  <p id="probe-settings-target" data-i18n-ignore></p>
+  <p>设置保存在当前串口位置，换板后仍沿用。识别不是终端访问或分享给 AI 的前提。</p>
+  <label class="probe-settings-field">探测方式<select id="probe-settings-mode"><option value="linux">内置 Linux / Buildroot 探测</option><option value="custom">自定义 shell 命令</option><option value="manual">仅使用终端，不自动探测</option></select></label>
+  <label class="probe-settings-field">探测命令<textarea id="probe-settings-command" spellcheck="false" maxlength="16384" data-i18n-ignore></textarea></label>
+  <p>自定义命令在板端 POSIX shell 中执行，可输出 HOST=、SERIAL=、MODEL=、SSHD= 和 IP= 字段。不输出序列号也能保留探测结果；不会据此合并设备档案。</p>
+  <div class="agent-share-actions"><button class="pri" id="probe-settings-save" type="button" disabled>保存设置</button><span id="probe-settings-status" role="status"></span></div>
+  <p>保存不会发送命令；点击“识别设备”时执行。其他控制台可选择仅使用终端。</p>
+</dialog>
 <dialog id="agent-share-dialog" class="agent-share-dialog" aria-labelledby="agent-share-title">
   <div class="agent-share-head"><div><strong id="agent-share-title">分享给 Agent</strong><small>生成独立令牌；默认不限期，可随时撤销</small></div><button id="agent-share-close" type="button">关闭</button></div>
-  <p>复制接入文本给 Claude Code、Codex 等 Agent。它会安装本机托管的 skill 和 CLI，优先通过 SSH 操作；启动、内核和 SSH 故障再查看串口。</p>
+  <p>将 MCP 配置添加到 AI 客户端，可读取终端、发送输入和管理任务。也可选择 CLI 接入指引。</p>
   <div class="agent-share-fields">
     <label>授权范围<select id="agent-share-scope"><option value="device">当前设备</option><option value="all">全部设备</option></select></label>
     <label>连接位置<select id="agent-share-address-mode"><option value="local">本机</option><option value="lan">局域网</option></select></label>
     <label>Agent 可访问的服务地址<input id="agent-share-url" type="url" spellcheck="false" placeholder="http://上位机IP:8898"></label>
   </div>
+  <label class="agent-share-format">接入方式<select id="agent-share-format"><option value="mcp">MCP 客户端配置</option><option value="cli">CLI 接入指引</option></select></label>
+  <p id="agent-share-setup">在 AI 客户端所在机器安装 MCP 适配器；独立环境中的程序请填写实际绝对路径。将生成的 JSON 添加到客户端 MCP 设置后重启连接。令牌属于客户端配置，请勿粘贴到对话中。</p>
+  <div id="agent-share-mcp-options">
+    <label class="agent-share-launcher">MCP 可执行文件<input id="agent-share-command" type="text" value="seriald-mcp" spellcheck="false" autocomplete="off" aria-label="MCP 可执行文件"></label>
+    <details class="agent-share-install"><summary>首次安装：使用独立 Python 环境</summary>
+      <p>先下载 DeckLab 源码，并将下方源码目录替换为实际路径。最后一行显示应填写的可执行文件路径。</p>
+      <p>Linux / macOS</p><pre><code>python3 -m venv "$HOME/.local/share/decklab-mcp"
+"$HOME/.local/share/decklab-mcp/bin/python" -m pip install /path/to/decklab
+echo "$HOME/.local/share/decklab-mcp/bin/seriald-mcp"</code></pre>
+      <p>Windows PowerShell</p><pre><code>py -3 -m venv "$env:LOCALAPPDATA\decklab-mcp"
+&amp; "$env:LOCALAPPDATA\decklab-mcp\Scripts\python.exe" -m pip install C:\path\to\decklab
+Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\seriald-mcp.exe'</code></pre>
+    </details>
+  </div>
   <p id="agent-share-hint"></p>
   <div class="agent-share-actions"><button class="pri" id="agent-share-create" type="button">生成并复制</button><button id="agent-share-copy" type="button" disabled>再次复制</button><span id="agent-share-status" role="status"></span></div>
-  <textarea id="agent-share-text" readonly spellcheck="false" aria-label="Agent 接入文本" placeholder="生成后在此显示完整命令和指引"></textarea>
+  <textarea id="agent-share-text" readonly spellcheck="false" aria-label="Agent 接入配置" placeholder="生成后在此显示 MCP 配置或 CLI 指引" data-i18n-ignore></textarea>
   <div class="agent-share-head agent-share-list-head"><strong>已有授权</strong><button id="agent-share-refresh" type="button">刷新</button></div>
   <div id="agent-share-grants" class="agent-share-grants"></div>
 </dialog>

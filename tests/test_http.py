@@ -237,6 +237,178 @@ class HandlerTests(unittest.TestCase):
         headers = dict(call.args for call in denied.send_header.call_args_list)
         self.assertIn('Basic realm="seriald"', headers['WWW-Authenticate'])
 
+    def test_connection_grant_exposes_only_live_attachment_even_after_identity_key_changes(self):
+        store = AgentGrantStore(':memory:')
+        self.addCleanup(store.close)
+        token, grant = store.issue('connection', key='unprovisioned-usb', connection_id='attachment-1')
+        handler = self.control_handler('/api/devices')
+        handler.command, handler.auth_token, handler.grant_store = 'GET', 'owner', store
+        handler.headers = {'Authorization': 'Bearer ' + token}
+        reply = mock.Mock(status=200)
+        reply.read.return_value = json.dumps({'devices': [
+            {'key': 'new-board-label', 'serial': 'SN1', 'connection_id': 'attachment-1', 'alive': True},
+            {'key': 'unprovisioned-usb', 'serial': '', 'connection_id': 'replacement', 'alive': True},
+            {'key': 'offline', 'serial': '', 'connection_id': 'attachment-1', 'alive': False}],
+            'storage': {'secret': 'host details'}}).encode()
+        connection = mock.Mock()
+        connection.getresponse.return_value = reply
+        with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+            handler.do_GET()
+        self.assertEqual(self.result(handler)[1]['devices'][0]['key'], 'new-board-label')
+        self.assertEqual(len(self.result(handler)[1]['devices']), 1)
+        self.assertNotIn('storage', self.result(handler)[1])
+        self.assertEqual(connection.request.call_args.kwargs['headers']['X-Seriald-Connection'], 'attachment-1')
+        self.assertEqual(connection.request.call_args.kwargs['headers']['X-Seriald-Actor'], grant['actor'])
+
+    def test_connection_grant_pins_reads_and_writes_against_forged_target_fields(self):
+        store = AgentGrantStore(':memory:')
+        self.addCleanup(store.close)
+        token, grant = store.issue('connection', key='pending', connection_id='attachment-1')
+        reply = mock.Mock(status=200)
+        reply.getheader.return_value = None
+        connection = mock.Mock()
+        connection.getresponse.return_value = reply
+        for route, payload in (('/api/session?key=other&serial=OTHER&connection_id=replacement', None),
+                ('/api/session-send', {'key': 'other', 'sid': 'serial', 'serial': 'OTHER',
+                                       'connection_id': 'replacement', 'actor': 'web', 'data': 'help\r'})):
+            with self.subTest(route=route):
+                handler = self.control_handler(route)
+                handler.command, handler.auth_token, handler.grant_store = 'POST' if payload else 'GET', 'owner', store
+                raw = json.dumps(payload).encode() if payload else b''
+                handler.headers = {'Authorization': 'Bearer ' + token, 'Content-Length': str(len(raw)),
+                                   'X-Seriald-Connection': 'replacement', 'X-Seriald-Actor': 'web'}
+                handler.rfile = io.BytesIO(raw)
+                reply.read.side_effect = [b'{}', b'']
+                with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                    handler.do_POST() if payload else handler.do_GET()
+                forwarded = connection.request.call_args
+                self.assertEqual(forwarded.kwargs['headers']['X-Seriald-Connection'], 'attachment-1')
+                self.assertEqual(forwarded.kwargs['headers']['X-Seriald-Actor'], grant['actor'])
+                if payload:
+                    target = json.loads(forwarded.kwargs['body'])
+                    self.assertEqual(target['connection_id'], 'attachment-1')
+                    self.assertEqual(target['actor'], grant['actor'])
+                    self.assertNotIn('serial', target)
+                else:
+                    self.assertIn('connection_id=attachment-1', forwarded.args[1])
+                    self.assertNotIn('replacement', forwarded.args[1])
+                    self.assertNotIn('serial=', forwarded.args[1])
+
+    def test_connection_grant_is_issued_only_for_current_live_selection(self):
+        store = AgentGrantStore(':memory:')
+        self.addCleanup(store.close)
+        for alive, expected in ((True, 200), (False, 409)):
+            handler = self.control_handler('/api/agent-share')
+            handler.command, handler.auth_token, handler.grant_store = 'POST', 'owner', store
+            raw = json.dumps({'scope': 'connection', 'key': 'pending', 'connection_id': 'attachment-1'}).encode()
+            handler.headers = {'Authorization': 'Bearer owner', 'Content-Length': str(len(raw))}
+            handler.rfile = io.BytesIO(raw)
+            reply = mock.Mock(status=200)
+            reply.read.return_value = json.dumps({'devices': [
+                {'key': 'pending', 'connection_id': 'attachment-1', 'alive': alive}]}).encode()
+            connection = mock.Mock()
+            connection.getresponse.return_value = reply
+            with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+                handler.do_POST()
+            self.assertEqual(self.result(handler)[0], expected)
+            if alive:
+                issued = self.result(handler)[1]
+                self.assertEqual(store.lookup(issued['token'])['connection_id'], 'attachment-1')
+
+    def test_collector_refuses_stale_or_offline_connection_before_any_input(self):
+        self.device.connection_id = 'replacement'
+        self.device.present = True
+        self.device.fd = 1
+        self.device.stop.is_set.return_value = False
+        body = json.dumps({'key': 'board-key', 'connection_id': 'attachment-1', 'data': 'help\r'}).encode()
+        for current, alive in (('replacement', True), ('attachment-1', False)):
+            with self.subTest(current=current, alive=alive):
+                self.device.connection_id, self.device.fd = current, 1 if alive else None
+                handler = self.handler('/api/send', body, {'Content-Length': str(len(body)),
+                                       'X-Seriald-Connection': 'attachment-1'})
+                handler.do_POST()
+                self.assertEqual(self.result(handler)[0], 404)
+                self.device.send.assert_not_called()
+
+    def test_unidentified_current_connection_accepts_raw_terminal_input_without_probe(self):
+        self.device.serial = ''
+        self.device.connection_id, self.device.present, self.device.fd = 'attachment-1', True, 1
+        self.device.stop.is_set.return_value = False
+        self.device.send.return_value = (True, '')
+        body = json.dumps({'key': 'board-key', 'connection_id': 'attachment-1', 'data': 'help\r'}).encode()
+        handler = self.handler('/api/send', body, {'Content-Length': str(len(body)),
+                               'X-Seriald-Connection': 'attachment-1', 'X-Seriald-Actor': 'shared-agent/test'})
+        handler.do_POST()
+        self.assertEqual(self.result(handler)[0], 200)
+        self.device.send.assert_called_once_with('help\r')
+        self.device.run_probe.assert_not_called()
+
+    def test_generation_change_during_terminal_read_does_not_expose_replacement_bytes(self):
+        self.device.connection_id = 'attachment-1'
+        def replacement(*args, **kwargs):
+            self.device.connection_id = 'replacement'
+            return 18, b'replacement-secret', True
+        self.device.read.side_effect = replacement
+        handler = self.handler('/api/session?key=board-key&connection_id=attachment-1&sid=serial')
+        handler.do_GET()
+        self.assertEqual(self.result(handler)[0], 404)
+        self.assertNotIn(b'replacement-secret', handler.wfile.getvalue())
+
+    def test_generation_change_during_boot_log_read_does_not_expose_replacement_archive(self):
+        self.device.connection_id = 'attachment-1'
+        self.device.log_files.return_value = []
+        self.device.boot_epochs.return_value = [{'id': 'boot', 'size': 18, 'parts': []}]
+        def replacement(*args):
+            self.device.connection_id = 'replacement'
+            return b'replacement-secret'
+        handler = self.handler('/api/boot-log?key=board-key&connection_id=attachment-1&id=boot')
+        with mock.patch.object(sd, 'read_epoch', side_effect=replacement):
+            handler.do_GET()
+        self.assertEqual(self.result(handler)[0], 404)
+        self.assertNotIn(b'replacement-secret', handler.wfile.getvalue())
+
+    def test_generation_change_while_opening_download_sends_no_file_bytes(self):
+        self.device.connection_id = 'attachment-1'
+        self.device.log_files.return_value = [{'name': 'serial.log'}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory, 'serial.log')
+            path.write_bytes(b'replacement-secret')
+            self.device.stable_dir.return_value = directory
+            def replacement(*args):
+                self.device.connection_id = 'replacement'
+                return path.open('rb')
+            handler = self.handler('/api/log?key=board-key&connection_id=attachment-1&file=serial.log&download=1')
+            with mock.patch.object(sd, 'open_archive', side_effect=replacement):
+                handler.do_GET()
+            self.assertEqual(self.result(handler)[0], 404)
+            self.assertNotIn(b'replacement-secret', handler.wfile.getvalue())
+
+    def test_generation_change_inside_sse_read_emits_no_replacement_event(self):
+        self.device.connection_id = 'attachment-1'
+        def replacement(*args, **kwargs):
+            self.device.connection_id = 'replacement'
+            return 18, b'replacement-secret', True
+        self.device.read.side_effect = replacement
+        handler = self.handler('/api/session-events?key=board-key&connection_id=attachment-1&sid=serial')
+        handler.do_GET()
+        self.assertEqual(handler.send_response.call_args.args[0], 200)
+        self.assertEqual(handler.wfile.getvalue(), b'')
+
+    def test_agent_credentials_cannot_read_or_write_managed_probe_settings(self):
+        store = AgentGrantStore(':memory:')
+        self.addCleanup(store.close)
+        token, _ = store.issue('connection', key='pending', connection_id='attachment-1')
+        for credential in (token, 'named-agent-token'):
+            for method in ('GET', 'POST'):
+                handler = self.control_handler('/api/probe-settings?key=pending')
+                handler.command, handler.auth_token, handler.grant_store = method, 'owner', store
+                handler.agent_tokens = {'agent': 'named-agent-token'}
+                handler.headers = {'Authorization': 'Bearer ' + credential}
+                with mock.patch.object(control, 'UnixHTTPConnection') as upstream:
+                    handler.do_POST() if method == 'POST' else handler.do_GET()
+                self.assertEqual(self.result(handler)[0], 403)
+                upstream.assert_not_called()
+
     def test_named_agent_token_overrides_untrusted_actor_before_proxy(self):
         token = 't' * 40
         handler = self.control_handler('/api/session-send')
@@ -480,10 +652,43 @@ class HandlerTests(unittest.TestCase):
                                 if call.args[0].lower() == 'content-type']
                 self.assertEqual(len(content_type), 1)
                 self.assertIn('charset=utf-8', content_type[0])
+                source = ('skills/seriald-board/SKILL.zh-CN.md' if 'lang=zh-CN' in route
+                          else route.split('?', 1)[0].lstrip('/'))
+                self.assertEqual(handler.wfile.getvalue(), (ROOT / source).read_bytes())
                 if '/SKILL.md' in route:
                     text = handler.wfile.getvalue().decode('utf-8')
-                    self.assertIn('开发板' if 'lang=zh-CN' in route else 'development boards', text)
                     self.assertIn('boot-log --latest', text)
+
+    def test_mcp_source_downloads_are_explicit_utf8_public_routes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ('seriald_mcp.py', 'requirements-mcp.txt', 'pyproject.toml'):
+                payload = ('# fixture ' + name + ' 中文\n').encode()
+                pathlib.Path(directory, name).write_bytes(payload)
+                handler = self.control_handler('/' + name)
+                handler.static_root, handler.auth_token = directory, 'owner-secret'
+                handler.do_GET()
+                self.assertEqual(handler.send_response.call_args.args[0], 200)
+                self.assertEqual(handler.wfile.getvalue(), payload)
+                content_type = dict(call.args for call in handler.send_header.call_args_list)['Content-type']
+                self.assertIn('charset=utf-8', content_type)
+            unlisted = self.control_handler('/private.py')
+            unlisted.auth_token = 'owner-secret'
+            unlisted.do_GET()
+            self.assertEqual(self.result(unlisted)[0], 401)
+
+    def test_revocation_between_authentication_and_proxy_never_drops_agent_scope(self):
+        store = AgentGrantStore(':memory:')
+        self.addCleanup(store.close)
+        token, grant = store.issue('connection', key='pending', connection_id='attachment-1')
+        handler = self.control_handler('/api/devices')
+        handler.command, handler.auth_token, handler.grant_store = 'GET', 'owner', store
+        handler.headers = {'Authorization': 'Bearer ' + token}
+        self.assertTrue(handler._authorized())
+        store.revoke(grant['id'])
+        with mock.patch.object(control, 'UnixHTTPConnection') as upstream:
+            handler._proxy()
+        self.assertEqual(self.result(handler)[0], 401)
+        upstream.assert_not_called()
 
     def test_protected_lan_allows_only_local_agents_without_token(self):
         local = self.control_handler('/healthz')

@@ -1899,6 +1899,60 @@ test('task history filters by involvement without narrowing multi-board cancella
   assert.equal(Object.hasOwn(cancel.body, 'serial'), false);
 });
 
+test('custom probe settings work before identification and save without running a command', async () => {
+  const h = await associationFixture();
+  h.get('b-probe-settings').click();
+  assert.equal(h.get('probe-settings-dialog').open, true);
+  const load = h.take('/api/probe-settings');
+  assert.match(load.url, /connection_id=connection-A/);
+  load.resolve({mode: 'linux', command: '', default_command: 'printf HOST=buildroot'});
+  await drain();
+  assert.equal(h.get('probe-settings-command').readOnly, true);
+  h.get('probe-settings-mode').value = 'custom'; h.get('probe-settings-mode').emit('change');
+  assert.equal(h.get('probe-settings-save').disabled, true, 'empty custom command is invalid');
+  h.get('probe-settings-command').value = "printf 'HOST=buildroot\\n'\necho MODEL=K3";
+  h.get('probe-settings-command').emit('input');
+  h.get('probe-settings-save').click();
+  const save = h.take('/api/probe-settings', request => request.options.method === 'POST');
+  assert.deepEqual(save.body, {key: 'pending', connection_id: 'connection-A', mode: 'custom',
+    command: "printf 'HOST=buildroot\\n'\necho MODEL=K3", client_id: h.clientId});
+  save.resolve({ok: true}); await drain();
+  assert.match(h.get('probe-settings-status').textContent, /已保存/);
+  assert.equal(h.requests.filter(request => request.url === '/api/task-start').length, 0,
+    'saving configuration must not execute a board command');
+  h.get('probe-settings-mode').value = 'manual'; h.get('probe-settings-mode').emit('change');
+  assert.equal(h.get('probe-settings-command').disabled, true);
+  h.get('probe-settings-save').click();
+  const manual = h.take('/api/probe-settings', request => request.options.method === 'POST');
+  assert.equal(manual.body.mode, 'manual'); assert.equal(manual.body.command, '');
+});
+
+test('stale probe settings cannot alter another connection and saved commands remain literal', async () => {
+  const h = await associationFixture(); h.get('b-probe-settings').click();
+  const old = h.take('/api/probe-settings'); h.select('B');
+  assert.equal(h.get('probe-settings-dialog').open, false);
+  old.resolve({mode: 'custom', command: 'echo HOST=stale', default_command: ''}); await drain();
+  assert.equal(h.get('probe-settings-command').value, '');
+  h.get('b-probe-settings').click();
+  h.take('/api/probe-settings').resolve({mode: 'custom', command: 'echo HOST=在线', default_command: ''});
+  await drain();
+  assert.equal(h.get('probe-settings-command').value, 'echo HOST=在线');
+  h.get('probe-settings-save').click(); const saving = h.take('/api/probe-settings', r => r.options.method === 'POST');
+  h.select('pending'); saving.resolve({ok: false, error: 'stale B failure'}, 409); await drain();
+  assert.equal(h.get('d-status').textContent, '');
+});
+
+test('custom probe output stays visible without claiming a bound identity', async () => {
+  const h = await associationFixture(); h.get('b-identify').click();
+  h.take('/api/task-start').resolve({ok: true, task: {id: 'custom-probe', state: 'completed',
+    result: {ok: true, identified: false, serial: '', ips: [], raw: '启动 在线\ncustom result'}}});
+  await drain();
+  assert.equal(h.get('b-info').disabled, false);
+  assert.match(h.get('d-info').textContent, /启动 在线\ncustom result/);
+  assert.doesNotMatch(h.get('d-info').textContent, /待确认（/);
+  assert.match(h.get('d-status').textContent, /尚未绑定设备身份/);
+});
+
 test('stale task history cannot replace newly selected board tasks', async () => {
   const h = await setup(); h.select('A'); const old = h.take('/api/tasks');
   h.select('B'); const current = h.take('/api/tasks');

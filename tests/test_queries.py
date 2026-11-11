@@ -35,6 +35,7 @@ class QueryTests(unittest.TestCase):
         from urllib.parse import urlencode
         handler = web.Handler.__new__(web.Handler)
         handler.path = '/api/' + action + '?' + urlencode(dict(params, key='board', serial='SN1'))
+        handler.headers = {}
         handler.wfile = io.BytesIO()
         handler.send_response, handler.send_header, handler.end_headers = mock.Mock(), mock.Mock(), mock.Mock()
         with mock.patch.object(web, 'MGR', self.manager), mock.patch.object(web, 'LOG_ROOT', str(self.root.parent)):

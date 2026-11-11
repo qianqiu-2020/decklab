@@ -4,6 +4,7 @@ import http.server
 import json
 import os
 import shutil
+import threading
 import time
 from urllib.parse import urlparse, parse_qs, quote
 
@@ -53,6 +54,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             return self._json(400, {'error': 'bad offset'})
         expected_key = d.key
+        expected_connection = self._read_guard[1]
+        if not self._read_current():
+            return self._json(404, {'error': 'device connection changed'})
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
         self.send_header('Cache-Control', 'no-store')
@@ -64,7 +68,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         last_terminal = object()
         keepalive = time.monotonic()
         try:
-            while d.key == expected_key:
+            while d.key == expected_key and d.connection_id == expected_connection:
                 owner = transactions_for(d).ownership() if sid == 'serial' else None
                 terminal = screen_for(stream)
                 state = terminal.metadata() if hasattr(terminal, 'metadata') else None
@@ -72,6 +76,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # board. Bound the wait; only changed state emits a data event.
                 wait = 0 if owner != last_owner or state != last_terminal else 1
                 new_off, data, alive = stream.read(off, wait=wait)
+                if d.connection_id != expected_connection or d.key != expected_key:
+                    break
                 owner = transactions_for(d).ownership() if sid == 'serial' else None
                 state = terminal.metadata() if hasattr(terminal, 'metadata') else None
                 if data or not alive or owner != last_owner or state != last_terminal:
@@ -94,6 +100,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     terminal_revision = (last_terminal or {}).get('revision', 0)
                     last_owner = owner
                     body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                    if d.connection_id != expected_connection or d.key != expected_key:
+                        break
                     self.wfile.write(b'id: %d\ndata: ' % new_off + body + b'\n\n')
                     self.wfile.flush()
                     off = new_off
@@ -113,7 +121,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
 
+    def _read_current(self):
+        guard = getattr(self, '_read_guard', None)
+        return guard is None or guard[0].connection_id == guard[1]
+
     def _json(self, code, payload):
+        if not self._read_current():
+            code, payload = 404, {'error': 'device connection changed', 'code': 'not-found'}
         payload = api_response(code, payload).payload
         if getattr(self, 'response_key', None):
             payload = dict(payload, key=self.response_key)
@@ -129,8 +143,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         key = (q.get('key') or [''])[0]
         self.response_key = key
         device = self.manager.resolve(key)
+        generation = device.connection_id if device else None
         if device and q.get('serial') and q['serial'][0] != device.serial:
             return None
+        expected = self.headers.get('X-Seriald-Connection') or (q.get('connection_id') or [''])[0]
+        if device and expected and generation != expected:
+            return None
+        if device and self.headers.get('X-Seriald-Connection') and (
+                not device.present or device.fd is None or device.stop.is_set()):
+            return None
+        if device and getattr(self, '_reading', False):
+            self._read_guard = (device, generation)
         return device
 
     def _archives(self):
@@ -144,6 +167,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except OSError:
             return self._json(404, {'error': 'log unavailable'})
         with source:
+            if not self._read_current():
+                return self._json(404, {'error': 'device connection changed'})
             size = os.fstat(source.fileno()).st_size
             ascii_name = ''.join(char if 32 <= ord(char) < 127 and char not in '"\\'
                                  else '_' for char in name)
@@ -154,10 +179,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(size))
             self.send_header('Cache-Control', 'no-store')
             self.end_headers()
-            shutil.copyfileobj(source, self.wfile, length=65536)
+            while self._read_current():
+                chunk = source.read(65536)
+                if not chunk or not self._read_current():
+                    break
+                self.wfile.write(chunk)
 
     def do_GET(self):
         self.response_key = None
+        self._reading, self._read_guard = True, None
         u = urlparse(self.path)
         route, q = u.path, parse_qs(u.query)
 
@@ -259,6 +289,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             result = DeviceActions(self.manager).operation(device)
             return self._json(result.status, result.payload)
 
+        if route == '/api/probe-settings':
+            device = self._dev(q)
+            if not device:
+                return self._json(404, {'error': 'no such device'})
+            result = DeviceActions(self.manager).execute('probe-settings', {'read': True}, device,
+                                                       self.headers.get('X-Seriald-Actor') or 'web')
+            return self._json(result.status, result.payload)
+
         if route == '/api/boot-compare':
             result = self._archives().compare({key: values[0] for key, values in q.items()})
             return self._json(result.status, result.payload)
@@ -289,6 +327,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.response_key = None
+        self._reading, self._read_guard = False, None
         route = urlparse(self.path).path
         try:
             n = int(self.headers.get('Content-Length') or 0)
@@ -338,7 +377,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(200, {'ok': True, 'closed_sessions': closed})
         if route == '/api/task-cancel':
             result = TaskActions(self.manager).cancel(str(payload.get('id') or ''),
-                                            str(payload.get('actor') or 'web'), payload.get('serial'))
+                                            str(payload.get('actor') or 'web'), payload.get('serial'),
+                                            self.headers.get('X-Seriald-Connection'))
             return self._json(result.status, result.payload)
         if route in ('/api/artifact-append', '/api/artifact-seal', '/api/artifact-delete'):
             result = ArtifactActions(self.manager).execute(route.removeprefix('/api/artifact-'), payload,
@@ -347,6 +387,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         q = {'key': [str(payload.get('key') or '')]}
         if payload.get('serial'):
             q['serial'] = [str(payload['serial'])]
+        if payload.get('connection_id'):
+            q['connection_id'] = [str(payload['connection_id'])]
         d = self._dev(q)
         if not d:
             return self._json(404, {'error': 'no such device'})
@@ -361,8 +403,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self._device_post(route, payload, d, actor)
 
     def _device_post(self, route, payload, d, actor):
-        result = DeviceActions(self.manager, recover=try_rescue, recovery_binary=RESCUE_BIN).execute(
-            route.removeprefix('/api/'), payload, d, actor)
+        actions = DeviceActions(self.manager, recover=try_rescue, recovery_binary=RESCUE_BIN)
+        expected = self.headers.get('X-Seriald-Connection') or payload.get('connection_id')
+        if expected:
+            try:
+                with transactions_for(d).task_scope(threading.Event(), expected, d.stop):
+                    transactions_for(d).check_context()
+                    result = actions.execute(route.removeprefix('/api/'), payload, d, actor)
+            except TransactionError as error:
+                return self._json(error.status, {'error': str(error), 'code': error.code})
+        else:
+            result = actions.execute(route.removeprefix('/api/'), payload, d, actor)
         return self._json(result.status, result.payload)
 
     def log_message(self, fmt, *args):

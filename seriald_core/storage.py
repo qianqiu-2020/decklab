@@ -100,6 +100,23 @@ class Store:
         with self.lock:
             return self._board(self.db.execute('SELECT * FROM boards WHERE label=?', (label,)).fetchone())
 
+    def get_probe_settings(self, port):
+        """Port preferences do not assert a persistent board identity."""
+        with self.lock:
+            row = self.db.execute('SELECT document FROM probe_settings WHERE port=?', (port,)).fetchone()
+        return json.loads(row['document']) if row else None
+
+    def set_probe_settings(self, port, document):
+        from .profiles import validate_probe_settings
+        if not isinstance(port, str) or not port or len(port) > 4096 or '\x00' in port:
+            raise ValueError('invalid probe settings port')
+        settings = validate_probe_settings(document)
+        with self.lock, self.db:
+            self.db.execute('INSERT INTO probe_settings(port,document) VALUES (?,?) '
+                            'ON CONFLICT(port) DO UPDATE SET document=excluded.document',
+                            (port, json.dumps(settings, ensure_ascii=False)))
+        return settings
+
     def bind(self, info, path, dev, label=None, connection_id=None, conflict_resolution=None):
         serial = str(info.get('serial') or '').strip()
         serial_component(serial)

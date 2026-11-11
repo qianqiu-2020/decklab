@@ -59,6 +59,15 @@
     color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);border-radius:16px;
     padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.28)}
   .agent-share-dialog::backdrop{background:rgba(9,23,25,.6)}
+  .probe-settings-dialog{width:min(720px,calc(100vw - 28px));max-height:calc(100dvh - 28px);overflow:auto;
+    padding:22px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);color:var(--ink)}
+  .probe-settings-dialog::backdrop{background:rgba(9,23,25,.6)}
+  .probe-settings-dialog p{color:var(--ink-2);font-size:12px;line-height:1.6}
+  .probe-settings-field{display:grid;gap:6px;margin:12px 0;color:var(--ink-2);font-size:12px}
+  .probe-settings-field select,.probe-settings-field textarea{width:100%;padding:10px;border:1px solid var(--line-strong);
+    border-radius:8px;background:var(--surface-2);color:var(--ink)}
+  #probe-settings-command{height:220px;resize:vertical;font:12px/1.55 var(--font-mono)}
+  #probe-settings-status{color:var(--ink-3);font-size:12px}
   .identity-association-dialog{width:min(540px,calc(100vw - 28px));max-height:calc(100dvh - 28px);overflow:auto;
     padding:22px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);
     color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.3)}
@@ -76,6 +85,14 @@
   .agent-share-fields label{display:grid;gap:4px;color:var(--ink-2);font-size:12px}
   .agent-share-fields input,.agent-share-fields select{width:100%;padding:8px;border:1px solid var(--line-strong);
     border-radius:8px;background:var(--surface);color:var(--ink)}
+  .agent-share-format{display:flex;align-items:center;gap:10px;margin-top:12px;color:var(--ink-2);font-size:12px}
+  .agent-share-format select{padding:7px 9px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--ink)}
+  .agent-share-launcher{display:grid;gap:5px;color:var(--ink-2);font-size:12px}
+  .agent-share-launcher input{width:100%;padding:8px 10px;border:1px solid var(--line-strong);border-radius:8px;
+    background:var(--surface-2);color:var(--ink);font:12px var(--font-mono)}
+  .agent-share-install{margin:10px 0;color:var(--ink-2);font-size:12px}
+  .agent-share-install summary{cursor:pointer}
+  .agent-share-install pre{overflow:auto;padding:10px;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;font:11px/1.6 var(--font-mono)}
   .agent-share-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}
   #agent-share-status{color:var(--ink-3);font-size:12px}
   #agent-share-text{display:block;width:100%;height:min(32vh,300px);resize:vertical;padding:12px;

@@ -6,7 +6,9 @@ from .boot_marker import read_command
 
 # 每次命令由 _run_cmd 加独立 nonce 帧;命令回显不含完整 marker,迟到结果不会串单。
 SSH_STATE_CMD = (
-    "if ! command -v systemctl >/dev/null 2>&1; then echo SSHD=unsupported-systemd; "
+    "if ! command -v systemctl >/dev/null 2>&1; then "
+    "if command -v pidof >/dev/null 2>&1 && { pidof sshd >/dev/null 2>&1 || pidof dropbear >/dev/null 2>&1; }; "
+    "then echo SSHD=active; else echo SSHD=unsupported-systemd; fi; "
     "elif command -v timeout >/dev/null 2>&1 && timeout 5 systemctl is-active --quiet ssh 2>/dev/null; then echo SSHD=active; "
     "elif command -v timeout >/dev/null 2>&1 && timeout 5 systemctl is-active --quiet sshd 2>/dev/null; then echo SSHD=active; "
     "elif ! command -v timeout >/dev/null 2>&1 && systemctl is-active --quiet ssh 2>/dev/null; then echo SSHD=active; "
@@ -93,13 +95,14 @@ def parse_onie_serial(value):
     return serial, True
 
 
-def parse_probe(raw):
+def parse_probe(raw, strict=True):
     """解析已校验的 nonce 帧正文;字段缺失或重复必须报错,不能把残帧当成功。"""
     out = {'hostname': '', 'serial': '', 'model': '', 'ips': [], 'sshd': ''}
     # 调用者已经验证完整 nonce 帧;字段值里的 marker 样文字不能再截断正文。
     body = raw.replace('\r\n', '\n')
     for key in ('HOST', 'SERIAL', 'MODEL', 'SSHD'):
-        if len(re.findall(r'^' + key + r'=', body, re.M)) != 1:
+        count = len(re.findall(r'^' + key + r'=', body, re.M))
+        if count > 1 or strict and count != 1:
             raise ValueError('识别结果缺少或重复字段: ' + key)
 
     def last(key, pat):

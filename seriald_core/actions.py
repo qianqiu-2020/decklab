@@ -20,6 +20,7 @@ def capabilities():
         'api_version': 1, 'version': __version__,
         'features': {'serial': True, 'ssh': True, 'sse_offsets': True, 'shared_terminal': True,
                      'boot_archives': True, 'boot_compare': True,
+                     'custom_probe_commands': True, 'unidentified_terminal_access': True,
                      'operation_status': True, 'operation_cancel': True, 'durable_tasks': True},
         'tasks': {'kinds': ['identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download']
                   + ['hardware-' + action for action in ACTIONS], 'restart': 'interrupt',
@@ -88,6 +89,35 @@ class DeviceActions:
             return self._dispatch(action, payload, device, actor)
 
     def _dispatch(self, action, payload, d, actor):
+        if action == 'probe-settings':
+            # Persisting a command changes future identity probes. This is a
+            # human configuration operation, never delegated by an AI grant.
+            if actor != 'web':
+                return response(403, {'ok': False, 'error': '只有网页操作者可以配置探测命令'})
+            if payload.get('read') is True:
+                return response(200, dict(d.probe_settings(include_default=True),
+                                         connection_id=d.connection_id))
+            connection = payload.get('connection_id')
+            if not isinstance(connection, str) or connection != d.connection_id:
+                return response(409, {'ok': False, 'error': '连接已变化，请刷新后重试'})
+            try:
+                from .profiles import validate_probe_settings
+                settings = validate_probe_settings({'mode': payload.get('mode'),
+                                                     'command': payload.get('command', '')})
+                with transactions_for(d).begin('probe-settings', 5, require_open=False,
+                                               expected_connection=connection):
+                    if not d.present or not d.by_path:
+                        return response(409, {'ok': False, 'error': '请先选择当前串口连接'})
+                    self.manager.store.set_probe_settings(d.by_path, settings)
+                    # Saving preferences must not inject a command into a console.
+                    d.auto_identify_started = True
+                    if d.serial:
+                        self.manager.store.event(d.serial, actor, 'probe-settings', settings['mode'])
+                return response(200, dict(d.probe_settings(include_default=True), ok=True,
+                                         connection_id=d.connection_id))
+            except (ValueError, TransactionError) as error:
+                return response(getattr(error, 'status', 400), {'ok': False, 'error': str(error)})
+
         if action in ('input-claim', 'input-release'):
             try:
                 transactions = transactions_for(d)

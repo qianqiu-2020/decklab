@@ -2,6 +2,9 @@
 import importlib.util
 import pathlib
 import re
+import os
+import select
+import shlex
 import shutil
 import subprocess
 import threading
@@ -13,6 +16,8 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 from seriald_core import device as sd
 from seriald_core.protocol import SSH_STATE_CMD
+from seriald_core.console_protocol import frame_command
+from seriald_core.profiles import BoardProfile
 
 NONCE = '0123456789abcdef01234567'
 BEGIN = '__SD_B_' + NONCE + '__'
@@ -75,7 +80,7 @@ class FramingTests(DeviceFixture):
         command = write.call_args.args[0]
         self.assertNotIn(BEGIN, command)
         self.assertNotIn(END, command)
-        self.assertEqual(command.count(NONCE), 2)
+        self.assertLessEqual(max(len(line.encode()) for line in command.splitlines()), 512)
         self.assertTrue(command.endswith(self.device.newline))
         self.assertEqual(wait.call_count, 1)
 
@@ -157,6 +162,12 @@ class FramingTests(DeviceFixture):
 
 
 class ProbeParserTests(unittest.TestCase):
+    def test_custom_output_has_optional_fields_but_rejects_duplicates(self):
+        self.assertEqual(sd.parse_probe('firmware 1.0\n', strict=False)['raw'], 'firmware 1.0\n')
+        self.assertEqual(sd.parse_probe('MODEL=RTOS\n', strict=False)['model'], 'RTOS')
+        with self.assertRaisesRegex(ValueError, 'MODEL'):
+            sd.parse_probe('MODEL=one\nMODEL=two\n', strict=False)
+
     def test_valid_fields_and_duplicate_ip_filtering(self):
         body = BODY.replace('SSHD=active', 'IP=other 192.0.2.10/24\nIP=lo 127.0.0.1/8\nSSHD=active')
         result = sd.parse_probe(body)
@@ -180,6 +191,151 @@ class ProbeParserTests(unittest.TestCase):
         self.assertEqual(result['serial'], '')
         self.assertEqual(result['model'], '')
         self.assertEqual(result['sshd'], 'unsupported-systemd')
+
+
+class CustomProbeTests(DeviceFixture):
+    def test_board_switch_before_transaction_acquisition_never_sends_probe(self):
+        original = self.device._run_cmd
+
+        def switched(cmd, timeout=30, expected_connection=None):
+            self.device.connection_id = 'replacement-before-lease'
+            return original(cmd, timeout, expected_connection=expected_connection)
+
+        with mock.patch.object(self.device, '_run_cmd', side_effect=switched), \
+                mock.patch.object(self.device, '_write') as write:
+            result = self.device.run_probe()
+        self.assertFalse(result['ok'])
+        self.assertIn('连接已变化', result['error'])
+        write.assert_not_called()
+
+    def test_board_switch_after_response_cannot_publish_old_identity(self):
+        manager = mock.Mock()
+        self.device.manager = manager
+
+        def switched(*args, **kwargs):
+            # prepare_switch rotates the attachment generation without
+            # replacing the collector's stop event.
+            self.device.connection_id = 'replacement-generation'
+            return True, BODY
+
+        with mock.patch.object(sd.Device, 'profile', new_callable=mock.PropertyMock,
+                               return_value=BoardProfile()), \
+                mock.patch.object(self.device, '_run_cmd', side_effect=switched):
+            result = self.device.run_probe()
+        self.assertFalse(result['ok'])
+        self.assertIn('重新枚举', result['error'])
+        self.assertEqual(self.device.probe_info, {})
+        manager.identify.assert_not_called()
+
+    @unittest.skipUnless(pathlib.Path('/bin/sh').is_file(), 'requires a local POSIX shell')
+    def custom_probe(self, command):
+        profile = BoardProfile(probe='custom', probe_command=command, auto_configure_ssh=False)
+        manager = mock.Mock()
+        self.device.manager = manager
+
+        def run(cmd, timeout, expected_connection=None):
+            result = subprocess.run(['/bin/sh', '-c', cmd], text=True, capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return True, result.stdout
+
+        with mock.patch.object(sd.Device, 'profile', new_callable=mock.PropertyMock, return_value=profile), \
+                mock.patch.object(self.device, '_run_cmd', side_effect=run), \
+                mock.patch.object(self.device, '_say'):
+            result = self.device.run_probe()
+        return result, manager
+
+    @unittest.skipUnless(pathlib.Path('/bin/sh').is_file(), 'requires a local POSIX shell')
+    def test_metadata_only_probe_preserves_output_without_binding_identity(self):
+        result, manager = self.custom_probe("printf 'MODEL=RTOS\\nversion 1.2\\n'")
+        self.assertTrue(result['ok'], result)
+        self.assertFalse(result['identified'])
+        self.assertTrue(result['needs_provisioning'])
+        self.assertEqual(result['model'], 'RTOS')
+        self.assertIn('version 1.2', self.device.probe_info['raw'])
+        manager.identify.assert_not_called()
+
+    @unittest.skipUnless(pathlib.Path('/bin/sh').is_file(), 'requires a local POSIX shell')
+    def test_custom_exit_exec_and_syntax_error_are_confined_and_reported(self):
+        for command, code in (('exit 7', 7), ('if', 2), ('set -e; false', 1)):
+            with self.subTest(command=command):
+                result, manager = self.custom_probe(command)
+                self.assertFalse(result['ok'], result)
+                self.assertEqual(result['exit_code'], code)
+                manager.identify.assert_not_called()
+        result, manager = self.custom_probe("exec printf 'MODEL=Firmware\\n'")
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['exit_code'], 0)
+        self.assertEqual(result['model'], 'Firmware')
+        manager.identify.assert_not_called()
+
+
+class ShortLineScriptTests(unittest.TestCase):
+    @unittest.skipUnless(pathlib.Path('/bin/sh').is_file(), 'requires a local POSIX shell')
+    def test_staging_preserves_long_scripts_quotes_unicode_and_newlines(self):
+        payload = ('a\'\"$`\\中\n' * 500) + 'end'
+        command = 'printf %s ' + shlex.quote(payload)
+        script = frame_command(command, NONCE, '\n')
+        self.assertLessEqual(max(len(line.encode()) for line in script.splitlines()), 512)
+        self.assertNotIn(BEGIN, script)
+        self.assertNotIn(END, script)
+        shells = [['/bin/sh']]
+        if shutil.which('busybox'):
+            shells.append([shutil.which('busybox'), 'ash'])
+        for shell in shells:
+            with self.subTest(shell=shell):
+                result = subprocess.run(shell, input=script, text=True, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, '\n' + BEGIN + '\n' + payload + '\n' + END + '\n')
+
+    @unittest.skipUnless(pathlib.Path('/bin/sh').is_file(), 'requires a local POSIX shell')
+    def test_large_transfer_script_staging_keeps_wire_overhead_bounded(self):
+        payload = 'x' * (40 * 1024)
+        script = frame_command('printf %s ' + shlex.quote(payload), NONCE, '\n')
+        self.assertLess(len(script.encode()), 48 * 1024)
+        self.assertLessEqual(max(len(line.encode()) for line in script.splitlines()), 512)
+        result = subprocess.run(['/bin/sh'], input=script, text=True, capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '\n' + BEGIN + '\n' + payload + '\n' + END + '\n')
+
+    @unittest.skipUnless(os.name == 'posix' and shutil.which('busybox'), 'requires local BusyBox and PTY')
+    def test_long_script_completes_in_busybox_interactive_line_editor(self):
+        # The shell is an isolated test process attached to a new PTY, never
+        # any collector-managed serial port. A >2 KiB interactive input line
+        # is truncated by common Buildroot ash configurations.
+        import pty
+        master, slave = pty.openpty()
+        process = subprocess.Popen([shutil.which('busybox'), 'ash', '-i'],
+                                   stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+        os.close(slave)
+        output = bytearray()
+
+        def receive(deadline, complete=None):
+            while time.monotonic() < deadline:
+                if complete and complete in output:
+                    return
+                ready, _, _ = select.select([master], [], [], 0.05)
+                if not ready:
+                    continue
+                try:
+                    data = os.read(master, 65536)
+                except OSError:
+                    return
+                output.extend(data)
+                if b'\x1b[6n' in data:
+                    os.write(master, b'\x1b[1;1R')
+
+        try:
+            receive(time.monotonic() + 0.1)
+            payload = 'x' * 3000
+            script = frame_command("printf 'PAYLOAD:%s:END\\n' '" + payload + "'", NONCE, '\n')
+            os.write(master, script.encode())
+            receive(time.monotonic() + 5, (END + '\r\n').encode())
+            normalized = bytes(output).replace(b'\r\n', b'\n')
+            self.assertIn(('\n' + BEGIN + '\nPAYLOAD:' + payload + ':END\n\n' + END + '\n').encode(), normalized)
+        finally:
+            process.kill()
+            process.wait(timeout=3)
+            os.close(master)
 
 
 class ShellLoginTests(DeviceFixture):

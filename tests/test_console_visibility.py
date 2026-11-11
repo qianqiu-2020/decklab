@@ -40,7 +40,9 @@ class ConsoleVisibilityTests(unittest.TestCase):
         return base64.b64decode(snapshot['data']).decode('utf-8')
 
     def shell_write(self, text):
-        result = subprocess.run(['/bin/sh', '-c', text.rstrip('\r')],
+        # Model the target TTY's CR/LF input conversion before invoking sh.
+        script = text.replace('\r\n', '\n').replace('\r', '\n')
+        result = subprocess.run(['/bin/sh', '-c', script],
                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
         output = (result.stdout + result.stderr).replace(b'\n', b'\r\n')
         self.device.append(text.encode().replace(b'\r', b'\r\n') + output + b'root@fixture:~# ')

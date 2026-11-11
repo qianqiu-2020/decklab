@@ -37,7 +37,8 @@ async function main() {
     else if (route === '/api/agent-share') {
       const request = JSON.parse(options.body);
       const grant = { id: 'abc123', actor: 'shared-agent/abc123', scope: request.scope,
-        serial: request.serial, created: 1, expires: null, revoked: null };
+        serial: request.serial, key: request.key, connection_id: request.connection_id,
+        created: 1, expires: null, revoked: null };
       active.push(grant);
       body = { token: 'seriald-ag-secret', grant };
     } else if (route === '/api/agent-revoke') {
@@ -49,10 +50,11 @@ async function main() {
   let rejectClipboard = false;
   let rejectPageShare = false;
   let legacyCopies = 0;
+  let selected = { key: 'milkv', label: 'milkv', serial: 'SN1' };
   const context = {
     document: { getElementById: byId, createElement: () => new Element(), body: new Element(),
       execCommand: command => { assert.equal(command, 'copy'); legacyCopies++; return true; } },
-    window: { SerialdShareSelection: () => ({ key: 'milkv', label: 'milkv', serial: 'SN1' }),
+    window: { SerialdShareSelection: () => selected,
       SerialdI18n: {locale: 'zh-CN', setDefaultLocale() {}},
       addEventListener(name, fn) { this.events ||= {}; this.events[name] = fn; },
       prompt: () => { throw new Error('LAN IP should be discovered without prompting'); } },
@@ -71,6 +73,7 @@ async function main() {
 
   byId('b-agent-share').click();
   assert.equal(byId('agent-share-scope').value, 'device');
+  assert.equal(byId('agent-share-format').value, 'mcp');
   assert.equal(byId('agent-share-address-mode').value, 'lan');
   assert.equal(byId('agent-share-url').value, 'http://192.0.2.161:8898');
   byId('agent-share-address-mode').value = 'local';
@@ -81,6 +84,21 @@ async function main() {
   await byId('agent-share-create').click();
   const request = calls.find(call => call.route === '/api/agent-share');
   assert.deepEqual(JSON.parse(request.options.body), { scope: 'device', serial: 'SN1' });
+  const mcp = JSON.parse(byId('agent-share-text').value);
+  assert.deepEqual(mcp, {mcpServers: {decklab: {command: 'seriald-mcp', args: [], env: {
+    SERIALD_URL: 'http://192.0.2.161:8898', SERIALD_TOKEN: 'seriald-ag-secret'}}}});
+  assert.match(byId('agent-share-setup').textContent, /实际绝对路径/);
+  const originalMcpConfig = byId('agent-share-text').value;
+  const grantsBeforeCommandChange = active.length;
+  byId('agent-share-command').value = '/home/ai/.local/share/decklab-mcp/bin/seriald-mcp';
+  byId('agent-share-command').events.input();
+  assert.equal(JSON.parse(byId('agent-share-text').value).mcpServers.decklab.command,
+    '/home/ai/.local/share/decklab-mcp/bin/seriald-mcp');
+  assert.equal(active.length, grantsBeforeCommandChange, 'editing launch path must reuse the grant');
+  byId('agent-share-command').value = 'seriald-mcp'; byId('agent-share-command').events.input();
+  assert.equal(byId('agent-share-text').value, originalMcpConfig);
+  byId('agent-share-format').value = 'cli';
+  byId('agent-share-format').change();
   const text = byId('agent-share-text').value;
   assert.match(text, /seriald-ag-secret/);
   assert.match(text, /\nexport SERIALD_URL='http:\/\/192\.0\.2\.161:8898'\n/);
@@ -93,7 +111,7 @@ async function main() {
   assert.equal(legacyCopies, 1);
   rejectClipboard = false;
   await byId('agent-share-copy').click();
-  assert.equal(clipboard[0], text);
+  assert.equal(clipboard.at(-1), text);
   const grantsBeforeSwitch = active.length;
   context.window.SerialdI18n.locale = 'en';
   context.window.events['decklab-language-change']();
@@ -118,6 +136,26 @@ async function main() {
   assert.equal(byId('device-share-status').textContent, '链接已复制，24 小时有效');
   assert.equal(byId('b-device-share').disabled, false);
   assert.equal(byId('b-share').disabled, false);
+
+  selected = {key: 'unprovisioned-usb', label: '待识别 COM5', dev: 'COM5', alive: true,
+    connection_id: 'fresh-connection', serial: ''};
+  byId('b-agent-share').click();
+  assert.equal(byId('agent-share-create').disabled, false, 'identity must not gate access');
+  assert.match(byId('agent-share-hint').textContent, /无需识别/);
+  await byId('agent-share-create').click();
+  assert.deepEqual(JSON.parse(calls.filter(call => call.route === '/api/agent-share').at(-1).options.body),
+    {scope: 'connection', key: 'unprovisioned-usb', connection_id: 'fresh-connection'});
+  assert.equal(JSON.parse(byId('agent-share-text').value).mcpServers.decklab.env.SERIALD_TOKEN, 'seriald-ag-secret');
+  const grantCount = active.length;
+  byId('agent-share-format').value = 'cli'; byId('agent-share-format').change();
+  assert.match(byId('agent-share-text').value, /当前串口连接/);
+  assert.doesNotMatch(byId('agent-share-text').value, / exec --command /, 'raw access must not require SSH');
+  assert.equal(active.length, grantCount, 'format changes reuse the current authorization');
+  selected = {key: 'unprovisioned-usb', label: 'COM5', alive: false, serial: ''};
+  byId('b-agent-share').click();
+  assert.equal(byId('agent-share-create').disabled, true, 'offline unidentified ports cannot create grants');
+  assert.equal(byId('agent-share-scope').value, 'device', 'never widen scope automatically');
+  selected = { key: 'milkv', label: 'milkv', serial: 'SN1' };
   rejectPageShare = true;
   await byId('b-device-share').click();
   assert.match(byId('device-share-status').textContent, /分享失败/);

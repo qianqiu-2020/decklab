@@ -48,6 +48,11 @@ def _grants_initial(db):
                'created INTEGER NOT NULL, expires INTEGER, revoked INTEGER)')
 
 
+def _grants_connections(db):
+    db.execute("ALTER TABLE grants ADD COLUMN key TEXT NOT NULL DEFAULT ''")
+    db.execute("ALTER TABLE grants ADD COLUMN connection_id TEXT NOT NULL DEFAULT ''")
+
+
 def _registry_tasks(db):
     db.execute('CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, kind TEXT NOT NULL, actor TEXT NOT NULL, '
                'client_id TEXT NOT NULL, state TEXT NOT NULL, progress TEXT NOT NULL, result TEXT, '
@@ -77,9 +82,14 @@ def _registry_connections(db):
     db.execute('CREATE INDEX IF NOT EXISTS connection_board ON connection_identities(serial)')
 
 
+def _registry_probe_settings(db):
+    db.execute('CREATE TABLE IF NOT EXISTS probe_settings '
+               '(port TEXT PRIMARY KEY, document TEXT NOT NULL)')
+
+
 REGISTRY_MIGRATIONS = (_registry_initial, _registry_history, _registry_tasks, _registry_artifacts,
-                       _registry_connections)
-GRANT_MIGRATIONS = (_grants_initial,)
+                       _registry_connections, _registry_probe_settings)
+GRANT_MIGRATIONS = (_grants_initial, _grants_connections)
 _SCHEMAS = {
     'registry': (0x444C5247, REGISTRY_MIGRATIONS, {
         'boards': 'serial label info first_seen last_seen last_path last_dev',
@@ -91,9 +101,10 @@ _SCHEMAS = {
         'task_targets': 'task_id serial connection_id',
         'transfer_artifacts': 'id actor serial direction name size received sha256 state task_id created updated',
         'connection_identities': 'connection_id serial identified',
+        'probe_settings': 'port document',
     }),
     'grants': (0x444C4147, GRANT_MIGRATIONS, {
-        'grants': 'id token_hash actor scope serial created expires revoked',
+        'grants': 'id token_hash actor scope serial created expires revoked key connection_id',
     }),
 }
 

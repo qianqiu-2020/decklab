@@ -13,7 +13,7 @@
     byId: $, fetch: fetch, formatBytes: fmt, age: ago,
     getView: function () { return terminalView.current; },
     isCurrent: function (ctx) { return isCurrent(ctx); },
-    open: select, renderInfo: function (info) { checkIdentityAssociation(); renderInfo(info); },
+    open: select, renderInfo: function (info) { checkIdentityAssociation(); checkProbeSettings(); renderInfo(info); },
     loadSessions: loadSessions, loadActivity: loadActivity,
     updateInputOwner: updateInputOwner
   });
@@ -25,7 +25,7 @@
     session: function (sid) { return sessions.find(function (session) { return session.sid === sid; }); },
     takenOver: function (sid) { return !!takenOver[sid]; },
     onSelect: function (key, sid) {
-      closeIdentityAssociation(); deviceDirectory.selectionChanged(key); curSid = sid;
+      closeIdentityAssociation(); closeProbeSettings(); deviceDirectory.selectionChanged(key); curSid = sid;
     },
     clearTerminalSearch: function (focus) { clearTerminalSearch(focus); },
     clearCommandDecorations: function (ctx) { clearCommandDecorations(ctx); },
@@ -705,9 +705,103 @@
   });
 
   /* ---------- 识别设备 / 一键开 SSH ---------- */
+  var probeEditor = null;
+  function closeProbeSettings() {
+    probeEditor = null;
+    if ($('probe-settings-dialog').open) $('probe-settings-dialog').close();
+  }
+  function probeSettingsCurrent(state) {
+    if (!state || !isCurrent(state.ctx) || state.ctx.connectionId !== state.connectionId) return false;
+    var board = deviceDirectory.find(state.ctx.key);
+    return !!board && board.alive && board.connection_id === state.connectionId;
+  }
+  function checkProbeSettings() {
+    if (probeEditor && !probeSettingsCurrent(probeEditor)) closeProbeSettings();
+  }
+  function updateProbeCommand() {
+    if (!probeEditor) return;
+    var mode = $('probe-settings-mode').value;
+    var command = $('probe-settings-command');
+    command.readOnly = mode !== 'custom';
+    command.disabled = mode === 'manual';
+    command.value = mode === 'linux' ? probeEditor.defaultCommand
+      : mode === 'custom' ? probeEditor.customCommand : '';
+    $('probe-settings-save').disabled = !probeSettingsCurrent(probeEditor) || probeEditor.saving
+      || (mode === 'custom' && !command.value.trim());
+  }
+  $('b-probe-settings').addEventListener('click', function () {
+    var ctx = terminalView.current, board = ctx && deviceDirectory.find(ctx.key);
+    if (!isCurrent(ctx) || !board || !board.alive || !board.connection_id) {
+      $('d-status').textContent = ' 当前连接不可用，请刷新设备列表后重试'; return;
+    }
+    var state = probeEditor = { ctx: ctx, connectionId: board.connection_id,
+      defaultCommand: '', customCommand: '', saving: false };
+    $('probe-settings-target').textContent = board.dev || board.by_path || board.key;
+    $('probe-settings-mode').disabled = true;
+    $('probe-settings-command').value = '';
+    $('probe-settings-command').readOnly = true;
+    $('probe-settings-save').disabled = true;
+    $('probe-settings-status').textContent = '正在读取探测设置…';
+    $('probe-settings-dialog').showModal();
+    fetch('/api/probe-settings?key=' + encodeURIComponent(ctx.key) + '&connection_id='
+      + encodeURIComponent(state.connectionId), { cache: 'no-store' })
+      .then(function (response) { return response.json().then(function (result) {
+        if (!response.ok) throw new Error(result.error || '读取探测设置失败');
+        return result;
+      }); })
+      .then(function (result) {
+        if (probeEditor !== state || !probeSettingsCurrent(state)) return;
+        state.defaultCommand = result.default_command || '';
+        state.customCommand = result.command || '';
+        $('probe-settings-mode').value = result.mode || 'linux';
+        $('probe-settings-mode').disabled = false;
+        $('probe-settings-status').textContent = '';
+        updateProbeCommand();
+      }).catch(function (error) {
+        if (probeEditor === state && probeSettingsCurrent(state)) $('probe-settings-status').textContent = error.message;
+      });
+  });
+  $('probe-settings-mode').addEventListener('change', updateProbeCommand);
+  $('probe-settings-command').addEventListener('input', function () {
+    if (!probeEditor || $('probe-settings-mode').value !== 'custom') return;
+    probeEditor.customCommand = $('probe-settings-command').value;
+    $('probe-settings-save').disabled = !probeSettingsCurrent(probeEditor) || probeEditor.saving
+      || !probeEditor.customCommand.trim();
+  });
+  $('probe-settings-close').addEventListener('click', closeProbeSettings);
+  $('probe-settings-dialog').addEventListener('close', function () { probeEditor = null; });
+  $('probe-settings-save').addEventListener('click', function () {
+    var state = probeEditor;
+    if (!probeSettingsCurrent(state) || state.saving || $('probe-settings-save').disabled) return;
+    var mode = $('probe-settings-mode').value;
+    var command = mode === 'custom' ? $('probe-settings-command').value : '';
+    state.saving = true;
+    $('probe-settings-save').disabled = true;
+    $('probe-settings-mode').disabled = true;
+    $('probe-settings-command').disabled = true;
+    $('probe-settings-status').textContent = '正在保存探测设置…';
+    fetch('/api/probe-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: state.ctx.key, connection_id: state.connectionId, mode: mode, command: command }) })
+      .then(function (response) { return response.json().then(function (result) {
+        if (!response.ok || result.ok === false) throw new Error(result.error || '保存探测设置失败');
+        return result;
+      }); })
+      .then(function () {
+        if (probeEditor !== state || !probeSettingsCurrent(state)) return;
+        $('probe-settings-status').textContent = '已保存；识别设备时使用此设置';
+        pollDevices();
+      }).catch(function (error) {
+        if (probeEditor === state && probeSettingsCurrent(state)) $('probe-settings-status').textContent = error.message;
+      }).finally(function () {
+        state.saving = false;
+        if (probeEditor !== state || !probeSettingsCurrent(state)) return;
+        $('probe-settings-mode').disabled = false;
+        updateProbeCommand();
+      });
+  });
   function renderInfo(info) {
     var box = $('d-info');
-    if (!info || (!info.serial && !info.hostname && !(info.ips || []).length)) {
+    if (!info || (!info.serial && !info.hostname && !(info.ips || []).length && !info.raw)) {
       box.hidden = true; $('b-info').disabled = true; return;
     }
     box.hidden = false; $('b-info').disabled = false;
@@ -719,17 +813,19 @@
       'verified-correction': '管理员核实并更正', 'verified-manual': '管理员核实' };
     [[info.identity_status === 'confirmed' ? '板卡序列号' : '候选身份编号', info.serial, true],
      ['身份来源', sources[info.serial_source] || '', false],
-     ['身份状态', info.identity_status === 'confirmed' ? '已确认'
+     ['身份状态', !info.serial ? '' : info.identity_status === 'confirmed' ? '已确认'
        : '待确认（直接读取 EEPROM 或匹配厂商固件约定后自动确认）', false],
      ['固件原始编号', info.reported_serial && info.reported_serial !== info.serial ? info.reported_serial : '', false],
      ['主机名', info.hostname, false],
      ['IP', (info.ips || []).join('   '), false], ['sshd', info.sshd, false],
-     ['识别时间', info.ts ? new Date(info.ts * 1000).toLocaleString('zh-CN') : '', false]
+     ['识别时间', info.ts ? new Date(info.ts * 1000).toLocaleString('zh-CN') : '', false],
+     ['最近探测输出', info.raw || '', false]
     ].forEach(function (r) {
       if (!r[1]) return;
       var d = document.createElement('div');
       var k = document.createElement('span'); k.className = 'k'; k.textContent = r[0];
       var v = document.createElement('span'); v.className = 'v' + (r[2] ? ' hi' : '');
+      if (r[0] === '最近探测输出') v.style.whiteSpace = 'pre-wrap';
       if (['身份来源', '身份状态', '识别时间'].indexOf(r[0]) < 0) v.dataset.i18nIgnore = '';
       v.textContent = r[1];
       d.appendChild(k); d.appendChild(v);
@@ -809,7 +905,8 @@
         if (!d.ok) { $('d-status').textContent = ' 失败：' + (d.error || ''); return; }
         if (d.serial !== undefined || d.ips !== undefined) {
           if (d.ok && d.device_key) adoptKey(ctx, d.device_key, d.serial);
-          renderInfo(d); $('d-status').textContent = ' 识别完成';
+          renderInfo(d); $('d-status').textContent = d.identified === false
+            ? ' 探测完成；尚未绑定设备身份，终端和 AI 共享可继续使用' : ' 识别完成';
         } else {
           $('d-status').textContent = ' 完成：ssh d=' + (d.sshd || '?');
         }

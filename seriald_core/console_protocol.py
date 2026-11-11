@@ -15,6 +15,37 @@ from .protocol import RE_LOGIN, RE_PASSWD, RE_PROMPT
 from .transactions import TransactionError
 
 
+def frame_command(cmd, nonce, newline):
+    """Keep each interactive input line below small BusyBox line-editor limits.
+
+    BusyBox ash can truncate a line before the kernel's canonical input limit.
+    Reassemble long scripts using only POSIX shell builtins, without temporary
+    board files, terminal configuration changes or an additional serial reader.
+    Split marker arguments keep an echoed command from completing its own frame.
+    """
+    framed = ("printf '\\n%s%s\\n' '__SD_B_' '%s__'; %s\n"
+              "printf '\\n%s%s\\n' '__SD_E_' '%s__'")
+    framed = framed % ('%s', '%s', nonce, cmd, '%s', '%s', nonce)
+    if max(len(line.encode('utf-8')) for line in framed.split('\n')) <= 512:
+        # Convert our command separator only; literal LF characters inside a
+        # quoted user script must not acquire an extra CR on CRLF consoles.
+        return newline.join(framed.rsplit('\n', 1)) + newline
+    name = '__seriald_command'
+    lines = [name + "=''"]
+    offset = 0
+    prefix = name + '=${' + name + '}'
+    while offset < len(framed):
+        # Ordinary base64/text needs little overhead; shrink Unicode or quote
+        # heavy chunks by encoded wire length rather than assuming ASCII.
+        size = min(400, len(framed) - offset)
+        while len((prefix + shlex.quote(framed[offset:offset + size])).encode('utf-8')) > 512:
+            size //= 2
+        lines.append(prefix + shlex.quote(framed[offset:offset + size]))
+        offset += size
+    lines.append('eval "$' + name + '"; unset ' + name)
+    return newline.join(lines) + newline
+
+
 def root_ssh_config_command():
     """Build a root-only, password-free command for the serial shell."""
     script = (
@@ -83,7 +114,7 @@ class ConsoleProtocol:
     def ensure_shell(self, base):
         """仅从现场输出判断登录状态,兼容 ANSI、免密码登录以及 CR/LF。"""
         device = self.connection
-        if device.profile.probe != 'linux':
+        if device.profile.probe == 'manual':
             return False, base
         with device.cv:
             tail = ANSI.sub('', device.console_tail).rstrip()[-120:]
@@ -125,13 +156,14 @@ class ConsoleProtocol:
         match = device._wait(base, RE_PROMPT + '|' + failure, 20)
         return (bool(match and re.search(RE_PROMPT, match.group(0))), device.now_off())
 
-    def run_command(self, cmd, timeout=30.0):
+    def run_command(self, cmd, timeout=30.0, expected_connection=None):
         """一个事务覆盖登录、完整发送和带 nonce 的响应,禁止其他写入口插队。"""
         device = self.connection
         if device.file_transfer.active:
             return False, '串口文件传输中，请完成或取消后再操作'
         try:
-            with device.transactions.begin('console-command', timeout):
+            with device.transactions.begin('console-command', timeout,
+                                           expected_connection=expected_connection):
                 device.probing = True
                 try:
                     return device._run_cmd_locked(cmd, timeout)
@@ -157,12 +189,9 @@ class ConsoleProtocol:
             return False, '本连接尚未确定 shell 换行方式'
         nonce = secrets.token_hex(12)
         begin, end = '__SD_B_' + nonce + '__', '__SD_E_' + nonce + '__'
-        # printf 参数拆开 marker,回显再怎么分块也不会成为完整标记行。
-        framed = ("printf '\\n%s%s\\n' '__SD_B_' '%s__'; %s; "
-                  "printf '\\n%s%s\\n' '__SD_E_' '%s__'")
-        framed = framed % ('%s', '%s', nonce, cmd, '%s', '%s', nonce)
+        framed = frame_command(cmd, nonce, device.newline)
         base = device.now_off()
-        ok, err = device._write(framed + device.newline)
+        ok, err = device._write(framed)
         if not ok:
             return False, err
         # A long echoed upload line can interleave with printf output, leaving

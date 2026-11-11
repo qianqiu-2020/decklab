@@ -7,7 +7,7 @@ import shutil
 from urllib.parse import quote, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
-GUIDES = ('RELEASING', 'AGENT_ACCESS', 'API', 'ARCHITECTURE', 'INSTALL',
+GUIDES = ('RELEASING', 'AGENT_ACCESS', 'MCP', 'API', 'ARCHITECTURE', 'INSTALL',
           'HARDWARE_ID', 'DEVICE_IDENTITY_MATRIX', 'CONFIGURATION', 'DEMO',
           'CONSOLE_TRANSACTIONS', 'STORAGE_UPGRADES', 'LOG_OPERATIONS', 'TASKS',
           'TRANSFER_ARTIFACTS', 'HARDWARE_EXTENSIONS', 'WINDOWS',

@@ -33,7 +33,9 @@ class SerialHealthTests(unittest.TestCase):
         self.device.append(b'root@fixture:~# ')
 
     def shell_write(self, text):
-        result = subprocess.run(['/bin/sh', '-c', text.rstrip('\r')],
+        # Model the target TTY's CR/LF input conversion before invoking sh.
+        script = text.replace('\r\n', '\n').replace('\r', '\n')
+        result = subprocess.run(['/bin/sh', '-c', script],
                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
         self.device.append(text.encode().replace(b'\r', b'\r\n')
                            + result.stdout.replace(b'\n', b'\r\n') + b'root@fixture:~# ')
@@ -65,7 +67,7 @@ class SerialHealthTests(unittest.TestCase):
         self.assertEqual(state['status'], 'ok')
         self.assertGreater(state['last_success'], 0)
         self.assertAlmostEqual(state['next_check'] - state['last_success'], 3600, delta=1)
-        self.assertIn('; :; ', write.call_args.args[0])
+        self.assertRegex(write.call_args.args[0], r'; :(?:;|\r|\n)')
         self.assertIn(b'__SD_B_', self.device.buf)
         self.assertIn(b'__SD_E_', self.device.buf)
         screen = base64.b64decode(self.device.terminal.screen.snapshot()['data']).decode()

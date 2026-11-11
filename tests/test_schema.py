@@ -247,6 +247,28 @@ class SchemaTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_version_one_grants_upgrade_preserves_credentials_and_adds_connection_scope(self):
+        db = sqlite3.connect(self.path)
+        schema._grants_initial(db)
+        token = 'seriald-ag-legacy'
+        db.execute('INSERT INTO grants VALUES (?,?,?,?,?,?,?,?)',
+                   ('legacy', hashlib.sha256(token.encode()).hexdigest(), 'agent', 'device', 'SN1', 1, None, None))
+        db.execute('PRAGMA user_version=1')
+        db.commit()
+        db.close()
+        store = AgentGrantStore(str(self.path))
+        try:
+            legacy = store.lookup(token)
+            self.assertEqual((legacy['scope'], legacy['serial'], legacy['connection_id']), ('device', 'SN1', ''))
+            current_token, current = store.issue('connection', key='pending', connection_id='attachment')
+            self.assertEqual(store.lookup(current_token), current)
+            self.assertIsNotNone(store.schema_backup)
+            with closing(sqlite3.connect(store.schema_backup)) as saved:
+                self.assertEqual(saved.execute('PRAGMA user_version').fetchone()[0], 1)
+                self.assertNotIn('connection_id', {row[1] for row in saved.execute('PRAGMA table_info(grants)')})
+        finally:
+            store.close()
+
     def test_foreign_key_failure_rolls_back_adoption(self):
         db = self.legacy()
         db.execute("UPDATE sessions SET serial='missing'")

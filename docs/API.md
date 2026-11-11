@@ -50,7 +50,7 @@ begun: a truncated download or dropped SSE connection requires client recovery.
 | GET `/healthz` | Control-process health, not proof of board health |
 | GET `/api/health` | Collector uptime, version, device counts, disk and logging status; unavailable to single-board grants |
 | GET `/api/capabilities` | Protocol version/features; no board commands |
-| GET `/api/devices` | Online, pending and historical device snapshots; grants filter by serial |
+| GET `/api/devices` | Online, pending and historical device snapshots; grants filter by serial or live connection |
 | GET `/api/sessions` | `key`, `serial`; serial plus SSH sessions |
 | GET `/api/session` | `key`, `serial`, `sid` (default `serial`), `off` byte cursor; snapshot or long poll |
 | GET `/api/serial` | Serial-only cursor read, same byte semantics |
@@ -231,7 +231,7 @@ and command examples; do not call the collector's internal revocation endpoint.
 | --- | --- |
 | GET `/api/access` | `share_enabled`, `agent_share_enabled`, `open_access`, `loopback_open`, `lan_hosts`, `default_language` (`en`, `zh-CN` or empty); UI capability hints and host language default |
 | GET `/api/agent-grants` | `grants` metadata, at most 200 newest rows; includes revoked rows and never returns token secrets |
-| POST `/api/agent-share` | `scope=all` or `device`; device scope requires nonempty `serial` (at most 128 characters); returns `token` once and `grant` metadata |
+| POST `/api/agent-share` | `scope=all`, `device`, or `connection`; device scope requires nonempty `serial` (at most 128 characters); connection scope requires live `key` and expected `connection_id`; returns `token` once and `grant` metadata |
 | POST `/api/agent-revoke` | Grant `id` (16 lowercase hex characters); returns revoked `id` and `sessions_closed` cleanup confirmation |
 | POST `/api/share-link` | No payload required; primary credential only; returns relative `path` and `expires_in` |
 
@@ -244,6 +244,8 @@ cleanup could not be confirmed, rather than that the grant remains valid.
 
 Web-issued agent grants, including all-board grants, cannot call `/api/label`,
 `/api/switch-mode`, `/api/rescue`, `/api/ssh-enable` or `/api/session-takeover`.
+GET/POST `/api/probe-settings` is restricted to human web access, including when
+using an environment-configured agent credential.
 They cannot start `kind=ssh-enable` tasks or create board identity markers through
 either identify interface. They can create SSH sessions; profile-controlled
 automatic SSH provisioning after authentication denial still applies to that
@@ -257,6 +259,32 @@ to the grant. Ordinary full-platform task/artifact requests can use IDs without
 device selection. Environment-configured agent credentials identify an actor but
 do not receive these web-issued grant restrictions. Open anonymous access also
 retains full platform access; issuing a grant does not restrict other clients.
+
+A connection grant allows raw terminal access even without a successful probe or
+serial number. Control pins its `connection_id` on every scoped request and the
+collector verifies the same live generation. It follows an identity discovered
+within that connection, but unplugging/replacing it or preparing a board switch
+invalidates access. It never authorizes another connection at the same port.
+An empty device list means the granted connection is no longer available; ask a
+human to issue a new grant. Do not silently retry against another device.
+
+## Custom probe settings
+
+GET `/api/probe-settings` takes `key` and expected `connection_id`, returning
+`mode`, `command`, `default_command` and the current `connection_id`. POST the
+same route with `key`, `connection_id`, `mode` and `command` to save. Modes are
+`linux` (built-in probe), `custom` (1–16384 UTF-8 bytes of POSIX shell script) and
+`manual` (no automatic shell login or probing). Non-custom modes use an empty
+command. Saving is passive: the human invokes Identify separately to execute.
+Preferences persist by physical attachment; they are not board identity and must
+be reviewed when attaching a different target to that port.
+
+Custom scripts can output `HOST=`, `SERIAL=`, `MODEL=`, `SSHD=` and `IP=interface
+address/prefix` lines, plus the standard optional identity fields. Metadata-only
+output is useful without binding a board. A serial still passes the normal
+hardware-identity validation, duplicate checks and human archive-association
+rules; missing metadata never fabricates a serial. Arbitrary non-POSIX consoles
+can use manual mode and the raw terminal instead.
 
 The hosted client `/serialctl.py` and skill `/skills/seriald-board/SKILL.md` are
 public downloads. Skill content defaults to English; `?lang=zh-CN` selects

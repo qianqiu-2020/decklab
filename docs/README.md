@@ -11,6 +11,7 @@ SpacemiT K3. See the overview for the board support list and default credentials
 - [Configuration](CONFIGURATION.md): serial framing, credentials and board profiles.
 - [Demo](DEMO.md): explore the application without hardware.
 - [Agent access](AGENT_ACCESS.md): shared SSH/serial access, grants and CLI commands.
+- [MCP](MCP.md): standard AI client tools over the existing protected control API.
 
 ## Operate boards
 

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Keep BusyBox/Buildroot probes below interactive shell input-line limits and
+  detect existing SSH services without requiring systemd.
+- Configure custom POSIX probe scripts or manual consoles in the browser.
+  Identification remains optional for terminal access; no synthetic serial is
+  created when an operating system cannot report a hardware identity.
+- Share an unidentified live connection with an AI using a revocable grant that
+  expires on connection replacement or board switching.
+- Add an optional MCP adapter with stdio and authenticated Streamable HTTP,
+  browser-generated client configuration, bounded terminal reads, input, SSH
+  execution, task operations and boot history through the protected control API.
+
 ## 1.6.5
 
 - Recover a previously duplicated board serial from the Identify action: review

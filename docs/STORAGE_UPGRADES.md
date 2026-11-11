@@ -2,7 +2,7 @@
 
 DeckLab versions both SQLite databases with `PRAGMA user_version` and identifies
 their purpose with `PRAGMA application_id`. The registry currently uses schema
-version 5; the agent-grant database uses version 1. These versions are independent
+version 6; the agent-grant database uses version 2. These versions are independent
 of the application release number.
 
 ## Automatic upgrade
@@ -16,7 +16,10 @@ task history and historical connection targets. Schema 4 adds host-side transfer
 artifact metadata and task ownership. Schema 5 adds proven connection-to-board
 associations so pre-identification tasks can follow confirmed identity without
 guessing the owner of historical connections. Existing task snapshots are retained;
-connections without evidence are not backfilled. New empty databases need no backup.
+connections without evidence are not backfilled. Registry schema 6 stores explicit
+probe preferences by physical attachment, independently of board identity. Grant
+schema 2 adds connection-bound grants; older grants retain their existing scope.
+New empty databases need no backup.
 
 Before modifying an existing database, DeckLab creates a snapshot under:
 

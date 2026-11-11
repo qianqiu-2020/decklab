@@ -12,6 +12,10 @@
   var topAgent = document.getElementById('b-agent-share-all');
   var deviceAgent = document.getElementById('b-agent-share');
   var scope = document.getElementById('agent-share-scope');
+  var format = document.getElementById('agent-share-format');
+  var setup = document.getElementById('agent-share-setup');
+  var mcpOptions = document.getElementById('agent-share-mcp-options');
+  var mcpCommand = document.getElementById('agent-share-command');
   var addressMode = document.getElementById('agent-share-address-mode');
   var address = document.getElementById('agent-share-url');
   var hint = document.getElementById('agent-share-hint');
@@ -98,8 +102,11 @@
     if (scope.value === 'device') {
       hint.textContent = board && board.serial
         ? '仅允许访问 ' + board.label + '（SN ' + board.serial + '）；设备改标签后仍绑定此序列号。'
-        : '当前设备尚无序列号；请先识别设备，或选择“全部设备”。';
-      create.disabled = !(board && board.serial);
+        : board && board.alive && board.connection_id
+          ? '仅允许访问当前串口连接 ' + (board.label || board.dev || board.key)
+            + '；无需识别设备。拔插、准备换板或采集器重启后须重新授权。'
+          : '请选择一个已识别设备或在线串口连接。';
+      create.disabled = !(board && (board.serial || (board.alive && board.key && board.connection_id)));
     } else {
       hint.textContent = '允许访问当前和今后接入的全部设备。';
       create.disabled = false;
@@ -116,14 +123,19 @@
   function agentText(url, token, grant, board) {
     var english = window.SerialdI18n && window.SerialdI18n.locale === 'en';
     function phrase(chinese, translated) { return english ? translated : chinese; }
-    var target = grant.scope === 'device' ? board.label : phrase('<先用 devices 选择标签>', '<choose a label with devices>');
+    var target = grant.scope === 'all' ? phrase('<先用 devices 选择标签>', '<choose a label with devices>')
+      : grant.scope === 'connection' ? grant.key : board.label;
     var selection = grant.scope === 'device'
       ? phrase('只操作 ', 'Operate only on ') + board.label + ' (SN ' + grant.serial + '). '
         + phrase('令牌在服务端限制为此序列号。', 'The server limits this token to that serial number.')
-      : phrase('可访问所有设备；先运行 devices，再根据任务选择明确的设备标签，不要默认选第一台。',
+      : grant.scope === 'connection'
+        ? phrase('仅允许访问当前串口连接。无需识别；换板、拔插或采集器重启后重新授权。',
+          'Access is limited to this serial connection. Identification is optional; reauthorize after replacement, reconnect or collector restart.')
+        : phrase('可访问所有设备；先运行 devices，再根据任务选择明确的设备标签，不要默认选第一台。',
         'All boards are accessible. Run devices and choose the label required by the task; do not default to the first board.');
     return [
-      phrase('请使用 seriald 访问开发板。', 'Use seriald to access the development boards. ') + selection,
+      phrase('在 AI 客户端主机的终端中配置 CLI；令牌不要粘贴到对话中。',
+        'Configure the CLI in a terminal on the AI client host; do not paste the token into a conversation.') + '\n' + selection,
       phrase('授权默认不限期；用户可以随时在网页撤销。当前会话的操作标签：',
         'The grant has no expiry by default and can be revoked in the UI. Session actor: ') + grant.actor + '.',
       ...(openAccess ? [phrase('当前服务为开放模式；此令牌约束使用它的请求，其他客户端仍可无令牌访问。',
@@ -139,9 +151,11 @@
       'export SERIALD_URL=' + shellQuote(url),
       'export SERIALD_TOKEN=' + shellQuote(token),
       'python3 "$HOME/.local/share/seriald/serialctl.py" devices',
-      phrase('# 先按任务选定标签；首选 SSH：', '# Choose the label required by the task; prefer SSH:'),
-      'python3 "$HOME/.local/share/seriald/serialctl.py" --device ' + shellQuote(target) + ' exec --command ' + shellQuote('uname -a'),
-      phrase('# 启动、内核或 SSH 故障时再读取串口：', '# Read serial for boot, kernel or SSH failures:'),
+      ...(grant.scope !== 'connection' ? [
+        phrase('# 先按任务选定标签；首选 SSH：', '# Choose the label required by the task; prefer SSH:'),
+        'python3 "$HOME/.local/share/seriald/serialctl.py" --device ' + shellQuote(target) + ' exec --command ' + shellQuote('uname -a')
+      ] : []),
+      phrase('# 读取当前串口输出：', '# Read the current serial output:'),
       'python3 "$HOME/.local/share/seriald/serialctl.py" --device ' + shellQuote(target) + ' read --sid serial',
       '```', '',
       phrase('如果 Agent 运行在 Windows PowerShell，请用 Invoke-WebRequest 下载相同两个地址，并用 py -3 运行 serialctl.py。',
@@ -151,6 +165,17 @@
       phrase('如果通过 SSH 操作失败，先用 read 查看当前串口，再按 skill 指引决定是否发送输入。',
         'If SSH fails, read the existing serial output first, then follow the skill before sending input.')
     ].join('\n');
+  }
+  function renderInstructions() {
+    setup.textContent = format.value === 'cli'
+      ? 'CLI 指引用于客户端主机的终端。令牌不要粘贴到对话中；当前授权同样适用于 MCP。'
+      : '在 AI 客户端所在机器安装 MCP 适配器；独立环境中的程序请填写实际绝对路径。将生成的 JSON 添加到客户端 MCP 设置后重启连接。令牌属于客户端配置，请勿粘贴到对话中。';
+    mcpOptions.hidden = format.value === 'cli';
+    if (!instructions) return;
+    output.value = format.value === 'cli'
+      ? agentText(instructions.url, instructions.token, instructions.grant, instructions.board)
+      : JSON.stringify({ mcpServers: { decklab: { command: mcpCommand.value.trim() || 'seriald-mcp', args: [],
+        env: { SERIALD_URL: instructions.url, SERIALD_TOKEN: instructions.token } } } }, null, 2);
   }
 
   async function loadGrants() {
@@ -164,7 +189,8 @@
         var row = document.createElement('div');
         row.className = 'agent-grant' + (grant.revoked ? ' revoked' : '');
         var detail = document.createElement('span');
-        detail.textContent = (grant.scope === 'all' ? '全部设备' : 'SN ' + grant.serial)
+        detail.textContent = (grant.scope === 'all' ? '全部设备' : grant.scope === 'connection'
+          ? '串口连接 ' + grant.key + ' · ' + grant.connection_id.slice(0, 12) : 'SN ' + grant.serial)
           + ' · ' + grant.actor + ' · ' + new Date(grant.created * 1000).toLocaleString('zh-CN')
           + (grant.revoked ? ' · 已撤销' : (grant.expires ? ' · 有效期至 ' + new Date(grant.expires * 1000).toLocaleString('zh-CN') : ' · 不限期'));
         row.appendChild(detail);
@@ -193,10 +219,14 @@
   function openAgent(initialScope) {
     selected = selectedDevice();
     scope.value = initialScope;
+    format.value = 'mcp';
+    if (!mcpCommand.value.trim()) mcpCommand.value = 'seriald-mcp';
     addressMode.value = lanUrl() ? 'lan' : 'local';
     selectAddress();
     output.value = '';
     copyButton.disabled = true;
+    instructions = null;
+    renderInstructions();
     updateHint();
     dialog.showModal();
     loadGrants();
@@ -204,14 +234,15 @@
   topAgent.addEventListener('click', function () { openAgent('all'); });
   deviceAgent.addEventListener('click', function () { openAgent('device'); });
   scope.addEventListener('change', updateHint);
+  format.addEventListener('change', renderInstructions);
+  mcpCommand.addEventListener('input', renderInstructions);
   addressMode.addEventListener('change', selectAddress);
   document.getElementById('agent-share-close').addEventListener('click', function () {
     output.value = ''; instructions = null; dialog.close();
   });
   dialog.addEventListener('close', function () { output.value = ''; instructions = null; copyButton.disabled = true; });
   if (window.addEventListener) window.addEventListener('decklab-language-change', function () {
-    if (dialog.open && instructions) output.value = agentText(instructions.url, instructions.token,
-      instructions.grant, instructions.board);
+    if (dialog.open) renderInstructions();
   });
   document.getElementById('agent-share-refresh').addEventListener('click', loadGrants);
   create.addEventListener('click', async function () {
@@ -220,24 +251,30 @@
     try {
       var url = baseUrl();
       var board = selected;
-      if (scope.value === 'device' && !(board && board.serial)) throw new Error('先识别当前设备');
+      var request = { scope: scope.value, serial: '' };
+      if (scope.value === 'device') {
+        if (board && board.serial) request.serial = board.serial;
+        else if (board && board.alive && board.key && board.connection_id) {
+          request = { scope: 'connection', key: board.key, connection_id: board.connection_id };
+        } else throw new Error('请选择一个已识别设备或在线串口连接。');
+      }
       var response = await fetch('/api/agent-share', { method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: scope.value, serial: scope.value === 'device' ? board.serial : '' }) });
+        body: JSON.stringify(request) });
       var result = await response.json();
       if (!response.ok || !result.token) throw new Error(result.error || '授权失败');
       instructions = { url: url, token: result.token, grant: result.grant, board: board };
-      output.value = agentText(url, result.token, result.grant, board);
+      renderInstructions();
       copyButton.disabled = false;
-      try { await copy(output.value); agentStatus.textContent = '已复制接入文本；令牌只显示这一次'; }
+      try { await copy(output.value); agentStatus.textContent = '已复制接入配置；令牌只显示这一次'; }
       catch (_) { agentStatus.textContent = '已生成；请点击“再次复制”或手动复制下方文本'; }
       await loadGrants();
     } catch (error) { agentStatus.textContent = '生成失败：' + error.message; }
     finally { updateHint(); }
   });
   copyButton.addEventListener('click', async function () {
-    try { await copy(output.value); agentStatus.textContent = '接入文本已复制'; }
-    catch (_) { output.focus(); output.select(); agentStatus.textContent = '请手动复制选中的接入文本'; }
+    try { await copy(output.value); agentStatus.textContent = '接入配置已复制'; }
+    catch (_) { output.focus(); output.select(); agentStatus.textContent = '请手动复制选中的接入配置'; }
   });
 
   async function sharePage(source) {

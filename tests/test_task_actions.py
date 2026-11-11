@@ -188,6 +188,20 @@ class TaskActionTests(unittest.TestCase):
         self.assertEqual(self.actions.query(actor='agent', serial='SN1').payload['tasks'], [])
         self.assertEqual(self.actions.query(task_id, 'web').status, 200)
 
+    def test_connection_scope_cannot_read_or_cancel_different_or_mixed_targets(self):
+        actor = 'shared-agent/connection'
+        first = self.manager.tasks.store.create('identify', actor, '', [
+            {'serial': '', 'connection_id': 'attachment-1'}])
+        mixed = self.manager.tasks.store.create('file-copy', actor, '', [
+            {'serial': '', 'connection_id': 'attachment-1'},
+            {'serial': 'SN2', 'connection_id': 'attachment-2'}])
+        self.assertEqual(self.actions.query(first, actor, connection_id='attachment-1').status, 200)
+        self.assertEqual(self.actions.query(first, actor, connection_id='replacement').status, 404)
+        self.assertEqual(self.actions.cancel(first, actor, connection_id='replacement').status, 404)
+        self.assertEqual(self.actions.query(mixed, actor, connection_id='attachment-1').status, 404)
+        self.assertEqual(self.actions.cancel(mixed, actor, connection_id='attachment-1').status, 404)
+        self.assertFalse(self.manager.tasks.store.get(first)['cancel_requested'])
+
     def test_invalid_task_kind_connection_and_owned_input_are_rejected_before_recording(self):
         for payload in ({'kind': []}, {'kind': 'send'}, {'kind': 'identify', 'connection_id': 'old'}):
             result = self.actions.start(payload, self.device, 'web')

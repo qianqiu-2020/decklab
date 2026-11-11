@@ -9,6 +9,8 @@ const {launchBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'seriald-browser-'));
 const posts = [], errors = [];
+const probeSettingsPosts = [], grantPosts = [];
+let probeSettings = {mode: 'linux', command: '', default_command: "printf 'HOST=%s\\n' \"$(hostname)\""};
 let serialPayload = null;
 const serialLiveChunks = [];
 const fixtures = [
@@ -29,7 +31,22 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   res.setHeader('Cache-Control', 'no-store');
   const json = data => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); };
-  if (req.method === 'POST') { posts.push(u.pathname); json(u.pathname === '/api/session-send' && serialPayload ? {ok:true} : { ok: false, error: 'read-only fixture' }); return; }
+  if (req.method === 'POST') {
+    posts.push(u.pathname);
+    if (u.pathname === '/api/probe-settings' || u.pathname === '/api/agent-share') {
+      let body = ''; req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        const payload = JSON.parse(body);
+        if (u.pathname === '/api/probe-settings') {
+          probeSettingsPosts.push(payload); probeSettings = {...probeSettings, ...payload}; return json({ok:true, ...probeSettings});
+        }
+        grantPosts.push(payload);
+        return json({token: 'seriald-ag-simulated-fixture-only', grant: {id: 'fixture', actor: 'shared-agent/fixture',
+          created: 1, expires: null, revoked: null, ...payload}});
+      }); return;
+    }
+    json(u.pathname === '/api/session-send' && serialPayload ? {ok:true} : { ok: false, error: 'read-only fixture' }); return;
+  }
   if (u.pathname === '/api/devices') return json({ devices: fixtures });
   if (u.pathname === '/api/session') {
     const chunk = u.searchParams.get('off') === '0' ? serialPayload ||
@@ -65,7 +82,9 @@ const server = http.createServer((req, res) => {
       right_spans: [{text:'clock=1',changed:false},{text:'6',changed:true},{text:'0MHz',changed:false}] },
       { type: 'insert', left_no: null, left: '', right_no: 2, right: 'mmc timeout' }], truncated: false });
   if (u.pathname === '/api/log') return json({ data: log, off: log.length, start_off: 0, size: log.length, more: false });
-  if (u.pathname === '/api/access') return json({ share_enabled: false });
+  if (u.pathname === '/api/access') return json({ share_enabled: false, agent_share_enabled: true, lan_hosts: ['127.0.0.1'] });
+  if (u.pathname === '/api/agent-grants') return json({grants: []});
+  if (u.pathname === '/api/probe-settings') return json(probeSettings);
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
   if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
@@ -467,8 +486,39 @@ let chrome, ws;
   await evaluate(`new Promise(resolve => {testTerm.reset();testTerm.write('X'.repeat(${wideCols-1})+'YZ',resolve);})`);
   assert.ok(await evaluate(`testTerm.buffer.active.getLine(0)?.translateToString(true).endsWith('Y')`));
   assert.ok(await evaluate(`testTerm.buffer.active.getLine(1)?.translateToString(true).startsWith('Z')`));
+  // These are isolated HTTP fixtures, with no collector or real board. Label
+  // screenshots explicitly so they cannot be mistaken for field evidence.
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  await evaluate(`(() => {const banner=document.createElement('div'); banner.textContent='浏览器测试夹具 · 模拟设备与令牌';
+    banner.style.cssText='position:fixed;top:8px;left:8px;z-index:10000;background:#713f12;color:white;padding:8px 12px;border-radius:6px;font:13px sans-serif';
+    document.body.appendChild(banner);})()`);
+  await evaluate('document.querySelector(\'[data-key="unprovisioned-demo"]\').click();document.querySelector("#b-probe-settings").click()');
+  for(let n=0;n<30 && await evaluate('document.querySelector("#probe-settings-mode").disabled');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#probe-settings-dialog").open'),true);
+  await evaluate(`document.querySelector('#probe-settings-mode').value='custom';document.querySelector('#probe-settings-mode').dispatchEvent(new Event('change'));
+    document.querySelector('#probe-settings-command').value="echo HOST=buildroot\\necho MODEL=K3";
+    document.querySelector('#probe-settings-command').dispatchEvent(new Event('input'))`);
+  assert.equal(await evaluate('document.querySelector("#probe-settings-save").disabled'),false);
+  await evaluate('document.querySelector("#probe-settings-save").click()');
+  for(let n=0;n<30 && !probeSettingsPosts.length;n++)await delay(50);
+  assert.equal(probeSettingsPosts[0].mode,'custom');
+  assert.equal(probeSettingsPosts[0].connection_id,'test-unprovisioned-demo');
+  assert.equal(posts.includes('/api/task-start'),false,'save must not execute the probe');
+  const probeSettingsShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-probe-settings.png'),Buffer.from(probeSettingsShot.data,'base64'));
+  await evaluate('document.querySelector("#probe-settings-close").click();document.querySelector("#b-agent-share").click()');
+  assert.equal(await evaluate('document.querySelector("#agent-share-create").disabled'),false);
+  assert.ok(await evaluate('document.querySelector("#agent-share-hint").textContent.includes("无需识别")'));
+  await evaluate('document.querySelector("#agent-share-create").click()');
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#agent-share-text").value.includes("mcpServers")');n++)await delay(50);
+  assert.equal(grantPosts[0].scope,'connection');
+  const generatedConfig=await evaluate('JSON.parse(document.querySelector("#agent-share-text").value)');
+  assert.equal(generatedConfig.mcpServers.decklab.command,'seriald-mcp');
+  assert.equal(generatedConfig.mcpServers.decklab.env.SERIALD_TOKEN,'seriald-ag-simulated-fixture-only');
+  const mcpShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-share-mcp.png'),Buffer.from(mcpShot.data,'base64'));
   assert.deepEqual(errors,[]);
-  console.log('Browser smoke passed: real xterm query suppression, read-only agent/archive tabs, desktop/mobile layout.');
+  console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings and MCP sharing (isolated simulated fixtures).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(ws)ws.close(); if(chrome){chrome.kill('SIGTERM');await delay(500);}server.close();
   fs.rmSync(profile,{recursive:true,force:true});

@@ -9,7 +9,7 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core.profiles import BoardProfile, ProfileBook, SerialSettings
+from seriald_core.profiles import BoardProfile, ProfileBook, SerialSettings, validate_probe_settings
 from seriald_core.device import Device
 from seriald_core import transport
 
@@ -252,6 +252,33 @@ class ProfileTests(unittest.TestCase):
         book = ProfileBook(json.loads(path.read_text()))
         self.assertEqual(book.resolve('EXAMPLE-BOARD-SERIAL').ssh_user, 'ubuntu')
         self.assertEqual(book.resolve(port='EXAMPLE-PHYSICAL-PORT-KEY').probe, 'manual')
+
+    def test_custom_profile_requires_a_bounded_command_and_disables_ssh_provisioning(self):
+        book = ProfileBook({'profiles': {'custom': {'probe': 'custom',
+                                                   'probe_command': 'printf "MODEL=RTOS\\n"'}},
+                            'default': 'custom'})
+        profile = book.resolve()
+        self.assertEqual(profile.probe, 'custom')
+        self.assertFalse(profile.auto_configure_ssh)
+        self.assertNotIn('RTOS', repr(profile))
+        for settings in ({'mode': 'custom'}, {'mode': 'custom', 'command': 'x' * 16385},
+                         {'mode': 'custom', 'command': 'printf\x00'},
+                         {'mode': 'linux', 'command': 'echo forbidden'}, {'mode': 'unknown'}):
+            with self.subTest(settings=settings), self.assertRaises(ValueError):
+                validate_probe_settings(settings)
+
+    def test_web_probe_override_is_by_attachment_and_does_not_modify_base_profile(self):
+        store = mock.Mock()
+        store.get_probe_settings.return_value = {'mode': 'custom', 'command': 'echo custom'}
+        manager = types.SimpleNamespace(profiles=ProfileBook(), store=store)
+        device = Device('fake-port', '/fake', manager)
+        self.assertEqual(device.profile.probe, 'custom')
+        self.assertFalse(device.profile.auto_configure_ssh)
+        self.assertEqual(device.probe_settings()['command'], 'echo custom')
+        store.get_probe_settings.assert_called_with('fake-port')
+        self.assertEqual(manager.profiles.resolve().probe, 'linux')
+        store.get_probe_settings.return_value = None
+        self.assertEqual(device.profile.probe, 'linux')
 
 
 if __name__ == '__main__':

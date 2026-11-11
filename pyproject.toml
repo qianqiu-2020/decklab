@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "decklab-mcp"
+version = "0.1.0"
+description = "MCP adapter for DeckLab's authenticated shared board terminals"
+requires-python = ">=3.10"
+dependencies = ["mcp==2.3.0"]
+
+[project.scripts]
+seriald-mcp = "seriald_mcp:main"
+
+[tool.setuptools]
+py-modules = ["seriald_mcp", "serialctl"]

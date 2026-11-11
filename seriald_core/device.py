@@ -1,9 +1,10 @@
 """One board connection: console stream, probe transactions and SSH sessions."""
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 import os
 import re
 import secrets
+import shlex
 import threading
 import time
 import sys
@@ -23,11 +24,11 @@ if sys.platform == 'win32':
 else:
     from .sessions import SshSession, check_password_login
 from .storage import IdentityConfirmationRequired, IdentityError
-from .identity import eeprom_serial, usable_serial
-from .boot_marker import init_command
+from .identity import eeprom_serial, hardware_serial, usable_serial
+from .boot_marker import init_command, marker_serial
 from .log_archive import boot_epochs
 from .file_transfer import SerialFileTransfer
-from .profiles import ProfileBook
+from .profiles import ProfileBook, validate_probe_settings
 from .models import Board, SessionRegistry
 from .transactions import SerialTransactions, TransactionError
 
@@ -172,7 +173,22 @@ class Device:
         book = getattr(self.manager, 'profiles', None)
         if not isinstance(book, ProfileBook):
             book = ProfileBook.from_env()
-        return book.resolve(self.serial, self.by_path)
+        profile = book.resolve(self.serial, self.by_path)
+        store = getattr(self.manager, 'store', None)
+        get_settings = getattr(store, 'get_probe_settings', None)
+        settings = get_settings(self.by_path) if callable(get_settings) else None
+        if isinstance(settings, dict) and settings:
+            settings = validate_probe_settings(settings)
+            return replace(profile, probe=settings['mode'], probe_command=settings['command'],
+                           auto_configure_ssh=profile.auto_configure_ssh and settings['mode'] == 'linux')
+        return profile
+
+    def probe_settings(self, include_default=False):
+        profile = self.profile
+        result = {'mode': profile.probe, 'command': profile.probe_command}
+        if include_default:
+            result['default_command'] = PROBE_CMD
+        return result
 
     def preload(self):
         """启动时把最近一份串口日志的尾部装回内存缓冲。
@@ -434,7 +450,7 @@ class Device:
 
     def _maybe_auto_identify(self, text):
         """Run one armed probe after the replacement board reaches login or a shell."""
-        if (self.profile.probe != 'linux' or not self.auto_identify or self.auto_identify_started or self.serial
+        if (self.profile.probe == 'manual' or not self.auto_identify or self.auto_identify_started or self.serial
                 or not self.manager or self.stop.is_set()):
             return
         if time.monotonic() > self.auto_identify_until:
@@ -497,37 +513,69 @@ class Device:
     def ensure_shell(self, base):
         return self.console.ensure_shell(base)
 
-    def _run_cmd(self, cmd, timeout=30.0):
-        return self.console.run_command(cmd, timeout)
+    def _run_cmd(self, cmd, timeout=30.0, expected_connection=None):
+        return self.console.run_command(cmd, timeout, expected_connection=expected_connection)
 
     def _run_cmd_locked(self, cmd, timeout, ensure_shell=True):
         return self.console.run_locked(cmd, timeout, ensure_shell)
 
     def run_probe(self, init_boot_marker=False, association=None, actor='web'):
         """Read identity metadata; create a /boot marker only on explicit request."""
-        if self.profile.probe != 'linux':
+        profile = self.profile
+        if profile.probe == 'manual':
             return {'ok': False, 'error': '当前配置仅提供原始串口，未启用 Linux shell 探测'}
+        if init_boot_marker and profile.probe != 'linux':
+            return {'ok': False, 'error': '仅默认 Linux 探测支持创建 /boot 软件标记'}
         if init_boot_marker and self.serial and self.probe_info.get('serial_source') != 'boot-marker':
             return {'ok': False, 'error': '设备已有身份，无需创建 /boot 软件标记'}
         origin = self.stop
-        cmd = (init_command() + ' && { ' + PROBE_CMD + '; }') if init_boot_marker else PROBE_CMD
-        ok, raw = self._run_cmd(cmd, timeout=30)
+        origin_connection = self.connection_id
+        probe_command = profile.probe_command if profile.probe == 'custom' else PROBE_CMD
+        if profile.probe == 'custom':
+            # Isolate exit/exec/set -e and syntax errors from the interactive
+            # console, so the nonce's completion marker is still emitted.
+            probe_command = ('sh -c ' + shlex.quote(probe_command)
+                             + '; __sd_probe_status=$?; '
+                             + "printf '\\n__SD_PROBE_EXIT=%s\\n' \"$__sd_probe_status\"; "
+                             + 'unset __sd_probe_status')
+        cmd = (init_command() + ' && { ' + probe_command + '; }') if init_boot_marker else probe_command
+        ok, raw = self._run_cmd(cmd, timeout=30, expected_connection=origin_connection)
         if not ok:
             return {'ok': False, 'error': raw}
+        if profile.probe == 'custom':
+            statuses = re.findall(r'^__SD_PROBE_EXIT=(\d+)\r?$', raw, re.M)
+            if len(statuses) != 1:
+                return {'ok': False, 'error': '自定义探测缺少或重复退出状态', 'raw': raw[-1200:]}
+            exit_code = int(statuses[0])
+            raw = re.sub(r'^__SD_PROBE_EXIT=\d+\r?\n?', '', raw, flags=re.M)
+            if exit_code:
+                return {'ok': False, 'error': '自定义探测命令退出码 %s' % exit_code,
+                        'exit_code': exit_code, 'raw': raw[-1200:]}
         error = re.search(r'^BOOT_MARKER_ERROR=(.*)$', raw, re.M)
         if error:
             return {'ok': False, 'error': '/boot 标记初始化失败: ' + error.group(1)}
         try:
-            info = parse_probe(raw)
+            info = parse_probe(raw, strict=profile.probe != 'custom')
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
         info['ok'] = True
+        if profile.probe == 'custom':
+            info['exit_code'] = 0
         info['ts'] = time.time()
         info['needs_provisioning'] = not bool(eeprom_serial(info) or usable_serial(info.get('serial')))
+        has_identity = bool(eeprom_serial(info) or usable_serial(info.get('serial'))
+                            or hardware_serial(info) or marker_serial(info))
+        metadata_only = profile.probe == 'custom' and not has_identity
+        if metadata_only:
+            info['identified'] = False
         with self.operation_lock:
-            if self.stop is not origin or origin.is_set():
+            if self.stop is not origin or origin.is_set() or self.connection_id != origin_connection:
                 return {'ok': False, 'error': '识别期间设备已重新枚举'}
-            if self.manager:
+            try:
+                self.transactions.check_context()
+            except TransactionError as error:
+                return {'ok': False, 'error': str(error)}
+            if self.manager and not metadata_only:
                 try:
                     if association is not None:
                         self.manager.identify(self, info, association=association, actor=actor)
@@ -560,6 +608,7 @@ class Device:
         没有 IP 就先识别一次 —— 这正是"识别设备"存在的意义:串口负责拿到
         IP/序列号/sshd 状态,SSH 会话负责后续高效操作。两者并存、各记各的日志。
         """
+        self.transactions.check_context()
         origin = self.stop
         connection_id = self.connection_id
         info = self.probe_info
@@ -718,6 +767,7 @@ class Device:
         profile = self.profile
         return {'operation': self.transactions.snapshot(), 'input_owner': self.transactions.ownership(),
                 'profile': profile.name,
+                'probe_mode': profile.probe,
                 'serial_settings': asdict(self.serial_settings or profile.serial),
                 'settings_pending': self.serial_settings is not None and self.serial_settings != profile.serial,
                 'key': self.key, 'serial': self.serial, 'connection_id': self.connection_id, 'dev': self.dev if self.present else '',
