@@ -13,8 +13,10 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-22.04
+            archive_hosts: archive.ubuntu.com security.ubuntu.com
           - arch: arm64
             runner: ubuntu-22.04-arm
+            archive_hosts: ports.ubuntu.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,12 +28,13 @@ jobs:
       - name: Validate version tag
         run: python tools/check_release_tag.py "$GITHUB_REF_NAME"
       - name: Verify Ubuntu archive DNS on the temporary runner
-        run: python tools/ci_ubuntu_network.py --repair
+        run: python tools/ci_ubuntu_network.py --repair --hosts ${{ matrix.archive_hosts }}
       - run: python -m pip install 'pyserial>=3.5,<4' 'paramiko>=3.4,<5'
       - run: python -m pip install -r requirements-mcp.txt
       - name: Install BusyBox for the ash terminal resize regression
         run: |
           if ! command -v busybox >/dev/null; then
+            python tools/ci_ubuntu_network.py --repair
             sudo apt-get update -qq
             sudo apt-get install -y busybox
           fi

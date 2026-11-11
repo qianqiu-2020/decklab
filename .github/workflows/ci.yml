@@ -14,15 +14,17 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-22.04
+            archive_hosts: archive.ubuntu.com security.ubuntu.com
           - arch: arm64
             runner: ubuntu-22.04-arm
+            archive_hosts: ports.ubuntu.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Verify Ubuntu archive DNS on the temporary runner
-        run: python tools/ci_ubuntu_network.py --repair
+        run: python tools/ci_ubuntu_network.py --repair --hosts ${{ matrix.archive_hosts }}
       - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
         run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
       - name: Build the matching Debian architecture package

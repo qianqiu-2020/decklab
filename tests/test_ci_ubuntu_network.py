@@ -23,6 +23,7 @@ class CINetworkTests(unittest.TestCase):
                 mock.patch.object(Path, 'read_text', return_value='nameserver 127.0.0.53\n# credential=private\n'),
                 mock.patch.object(network.shutil, 'which', side_effect=lambda name: '/usr/bin/' + name),
                 mock.patch.object(network.subprocess, 'run', side_effect=self.run_command),
+                mock.patch.object(network.time, 'sleep'),
                 mock.patch.object(network.socket, 'socket', side_effect=AssertionError('network forbidden'))):
             patch.start()
             self.addCleanup(patch.stop)
@@ -42,6 +43,8 @@ class CINetworkTests(unittest.TestCase):
             output = self.route
         elif 'getent' in arguments:
             ok = (self.apt if '_apt' in arguments else self.root if arguments[0] == 'sudo' else self.normal)
+            if isinstance(ok, dict):
+                ok = ok[arguments[-1]]
             ok = ok or self.repaired and self.recover
             output = '91.189.90.11 STREAM\n' if ok else ''
         elif 'resolvectl' in arguments:
@@ -52,9 +55,9 @@ class CINetworkTests(unittest.TestCase):
             self.fail('unexpected command: ' + repr(arguments))
         return SimpleNamespace(returncode=0 if ok else 1, stdout=output)
 
-    def main(self, repair=True):
+    def main(self, repair=True, hosts=(HOST,)):
         with redirect_stdout(self.output), redirect_stderr(self.output):
-            return network.main(['--hosts', HOST, *(['--repair'] if repair else [])])
+            return network.main(['--hosts', *hosts, *(['--repair'] if repair else [])])
 
     def mutations(self):
         return [call for call in self.calls if 'resolvectl' in call]
@@ -75,6 +78,15 @@ class CINetworkTests(unittest.TestCase):
         for normal, apt, root in ((True, False, True), (False, True, True), (False, False, True)):
             self.normal, self.apt, self.root = normal, apt, root
             self.assertEqual(self.main(), 1)
+        self.assertEqual(self.mutations(), [])
+
+    def test_crossed_per_host_user_results_never_change_global_dns(self):
+        hosts = (HOST, 'security.ubuntu.com')
+        self.normal = self.root = dict(zip(hosts, (True, False)))
+        self.apt = dict(zip(hosts, (False, True)))
+        with mock.patch.object(network, 'public_dns') as probe:
+            self.assertEqual(self.main(hosts=hosts), 1)
+        probe.assert_not_called()
         self.assertEqual(self.mutations(), [])
 
     def test_failed_public_dns_and_read_only_mode_never_repair(self):
@@ -114,6 +126,19 @@ class CINetworkTests(unittest.TestCase):
             self.assertEqual(len(self.mutations()), 1)
             self.repair_ok, self.recover = True, False
             self.assertEqual(self.main(), 1)
+        self.assertEqual(network.time.sleep.call_args_list, [mock.call(1), mock.call(1)])
+
+    def test_read_only_ready_poll_can_recover_without_repeating_dns_changes(self):
+        results = [{HOST: False}] * 4 + [{HOST: True}] * 3
+        with mock.patch.object(network, 'resolves', side_effect=results) as resolve, \
+                mock.patch.object(network, 'public_dns', return_value=True):
+            self.assertEqual(self.main(), 0)
+        self.assertEqual(resolve.call_count, 7)
+        self.assertEqual(len(self.mutations()), 3)
+        self.assertEqual(resolve.call_args_list[3:], [
+            mock.call([HOST]), mock.call([HOST], ('sudo', '-n', '-u', '_apt')),
+            mock.call([HOST]), mock.call([HOST], ('sudo', '-n', '-u', '_apt'))])
+        network.time.sleep.assert_called_once_with(1)
 
 
 class DNSPacketTests(unittest.TestCase):
@@ -124,6 +149,15 @@ class DNSPacketTests(unittest.TestCase):
         return (query[:2] + struct.pack('!5H', flags, 1, 1, 0, 0) + query[12:] + b'\xc0\x0c' +
                 struct.pack('!HHIH', 1, 1, 30, 4) + ipaddress.IPv4Address(address).packed)
 
+    def name(self, value):
+        return b''.join(bytes([len(part)]) + part.encode() for part in value.split('.')) + b'\0'
+
+    def packet(self, query, records):
+        return query[:2] + struct.pack('!5H', 0x8180, 1, len(records), 0, 0) + query[12:] + b''.join(records)
+
+    def rr(self, owner, kind, value):
+        return owner + struct.pack('!HHIH', kind, 1, 30, len(value)) + value
+
     def test_valid_public_a_answer_and_malformed_or_private_answers(self):
         query = self.query()
         self.assertTrue(network.valid_answer(self.response(query), query))
@@ -132,8 +166,26 @@ class DNSPacketTests(unittest.TestCase):
         for address in ('127.0.0.1', '10.0.0.1', '198.18.0.1', '224.0.0.1', '0.0.0.0'):
             self.assertFalse(network.valid_answer(self.response(query, address), query))
         for packet in (b'', self.response(query)[:-1], b'\0\0' + self.response(query)[2:],
-                       self.response(query).replace(b'\xc0\x0c', b'\xc0\xff')):
+                       self.response(query).replace(b'\xc0\x0c', b'\xc0\xff'),
+                       self.response(query).replace(b'\xc0\x0c', struct.pack('!H', 0xc000 | len(query)))):
             self.assertFalse(network.valid_answer(packet, query))
+
+    def test_a_owner_requires_the_question_or_a_noncyclic_cname_chain(self):
+        query, address = self.query(), ipaddress.IPv4Address('91.189.90.11').packed
+        original, alias = b'\xc0\x0c', self.name('edge.example')
+        cname = self.rr(original, 5, alias)
+        linked_a = self.rr(self.name('EDGE.example'), 1, address)
+        self.assertTrue(network.valid_answer(self.packet(query, [cname, linked_a]), query))
+        unrelated_a = self.rr(self.name('unrelated.example'), 1, address)
+        self.assertFalse(network.valid_answer(self.packet(query, [unrelated_a]), query))
+        self.assertFalse(network.valid_answer(self.packet(query, [cname, linked_a, unrelated_a]), query))
+        cycle = self.rr(alias, 5, original)
+        self.assertFalse(network.valid_answer(self.packet(query, [cname, cycle, linked_a]), query))
+        self.assertFalse(network.valid_answer(self.packet(query, [self.rr(original, 5, original),
+                                                                 self.rr(original, 1, address)]), query))
+        unrelated_cycle = self.rr(alias, 5, alias)
+        self.assertFalse(network.valid_answer(self.packet(query, [self.rr(original, 1, address),
+                                                                 unrelated_cycle]), query))
 
     def test_udp_source_and_timeout_are_validated(self):
         connection = mock.MagicMock()

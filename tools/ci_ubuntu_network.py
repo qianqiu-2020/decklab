@@ -9,6 +9,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import time
 
 
 HOSTS = ('archive.ubuntu.com', 'security.ubuntu.com', 'ports.ubuntu.com', 'azure.archive.ubuntu.com')
@@ -24,27 +25,37 @@ def command(arguments):
 
 
 def resolves(hosts, prefix=()):
-    results = []
+    results = {}
     for host in hosts:
         result = command([*prefix, 'getent', 'ahostsv4', host])
         ok = result is not None and result.returncode == 0 and bool(result.stdout.strip())
         print(('_apt' if '_apt' in prefix else 'root' if prefix else 'normal') +
               ' DNS ' + host + ': ' + ('ok' if ok else 'failed'))
-        results.append(ok)
-    return all(results)
+        results[host] = ok
+    return results
 
 
-def skip_name(data, offset):
-    while offset < len(data):
+def read_name(data, offset):
+    labels, seen, end = [], set(), None
+    for _ in range(128):
+        if offset >= len(data) or offset in seen:
+            break
+        seen.add(offset)
         size = data[offset]
         offset += 1
         if not size:
-            return offset
+            return tuple(labels), end if end is not None else offset
         if size & 0xc0 == 0xc0:
             if offset >= len(data) or ((size & 63) << 8 | data[offset]) >= len(data):
                 break
-            return offset + 1
+            if end is None:
+                end = offset + 1
+            offset = (size & 63) << 8 | data[offset]
+            continue
         if size > 63 or offset + size > len(data):
+            break
+        labels.append(data[offset:offset + size].lower())
+        if sum(map(len, labels)) + len(labels) > 254:
             break
         offset += size
     raise ValueError('invalid DNS name')
@@ -57,10 +68,13 @@ def valid_answer(data, query):
     if (ident != int.from_bytes(query[:2], 'big') or flags & 0x8000 == 0
             or flags & 0x7a0f or questions != 1 or not answers or data[12:len(query)] != query[12:]):
         return False
-    offset, found = len(query), False
+    offset, addresses, aliases = len(query), {}, {}
     try:
+        question, end = read_name(query, 12)
+        if end + 4 != len(query) or query[end:] != b'\0\1\0\1':
+            return False
         for _ in range(answers):
-            offset = skip_name(data, offset)
+            owner, offset = read_name(data, offset)
             kind, cls, _, size = struct.unpack('!HHIH', data[offset:offset + 10])
             offset += 10
             if offset + size > len(data):
@@ -71,11 +85,23 @@ def valid_answer(data, query):
                 address = ipaddress.IPv4Address(data[offset:offset + size])
                 if not address.is_global or address.is_multicast:
                     return False
-                found = True
+                addresses[owner] = True
+            elif kind == 5 and cls == 1:
+                target, end = read_name(data, offset)
+                if end != offset + size or owner in aliases and aliases[owner] != target:
+                    return False
+                aliases[owner] = target
             offset += size
+        reachable = set()
+        while question in aliases:
+            if question in reachable:
+                return False
+            reachable.add(question)
+            question = aliases[question]
+        reachable.add(question)
     except (ValueError, struct.error):
         return False
-    return found
+    return bool(addresses) and set(addresses) <= reachable and set(aliases) <= reachable
 
 
 def public_dns(resolver, host):
@@ -114,9 +140,10 @@ def main(argv=None):
         return 1
     normal = resolves(args.hosts)
     apt = resolves(args.hosts, ('sudo', '-n', '-u', '_apt'))
-    if normal and apt:
+    if all(normal.values()) and all(apt.values()):
         return 0
-    if normal or apt or resolves(args.hosts, ('sudo', '-n')):
+    root = resolves(args.hosts, ('sudo', '-n'))
+    if any(normal[host] != apt[host] or normal[host] != root[host] for host in args.hosts):
         print('Resolver results differ by user; diagnose APT/NSS permissions, no global DNS change')
         return 1
     resolver = next((server for server in RESOLVERS if all(public_dns(server, host) for host in args.hosts)), None)
@@ -141,11 +168,16 @@ def main(argv=None):
         if result is None or result.returncode != 0:
             print('CI DNS repair failed at resolvectl ' + arguments[0])
             return 1
-    if not (resolves(args.hosts) and resolves(args.hosts, ('sudo', '-n', '-u', '_apt'))):
-        print('CI DNS repair did not restore all requested lookups')
-        return 1
-    print('CI DNS lookups restored; original APT sources and signature checks remain unchanged')
-    return 0
+    for attempt in range(3):
+        normal = resolves(args.hosts)
+        apt = resolves(args.hosts, ('sudo', '-n', '-u', '_apt'))
+        if all(normal.values()) and all(apt.values()):
+            print('CI DNS lookups restored; original APT sources and signature checks remain unchanged')
+            return 0
+        if attempt < 2:
+            time.sleep(1)
+    print('CI DNS repair did not restore all requested lookups')
+    return 1
 
 
 if __name__ == '__main__':
