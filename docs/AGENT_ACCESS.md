@@ -126,10 +126,14 @@ stdin 为 EOF，stdout/stderr 合并，返回文本去除 ANSI；命令限 2048 
 `session_persistent` 表示服务是否保留了这个 actor 的 SSH 会话；持久会话不会返回
 `session_closed: true`，应使用 `ssh-close` 关闭。CLI 成功退出 0，访问/命令失败退出 1，参数错误退出 2。
 非零退出码、输出缺失、超时不能报告为成功。
-建立 SSH 时先尝试设备 profile 的密码，再依次尝试 `bianbu`、`debian`，重复值只试一次；
-仅明确认证拒绝才继续，网络失败或超时立即返回。显式提供 `ssh_user` 或 `ssh_password`
-时，只尝试该组凭据。仍失败会返回 `ssh-authentication-failed`，网页可填写普通用户或 root
-的 SSH 账号和密码后重试；请求密码只用于该次连接，不写入任务记录，也不修改设备 profile。
+建立 SSH 时优先复用用户在服务端为该设备保存的账号和密码，只尝试一次。没有保存值时，先尝试
+设备 profile 的密码，再依次尝试 `bianbu`、`debian`，重复值只试一次；仅明确认证拒绝才继续，
+网络失败或超时立即返回。显式提供 `ssh_user` 或 `ssh_password` 时，只尝试该组凭据。
+Agent 建连不会覆盖持久凭据，显式 Agent 凭据只用于该次连接，不写入任务记录或设备 profile。
+仍失败会返回 `ssh-authentication-failed`，用户可在网页“SSH 设置”填写普通用户或 root 的账号和
+密码，连接成功后由服务端按设备序列号记住；服务重启、重新插拔和换 USB 口后可继续复用。
+未识别连接没有可持久关联的设备身份，凭据不按 IP 或 COM/tty 保存。API 只公开保存状态和
+用户名，不提供读取密码的接口；详见[凭据保存说明](CONFIGURATION.md#remembered-ssh-credentials)。
 `exec`、`ssh-open` 和普通网页建连均不会因认证失败而自动重设 root 密码或修改 sshd。
 需要 root 密码登录时，由用户按[串口手工指引](CONFIGURATION.md#manual-root-ssh-setup)分步执行。
 

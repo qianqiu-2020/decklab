@@ -37,7 +37,7 @@ serialctl devices
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dist/seriald_1.7.2_amd64.deb
+sudo apt install ./dist/seriald_1.7.3_amd64.deb
 ```
 
 arm64 构建将上述 `amd64` 改为 `arm64`，在对应原生构建机执行。
@@ -59,8 +59,9 @@ Debian 包的内置 MCP 由 control 自动管理；升级到 1.7.1 后无需另�
 `seriald.service`，无需重启 collector。源码部署与故障排查见 [MCP 接入](MCP.md)。
 
 编辑 `/etc/seriald/seriald.env` 后，监听地址和认证配置通过
-`sudo systemctl restart seriald` 生效；板卡密码、串口参数、profile、日志和传输配置
+`sudo systemctl restart seriald` 生效；默认板卡密码、串口参数、profile、日志和传输配置
 需要 `sudo systemctl restart seriald-collector`。仅重启网页服务不加载采集器配置。
+网页“SSH 设置”保存的设备账号密码则在连接成功后立即生效，无需重启服务。
 
 ```ini
 SERIALD_SOCKET=/run/seriald/collector.sock
@@ -72,9 +73,12 @@ SERIALD_AUTH_TOKEN=一段足够长的随机值
 ```
 
 配置文件是 root/seriald 可读的 conffile，升级保留用户修改。远程客户端设置 `SERIALD_URL=http://上位机:8898`。
-如果不同板子的 SSH 账户不同，agent 可在单次请求中传入 `serialctl --ssh-user ubuntu
---ssh-password "$BOARD_PASSWORD" ...` 覆盖服务默认值；密码不要写进命令历史，优先使用环境变量
-`SERIALD_SSH_PASSWORD_OVERRIDE`。网页创建的 SSH 仍使用服务默认账户。
+网页“SSH 设置”可填写每块板的账号密码，成功连接后服务端按序列号保存，后续建连优先复用；
+服务重启、重新插拔或更换 USB 口后，只要恢复相同设备身份即可继续使用。修改时同样先验证连接，
+失败不会覆盖旧值。未识别连接不按 IP 或 COM/tty 保存长期凭据。
+Agent 也可复用用户保存的账号，或在单次请求中传入 `serialctl --ssh-user ubuntu
+--ssh-password "$BOARD_PASSWORD" ...` 临时覆盖；Agent 建连不更新持久凭据。密码不要写进命令历史，
+优先使用环境变量 `SERIALD_SSH_PASSWORD_OVERRIDE`。服务默认值仅在没有该设备保存值时使用。
 `SERIALD_AUTH_TOKEN` 为空时不启用认证，仅适合可信开发网络。设置后，浏览器使用用户名 `seriald`、
 密码为该 token 的 HTTP Basic 登录；agent 设置 `SERIALD_TOKEN` 或传 `serialctl --token`。
 无需预先设置令牌文件：网页“分享给 Agent”会生成独立且可撤销的接入令牌，默认不限期，
@@ -87,11 +91,11 @@ agent 使用其专用令牌时，control 会覆盖请求中的 `actor`，操作�
 共享的主令牌仍有完整管理权限；无认证模式下 `actor` 只是客户端自报的标签。
 终端访问等同于使用开发板登录账户，即使启用 token 也应限制防火墙访问范围。
 
-启用自动配置的 root profile 使用配置密码认证被拒绝时，服务会尝试从已登录的串口 shell 执行免密码 sudo，
-交互式设置 root 密码为 profile 中的密码（默认 bianbu），在 sshd_config 顶部启用 root 密码登录，验证配置并
-重启 sshd，然后复验 SSH。串口停在登录提示符、sudo 要求普通用户密码或 SSH 网络不通时
-不会盲目更改配置；非 root profile 或单次请求使用与 profile 不同的密码也不会触发该流程。
-设置 `SERIALD_AUTO_CONFIGURE_SSH=0` 可以关闭自动修改。
+普通 SSH 建连认证失败时会提示填写账号密码，不会自动修改 root 密码或 sshd 登录策略，
+无论旧配置中的 `SERIALD_AUTO_CONFIGURE_SSH` 为何值。已有普通用户可直接用于 SSH；
+确需 root 密码登录时，由用户按[串口手工指引](CONFIGURATION.md#manual-root-ssh-setup)分步执行。
+指引按钮只复制命令，不自动发送。单独授权的 `ssh-enable` 可从已有 root 串口 shell 安装或启动
+SSH 服务，但不设置 root 密码或启用 root 密码登录。
 
 ## 安装布局
 
@@ -101,7 +105,7 @@ agent 使用其专用令牌时，control 会覆盖请求中的 `actor`，操作�
 | `/usr/lib/seriald/mcp-runtime/` | root 拥有的私有 MCP/Python 运行时及第三方清单；服务账户不可修改 |
 | `/usr/bin/serialctl`、`seriald-admin` | CLI 与迁移工具 |
 | `/etc/seriald/seriald.env` | 可修改的服务配置 |
-| `/data/seriald-data/registry.sqlite3` | 设备与会话档案 |
+| `/data/seriald-data/registry.sqlite3` | 设备、会话档案与私有 SSH 凭据；Unix 权限 0600 |
 | `/data/seriald-data/mcp-worker.log` | MCP 进程诊断日志，0600；每份最多 64 KiB，保留一份 `.1` 轮转 |
 | `/data/seriald-data/logs/<serial>/` | 已确认身份的串口及独立 SSH 日志 |
 | `/data/seriald-data/logs/_provisional/<source>/<serial>/` | SoC/eFuse 或 `/boot` 候选身份日志；旧版本 DT 候选目录在确认后迁移，有效 DT 编号现直接确认 |
@@ -112,8 +116,11 @@ agent 使用其专用令牌时，control 会覆盖请求中的 `actor`，操作�
 服务用 `seriald` 用户运行，只有 collector 加入 `dialout`。日志分别通过
 `journalctl -u seriald-collector -f` 和 `journalctl -u seriald -f` 查看。USB recovery 仅允许 sudo 执行
 root 拥有的固定 helper，helper 验证叶子设备名和模式。
-需要直接排查生产数据时，将操作者加入 `seriald` 组：`sudo usermod -aG seriald $USER`，重新登录后即可
-读写 `/data/seriald-data`。目录使用 setgid，服务以 `UMask=0007` 创建组可写文件，不依赖 ACL。
+需要直接排查日志时，可将操作者加入 `seriald` 组：`sudo usermod -aG seriald $USER`，重新登录后访问
+组可读写的日志。目录使用 setgid，服务以 `UMask=0007` 创建普通运行文件，不依赖 ACL。
+含已保存 SSH 密码的注册表及其 WAL/SHM 为例外，只允许服务账户读写（0600）；备份也应按敏感文件管理。
+凭据以明文存于服务端，不回传浏览器、不写任务记录，也不修改串口登录或 profile 文件；
+见[凭据保存](CONFIGURATION.md#remembered-ssh-credentials)和[数据库升级恢复](STORAGE_UPGRADES.md)。
 服务升级以及卸载不删除 `/data/seriald-data`，历史数据由操作者决定保留期限。
 
 ## 控制面热更新与 collector 升级

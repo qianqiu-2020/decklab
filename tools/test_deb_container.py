@@ -100,6 +100,11 @@ def ready():
         except OSError:
             time.sleep(.1)
     raise AssertionError('Installed control/collector API did not start')
+def credentials(phase):
+    subprocess.run(['sudo', '-u', 'seriald', '--preserve-env', 'python3',
+                    '/tmp/installed_ssh_credentials_check.py', '--phase', phase,
+                    '--database', str(base / 'ssh-credentials-fixture.sqlite3')],
+                   env=environment, check=True, timeout=20)
 try:
     collector = start('/usr/bin/seriald-collector')
     control = start('/usr/bin/seriald-control')
@@ -137,6 +142,20 @@ try:
     else:
         assert installed_pid == first_pid
         print('PASS: unchanged collector fingerprint keeps the existing collector PID', flush=True)
+    credentials('seed')
+    # Seed only after the incoming package is active: the old thin upgrade
+    # fixture predates remembered credentials. A second real reinstall proves
+    # that the new private record survives package scripts and a fresh process.
+    stop(control)
+    subprocess.run(['dpkg', '--force-confold', '-i', '/tmp/seriald.deb'], check=True)
+    assert not restart_marker.exists(), 'same-code reinstall requested a collector restart'
+    control = start('/usr/bin/seriald-control')
+    ready()
+    with urlopen('http://127.0.0.1:18898/api/health', timeout=3) as response:
+        assert json.load(response)['pid'] == installed_pid
+    assert config.read_bytes() == original + b'\n# installation preservation fixture\n'
+    assert sentinel.read_text() == 'runtime data must survive'
+    credentials('check')
     subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:18898'],
                    env=environment, check=True, timeout=30)
     worker_users = []
@@ -155,6 +174,7 @@ try:
                    env=environment, check=True, timeout=30)
     with urlopen('http://127.0.0.1:18898/api/health', timeout=3) as response:
         assert json.load(response)['pid'] == installed_pid
+    credentials('check')
     assert importlib.util.find_spec('mcp') is None
     if previous:
         print('PASS: published 1.7.0 thin package upgrades to included MCP with configuration and runtime data preserved', flush=True)
@@ -170,7 +190,26 @@ assert sentinel.read_text() == 'runtime data must survive'
 assert (base / 'registry.sqlite3').is_file()
 assert not pathlib.Path('/usr/bin/seriald-collector').exists()
 assert not pathlib.Path('/usr/lib/seriald/mcp-runtime').exists()
-print('PASS: package purge preserves runtime data and removes program files', flush=True)
+credentials('purged')
+registry = base / 'registry.sqlite3'
+assert stat.S_IMODE(registry.stat().st_mode) == 0o600
+# Reproduce retained legacy permissions after checking that purge kept private
+# data intact. The fixture DB remains owner-only; old registries/snapshots must
+# be tightened by postinst itself, before any Store has a chance to open them.
+os.chmod(registry, 0o660)
+for snapshot in (base / 'backups').glob('*.sqlite3'):
+    os.chmod(snapshot, 0o660)
+subprocess.run(['dpkg', '--force-confold', '-i', '/tmp/seriald.deb'], check=True)
+assert stat.S_IMODE(registry.stat().st_mode) == 0o600
+credentials('check')
+assert stat.S_IMODE(sentinel.stat().st_mode) == 0o660
+assert sentinel.read_text() == 'runtime data must survive'
+subprocess.run(['dpkg', '--purge', 'seriald'], check=True)
+assert not pathlib.Path('/usr/bin/seriald-collector').exists()
+assert not pathlib.Path('/usr/lib/seriald/mcp-runtime').exists()
+assert stat.S_IMODE(registry.stat().st_mode) == 0o600
+credentials('purged')
+print('PASS: purge/fresh reinstall preserves private credentials and snapshots, ordinary log permissions and runtime data', flush=True)
 print('NOT COVERED: systemd activation, real UART, privileged USB recovery', flush=True)
 '''
 
@@ -199,6 +238,8 @@ def main():
             subprocess.run(['docker', 'cp', str(check), name + ':/tmp/check.py'], check=True)
             subprocess.run(['docker', 'cp', str(Path(__file__).with_name('installed_mcp_check.py')),
                             name + ':/tmp/installed_mcp_check.py'], check=True)
+            subprocess.run(['docker', 'cp', str(Path(__file__).with_name('installed_ssh_credentials_check.py')),
+                            name + ':/tmp/installed_ssh_credentials_check.py'], check=True)
             initial = '/tmp/seriald.deb'
             if args.upgrade_from:
                 subprocess.run(['docker', 'cp', str(args.upgrade_from.resolve()),

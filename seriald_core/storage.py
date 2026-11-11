@@ -60,12 +60,34 @@ def validate_conflict_reason(reason):
     return reason.strip()
 
 
+def _private_registry_files(path):
+    """Protect secrets before SQLite opens or creates its sidecar files.
+
+    SQLite creates journals/WAL with the database's permissions. Existing
+    sidecars from an older install need tightening as well. Windows access is
+    governed by the runtime directory's inherited ACL, rather than POSIX modes.
+    """
+    if path == ':memory:' or os.name != 'posix':
+        return
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+    finally:
+        os.close(descriptor)
+    for suffix in ('-wal', '-shm', '-journal'):
+        try:
+            os.chmod(path + suffix, 0o600)
+        except FileNotFoundError:
+            pass
+
+
 class Store:
     def __init__(self, path):
         path = os.fspath(path)
         self.path = path
         if path != ':memory:':
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        _private_registry_files(path)
         self.lock = threading.RLock()
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -73,6 +95,7 @@ class Store:
         try:
             self.schema_backup = initialize(self.db, path, 'registry')
             self.db.execute('PRAGMA journal_mode=WAL')
+            _private_registry_files(path)
         except Exception:
             self.db.close()
             raise
@@ -99,6 +122,65 @@ class Store:
     def resolve(self, label):
         with self.lock:
             return self._board(self.db.execute('SELECT * FROM boards WHERE label=?', (label,)).fetchone())
+
+    def get_ssh_credentials(self, serial):
+        """Private connection input; never include this result in an API record."""
+        if not isinstance(serial, str) or not serial:
+            return None
+        with self.lock:
+            row = self.db.execute(
+                'SELECT ssh_user,ssh_password,revision FROM ssh_credentials WHERE serial=? '
+                'AND NOT EXISTS (SELECT 1 FROM identity_conflicts WHERE serial=?)',
+                (serial, serial)).fetchone()
+        return dict(row) if row else None
+
+    def get_ssh_credentials_metadata(self, serial):
+        """Public settings status deliberately selects no password column."""
+        if not isinstance(serial, str) or not serial:
+            return {'saved': False, 'user': '', 'revision': 0}
+        with self.lock:
+            row = self.db.execute(
+                'SELECT ssh_user,revision FROM ssh_credentials WHERE serial=? '
+                'AND NOT EXISTS (SELECT 1 FROM identity_conflicts WHERE serial=?)',
+                (serial, serial)).fetchone()
+        return ({'saved': True, 'user': row['ssh_user'], 'revision': row['revision']} if row
+                else {'saved': False, 'user': '', 'revision': 0})
+
+    def save_ssh_credentials(self, serial, ssh_user, ssh_password, connection_id, expected_revision):
+        """Save verified credentials only for the proven board and unchanged settings.
+
+        The connection caller still guards its live generation and cancellation
+        under the device operation lock. This transaction checks its persistent
+        identity proof and prevents a slower login overwriting newer settings.
+        """
+        from .session_base import valid_ssh_user, valid_ssh_password
+        if not valid_ssh_user(ssh_user) or not valid_ssh_password(ssh_password):
+            raise ValueError('invalid SSH credentials')
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError('invalid SSH credentials revision')
+        if (not isinstance(serial, str) or not serial or not isinstance(connection_id, str)
+                or not connection_id or len(connection_id) > 80):
+            return False
+        with self.lock, self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            owner = self.db.execute(
+                'SELECT 1 FROM connection_identities JOIN boards USING(serial) '
+                'WHERE connection_id=? AND serial=? '
+                'AND NOT EXISTS (SELECT 1 FROM identity_conflicts WHERE serial=?)',
+                (connection_id, serial, serial)).fetchone()
+            if owner is None:
+                return False
+            row = self.db.execute('SELECT revision FROM ssh_credentials WHERE serial=?',
+                                  (serial,)).fetchone()
+            revision = row['revision'] if row else 0
+            if revision != expected_revision:
+                return False
+            self.db.execute(
+                'INSERT INTO ssh_credentials(serial,ssh_user,ssh_password,revision) VALUES (?,?,?,?) '
+                'ON CONFLICT(serial) DO UPDATE SET ssh_user=excluded.ssh_user, '
+                'ssh_password=excluded.ssh_password,revision=excluded.revision',
+                (serial, ssh_user, ssh_password, revision + 1))
+        return True
 
     def get_probe_settings(self, port):
         """Port preferences do not assert a persistent board identity."""

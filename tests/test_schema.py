@@ -143,6 +143,35 @@ class SchemaTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_version_six_adds_private_ssh_credentials_and_preserves_existing_records(self):
+        db = self.legacy()
+        for migrate in schema.REGISTRY_MIGRATIONS[1:6]:
+            migrate(db)
+        db.execute('INSERT INTO connection_identities VALUES (?,?,?)', ('connection-one', 'SN1', 2))
+        db.execute('PRAGMA user_version=6')
+        db.commit()
+        store = Store(str(self.path))
+        try:
+            self.assertEqual(store.get('SN1')['label'], 'board-one')
+            self.assertEqual(store.sessions('SN1')[0]['sid'], 'ssh1')
+            self.assertIsNone(store.get_ssh_credentials('SN1'))
+            self.assertTrue(store.save_ssh_credentials('SN1', 'ubuntu', 'private-password',
+                                                       'connection-one', 0))
+            with closing(sqlite3.connect(store.schema_backup)) as backup:
+                self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 6)
+                self.assertIsNone(backup.execute(
+                    "SELECT name FROM sqlite_master WHERE name='ssh_credentials'").fetchone())
+                self.assertEqual(backup.execute('SELECT serial FROM boards').fetchone()[0], 'SN1')
+        finally:
+            store.close()
+        reopened = Store(str(self.path))
+        try:
+            self.assertIsNone(reopened.schema_backup)
+            self.assertEqual(reopened.get_ssh_credentials('SN1'),
+                             {'ssh_user': 'ubuntu', 'ssh_password': 'private-password', 'revision': 1})
+        finally:
+            reopened.close()
+
     def test_failed_migration_rolls_back_ddl_data_and_version(self):
         db = self.legacy()
         owner, migrations, expected = schema._SCHEMAS['registry']

@@ -60,17 +60,52 @@ one 64 KiB file and one 64 KiB `.1` backup are retained. See the
 | `SERIALD_AUTO_CONFIGURE_SSH` | 1 for linux; 0 otherwise | Legacy serial root-provisioning permission; 0, 1, false, true. Normal SSH opens never change board credentials or policy |
 | `SERIALD_PROFILES` | unset | UTF-8 JSON profile file path; at most 64 KiB |
 
-The development defaults remain root/bianbu. A normal SSH connection tries the
-profile password, then `bianbu`, then `debian`, without repeating duplicate
-values. Only an explicit authentication rejection advances to another password;
-network failures and timeouts stop the attempt. Requests with an explicit
-`ssh_user` or `ssh_password` use only those overridden credentials.
+The development defaults remain root/bianbu. A normal SSH connection first uses
+the account and password saved on the server for that board's serial. Saved
+credentials are attempted once; authentication rejection opens credential entry
+instead of replacing them with a default password. Without saved credentials,
+the service tries the profile password, then `bianbu`, then `debian`, without
+repeating duplicate values. Only an explicit authentication rejection advances
+that list; network failures and timeouts stop the attempt. Requests with an
+explicit `ssh_user` or `ssh_password` use only those overridden credentials.
+
+### Remembered SSH credentials
+
+After a web connection succeeds, the server saves the verified account and
+password for an identified device. This also remembers the working default
+password on the first successful connection. Later connections reuse it after
+service restart, replugging or a USB-port change, once the same device identity
+has been restored. Labels, IP addresses and COM/tty numbers are not credential
+keys. An unidentified connection can use SSH, but its credentials are not saved
+for future connections; identify the board first for persistent reuse.
+
+Use **SSH settings** to change the account or password. An existing account such
+as `ubuntu` or `debian` can be used directly. The new pair replaces the saved
+pair only after successful connection; failed authentication leaves the old
+settings intact. The form shows the saved username and a blank password field;
+the API never returns the stored password. Connection-generation and revision
+checks prevent a late attempt from overwriting another device's or a newer
+configuration. Cancellation and connection state are checked before saving;
+cancellation after the database commit does not roll back saved settings. If
+credential saving fails, the established SSH session remains available and the
+response reports that the credentials were not saved. Reusing the saved pair
+does not rewrite it.
+
+Credentials are stored in the private `ssh_credentials` table of
+`<SERIALD_BASE>/registry.sqlite3`, separately from public device metadata and task
+history. They are stored as plaintext so the service can authenticate again.
+On Unix, the registry and its WAL/SHM files use owner-only permissions (0600);
+Windows access follows the host directory's ACLs. Treat the registry and any
+backups containing saved credentials as sensitive files. See
+[database upgrades and recovery](STORAGE_UPGRADES.md). Passwords are not kept in
+browser storage or task records, and SSH settings do not change profile files or
+serial-console login credentials. Agents can use server-saved credentials for
+their permitted devices, but Agent connection attempts do not update them;
+explicit Agent credential overrides apply only to that connection.
 
 When authentication still fails, `ssh-authentication-failed` lets the web user
-enter an SSH username and password for that connection. An existing account such
-as `ubuntu` or `debian` can be used directly. Request credentials do not update
-the profile and are not written into task records. Normal SSH opens never reset
-root's password or change sshd policy, regardless of `SERIALD_AUTO_CONFIGURE_SSH`.
+enter another SSH username and password. Normal SSH opens never reset root's
+password or change sshd policy, regardless of `SERIALD_AUTO_CONFIGURE_SSH`.
 The separately requested `ssh-enable` operation may install/start the SSH service
 from an already-root serial shell; it does not set root's password or enable
 root password login. It requires authorization for that board change.

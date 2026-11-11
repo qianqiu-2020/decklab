@@ -9,7 +9,18 @@ case "$1" in
     install -d -o seriald -g seriald -m 2770 /data/seriald-data
     if [ -z "${2:-}" ] || dpkg --compare-versions "$2" lt 1.3.2; then
       find /data/seriald-data -xdev -type d -exec chown seriald:seriald {} + -exec chmod 2770 {} +
-      find /data/seriald-data -xdev -type f -exec chown seriald:seriald {} + -exec chmod 0660 {} +
+      find /data/seriald-data -xdev -type f -exec chown seriald:seriald {} +
+      # Retained owner-only data may contain credentials, including after a
+      # purge/fresh install. Do not widen its permissions during legacy repair.
+      find /data/seriald-data -xdev -type f -perm /0077 -exec chmod 0660 {} +
+    fi
+    # Tighten old registries and snapshots before starting any service. Backups
+    # may already contain SSH passwords and are not reopened by Store startup.
+    find /data/seriald-data -xdev -maxdepth 1 -type f \
+      \( -name registry.sqlite3 -o -name registry.sqlite3-wal -o -name registry.sqlite3-shm \
+      -o -name registry.sqlite3-journal \) -exec chmod 0600 {} +
+    if [ -d /data/seriald-data/backups ]; then
+      find /data/seriald-data/backups -xdev -type f -exec chmod 0600 {} +
     fi
     chown root:seriald /etc/seriald/seriald.env
     chmod 0640 /etc/seriald/seriald.env

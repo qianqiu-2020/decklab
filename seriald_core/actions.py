@@ -262,9 +262,12 @@ class DeviceActions:
                                       'ssh_user': error.user, 'error': str(error)})
             if not s:
                 return response(502, {'ok': False, 'error': err})
+            credential_note = getattr(s, 'ssh_credentials_note', '')
             return response(200, {'ok': True, 'sid': s.sid, 'ip': s.ip,
                                     'persistent': bool(getattr(s, 'persistent', False)),
                                     'auto_configured': bool(getattr(s, 'auto_configured', False)),
+                                    'ssh_credentials_saved': getattr(s, 'ssh_credentials_saved', False) is True,
+                                    'ssh_credentials_note': credential_note if isinstance(credential_note, str) else '',
                                     'device_key': d.key, 'serial': d.serial})
 
         if action == 'session-send':

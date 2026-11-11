@@ -142,6 +142,37 @@ class TaskActionTests(unittest.TestCase):
         self.assertEqual(task['state'], 'failed')
         self.assertIsNone(task['result'])
 
+    def test_ssh_task_saves_verified_credentials_separately_from_task_history(self):
+        self.device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
+        self.store.bind({'serial': 'SN1', 'serial_source': 'device-tree'},
+                        'usb', 'fake', connection_id=self.device.connection_id)
+        password = 'verified-server-only-password'
+
+        def session_factory(sid, ip, label, directory, **credentials):
+            session = mock.Mock(sid=sid, ip=ip)
+            session.ensure.return_value = True
+            return session
+
+        with mock.patch('seriald_core.device.SshSession', side_effect=session_factory), \
+                mock.patch('seriald_core.device.check_password_login', return_value=(True, False, '')), \
+                mock.patch.object(self.device, 'stable_dir', return_value='/unused'):
+            code, result = self.http('/api/task-start', {
+                'kind': 'ssh-connect', 'key': 'board', 'serial': 'SN1',
+                'connection_id': self.device.connection_id, 'client_id': 'page',
+                'ssh_user': 'ubuntu', 'ssh_password': password})
+            self.assertEqual(code, 202)
+            self.wait_task(result['task']['id'])
+        code, result = self.http('/api/task?id=' + result['task']['id'])
+        self.assertEqual(code, 200)
+        task = result['task']
+        self.assertEqual(task['state'], 'completed')
+        self.assertIs(task['result']['ssh_credentials_saved'], True)
+        self.assertEqual(task['result']['ssh_credentials_note'], '')
+        self.assertNotIn(password, json.dumps(task))
+        self.assertNotIn('ssh_password', task['result'])
+        self.assertEqual(self.store.get_ssh_credentials('SN1')['ssh_password'], password)
+        self.assertNotIn(password, json.dumps(self.store.get('SN1')))
+
     def test_confirmed_identify_task_passes_explicit_association_to_probe(self):
         association = {'nonce': 'one-time-confirmation', 'serial': 'SN1',
                        'reason': 'Verified board identity and archive ownership'}

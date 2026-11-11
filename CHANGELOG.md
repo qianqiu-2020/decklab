@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.7.3
+
+- Remember successful web SSH credentials on the server by board serial, so
+  service restarts, USB reconnections and port changes reuse the same account.
+- Prefer saved credentials and update them only after a successful web login;
+  failed attempts and stale connections preserve the existing configuration.
+  Agent connections can reuse saved credentials without replacing them.
+- Show saved-account status in SSH settings without returning the password to
+  the browser. Unidentified connections remain temporary until a unique board
+  identity is established.
+- Upgrade the registry to schema 7 with private credential storage and retain
+  credentials through explicit board identity corrections and package upgrades.
+
 ## 1.7.2
 
 - Try the configured SSH password, then `bianbu` and `debian`, without duplicate

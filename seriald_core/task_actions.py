@@ -132,7 +132,8 @@ class TaskActions:
                 # Only operation metadata; no raw probe dumps, credentials or file contents.
                 output = {key: value for key, value in result.payload.items() if key in (
                     'ok', 'device_key', 'serial', 'hostname', 'ips', 'sshd', 'identity_status',
-                    'serial_source', 'sid', 'ip', 'auto_configured', 'already_connected')}
+                    'serial_source', 'sid', 'ip', 'auto_configured', 'already_connected',
+                    'ssh_credentials_saved', 'ssh_credentials_note')}
                 # Preserve a completed result if cancellation races the final response.
                 self.tasks.store.update(context.id, progress={'done': 1, 'total': 1, 'phase': kind})
                 return output

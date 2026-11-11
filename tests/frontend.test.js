@@ -535,9 +535,9 @@ function sshBoards(connection = 'connection-A') {
   return ['A', 'B'].map(key => ({key, label: key, serial: 'SN-' + key, alive: true,
     dev: '/mock/' + key, connection_id: key === 'A' ? connection : 'connection-B'}));
 }
-async function sshCredentialFixture() {
+async function sshCredentialFixture(boards = sshBoards()) {
   const h = harness();
-  h.take('/api/devices').resolve({devices: sshBoards()});
+  h.take('/api/devices').resolve({devices: boards});
   await drain(); h.select('A');
   return h;
 }
@@ -575,6 +575,108 @@ test('SSH authentication failures offer explicit credentials without replaying d
   h.get('ssh-credentials-dialog').emit('close');
   assert.equal(h.get('ssh-credentials-dialog').open, true);
   assert.equal(h.requests.filter(request => request.url === '/api/task-start').length, 2);
+});
+
+test('server SSH settings prefill only the account and default connections send no credentials', async () => {
+  const boards = sshBoards(); boards[0].ssh_settings = {saved: true, user: 'ubuntu'};
+  const h = await sshCredentialFixture(boards);
+  const settings = h.get('d-tabs').children.at(-1).children[1];
+  assert.equal(settings.textContent, 'SSH 设置 · 已保存');
+  settings.click();
+  assert.equal(h.get('ssh-credentials-user').value, 'ubuntu');
+  assert.equal(h.get('ssh-credentials-password').value, '');
+  assert.ok(h.get('ssh-credentials-saved-status').textContent.includes('服务端已保存'));
+  h.get('ssh-credentials-cancel').click();
+  h.get('d-tabs').children.at(-1).children[0].click();
+  const request = h.take('/api/task-start');
+  assert.deepEqual(request.body, {key: 'A', serial: 'SN-A', connection_id: 'connection-A',
+    kind: 'ssh-connect', actor: 'web', client_id: h.clientId});
+  request.resolve({ok: true, task: {id: 'remembered-ssh', state: 'completed', result: {
+    ok: true, sid: 'ssh-saved', ip: '192.0.2.1', ssh_credentials_saved: true}}});
+  await drain();
+  assert.ok(h.get('d-status').textContent.includes('SSH 账号已保存'));
+  h.get('d-tabs').children.at(-1).children[1].click();
+  assert.equal(h.get('ssh-credentials-user').value, 'ubuntu');
+  assert.equal(h.get('ssh-credentials-password').value, '');
+
+  // A newly loaded page obtains only public metadata from the server.
+  const reloaded = await sshCredentialFixture(boards);
+  reloaded.get('d-tabs').children.at(-1).children[1].click();
+  assert.equal(reloaded.get('ssh-credentials-user').value, 'ubuntu');
+  assert.equal(reloaded.get('ssh-credentials-password').value, '');
+  assert.equal(reloaded.requests.filter(item => item.url === '/api/task-start').length, 0);
+});
+
+test('successful SSH changes update saved account metadata while rejected changes keep the old account', async () => {
+  const boards = sshBoards(); boards[0].ssh_settings = {saved: true, user: 'ubuntu'};
+  const h = await sshCredentialFixture(boards);
+  h.get('d-tabs').children.at(-1).children[1].click();
+  submitSshCredentials(h, 'debian', 'changed-password');
+  sshAuthFailure(h.take('/api/task-start'), 'debian'); await drain();
+  assert.equal(h.get('ssh-credentials-user').value, 'debian');
+  assert.equal(h.get('ssh-credentials-password').value, '');
+  h.get('ssh-credentials-cancel').click();
+  h.get('d-tabs').children.at(-1).children[1].click();
+  assert.equal(h.get('ssh-credentials-user').value, 'ubuntu');
+  assert.ok(h.get('ssh-credentials-saved-status').textContent.includes('服务端已保存'));
+  submitSshCredentials(h, 'debian', 'verified-new-password');
+  h.take('/api/task-start').resolve({ok: true, task: {id: 'updated-ssh', state: 'completed', result: {
+    ok: true, sid: 'ssh-updated', ip: '192.0.2.1', ssh_credentials_saved: true}}});
+  await drain();
+  h.get('d-tabs').children.at(-1).children[1].click();
+  assert.equal(h.get('ssh-credentials-user').value, 'debian');
+  assert.equal(h.get('ssh-credentials-password').value, '');
+  assert.equal(h.get('d-tabs').children.at(-1).children[1].textContent, 'SSH 设置 · 已保存');
+});
+
+test('SSH storage failures preserve a working session without claiming the new credentials were saved', async () => {
+  const h = await sshCredentialFixture();
+  h.get('d-tabs').children.at(-1).children[1].click();
+  submitSshCredentials(h);
+  h.take('/api/task-start').resolve({ok: true, task: {id: 'storage-failure-ssh', state: 'completed', result: {
+    ok: true, sid: 'ssh-working', ip: '192.0.2.1', ssh_credentials_saved: false,
+    ssh_credentials_note: 'SSH 已连接，但凭据保存失败，请检查服务端存储'}}});
+  await drain();
+  assert.ok(h.get('d-status').textContent.includes('已连接'));
+  assert.ok(h.get('d-status').textContent.includes('凭据保存失败'));
+  assert.equal(h.get('d-tabs').children.at(-1).children[1].textContent, 'SSH 设置');
+  assert.equal(h.get('ssh-credentials-password').value, '');
+});
+
+test('a concurrent server credential update remains visible when an older connection cannot save', async () => {
+  const boards = sshBoards(); boards[0].ssh_settings = {saved: true, user: 'ubuntu'};
+  const h = await sshCredentialFixture(boards);
+  h.get('d-tabs').children.at(-1).children[1].click();
+  submitSshCredentials(h, 'older-request', 'stale-password');
+  const request = h.take('/api/task-start');
+  const newerBoards = sshBoards(); newerBoards[0].ssh_settings = {saved: true, user: 'newer-account'};
+  h.intervals.find(interval => interval.delay === 3000).fn();
+  h.take('/api/devices').resolve({devices: newerBoards}); await drain();
+  request.resolve({ok: true, task: {id: 'superseded-ssh', state: 'completed', result: {
+    ok: true, sid: 'ssh-superseded', ip: '192.0.2.1', ssh_credentials_saved: false,
+    ssh_credentials_note: 'SSH 已连接，但已保存配置或设备身份已变化，本次凭据未保存'}}});
+  await drain();
+  assert.ok(h.get('d-status').textContent.includes('本次凭据未保存'));
+  h.get('d-tabs').children.at(-1).children[1].click();
+  assert.equal(h.get('ssh-credentials-user').value, 'newer-account');
+  assert.equal(h.get('ssh-credentials-password').value, '');
+});
+
+test('unidentified SSH settings explain temporary credentials and old successful callbacks cannot save another board', async () => {
+  const pending = sshBoards(); pending[0].serial = '';
+  const h = await sshCredentialFixture(pending);
+  h.get('d-tabs').children.at(-1).children[1].click();
+  assert.equal(h.get('ssh-credentials-saved-status').textContent, '设备尚未识别，SSH 凭据仅用于本次连接');
+  submitSshCredentials(h, 'old-user', 'must-not-follow-board');
+  const request = h.take('/api/task-start');
+  h.select('B');
+  request.resolve({ok: true, task: {id: 'old-saved-ssh', state: 'completed', result: {
+    ok: true, sid: 'ssh-old', ip: '192.0.2.1', ssh_credentials_saved: true}}});
+  await drain();
+  h.get('d-tabs').children.at(-1).children[1].click();
+  assert.equal(h.get('ssh-credentials-user').value, 'root');
+  assert.equal(h.get('ssh-credentials-password').value, '');
+  assert.equal(h.get('d-tabs').children.at(-1).children[1].textContent, 'SSH 设置');
 });
 
 test('SSH settings reopen directly and never submit credentials after cancellation or a view change', async () => {

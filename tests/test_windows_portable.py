@@ -189,6 +189,50 @@ class WindowsPortableTests(unittest.TestCase):
         self.assertIn('refused', error)
         connect.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
 
+    def test_windows_saved_login_survives_host_restart_and_com_renumbering(self):
+        def fake_session(sid, ip, *args, **kwargs):
+            return types.SimpleNamespace(sid=sid, ip=ip, terminal=None,
+                                         ensure=mock.Mock(return_value=True), close=mock.Mock())
+        info = {'serial': 'WINDOWS-SN1', 'serial_source': 'device-tree',
+                'ips': ['eth0 192.0.2.1/24']}
+        with tempfile.TemporaryDirectory() as root, \
+                mock.patch.object(device_module.Device, 'preload'), \
+                mock.patch.object(device_module.Device, 'stable_dir', return_value=root), \
+                mock.patch.object(device_module, 'check_password_login', side_effect=check_password_login), \
+                mock.patch('seriald_core.sessions_windows._connect', side_effect=lambda *args: mock.Mock()) as connect, \
+                mock.patch.object(device_module, 'SshSession', side_effect=fake_session):
+            path = root + '/registry.sqlite3'
+            store = Store(path)
+            try:
+                record = store.bind(info, 'usb-1', 'COM7')
+                device = device_module.Device('usb-1', 'COM7', types.SimpleNamespace(store=store), record=record)
+                store.bind(info, 'usb-1', 'COM7', connection_id=device.connection_id)
+                first, error = device.ssh_connect(ssh_user='ubuntu', ssh_password='windows-private-password')
+                self.assertEqual(error, '')
+                self.assertTrue(first.ssh_credentials_saved)
+            finally:
+                store.close()
+            connect.reset_mock()
+            store = Store(path)
+            try:
+                info['ips'] = ['eth0 192.0.2.99/24']
+                record = store.bind(info, 'usb-3', 'COM12')
+                device = device_module.Device('usb-3', 'COM12', types.SimpleNamespace(store=store), record=record)
+                store.bind(info, 'usb-3', 'COM12', connection_id=device.connection_id)
+                with mock.patch.object(device, 'configure_root_ssh') as provision, \
+                        mock.patch.object(device, '_write') as write:
+                    second, error = device.ssh_connect()
+                self.assertEqual(error, '')
+                self.assertTrue(second.ssh_credentials_saved)
+                connect.assert_called_once_with('192.0.2.99', 'ubuntu', 'windows-private-password')
+                self.assertEqual(store.get_ssh_credentials('WINDOWS-SN1')['revision'], 1)
+                self.assertEqual(device.snapshot()['ssh_settings'], {'saved': True, 'user': 'ubuntu'})
+                self.assertNotIn('windows-private-password', json.dumps(device.snapshot()))
+                provision.assert_not_called()
+                write.assert_not_called()
+            finally:
+                store.close()
+
     def test_ssh_session_byte_stream_and_log(self):
         with tempfile.TemporaryDirectory() as root:
             session = SshSession('ssh123', '127.0.0.1', 'board', root)

@@ -301,14 +301,23 @@
     });
     sp.appendChild(add);
     var settings = document.createElement('button');
-    settings.type = 'button'; settings.textContent = 'SSH 设置';
-    settings.title = '填写 SSH 用户和密码'; settings.disabled = !!ctx.connecting;
-    settings.addEventListener('click', function () { openSshCredentials(ctx, ctx.sshUserHint); });
+    var remembered = sshSettings(ctx).saved;
+    settings.type = 'button'; settings.textContent = remembered ? 'SSH 设置 · 已保存' : 'SSH 设置';
+    settings.title = remembered ? '修改服务端已保存的 SSH 账号和密码' : '填写 SSH 用户和密码';
+    settings.disabled = !!ctx.connecting;
+    settings.addEventListener('click', function () { openSshCredentials(ctx); });
     sp.appendChild(settings);
     bar.appendChild(sp);
   }
 
   var sshCredentials = null;
+  function sshSettings(ctx) {
+    var board = ctx && deviceDirectory.find(ctx.key);
+    var settings = board && board.ssh_settings;
+    return { saved: !!(board && board.serial && settings && settings.saved === true),
+      user: settings && typeof settings.user === 'string' && settings.user
+        || ctx && ctx.sshUserHint || 'root' };
+  }
   function sshConnectionCurrent(ctx, connectionId) {
     if (!isCurrent(ctx) || ctx.connectionId !== connectionId) return false;
     var board = deviceDirectory.find(ctx.key);
@@ -318,6 +327,7 @@
     sshCredentials = null;
     $('ssh-credentials-password').value = '';
     $('ssh-credentials-user').value = '';
+    $('ssh-credentials-saved-status').textContent = '';
     $('ssh-credentials-status').textContent = '';
     if ($('ssh-credentials-dialog').open) $('ssh-credentials-dialog').close();
   }
@@ -329,9 +339,14 @@
     closeSshCredentials();
     sshCredentials = { ctx: ctx, connectionId: ctx.connectionId };
     var board = deviceDirectory.find(ctx.key);
+    var settings = sshSettings(ctx);
     $('ssh-credentials-target').textContent = board.label || board.dev || ctx.key;
-    $('ssh-credentials-user').value = user || 'root';
+    $('ssh-credentials-user').value = user || settings.user;
     $('ssh-credentials-password').value = '';
+    $('ssh-credentials-saved-status').textContent = !board.serial
+      ? '设备尚未识别，SSH 凭据仅用于本次连接'
+      : settings.saved ? '服务端已保存此设备的 SSH 账号；如需更改，请重新填写账号和密码。密码不会回传到页面。'
+        : '此设备尚未保存 SSH 账号；首次连接成功后自动保存。';
     $('ssh-credentials-status').textContent = message || '';
     $('ssh-root-copy-status').textContent = '';
     $('ssh-root-guide').open = false;
@@ -341,6 +356,7 @@
   function connectSSH(ctx, credentials) {
     if (!ctx || ctx.connecting || !sshConnectionCurrent(ctx, ctx.connectionId)) return;
     var connectionId = ctx.connectionId;
+    var submittedUser = credentials && credentials.ssh_user;
     ctx.connecting = true;
     renderTabs();
     $('d-status').textContent = ' 正在建立 SSH 会话…';
@@ -352,12 +368,20 @@
           var failure = new Error(result.error || '建立 SSH 会话失败');
           failure.result = result; throw failure;
         }
+        if (result.ssh_credentials_saved) {
+          var board = deviceDirectory.find(ctx.key);
+          var user = submittedUser || sshSettings(ctx).user;
+          if (board && board.serial) board.ssh_settings = {saved: true, user: user};
+          ctx.sshUserHint = user;
+        }
         if (result.device_key) adoptKey(ctx, result.device_key, result.serial);
         if (!sessions.some(function (session) { return session.sid === result.sid; })) {
           sessions.push({ sid: result.sid, kind: 'ssh', ip: result.ip });
         }
         switchSession(result.sid);
-        $('d-status').textContent = ' 已连接 ' + result.ip;
+        $('d-status').textContent = ' 已连接 ' + result.ip
+          + (result.ssh_credentials_saved ? ' · SSH 账号已保存'
+            : result.ssh_credentials_note ? ' · ' + result.ssh_credentials_note : '');
         pollDevices();
       })
       .catch(function (error) {

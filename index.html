@@ -171,7 +171,8 @@
 <dialog id="ssh-credentials-dialog" class="ssh-credentials-dialog" aria-labelledby="ssh-credentials-title" aria-describedby="ssh-credentials-intro">
   <div class="agent-share-head"><strong id="ssh-credentials-title">填写 SSH 用户和密码</strong><button id="ssh-credentials-close" type="button" aria-label="关闭">关闭</button></div>
   <p id="ssh-credentials-target" class="ssh-credentials-target" data-i18n-ignore></p>
-  <p id="ssh-credentials-intro">填写已有 SSH 用户和密码；仅用于本次连接，不修改板端账号。</p>
+  <p id="ssh-credentials-intro">连接成功后，服务端按已识别设备保存账号和密码，后续连接自动使用；不修改板端账号。</p>
+  <p id="ssh-credentials-saved-status"></p>
   <form id="ssh-credentials-form">
     <div class="ssh-credentials-fields">
       <label>SSH 用户<input id="ssh-credentials-user" type="text" autocomplete="username" maxlength="128" required spellcheck="false" data-i18n-ignore></label>

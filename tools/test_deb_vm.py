@@ -19,7 +19,7 @@ from build_deb import build, collector_build_id, __version__
 
 
 CHECK = r'''
-import importlib.util, os, pathlib, pwd, subprocess, time
+import importlib.util, os, pathlib, pwd, stat, subprocess, time
 from urllib.request import urlopen
 import json
 
@@ -40,6 +40,10 @@ def install(path):
     result = command('dpkg', '--force-confold', '-i', path)
     print(result, flush=True)
     return result
+def credentials(phase):
+    subprocess.run(['sudo', '-u', 'seriald', 'python3', '/tmp/installed_ssh_credentials_check.py',
+                    '--phase', phase, '--database', str(base / 'ssh-credentials-fixture.sqlite3')],
+                   check=True, timeout=20)
 
 subprocess.run(['apt-get', 'update', '-qq'], check=True)
 previous = pathlib.Path('/tmp/seriald-previous.deb').is_file()
@@ -59,6 +63,7 @@ installed_id = fingerprint.read_bytes()
 base = pathlib.Path('/data/seriald-data')
 marker = base / 'vm-preserve.log'
 marker.write_text('preserve runtime across service upgrades')
+os.chmod(marker, 0o660)
 config = pathlib.Path('/etc/seriald/seriald.env')
 saved = config.read_bytes() + b'\n# VM conffile preservation\n'
 config.write_bytes(saved)
@@ -89,13 +94,16 @@ assert pathlib.Path('/proc/' + control_pid).stat().st_uid == account.pw_uid
 for unit in ('seriald.service', 'seriald-collector.service'):
     assert command('systemctl', 'is-active', unit).strip() == 'active'
 subprocess.run(['serialctl', 'devices'], check=True)
+credentials('seed')
 unchanged = install('/tmp/seriald.deb')
 assert 'collector kept running (collector code unchanged)' in unchanged
 assert ready() == first
+credentials('check')
 subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:8898'],
                check=True, timeout=30)
 subprocess.run(['systemctl', 'restart', 'seriald.service'], check=True)
 assert ready() == first
+credentials('check')
 subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:8898'],
                check=True, timeout=30)
 changed = install('/tmp/seriald-changed.deb')
@@ -105,15 +113,34 @@ assert second != first
 assert config.read_bytes() == saved
 assert marker.read_text() == 'preserve runtime across service upgrades'
 assert not pathlib.Path('/run/seriald-collector-restart-required').exists()
+credentials('check')
 reinstall = install('/tmp/seriald-changed.deb')
 assert 'collector kept running (collector code unchanged)' in reinstall
 assert ready() == second
+credentials('check')
 print('PASS: real systemd startup, unchanged/changed collector decisions and conffile/data preservation', flush=True)
 subprocess.run(['dpkg', '--purge', 'seriald'], check=True)
 for unit in ('seriald.service', 'seriald-collector.service'):
     assert subprocess.run(['systemctl', 'is-active', '--quiet', unit]).returncode != 0
 assert marker.is_file() and (base / 'registry.sqlite3').is_file()
-print('PASS: purge stops services and preserves runtime data', flush=True)
+credentials('purged')
+registry = base / 'registry.sqlite3'
+assert stat.S_IMODE(registry.stat().st_mode) == 0o600
+os.chmod(registry, 0o660)
+for snapshot in (base / 'backups').glob('*.sqlite3'):
+    os.chmod(snapshot, 0o660)
+install('/tmp/seriald.deb')
+ready()
+assert stat.S_IMODE(registry.stat().st_mode) == 0o600
+credentials('check')
+assert marker.read_text() == 'preserve runtime across service upgrades'
+assert stat.S_IMODE(marker.stat().st_mode) == 0o660
+subprocess.run(['dpkg', '--purge', 'seriald'], check=True)
+for unit in ('seriald.service', 'seriald-collector.service'):
+    assert subprocess.run(['systemctl', 'is-active', '--quiet', unit]).returncode != 0
+assert stat.S_IMODE(registry.stat().st_mode) == 0o600
+credentials('purged')
+print('PASS: purge/fresh reinstall preserves private credentials and snapshots, ordinary log permissions and runtime data', flush=True)
 print('NOT COVERED: physical UART/USB recovery or Windows behavior', flush=True)
 '''
 
@@ -222,7 +249,9 @@ def main():
                        '-o', 'IdentitiesOnly=yes', '-o', 'PasswordAuthentication=no',
                        '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + str(root / 'known_hosts')]
                 files = [(package, 'seriald.deb'), (changed, 'seriald-changed.deb'), (check, 'check.py'),
-                         (Path(__file__).with_name('installed_mcp_check.py'), 'installed_mcp_check.py')]
+                         (Path(__file__).with_name('installed_mcp_check.py'), 'installed_mcp_check.py'),
+                         (Path(__file__).with_name('installed_ssh_credentials_check.py'),
+                          'installed_ssh_credentials_check.py')]
                 if args.upgrade_from:
                     files.append((args.upgrade_from.resolve(), 'seriald-previous.deb'))
                 for source, destination in files:

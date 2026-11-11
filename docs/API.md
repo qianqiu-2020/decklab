@@ -106,6 +106,12 @@ prove board responsiveness. Internal setup, probe and transfer echoes are hidden
 from managed screens and serial archives; raw session cursors remain available
 for protocol clients.
 
+Device snapshots also include `ssh_settings={saved,user}`. `saved` indicates
+whether this device has reusable server-side SSH credentials; `user` is the
+saved username, or the configured profile username when no credentials are
+saved. The password is never returned. Credentials are bound to a known board
+serial, independently of its current label, IP address or serial-port name.
+
 ## Archives and history
 
 Archive/history routes take `key`; include expected `serial` to protect against
@@ -136,7 +142,7 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | --- | --- |
 | `/api/send` | `data`; literal serial input |
 | `/api/session-send` | `sid`, `data`; serial or SSH input |
-| `/api/ssh-connect` | Optional `title`, `ssh_user`, `ssh_password`; returns sid and persistence policy; authentication rejection uses `code=ssh-authentication-failed` and nonsecret `ssh_user` |
+| `/api/ssh-connect` | Optional `title`, `ssh_user`, `ssh_password`; returns sid, session persistence policy and credential-save status; authentication rejection uses `code=ssh-authentication-failed` and nonsecret `ssh_user` |
 | `/api/session-resize` | `sid`, `cols`, `rows`; serial also requires `observed_off`, with optional `automatic` boolean, `presentation` boolean and per-page `client_id` |
 | `/api/session-close` | `sid` |
 | `/api/session-result` | `sid`, `completed`, `exit_code`; records command outcome |
@@ -173,15 +179,31 @@ session access and the current controlling actor/client. Another page using
 the same web actor still needs explicit takeover. Resize/close/takeover select an SSH
 `sid`; they do not close or resize the physical serial collector.
 
-Default SSH opens try the profile password, `bianbu`, then `debian`, deduplicated.
-Only authentication denial advances the list; network failures and timeouts stop.
-An explicit `ssh_user` or `ssh_password` override attempts only that credential
-pair. Authentication failure returns HTTP 502 with `code=ssh-authentication-failed`
+Default SSH opens use the server-saved account and password for that board when
+available, with one authentication attempt. Without saved credentials, they try
+the profile password, `bianbu`, then `debian`, deduplicated. Only authentication
+denial advances that list; network failures and timeouts stop. An explicit
+`ssh_user` or `ssh_password` override attempts only that credential pair.
+Authentication failure returns HTTP 502 with `code=ssh-authentication-failed`
 and `ssh_user`, without a password. A failed durable SSH task preserves those
-nonsecret fields in its result so the web UI can offer credential entry. Passwords
-are request/session data, not task-record fields or profile updates. Normal SSH
-opens do not reset root's password or edit sshd configuration; manual root setup
-is documented in [configuration](CONFIGURATION.md#manual-root-ssh-setup).
+nonsecret fields in its result so the web UI can offer credential entry.
+
+Successful web connections save the verified pair for an identified board;
+explicit web overrides replace the previous pair only on success. Non-web
+actors may use saved credentials, but do not update them. Unidentified targets
+do not persist credentials by IP address or COM/tty port. A successful response
+and durable task result include `ssh_credentials_saved` and may include a safe
+`ssh_credentials_note` explaining why a working connection was not saved.
+Credential storage failure does not turn a working SSH session into a connection
+failure. Cancellation and connection state are checked before the save; a later
+cancellation does not roll back a committed credential update. Reusing saved
+credentials does not update their revision. The private server record is separate
+from public board metadata; passwords never appear in task records or responses.
+Profile files and serial console credentials are unchanged. See
+[remembered SSH credentials](CONFIGURATION.md#remembered-ssh-credentials)
+for storage and reuse rules. Normal SSH opens do not reset root's password or
+edit sshd configuration; manual root setup is documented in
+[configuration](CONFIGURATION.md#manual-root-ssh-setup).
 
 SSH resizes the actual PTY/channel and canonical screen; applications receive
 the normal window-size change. Pure UART has no out-of-band window-size message.

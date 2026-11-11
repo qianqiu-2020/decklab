@@ -70,4 +70,11 @@ assert.equal(h.api.translate('未知文本'), '未知文本');
 h.api.setLocale('en');
 assert.equal(h.api.translate('串口主动探测失败：等待板子完整响应超时'),
   'Serial round-trip probe failed: Timed out waiting for a complete board response');
+for (const [message, expected] of [
+  ['无法读取已保存 SSH 配置，请检查服务端存储', 'Could not read the saved SSH configuration; check server storage'],
+  ['设备尚未识别，SSH 凭据仅用于本次连接', 'The board is unidentified; these SSH credentials are used only for this connection'],
+  ['SSH 已连接，但服务端凭据存储不可用', 'SSH connected, but server credential storage is unavailable'],
+  ['SSH 已连接，但凭据保存失败，请检查服务端存储', 'SSH connected, but credentials could not be saved; check server storage'],
+  ['SSH 已连接，但已保存配置或设备身份已变化，本次凭据未保存', 'SSH connected, but the saved configuration or board identity changed; these credentials were not saved'],
+]) assert.equal(h.api.translate(message), expected);
 console.log('ok - UI language defaults, live switching, persistence and raw-content isolation');

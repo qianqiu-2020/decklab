@@ -21,12 +21,19 @@ diagnostics are bounded, credential-redacted and private under
 `SERIALD_BASE/mcp-worker.log`, with one `.1` backup. A failed worker leaves the
 terminal and log APIs available.
 
-SSH connection attempts use the configured password, then the deduplicated
-`bianbu`/`debian` fallbacks, and advance only after authentication rejection.
-Explicit request credentials are attempted once. Exhausted authentication
-returns `ssh-authentication-failed`; the web UI can request credentials and
-display manual root SSH instructions without sending them to the serial port.
-Normal SSH opens must not reset root passwords or edit sshd policy. Keep request
-passwords out of durable task records and preserve stale-connection checks.
+SSH connections first use credentials saved on the server for the identified
+board serial, with one attempt. Without saved credentials, use the configured
+password, then deduplicated `bianbu`/`debian` fallbacks, advancing only after
+authentication rejection. Explicit request credentials are attempted once.
+Successful web connections save verified credentials; failed changes preserve
+the previous pair. Agents may reuse but do not update that private record.
+Keep passwords out of public snapshots, responses, durable task records and
+browser storage. Registry schema 7 stores them separately from board metadata;
+keep the registry/WAL/SHM owner-only on Unix and preserve private backups.
+Saving checks connection identity and credential revision; never persist by IP
+or COM/tty for unidentified targets. Exhausted authentication returns
+`ssh-authentication-failed`; the web UI can request credentials and display
+manual root SSH instructions without sending them to the serial port.
+Normal SSH opens must not reset root passwords or edit sshd policy.
 The separate authorized `ssh-enable` operation only installs/starts SSH from an
 already-root shell. See [configuration](docs/CONFIGURATION.md#manual-root-ssh-setup).

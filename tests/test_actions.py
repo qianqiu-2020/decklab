@@ -135,6 +135,30 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(result.status, 200)
         self.assertEqual(connect.call_args.kwargs['ssh_password'], password)
 
+    def test_ssh_success_returns_only_safe_credential_save_status(self):
+        session = types.SimpleNamespace(sid='ssh-saved', ip='192.0.2.1', persistent=False,
+                                        auto_configured=False, ssh_credentials_saved=True,
+                                        ssh_credentials_note='', ssh_password='server-only-password')
+        with mock.patch.object(self.device, 'ssh_connect', return_value=(session, '')):
+            result = self.actions.execute('ssh-connect', {}, self.device)
+        self.assertEqual(result.status, 200)
+        self.assertIs(result.payload['ssh_credentials_saved'], True)
+        self.assertEqual(result.payload['ssh_credentials_note'], '')
+        self.assertNotIn('ssh_password', result.payload)
+        self.assertNotIn('server-only-password', json.dumps(result.payload))
+
+    def test_ssh_connected_but_unsaved_is_still_a_successful_connection(self):
+        note = 'SSH 已连接，但凭据保存失败，请检查服务端存储'
+        session = types.SimpleNamespace(sid='ssh-unsaved', ip='192.0.2.1', persistent=False,
+                                        auto_configured=False, ssh_credentials_saved=False,
+                                        ssh_credentials_note=note)
+        with mock.patch.object(self.device, 'ssh_connect', return_value=(session, '')):
+            result = self.actions.execute('ssh-connect', {}, self.device)
+        self.assertEqual(result.status, 200)
+        self.assertIs(result.payload['ok'], True)
+        self.assertIs(result.payload['ssh_credentials_saved'], False)
+        self.assertEqual(result.payload['ssh_credentials_note'], note)
+
 
 if __name__ == '__main__':
     unittest.main()

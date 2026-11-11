@@ -52,7 +52,7 @@ first (Docker and build-time downloads are required by the default builder):
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dist/seriald_1.7.2_amd64.deb
+sudo apt install ./dist/seriald_1.7.3_amd64.deb
 ```
 
 For an arm64 host, build on the matching native runner with `--arch arm64` and
@@ -92,10 +92,12 @@ serial and Linux interfaces do not imply validation on other board families.
 | Other boards | Not validated; test serial framing, identity, login, SSH and file transfer before relying on them. |
 
 Built-in defaults follow the K3/Bianbu workflow: **115200 baud, 8N1, no flow
-control, `root` / `bianbu` for console and SSH, Linux identity probing, and
-automatic SSH configuration enabled**. These are generic settings, not automatic
-model detection. Override credentials and framing for other OS images; the
-example profile file disables automatic SSH configuration when explicitly used.
+control, `root` / `bianbu` for console and initial SSH login, and Linux identity
+probing**. These are generic settings, not automatic model detection. Override
+credentials and framing for other OS images. Successful web SSH connections
+remember verified credentials on the server for that device; use **SSH settings**
+to change them. Normal connections do not set root passwords or edit sshd policy;
+root access can be configured by the user with the separate serial-console guide.
 See [configuration](docs/CONFIGURATION.md) and the
 [historical identity matrix](docs/DEVICE_IDENTITY_MATRIX.md). The identity matrix
 records specific observations, not full-function certification.
@@ -108,8 +110,9 @@ targets can use manual mode without Linux shell probes; unconfirmed identities
 remain provisional.
 
 The service is intended for local or trusted-LAN development. Authentication is
-optional. SSH root provisioning can modify a development board, and SSH host
-keys can change after flashing. See [deployment scope](SECURITY.md).
+optional. Explicit SSH setup and manual root configuration can modify a
+development board, and SSH host keys can change after flashing. See
+[deployment scope](SECURITY.md).
 
 ## Contribute
 

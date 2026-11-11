@@ -87,8 +87,16 @@ def _registry_probe_settings(db):
                '(port TEXT PRIMARY KEY, document TEXT NOT NULL)')
 
 
+def _registry_ssh_credentials(db):
+    # Keep secrets separate from the board records exposed through public APIs.
+    # Explicit identity correction/promotion carries the same board's settings.
+    db.execute('CREATE TABLE IF NOT EXISTS ssh_credentials '
+               '(serial TEXT PRIMARY KEY REFERENCES boards(serial) ON UPDATE CASCADE, '
+               'ssh_user TEXT NOT NULL, ssh_password TEXT NOT NULL, revision INTEGER NOT NULL)')
+
+
 REGISTRY_MIGRATIONS = (_registry_initial, _registry_history, _registry_tasks, _registry_artifacts,
-                       _registry_connections, _registry_probe_settings)
+                       _registry_connections, _registry_probe_settings, _registry_ssh_credentials)
 GRANT_MIGRATIONS = (_grants_initial, _grants_connections)
 _SCHEMAS = {
     'registry': (0x444C5247, REGISTRY_MIGRATIONS, {
@@ -102,6 +110,7 @@ _SCHEMAS = {
         'transfer_artifacts': 'id actor serial direction name size received sha256 state task_id created updated',
         'connection_identities': 'connection_id serial identified',
         'probe_settings': 'port document',
+        'ssh_credentials': 'serial ssh_user ssh_password revision',
     }),
     'grants': (0x444C4147, GRANT_MIGRATIONS, {
         'grants': 'id token_hash actor scope serial created expires revoked key connection_id',

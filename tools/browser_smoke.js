@@ -10,6 +10,9 @@ const root = path.resolve(__dirname, '..');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'seriald-browser-'));
 const posts = [], errors = [];
 const probeSettingsPosts = [], grantPosts = [], sshConnectPosts = [];
+// This private fixture store survives page reloads. Only username/status metadata
+// goes through /api/devices; passwords never appear in a fixture API response.
+const savedSshCredentials = new Map(), sshAuthentications = [], fixtureSshSessions = [];
 let probeSettings = {mode: 'linux', command: '', default_command: "printf 'HOST=%s\\n' \"$(hostname)\""};
 let serialPayload = null;
 const serialLiveChunks = [];
@@ -20,6 +23,7 @@ const fixtures = [
   { key: 'milkv', serial: 'boot-0e9badc5-706a-4421-93a7-50e76cc240a6', state: 'online', alive: true, dev: '/dev/ttyUSB1', hostname: 'k1' },
   { key: 'unprovisioned-demo', serial: '', state: 'pending', alive: true, dev: '/dev/ttyUSB3', by_path: 'pci-usb-0:4.2.3' },
 ].map(d => ({ ...d, label: d.key, connection_id: 'test-' + d.key,
+  ssh_settings: {saved: false, user: 'root'},
   bytes: 8192, probes: 0, last_seen: Date.now() / 1000,
   info: ['milkv2', 'milkv'].includes(d.key) ? { serial: d.serial, reported_serial: '0123456789ABCDEF',
     serial_source: d.key === 'milkv' ? 'boot-marker' : 'soc-sysfs', identity_status: 'provisional' } : {} }));
@@ -43,8 +47,25 @@ const server = http.createServer((req, res) => {
         if (u.pathname === '/api/task-start') {
           if (payload.kind !== 'ssh-connect') return json({ok:false, error:'unsupported fixture task'});
           sshConnectPosts.push(payload);
+          const board = fixtures.find(device => device.key === payload.key
+            && device.connection_id === payload.connection_id);
+          const explicit = Object.hasOwn(payload, 'ssh_user') || Object.hasOwn(payload, 'ssh_password');
+          const credentials = explicit ? {user: payload.ssh_user, password: payload.ssh_password}
+            : board && savedSshCredentials.get(board.serial);
+          sshAuthentications.push({key: payload.key, explicit, ...credentials});
+          if (board && board.serial && credentials && credentials.user === 'ubuntu'
+              && credentials.password === 'simulated-saved-password-only') {
+            savedSshCredentials.set(board.serial, credentials);
+            board.ssh_settings = {saved: true, user: credentials.user};
+            const sid = 'ssh-fixture-session-' + sshConnectPosts.length;
+            fixtureSshSessions.push({sid, kind: 'ssh', actor: 'web', ip: '192.0.2.42'});
+            return json({ok:true, task:{id:'ssh-fixture-' + sshConnectPosts.length, state:'completed',
+              result:{ok:true, sid, ip:'192.0.2.42', device_key:board.key, serial:board.serial,
+                ssh_credentials_saved:true}}});
+          }
           return json({ok:true, task:{id:'ssh-fixture-' + sshConnectPosts.length, state:'failed',
-            error:'SSH 认证失败', result:{code:'ssh-authentication-failed', ssh_user:payload.ssh_user || 'root'}}});
+            error:'SSH 认证失败', result:{code:'ssh-authentication-failed',
+              ssh_user:credentials && credentials.user || 'root'}}});
         }
         grantPosts.push(payload);
         return json({token: 'seriald-ag-simulated-fixture-only', grant: {id: 'fixture', actor: 'shared-agent/fixture',
@@ -65,7 +86,8 @@ const server = http.createServer((req, res) => {
       ...(typeof chunk === 'object' ? {terminal_initial_geometry: chunk.geometry, terminal_geometry: chunk.geometry} : {}) });
   }
   if (u.pathname === '/api/sessions') return json({ sessions: [
-    { sid: 'serial', kind: 'serial' }, { sid: 'ssh123abc', kind: 'ssh', actor: 'claude-code', ip: '10.0.90.42' }] });
+    { sid: 'serial', kind: 'serial' }, { sid: 'ssh123abc', kind: 'ssh', actor: 'claude-code', ip: '10.0.90.42' },
+    ...fixtureSshSessions] });
   if (u.pathname === '/api/activity') return json({ next_offset: 2, sessions: [
     { sid: 'ssh123abc', actor: 'claude-code', title: 'dmesg | tail -50', status: 'active', started: Date.now()/1000, exit_code: null },
     { sid: 'ssh456def', actor: 'codex/diagnosis', title: 'uname -a', status: 'completed', started: Date.now()/1000-300, exit_code: 0 },
@@ -560,8 +582,70 @@ let chrome, ws;
   fs.writeFileSync(path.join(out,'ui-ssh-root-guide-mobile.png'),Buffer.from(rootGuideMobileShot.data,'base64'));
   await evaluate('document.querySelector("#ssh-credentials-password").value="must-clear";document.querySelector("#ssh-credentials-cancel").click()');
   assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").value'),'');
+  // A verified account belongs to the board serial in the server fixture, so a
+  // new page can reuse it without receiving or storing the password in JS.
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  await evaluate('document.querySelector(\'[data-key="musepi2"]\').click();Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.includes("+ SSH")).click()');
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#ssh-credentials-dialog").open');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-dialog").open'),true);
+  assert.ok(await evaluate('document.querySelector("#ssh-credentials-intro").textContent.includes("服务端")'));
+  await evaluate('document.querySelector("#ssh-credentials-user").value="ubuntu";document.querySelector("#ssh-credentials-password").value="simulated-saved-password-only";document.querySelector("#ssh-credentials-form").requestSubmit()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#d-status").textContent.includes("192.0.2.42")');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-dialog").open'),false);
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").value'),'');
+  const rememberedBoard = fixtures.find(device => device.key === 'musepi2');
+  assert.deepEqual(rememberedBoard.ssh_settings,{saved:true,user:'ubuntu'});
+  await evaluate('Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.startsWith("SSH 设置")).click()');
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-user").value'),'ubuntu');
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").value'),'');
+  assert.ok(await evaluate('document.querySelector("#ssh-credentials-saved-status").textContent.includes("已保存")'));
+  const rememberedShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-ssh-remembered.png'),Buffer.from(rememberedShot.data,'base64'));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await delay(100);
+  assert.ok(await evaluate('(()=>{const d=document.querySelector("#ssh-credentials-dialog");const r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&d.scrollWidth<=d.clientWidth+1;})()'));
+  const rememberedMobileShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-ssh-remembered-mobile.png'),Buffer.from(rememberedMobileShot.data,'base64'));
+  await evaluate('document.querySelector("#ssh-credentials-cancel").click()');
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  await evaluate('window.sshReloadMarker=true');
+  await rpc('Page.navigate',{url:address + '/#device=' + rememberedBoard.serial});
+  for(let n=0;n<50 && !await evaluate('!window.sshReloadMarker && Array.from(document.querySelectorAll("#d-tabs button")).some(button=>button.textContent.startsWith("SSH 设置"))');n++)await delay(100);
+  await evaluate('SerialdI18n.setLocale("zh-CN");Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.startsWith("SSH 设置")).click()');
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-user").value'),'ubuntu','new page must prefill the server-stored account');
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").value'),'','new page must never receive the stored password');
+  assert.equal(await evaluate('JSON.stringify({local:{...localStorage},session:{...sessionStorage}}).includes("simulated-saved-password-only")'),false);
+  assert.equal(await evaluate('fetch("/api/devices").then(response=>response.text()).then(text=>text.includes("simulated-saved-password-only")||text.includes("ssh_password"))'),false);
+  // A rejected replacement does not overwrite the remembered account. A fresh
+  // settings form uses server metadata instead of the failed retry's username.
+  const beforeReplacement = sshConnectPosts.length;
+  await evaluate('document.querySelector("#ssh-credentials-user").value="debian";document.querySelector("#ssh-credentials-password").value="rejected-fixture-password";document.querySelector("#ssh-credentials-form").requestSubmit()');
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#ssh-credentials-dialog").open');n++)await delay(50);
+  assert.equal(sshConnectPosts.length,beforeReplacement+1);
+  assert.deepEqual(rememberedBoard.ssh_settings,{saved:true,user:'ubuntu'});
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").value'),'');
+  await evaluate('document.querySelector("#ssh-credentials-cancel").click();Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.startsWith("SSH 设置")).click()');
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-user").value'),'ubuntu');
+  await evaluate('document.querySelector("#ssh-credentials-cancel").click();Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.includes("+ SSH")).click()');
+  for(let n=0;n<30 && sshConnectPosts.length<beforeReplacement+2;n++)await delay(50);
+  assert.equal(sshConnectPosts.length,beforeReplacement+2);
+  assert.equal(Object.hasOwn(sshConnectPosts.at(-1),'ssh_user'),false);
+  assert.equal(Object.hasOwn(sshConnectPosts.at(-1),'ssh_password'),false);
+  assert.equal(sshAuthentications.at(-1).user,'ubuntu','default connection must reuse the server account');
+  assert.equal(sshAuthentications.at(-1).password,'simulated-saved-password-only');
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#d-status").textContent.includes("192.0.2.42")');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-dialog").open'),false);
+  await evaluate('Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.startsWith("SSH 设置")).click();document.querySelector("#ssh-credentials-password").value="must-not-reach-replacement"');
+  rememberedBoard.connection_id = 'test-musepi2-replacement';
+  for(let n=0;n<80 && await evaluate('document.querySelector("#ssh-credentials-dialog").open');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-dialog").open'),false,'replacement connection must close an old credentials form');
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").value'),'');
+  const beforeStaleSubmit=sshConnectPosts.length;
+  await evaluate('document.querySelector("#ssh-credentials-form").requestSubmit()');
+  await delay(100);
+  assert.equal(sshConnectPosts.length,beforeStaleSubmit,'stale form must not submit credentials for a replacement connection');
   assert.deepEqual(errors,[]);
-  console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing and SSH credential recovery (isolated simulated fixtures).');
+  console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing and server-remembered SSH credentials across page reloads (isolated simulated fixtures).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(ws)ws.close(); if(chrome){chrome.kill('SIGTERM');await delay(500);}server.close();
   fs.rmSync(profile,{recursive:true,force:true});

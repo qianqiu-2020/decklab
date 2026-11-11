@@ -1,13 +1,17 @@
 """会话注册表并发回归:假 SSH、假目录,不打开串口或启动子进程。"""
+import json
 import subprocess
 import threading
 import time
+import types
 import unittest
 from unittest import mock
 
 from seriald_core import device as seriald
 from seriald_core.transactions import TransactionError
-from seriald_core.profiles import BoardProfile
+from seriald_core.profiles import BoardProfile, ProfileBook
+from seriald_core.storage import Store
+from seriald_core.models import Board
 
 
 class FakeSession:
@@ -379,6 +383,278 @@ class SessionRegistryTests(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertIs(device.probe_info, current)
         say.assert_not_called()
+
+
+class SavedSshCredentialTests(unittest.TestCase):
+    """Verified credentials belong to a board, never a port or an old request."""
+    def setUp(self):
+        self.store = Store(':memory:')
+        self.addCleanup(self.store.close)
+        self.manager = types.SimpleNamespace(store=self.store, profiles=ProfileBook({
+            'profiles': {'test': {'ssh_user': 'root', 'ssh_password': 'profile-secret'}},
+            'default': 'test'}))
+        patches = [
+            mock.patch.object(seriald.Device, 'preload'),
+            mock.patch.object(seriald.Device, 'stable_dir', return_value='/unused'),
+            mock.patch.object(seriald, 'SshSession', side_effect=FakeSession),
+            mock.patch.object(seriald, 'check_password_login', return_value=(True, False, '')),
+            mock.patch.object(seriald.os, 'open', side_effect=AssertionError('hardware forbidden')),
+            mock.patch.object(subprocess, 'Popen', side_effect=AssertionError('SSH forbidden')),
+        ]
+        self.opening = patches[2].start()
+        self.check = patches[3].start()
+        self.addCleanup(patches[2].stop)
+        self.addCleanup(patches[3].stop)
+        for patch in patches[:2] + patches[4:]:
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.device = self.device_for('SN1')
+
+    def device_for(self, serial, path='test-usb', ip='192.0.2.1'):
+        info = {'serial': serial, 'serial_source': 'device-tree',
+                'ips': ['eth0 ' + ip + '/24']}
+        record = self.store.bind(info, path, '/fake/tty')
+        device = seriald.Device(path, '/fake/tty', self.manager, record=record)
+        device.present, device.fd = True, 98765
+        self.store.bind(info, path, '/fake/tty', connection_id=device.connection_id)
+        return device
+
+    def remember(self, user='ubuntu', password='remembered-private-password'):
+        self.assertTrue(self.store.save_ssh_credentials(
+            'SN1', user, password, self.device.connection_id, 0))
+        return self.store.get_ssh_credentials('SN1')
+
+    def test_successful_manual_login_is_saved_and_reused_after_port_and_ip_change(self):
+        session, error = self.device.ssh_connect(ssh_user='ubuntu', ssh_password='chosen-private-password')
+        self.assertEqual(error, '')
+        self.assertTrue(session.ssh_credentials_saved)
+        self.assertEqual(self.store.get_ssh_credentials('SN1'), {
+            'ssh_user': 'ubuntu', 'ssh_password': 'chosen-private-password', 'revision': 1})
+        replugged = self.device_for('SN1', path='other-usb-port', ip='192.0.2.99')
+        self.check.reset_mock()
+        with mock.patch.object(self.store, 'save_ssh_credentials', wraps=self.store.save_ssh_credentials) as save:
+            reused, error = replugged.ssh_connect()
+        self.assertEqual(error, '')
+        self.check.assert_called_once_with('192.0.2.99', 'ubuntu', 'chosen-private-password')
+        self.assertEqual(self.opening.call_args.kwargs,
+                         {'user': 'ubuntu', 'password': 'chosen-private-password'})
+        self.assertTrue(reused.ssh_credentials_saved)
+        save.assert_not_called()
+        self.assertEqual(self.store.get_ssh_credentials('SN1')['revision'], 1)
+
+    def test_a_different_board_on_the_same_port_does_not_receive_old_password(self):
+        remembered = self.remember()
+        other = self.device_for('SN2')
+        session, error = other.ssh_connect()
+        self.assertEqual(error, '')
+        self.check.assert_called_once_with('192.0.2.1', 'root', 'profile-secret')
+        self.assertTrue(session.ssh_credentials_saved)
+        self.assertEqual(self.store.get_ssh_credentials('SN1'), remembered)
+        self.assertEqual(self.store.get_ssh_credentials('SN2')['ssh_password'], 'profile-secret')
+
+    def test_default_fallback_remembers_the_password_that_really_authenticated(self):
+        self.check.side_effect = [(False, True, 'denied'), (False, True, 'denied'), (True, False, '')]
+        session, error = self.device.ssh_connect()
+        self.assertEqual(error, '')
+        self.assertEqual(self.check.call_args_list, [
+            mock.call('192.0.2.1', 'root', 'profile-secret'),
+            mock.call('192.0.2.1', 'root', 'bianbu'),
+            mock.call('192.0.2.1', 'root', 'debian')])
+        self.assertTrue(session.ssh_credentials_saved)
+        self.assertEqual(self.store.get_ssh_credentials('SN1')['ssh_password'], 'debian')
+
+    def test_rejected_saved_password_does_not_try_defaults_or_replace_the_setting(self):
+        remembered = self.remember()
+        self.check.return_value = False, True, 'denied'
+        with self.assertRaises(seriald.SSHAuthenticationError) as caught:
+            self.device.ssh_connect()
+        self.assertEqual(caught.exception.user, 'ubuntu')
+        self.check.assert_called_once_with('192.0.2.1', 'ubuntu', remembered['ssh_password'])
+        self.opening.assert_not_called()
+        self.assertEqual(self.store.get_ssh_credentials('SN1'), remembered)
+        self.assertEqual(self.device.ssh_pending, 0)
+
+    def test_manual_replacement_is_saved_only_after_verified_connection(self):
+        remembered = self.remember()
+        self.check.return_value = False, True, 'denied'
+        with self.assertRaises(seriald.SSHAuthenticationError):
+            self.device.ssh_connect(ssh_user='debian', ssh_password='rejected-private-password')
+        self.assertEqual(self.store.get_ssh_credentials('SN1'), remembered)
+        self.check.return_value = True, False, ''
+        failed = FakeSession('failed')
+        failed.on_ensure = lambda: False
+        self.opening.side_effect = None
+        self.opening.return_value = failed
+        session, error = self.device.ssh_connect(ssh_user='debian', ssh_password='not-opened-private-password')
+        self.assertIsNone(session)
+        self.assertIn('失败', error)
+        self.assertEqual(self.store.get_ssh_credentials('SN1'), remembered)
+        self.opening.side_effect = FakeSession
+        session, error = self.device.ssh_connect(ssh_user='debian', ssh_password='replacement-private-password')
+        self.assertEqual(error, '')
+        self.assertTrue(session.ssh_credentials_saved)
+        self.assertEqual(self.store.get_ssh_credentials('SN1'), {
+            'ssh_user': 'debian', 'ssh_password': 'replacement-private-password', 'revision': 2})
+
+    def test_cancelled_task_after_transport_open_never_remembers_credentials(self):
+        cancelled = threading.Event()
+        session = FakeSession('cancelled')
+        session.on_ensure = lambda: cancelled.set() or True
+        self.opening.side_effect = None
+        self.opening.return_value = session
+        with self.device.transactions.task_scope(cancelled, self.device.connection_id, self.device.stop):
+            with self.assertRaises(TransactionError) as caught:
+                self.device.ssh_connect(ssh_user='ubuntu', ssh_password='cancelled-private-password')
+        self.assertEqual(caught.exception.code, 'cancelled')
+        self.assertTrue(session.closed)
+        self.assertEqual(self.device.ssh_sessions, {})
+        self.assertIsNone(self.store.get_ssh_credentials('SN1'))
+        self.assertEqual(self.device.ssh_pending, 0)
+
+    def test_replug_or_identity_change_after_transport_open_never_saves(self):
+        for changed in ('connection', 'serial'):
+            with self.subTest(changed=changed):
+                device = self.device_for('SN1')
+                session = FakeSession('stale-' + changed)
+                def change():
+                    if changed == 'connection':
+                        device.connection_id = 'replacement-connection'
+                    else:
+                        other = self.store.bind({'serial': 'SN2'}, 'other', '/fake/tty')
+                        device.board = Board(other)
+                    return True
+                session.on_ensure = change
+                self.opening.side_effect = None
+                self.opening.return_value = session
+                result, error = device.ssh_connect(ssh_user='ubuntu', ssh_password='old-request-private-password')
+                self.assertIsNone(result)
+                self.assertIn('重新枚举', error)
+                self.assertTrue(session.closed)
+                self.assertEqual(device.ssh_sessions, {})
+                self.assertIsNone(self.store.get_ssh_credentials('SN1'))
+                self.assertIsNone(self.store.get_ssh_credentials('SN2'))
+                self.assertEqual(device.ssh_pending, 0)
+
+    def test_slow_manual_connection_cannot_replace_newer_saved_configuration(self):
+        self.remember()
+        session = FakeSession('slower')
+        def newer_setting():
+            self.assertTrue(self.store.save_ssh_credentials(
+                'SN1', 'newer-user', 'newer-private-password', self.device.connection_id, 1))
+            return True
+        session.on_ensure = newer_setting
+        self.opening.side_effect = None
+        self.opening.return_value = session
+        result, error = self.device.ssh_connect(ssh_user='older-user', ssh_password='older-private-password')
+        self.assertEqual(error, '')
+        self.assertIs(result, session)
+        self.assertFalse(session.closed)
+        self.assertFalse(session.ssh_credentials_saved)
+        self.assertIn('配置或设备身份已变化', session.ssh_credentials_note)
+        self.assertEqual(self.store.get_ssh_credentials('SN1'), {
+            'ssh_user': 'newer-user', 'ssh_password': 'newer-private-password', 'revision': 2})
+
+    def test_saved_reconnection_does_not_block_a_newer_successful_manual_login(self):
+        self.remember()
+        reconnect = FakeSession('reconnect')
+        replacement = FakeSession('replacement')
+        def manual_replacement():
+            self.opening.side_effect = None
+            self.opening.return_value = replacement
+            updated, error = self.device.ssh_connect(
+                ssh_user='newer-user', ssh_password='newer-private-password')
+            self.assertEqual(error, '')
+            self.assertIs(updated, replacement)
+            self.assertTrue(updated.ssh_credentials_saved)
+            return True
+        reconnect.on_ensure = manual_replacement
+        self.opening.side_effect = None
+        self.opening.return_value = reconnect
+        with mock.patch.object(self.store, 'save_ssh_credentials', wraps=self.store.save_ssh_credentials) as save:
+            connected, error = self.device.ssh_connect()
+        self.assertEqual(error, '')
+        self.assertIs(connected, reconnect)
+        self.assertFalse(reconnect.closed)
+        self.assertFalse(reconnect.ssh_credentials_saved)
+        self.assertIn('配置或设备身份已变化', reconnect.ssh_credentials_note)
+        save.assert_called_once_with('SN1', 'newer-user', 'newer-private-password',
+                                     self.device.connection_id, 1)
+        self.assertEqual(self.store.get_ssh_credentials('SN1'), {
+            'ssh_user': 'newer-user', 'ssh_password': 'newer-private-password', 'revision': 2})
+
+    def test_storage_failure_keeps_working_ssh_and_does_not_publish_raw_error(self):
+        with mock.patch.object(self.store, 'save_ssh_credentials',
+                               side_effect=RuntimeError('SQL contained chosen-private-password')):
+            session, error = self.device.ssh_connect(ssh_user='ubuntu', ssh_password='chosen-private-password')
+        self.assertEqual(error, '')
+        self.assertFalse(session.closed)
+        self.assertIs(self.device.get_session(session.sid), session)
+        self.assertFalse(session.ssh_credentials_saved)
+        self.assertEqual(session.ssh_credentials_note, 'SSH 已连接，但凭据保存失败，请检查服务端存储')
+        self.assertNotIn('chosen-private-password', session.ssh_credentials_note)
+        self.assertIsNone(self.store.get_ssh_credentials('SN1'))
+
+    def test_failed_read_stops_default_authentication_but_allows_explicit_connection(self):
+        with mock.patch.object(self.store, 'get_ssh_credentials',
+                               side_effect=RuntimeError('SQL contained stored-private-password')):
+            session, error = self.device.ssh_connect()
+            self.assertIsNone(session)
+            self.assertEqual(error, '无法读取已保存 SSH 配置，请检查服务端存储')
+            self.check.assert_not_called()
+            session, error = self.device.ssh_connect(ssh_user='ubuntu', ssh_password='explicit-private-password')
+        self.assertEqual(error, '')
+        self.check.assert_called_once_with('192.0.2.1', 'ubuntu', 'explicit-private-password')
+        self.assertFalse(session.ssh_credentials_saved)
+        self.assertEqual(session.ssh_credentials_note, 'SSH 已连接，但服务端凭据存储不可用')
+        self.assertIsNone(self.store.get_ssh_credentials('SN1'))
+
+    def test_agent_can_reuse_or_override_without_changing_saved_credentials(self):
+        remembered = self.remember()
+        with mock.patch.object(self.store, 'save_ssh_credentials', wraps=self.store.save_ssh_credentials) as save:
+            session, error = self.device.ssh_connect(actor='agent-one')
+            self.assertEqual(error, '')
+            self.assertTrue(session.ssh_credentials_saved)
+            self.check.assert_called_once_with('192.0.2.1', 'ubuntu', remembered['ssh_password'])
+            self.check.reset_mock()
+            session, error = self.device.ssh_connect(actor='agent-two', ssh_user='temporary-user',
+                                                      ssh_password='temporary-private-password')
+            self.assertEqual(error, '')
+            self.assertFalse(session.ssh_credentials_saved)
+            self.check.assert_called_once_with('192.0.2.1', 'temporary-user', 'temporary-private-password')
+        save.assert_not_called()
+        self.assertEqual(self.store.get_ssh_credentials('SN1'), remembered)
+
+    def test_conflicted_serial_does_not_use_or_replace_saved_credentials(self):
+        remembered = self.remember()
+        self.store.mark_conflict('SN1')
+        session, error = self.device.ssh_connect()
+        self.assertEqual(error, '')
+        self.check.assert_called_once_with('192.0.2.1', 'root', 'profile-secret')
+        self.assertFalse(session.ssh_credentials_saved)
+        self.assertIn('配置或设备身份已变化', session.ssh_credentials_note)
+        raw = self.store.db.execute('SELECT ssh_user,ssh_password,revision FROM ssh_credentials WHERE serial=?',
+                                    ('SN1',)).fetchone()
+        self.assertEqual(dict(raw), remembered)
+
+    def test_unidentified_connection_never_persists_by_port_or_ip(self):
+        device = seriald.Device('test-usb', '/fake/tty', self.manager)
+        device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
+        with mock.patch.object(device, 'run_probe', return_value={'ok': True}), \
+                mock.patch.object(self.store, 'save_ssh_credentials', wraps=self.store.save_ssh_credentials) as save:
+            session, error = device.ssh_connect(ssh_user='ubuntu', ssh_password='temporary-private-password')
+        self.assertEqual(error, '')
+        self.assertFalse(session.ssh_credentials_saved)
+        self.assertEqual(session.ssh_credentials_note, '设备尚未识别，SSH 凭据仅用于本次连接')
+        save.assert_not_called()
+        self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM ssh_credentials').fetchone()[0], 0)
+
+    def test_public_snapshot_contains_only_saved_state_and_username(self):
+        self.remember()
+        snapshot = self.device.snapshot()
+        self.assertEqual(snapshot['ssh_settings'], {'saved': True, 'user': 'ubuntu'})
+        self.assertNotIn('remembered-private-password', json.dumps(snapshot))
+        self.assertNotIn('ssh_password', json.dumps(snapshot))
+        self.assertNotIn('revision', snapshot['ssh_settings'])
 
 
 if __name__ == '__main__':

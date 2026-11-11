@@ -603,6 +603,21 @@ class Device:
     def configure_root_ssh(self):
         return self.console.configure_root_ssh()
 
+    def ssh_settings(self, profile=None):
+        """Public SSH configuration metadata; the password stays in the store."""
+        user = (profile or self.profile).ssh_user
+        store = getattr(self.manager, 'store', None)
+        metadata = getattr(store, 'get_ssh_credentials_metadata', None)
+        if self.serial and callable(metadata):
+            try:
+                settings = metadata(self.serial)
+            except Exception:
+                settings = None
+            if (isinstance(settings, dict) and settings.get('saved')
+                    and valid_ssh_user(settings.get('user'))):
+                return {'saved': True, 'user': settings['user']}
+        return {'saved': False, 'user': user}
+
     def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None):
         """Connect an independent SSH session without changing board credentials.
 
@@ -652,6 +667,11 @@ class Device:
             registry.pending += 1
         session = None
         attempted_passwords = []
+        credential_serial = self.serial
+        store = getattr(self.manager, 'store', None)
+        stored = None
+        credential_revision = 0
+        credential_store_available = callable(getattr(store, 'get_ssh_credentials', None))
 
         def safe_error(detail):
             value = str(detail)
@@ -664,14 +684,28 @@ class Device:
             if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
                 return None, '设备已重新枚举,请重新识别 IP'
             profile = self.profile
-            user = ssh_user if ssh_user is not None else profile.ssh_user
+            explicit = ssh_user is not None or ssh_password is not None
+            if credential_serial and credential_store_available:
+                try:
+                    stored = store.get_ssh_credentials(credential_serial)
+                except Exception:
+                    # An explicit replacement can still connect during a storage
+                    # failure, but must not claim it remembered the credentials.
+                    credential_store_available = False
+                    if not explicit:
+                        return None, '无法读取已保存 SSH 配置，请检查服务端存储'
+                if isinstance(stored, dict):
+                    credential_revision = stored['revision']
+                else:
+                    stored = None
+            user = ssh_user if ssh_user is not None else (
+                stored['ssh_user'] if stored else profile.ssh_user)
             password = (ssh_password if ssh_password is not None
-                        else profile.ssh_password)
+                        else stored['ssh_password'] if stored else profile.ssh_password)
             if not valid_ssh_user(user) or not valid_ssh_password(password):
                 return None, 'SSH 用户或密码格式无效'
-            explicit = ssh_user is not None or ssh_password is not None
             candidates = [password]
-            if not explicit:
+            if not explicit and stored is None:
                 candidates.extend(candidate for candidate in ('bianbu', 'debian')
                                   if candidate not in candidates)
             for candidate in candidates:
@@ -697,6 +731,8 @@ class Device:
             session_args = {'user': user, 'password': password}
             session = SshSession(sid, ip, self.label, self.stable_dir(), **session_args)
             session.auto_configured = False
+            session.ssh_credentials_saved = bool(stored and not explicit)
+            session.ssh_credentials_note = ''
             session.actor, session.title = actor, title
             control_session(session, actor, self.transactions.client_id)
             session.persistent = persistent
@@ -707,10 +743,47 @@ class Device:
                 session.close()
                 return None, '建立 SSH 会话失败'
             with self.operation_lock:
+                self.transactions.check_context()
                 if (self.stop is not origin or origin.is_set() or self.connection_id != connection_id
-                        or self._sessions is not registry):
+                        or self._sessions is not registry or self.serial != credential_serial):
                     session.close()
                     return None, '设备已重新枚举,SSH 会话已关闭'
+                if stored is not None and not explicit:
+                    try:
+                        current = store.get_ssh_credentials_metadata(credential_serial)
+                        session.ssh_credentials_saved = bool(
+                            current.get('saved') and current.get('revision') == credential_revision)
+                        if not session.ssh_credentials_saved:
+                            session.ssh_credentials_note = (
+                                'SSH 已连接，但已保存配置或设备身份已变化，本次凭据未保存')
+                    except Exception:
+                        session.ssh_credentials_saved = False
+                        session.ssh_credentials_note = 'SSH 已连接，但服务端凭据存储不可用'
+                if actor == 'web':
+                    if not credential_serial:
+                        session.ssh_credentials_note = '设备尚未识别，SSH 凭据仅用于本次连接'
+                    elif not credential_store_available:
+                        session.ssh_credentials_saved = False
+                        session.ssh_credentials_note = 'SSH 已连接，但服务端凭据存储不可用'
+                    elif stored is not None and not explicit:
+                        # A normal connection only uses the remembered value;
+                        # it must not rewrite a setting changed in another page.
+                        pass
+                    else:
+                        try:
+                            # Compare the version read before authentication so
+                            # a late connection cannot replace a newer setting.
+                            session.ssh_credentials_saved = store.save_ssh_credentials(
+                                credential_serial, user, password, connection_id,
+                                credential_revision)
+                            if not session.ssh_credentials_saved:
+                                session.ssh_credentials_note = (
+                                    'SSH 已连接，但已保存配置或设备身份已变化，本次凭据未保存')
+                        except Exception:
+                            # Keep the verified working terminal. Raw storage
+                            # errors may contain SQL values, including passwords.
+                            session.ssh_credentials_saved = False
+                            session.ssh_credentials_note = 'SSH 已连接，但凭据保存失败，请检查服务端存储'
                 with self.sessions_lock:
                     self.ssh_sessions[sid] = session
             return session, ''
@@ -790,6 +863,7 @@ class Device:
         return {'operation': self.transactions.snapshot(), 'input_owner': self.transactions.ownership(),
                 'profile': profile.name,
                 'probe_mode': profile.probe,
+                'ssh_settings': self.ssh_settings(profile),
                 'serial_settings': asdict(self.serial_settings or profile.serial),
                 'settings_pending': self.serial_settings is not None and self.serial_settings != profile.serial,
                 'key': self.key, 'serial': self.serial, 'connection_id': self.connection_id, 'dev': self.dev if self.present else '',
