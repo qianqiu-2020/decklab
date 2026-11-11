@@ -101,7 +101,7 @@ def valid_answer(data, query):
         reachable.add(question)
     except (ValueError, struct.error):
         return False
-    return bool(addresses) and set(addresses) <= reachable and set(aliases) <= reachable
+    return question in addresses and set(addresses) <= reachable and set(aliases) <= reachable
 
 
 def public_dns(resolver, host):

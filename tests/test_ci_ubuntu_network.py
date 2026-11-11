@@ -176,6 +176,8 @@ class DNSPacketTests(unittest.TestCase):
         cname = self.rr(original, 5, alias)
         linked_a = self.rr(self.name('EDGE.example'), 1, address)
         self.assertTrue(network.valid_answer(self.packet(query, [cname, linked_a]), query))
+        self.assertFalse(network.valid_answer(self.packet(query, [cname,
+                                                                 self.rr(original, 1, address)]), query))
         unrelated_a = self.rr(self.name('unrelated.example'), 1, address)
         self.assertFalse(network.valid_answer(self.packet(query, [unrelated_a]), query))
         self.assertFalse(network.valid_answer(self.packet(query, [cname, linked_a, unrelated_a]), query))
