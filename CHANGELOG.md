@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.7.4
+
+- Recognize BusyBox ash directory prompts such as `~ #` and `/ #` when
+  synchronizing serial terminal dimensions, with the same idle-input and
+  ownership checks used for hostname prompts.
+- Share backend prompt recognition with internal-output filtering so a
+  successful size synchronization does not duplicate the ash prompt.
+- Report a distinct disabled-mode error when custom/manual probing prevents
+  Linux terminal setup, and verify ash resizing with real BusyBox PTYs in CI.
+
 ## 1.7.3
 
 - Remember successful web SSH credentials on the server by board serial, so

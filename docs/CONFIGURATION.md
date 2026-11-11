@@ -189,6 +189,20 @@ automatic size synchronization. The collector verifies the current byte offset,
 input state, Linux profile and transaction/ownership state before writing setup.
 No historical prompt or attachment alone triggers board input.
 
+Idle-prompt recognition includes BusyBox ash path prompts such as `~ #`, `/ #`,
+`/etc #` and `~/work $`, with a space or tab separating the path and prompt
+character. Frontend and collector use the same conservative forms; login or
+password prompts, U-Boot consoles and a prompt followed by typed input do not
+trigger setup. The earlier user/host-only match could leave these BusyBox
+prompts waiting indefinitely without sending the size command.
+
+Terminal size setup is enabled only for the `linux` probe mode. `manual` and
+`custom` modes continue to provide their existing terminal access without
+sending Linux size-configuration commands. A setup request in either mode
+returns HTTP 409 with `code=terminal-mode-disabled` and the message
+`当前探测模式未启用 Linux 终端尺寸同步`; `not-idle` instead means an enabled Linux
+terminal is waiting for a fresh idle prompt or matching output offset.
+
 One viewer coordinates automatic sizing per connection; other viewers follow
 the shared geometry. The actual input writer, explicit **Sync size**, or input ownership changes the
 coordinator. Resize requests wait for the next idle prompt during a running
@@ -205,6 +219,10 @@ clears the preceding firmware screen, attributes and cursor/scroll modes. Setup
 sends the short resize command before environment configuration; automatic later
 resizes omit the longer environment command. Captured bytes remain unchanged;
 SSH negotiates dimensions through its own PTY.
+
+BusyBox compatibility is checked with local BusyBox 1.30.1 `ash` and `stty` on an
+isolated pseudo-terminal, including a 140-column, 42-row size change. This is
+protocol regression coverage, not acceptance of a physical Buildroot board.
 
 Built-in defaults follow the SpacemiT K3/Bianbu development workflow: 115200,
 8N1, no flow control, console/SSH `root` with password `bianbu`, Linux probes

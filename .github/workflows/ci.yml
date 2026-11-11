@@ -58,6 +58,9 @@ jobs:
       - run: python -m pip install 'pyserial>=3.5,<4' 'paramiko>=3.4,<5'
       - name: Install optional MCP adapter dependencies
         run: python -m pip install -r requirements-mcp.txt
+      - name: Install BusyBox for the ash terminal resize regression
+        if: matrix.python == '3.12'
+        run: sudo apt-get update -qq && sudo apt-get install -y busybox
       - name: Check UART archives with a non-UTF-8 locale
         env:
           LC_ALL: C

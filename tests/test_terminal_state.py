@@ -111,6 +111,65 @@ class SerialTerminalTests(unittest.TestCase):
         self.feed(b'\r\nInstalling packages...')
         self.assertEqual(self.resize().status, 409)
 
+    def test_busybox_path_prompt_runs_both_setup_stages(self):
+        self.feed(b'~ # ')
+        result = self.resize()
+        self.assertEqual(result.status, 200)
+        self.assertTrue(result.payload['pending'])
+        self.assertIn('stty echoctl -ixon -ixoff rows 42 cols 140', self.write.call_args.args[0])
+        self.assertTrue(self.device.terminal.input_pending)
+        self.feed(b'\r\n\x1b[8;42;140t~ # ')
+        self.assertFalse(self.device.terminal.input_pending)
+        self.assertEqual(self.device.terminal.geometry, {'rows': 42, 'cols': 140})
+        self.assertTrue(self.resize().payload['pending'])
+        self.assertIn('infocmp xterm-256color', self.write.call_args.args[0])
+        self.feed(b'\r\n~ # ')
+        self.assertTrue(self.resize().payload['skipped'])
+        self.assertEqual(self.write.call_count, 2)
+
+    def test_busybox_path_prompts_do_not_accept_incomplete_commands_or_other_consoles(self):
+        state = self.device.terminal
+        for prompt in (b'~ # ', b'/ # ', b'/etc # ', b'~/work $ ', b'/tmp/board-1 #\t'):
+            with self.subTest(prompt=prompt):
+                state.tail = prompt
+                self.assertTrue(state.prompt())
+        for output in (b'# ', b'=> ', b'U-Boot# ', b'login: ', b'Password: ', b'/bin/ash:',
+                       b'~ # 1111111111111111111111111111111111111111111111111111111111',
+                       b'/tmp # echo wait', b'/tmp #\ncommand still running', b'buildroot # ',
+                       b'notes ~ # ', b'path with spaces # '):
+            with self.subTest(output=output):
+                state.tail = output
+                self.assertFalse(state.prompt())
+
+    def test_busybox_prompt_still_requires_current_offset_and_unclaimed_input(self):
+        self.feed(b'~ # ')
+        stale = self.resize(observed_off=0)
+        self.assertEqual(stale.status, 409)
+        self.assertEqual(stale.payload['code'], 'not-idle')
+        self.device.terminal.input_pending = True
+        pending = self.resize()
+        self.assertEqual(pending.status, 409)
+        self.assertEqual(pending.payload['code'], 'not-idle')
+        self.device.terminal.input_pending = False
+        with self.device.transactions.actor_scope('web', 'other'):
+            self.device.transactions.claim('web')
+        self.assertEqual(self.resize().status, 423)
+        self.write.assert_not_called()
+
+    def test_busybox_prompt_does_not_enable_setup_for_manual_or_custom_profiles(self):
+        from types import SimpleNamespace
+        self.feed(b'~ # ')
+        for mode in ('manual', 'custom'):
+            for automatic in (True, False):
+                with self.subTest(mode=mode, automatic=automatic), mock.patch.object(
+                        Device, 'profile', new_callable=mock.PropertyMock,
+                        return_value=SimpleNamespace(probe=mode)):
+                    result = self.resize(automatic=automatic)
+                    self.assertEqual(result.status, 409)
+                    self.assertEqual(result.payload['code'], 'terminal-mode-disabled')
+                    self.assertEqual(result.payload['error'], '当前探测模式未启用 Linux 终端尺寸同步')
+        self.write.assert_not_called()
+
     def test_replay_geometry_is_selected_at_the_first_byte_not_latest_state(self):
         from seriald_core.queries import SessionQueries
         self.feed(b'root@ubuntu:~# ')

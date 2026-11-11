@@ -1435,6 +1435,67 @@ test('automatic serial resize waits for idle prompt, cancels on typing and uses 
   assert.equal(t2.cols, 100); assert.equal(t2.rows, 30, 'viewers follow the shared board size');
 });
 
+test('BusyBox ash directory prompts permit automatic and manual serial size synchronization', async () => {
+  for (const prompt of ['~ # ', '/ # ', '/etc # ', '~/work $ ']) {
+    const h = await setup(); const terminal = h.select('A');
+    h.take('/api/session').resolve(readResponse('A', prompt));
+    await drain(); terminal.flush();
+    assert.ok(h.timer(400), 'schedule idle ash prompt: ' + prompt);
+    h.fire(h.timer(400)[0]);
+    const request = h.take('/api/session-resize');
+    assert.equal(request.body.automatic, true);
+    assert.equal(request.body.observed_off, prompt.length);
+    assert.equal(request.body.cols, 140); assert.equal(request.body.rows, 42);
+    request.resolve({ok: true, pending: true}); await drain();
+    assert.equal(h.sends().length, 0, 'the collector owns shell setup writes');
+  }
+  const h = await setup(); const terminal = h.select('A');
+  h.take('/api/session').resolve(readResponse('A', '~ # '));
+  await drain(); terminal.flush(); h.get('b-serial-size').click();
+  assert.equal(h.take('/api/session-resize').body.automatic, false);
+});
+
+test('ash resize detection rejects typed input and unrelated prompts and guards stale views', async () => {
+  for (const output of ['~ # 111111', '/bin/ash: 111111: not found', '=> ', 'U-Boot# ',
+    'login: ', 'Password: ', '# ', 'progress 50% #', '>>> ']) {
+    const h = await setup(); const terminal = h.select('A');
+    h.take('/api/session').resolve(readResponse('A', output));
+    await drain(); terminal.flush(); h.get('b-serial-size').click();
+    assert.equal(h.timer(400), undefined, 'do not schedule setup for: ' + output);
+    assert.equal(h.requests.filter(r => r.url === '/api/session-resize').length, 0);
+  }
+  const h = await setup(); const terminal = h.select('A');
+  h.take('/api/session').resolve(readResponse('A', '~ # '));
+  await drain(); terminal.flush();
+  terminal.data('1');
+  assert.equal(h.timer(400), undefined, 'typing into ash cancels pending setup');
+  h.get('b-serial-size').click();
+  assert.equal(h.requests.filter(r => r.url === '/api/session-resize').length, 0);
+  const h2 = await setup(); const t2 = h2.select('A');
+  h2.take('/api/session').resolve(readResponse('A', '~ # '));
+  await drain(); t2.flush();
+  const staleSetup = h2.timer(400)[1].fn;
+  h2.select('B'); staleSetup();
+  assert.equal(h2.requests.filter(r => r.url === '/api/session-resize').length, 0);
+});
+
+test('serial size mode restriction is explicit and does not retry at the same output offset', async () => {
+  const h = await setup(); const terminal = h.select('A');
+  h.take('/api/session').resolve(readResponse('A', '~ # '));
+  await drain(); terminal.flush();
+  assert.ok(h.timer(400));
+  h.get('b-serial-size').click();
+  h.take('/api/session-resize').resolve({ok: false, code: 'terminal-mode-disabled',
+    error: '当前探测模式未启用 Linux 终端尺寸同步'}, 409);
+  await drain();
+  assert.match(h.get('d-status').textContent, /当前探测模式未启用 Linux 终端尺寸同步/);
+  assert.doesNotMatch(h.get('d-status').textContent, /等待空闲|等待新的空闲/);
+  h.fire(h.timer(400)[0]); await drain();
+  assert.equal(h.requests.filter(r => r.url === '/api/session-resize').length, 1,
+    'the queued automatic attempt cannot retry the same rejected resize');
+  assert.equal(h.sends().length, 0);
+});
+
 test('serial size sync requires an idle prompt and shared output updates every viewer', async () => {
   const h = await setup(); const terminal = h.select('A');
   h.get('b-serial-size').click();

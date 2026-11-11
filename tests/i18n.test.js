@@ -71,6 +71,7 @@ h.api.setLocale('en');
 assert.equal(h.api.translate('串口主动探测失败：等待板子完整响应超时'),
   'Serial round-trip probe failed: Timed out waiting for a complete board response');
 for (const [message, expected] of [
+  ['当前探测模式未启用 Linux 终端尺寸同步', 'Linux terminal size synchronization is disabled in the current probe mode'],
   ['无法读取已保存 SSH 配置，请检查服务端存储', 'Could not read the saved SSH configuration; check server storage'],
   ['设备尚未识别，SSH 凭据仅用于本次连接', 'The board is unidentified; these SSH credentials are used only for this connection'],
   ['SSH 已连接，但服务端凭据存储不可用', 'SSH connected, but server credential storage is unavailable'],

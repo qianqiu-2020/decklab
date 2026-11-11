@@ -233,6 +233,7 @@
     '终端配置进行中，请稍后重试': 'Terminal setup is in progress; retry shortly',
     '正在同步串口终端尺寸…': 'Synchronizing serial terminal size…',
     '等待空闲控制台同步尺寸': 'Waiting for an idle console to synchronize size',
+    '当前探测模式未启用 Linux 终端尺寸同步': 'Linux terminal size synchronization is disabled in the current probe mode',
     '尺寸同步失败：': 'Terminal size synchronization failed: ',
     '已连接 · ': 'Connected · ', ' 台设备 · ': ' boards · ', ' 记录': ' captured', '末次 ': 'Last received ',
     '从未': 'Never', ' 秒前': ' seconds ago', ' 分钟前': ' minutes ago', ' 小时前': ' hours ago',

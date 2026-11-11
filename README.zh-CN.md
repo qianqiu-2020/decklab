@@ -59,7 +59,7 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dist/seriald_1.7.3_amd64.deb
+sudo apt install ./dist/seriald_1.7.4_amd64.deb
 ```
 
 默认运行时构建需要 Docker 和构建时下载；运行时准备后，deb 组装不访问网络。
@@ -76,7 +76,7 @@ arm64 包在对应原生构建机使用 `--arch arm64` 及对应目录。旧链�
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
 
 Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。安装构建依赖后，
-双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.7.3-windows-x64-setup.exe`：
+双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.7.4-windows-x64-setup.exe`：
 首次选择安装目录，后续升级记住原目录，保留 `data/`，无需手动解压覆盖。首次从便携版迁移时选中原目录。
 开始菜单提供本机、局域网无密码、局域网有密码三个入口。详见 [Windows 构建与安装](docs/WINDOWS.md)。
 也支持 Windows Docker 容器构建；IT 可按 EXE SHA-256 审批防火墙规则，升级后需重新审批。

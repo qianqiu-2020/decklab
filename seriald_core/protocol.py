@@ -56,6 +56,13 @@ RE_LOGIN = r'(?:login|用户名)[:：]?'
 RE_PASSWD = r'(?:[Pp]assword|密码)[:：]'
 RE_PROMPT = r'[#$]\s*$'
 
+# An idle terminal must look like a complete shell prompt, not just output
+# ending in '#'. BusyBox ash's default PS1 uses the current directory: '~ # '.
+RE_IDLE_SHELL_PROMPT = (
+    r'(?:[^\s@]+@[^\s]+[#$]|\[[^\]\r\n]*@[^\]\r\n]+\][#$]|'
+    r'(?:~(?:/[^\s#$]+)?|/[^\s#$]*)[ \t]+[#$])[ \t]*'
+)
+
 
 def parse_onie_serial(value):
     """Return the ONIE 0x23 serial only after validating framing and CRC."""

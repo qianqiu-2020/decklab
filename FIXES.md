@@ -37,3 +37,13 @@ manual root SSH instructions without sending them to the serial port.
 Normal SSH opens must not reset root passwords or edit sshd policy.
 The separate authorized `ssh-enable` operation only installs/starts SSH from an
 already-root shell. See [configuration](docs/CONFIGURATION.md#manual-root-ssh-setup).
+
+Serial terminal setup recognizes complete BusyBox ash path prompts (`~ #`,
+`/ #`, `/etc #`, `~/work $`) as well as user/host prompts. Both frontend and
+collector require the conservative path form, including a space/tab before the
+prompt character; typed input, login/password prompts and U-Boot are excluded.
+Keep the existing two-stage stty/environment setup, baud/parity settings, fresh
+offset checks and input ownership. `manual`/`custom` probe modes send no Linux
+size setup; their HTTP 409 uses `terminal-mode-disabled`, distinct from
+`not-idle`. A local BusyBox 1.30.1 ash/stty PTY check exercises 140 columns by
+42 rows; it is not physical-board acceptance.

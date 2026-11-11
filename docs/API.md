@@ -39,6 +39,8 @@ status as well as JSON: success of an input request does not prove command
 completion, and cancellation is not rollback.
 `session-controlled` means another client controls this shared SSH terminal;
 explicit takeover is required before writing, resizing or closing it.
+`terminal-mode-disabled` is HTTP 409 when serial terminal size setup is requested
+outside the `linux` probe mode; it is distinct from the temporary `not-idle` state.
 Some synchronous operations return HTTP 200 with `ok=false` and a failure code;
 check both fields. JSON errors are not guaranteed after a streaming response has
 begun: a truncated download or dropped SSE connection requires client recovery.
@@ -208,9 +210,19 @@ edit sshd configuration; manual root setup is documented in
 SSH resizes the actual PTY/channel and canonical screen; applications receive
 the normal window-size change. Pure UART has no out-of-band window-size message.
 Serial size setup requires a fresh idle Linux shell prompt and matching offset;
-it completes stty/TERM setup before queued browser input. Busy applications
-retain the established grid. `presentation=true` adjusts boot-text display only,
-writes nothing to the board, and is ignored during firmware or active programs.
+it accepts complete user/host prompts and BusyBox path prompts such as `~ #`,
+`/ #`, `/etc #` and `~/work $`. The path form requires a space or tab before
+`#`/`$`; login/password prompts, U-Boot and a prompt with typed input are not idle
+shells. The existing two-stage setup sends the short size command before the
+environment command and completes before queued browser input; baud, parity and
+serial framing are unchanged. Busy applications retain the established grid.
+
+In `manual` or `custom` probe mode, serial size setup sends no Linux commands and
+returns HTTP 409 with `code=terminal-mode-disabled` and
+`error=当前探测模式未启用 Linux 终端尺寸同步`. In `linux` mode, a stale offset or a
+non-idle shell instead returns `code=not-idle`. `presentation=true` adjusts
+boot-text display only, writes nothing to the board, and is ignored during
+firmware or active programs.
 
 ## Tasks, file transfer and sharing
 

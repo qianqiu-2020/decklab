@@ -80,6 +80,28 @@ class ConsoleVisibilityTests(unittest.TestCase):
         self.assertIn('stty rows 30 cols 100', archive)
         self.assertIn('user output', archive)
 
+    def test_busybox_setup_keeps_one_prompt_and_preserves_ash_errors(self):
+        self.device.append(b'\r\n~ # ')
+
+        def write(text):
+            geometry = b'\x1b[8;42;140t' if text.startswith('stty ') else b''
+            self.device.append(text.encode() + b'\r\n' + geometry + b'~ # ')
+            return True, ''
+
+        with mock.patch.object(self.device, '_write', side_effect=write):
+            for _ in range(2):
+                result = self.device.terminal.configure(140, 42, self.device.now_off(), True)
+                self.assertTrue(result['ok'])
+        self.assertFalse(self.device.visibility.active)
+        self.assertEqual(self.device.terminal.geometry, {'cols': 140, 'rows': 42})
+        self.assertNotIn('stty echoctl', self.screen())
+        self.assertNotIn('infocmp', self.screen())
+        self.assertEqual(self.screen().count('~ #'), 1)
+        self.assertEqual(human_output('stty rows 42 cols 140\r\n~ # ',
+                                      'stty rows 42 cols 140'), '')
+        self.assertEqual(human_output('/bin/ash: 111: not found\r\n~ # ', ''),
+                         '/bin/ash: 111: not found')
+
     @unittest.skipIf(os.name == 'nt', 'local POSIX shell integration')
     def test_binary_upload_download_keep_raw_frames_and_clean_archives(self):
         data = bytes(range(256)) * 4 + b'\0\xff\n'

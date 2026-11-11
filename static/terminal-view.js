@@ -190,7 +190,9 @@
       var b = ctx.term.buffer.active;
       if (b.type === 'alternate') return false;
       var line = b.getLine(b.baseY + b.cursorY);
-      return !!line && /^(?:[^\s@]+@[^\s]+[#$]|\[[^\]\r\n]*@[^\]\r\n]+\][#$])\s*$/.test(line.translateToString(true));
+      // BusyBox ash commonly shows only the working directory, e.g. "~ #".
+      // Keep the path-shaped prefix instead of accepting every line ending #/$.
+      return !!line && /^(?:[^\s@]+@[^\s]+[#$]|\[[^\]\r\n]*@[^\]\r\n]+\][#$]|(?:~(?:\/[^\s#$]+)?|\/[^\s#$]*)[ \t]+[#$])[ \t]*$/.test(line.translateToString(true));
     }
     function serialSizeStatus(ctx, text, initial) {
       var status = $('d-status');

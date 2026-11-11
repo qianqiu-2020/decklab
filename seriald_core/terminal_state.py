@@ -2,6 +2,7 @@
 import re
 
 from .config import ANSI
+from .protocol import RE_IDLE_SHELL_PROMPT
 from .transactions import TransactionError
 from .terminal_backend import SharedTerminal
 
@@ -62,14 +63,16 @@ class SerialTerminalState:
 
     def prompt(self):
         tail = ANSI.sub('', self.tail.decode('utf-8', 'replace')).split('\n')[-1].split('\r')[-1]
-        return bool(re.fullmatch(r'(?:[^\s@]+@[^\s]+[#$]|\[[^\]\r\n]*@[^\]\r\n]+\][#$])\s*', tail))
+        return bool(re.fullmatch(RE_IDLE_SHELL_PROMPT, tail))
 
     def configure(self, cols, rows, observed_off, automatic):
         d = self.device
         with d.transactions.begin('terminal-setup', 3) as lease:
             actor, client = lease.actor, (lease.actor, lease.client_id)
             with d.cv:
-                if (d.profile.probe != 'linux' or observed_off != d.base + len(d.buf)
+                if d.profile.probe != 'linux':
+                    raise TransactionError('terminal-mode-disabled', '当前探测模式未启用 Linux 终端尺寸同步')
+                if (observed_off != d.base + len(d.buf)
                         or self.input_pending or not self.prompt()):
                     raise TransactionError('not-idle', '等待新的空闲 Linux shell 提示符')
                 owner = d.transactions.ownership()

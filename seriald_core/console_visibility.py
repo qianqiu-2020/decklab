@@ -5,9 +5,10 @@ import secrets
 import threading
 
 from .config import ANSI, SCROLLBACK
+from .protocol import RE_IDLE_SHELL_PROMPT
 
 
-PROMPT = re.compile(r'^(?:[^\s@]+@[^\s]+[#$]|\[[^\]\r\n]*@[^\]\r\n]+\][#$])\s*$')
+PROMPT = re.compile(RE_IDLE_SHELL_PROMPT)
 SYSTEM_OUTPUT = re.compile(rb'\[\s*\d+\.\d{6}\]|Kernel panic|Oops:|BUG: |Linux version |U-Boot(?: SPL)? \d{4}\.\d{2}|\x00sys:')
 
 
