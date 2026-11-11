@@ -270,6 +270,25 @@
     border:1px solid var(--accent-line);border-radius:5px;background:var(--accent-soft);color:var(--accent);cursor:pointer}
   #ft-status{min-height:36px;color:var(--ink-2);font-size:12px;overflow-wrap:anywhere}
   .ft-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+  .flash-dialog{position:fixed;z-index:1001;top:24px;right:18px;left:auto;margin:0;
+    width:min(760px,calc(100vw - 24px));max-height:calc(100dvh - 48px);padding:20px;
+    border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);color:var(--ink);
+    box-shadow:0 24px 80px rgba(0,0,0,.3);overflow:auto}
+  .fl-head{display:flex;align-items:start;justify-content:space-between;gap:12px}
+  .fl-head strong{display:block;font-size:19px}.fl-head small{display:block;margin-top:4px;color:var(--ink-3)}
+  .fl-intro,#fl-status,#fl-event-status{font-size:12px;color:var(--ink-2);overflow-wrap:anywhere}
+  .fl-connections{display:grid;grid-template-columns:95px minmax(0,1fr);gap:5px 10px;font-size:12px}
+  .fl-connections dt{color:var(--ink-3)}.fl-connections dd{margin:0;overflow-wrap:anywhere}
+  .fl-inputs{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;align-items:center}
+  .fl-inputs>button{justify-self:end}.fl-inputs>.ft-field:first-child{grid-column:1/-1}
+  .fl-partition{display:grid;grid-template-columns:minmax(0,1fr) minmax(140px,1fr);gap:10px;margin:10px 0;font-size:12px}
+  .fl-partition label{display:flex;align-items:center;gap:6px}.fl-partition select{min-width:0}
+  .fl-preview{margin-top:14px;overflow:auto;font-size:12px}.fl-preview:empty{display:none}
+  .fl-preview table{width:100%;border-collapse:collapse}.fl-preview th,.fl-preview td{padding:7px;text-align:left;border-bottom:1px solid var(--line)}
+  .fl-preview td:last-child{max-width:180px;overflow-wrap:anywhere;font:10px var(--font-mono)}
+  .flash-dialog progress{width:100%;height:9px;margin-top:16px;accent-color:var(--accent)}
+  #fl-events{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px var(--font-mono)}
+  @media(max-width:540px){.fl-inputs,.fl-partition{grid-template-columns:1fr}.flash-dialog{right:12px;top:12px;max-height:calc(100dvh - 24px)}}
   .boot-compare-dialog{width:calc(100vw - 24px);max-width:none;height:calc(100dvh - 24px);max-height:none;
     padding:0;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);
     color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.3);overflow:hidden}

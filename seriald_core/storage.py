@@ -276,6 +276,9 @@ class Store:
 
     def _migrate_identity_references(self, old_serial, new_serial):
         """Migrate proven ownership inside the caller's identity transaction."""
+        if self.db.execute('SELECT 1 FROM flash_resource_holds WHERE resource=?',
+                           ('board:' + old_serial,)).fetchone():
+            raise IdentityError('开发板刷机维护占用尚未释放，不能修改身份')
         self.db.execute('INSERT OR IGNORE INTO connection_identities '
                         'SELECT DISTINCT connection_id,serial,? FROM task_targets WHERE serial=?',
                         (time.time(), old_serial))

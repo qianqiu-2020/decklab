@@ -627,6 +627,8 @@ class Manager:
                 self.maintenance.run_due(self, LOG_ROOT)
                 if self.artifacts is not None and time.monotonic() - self.artifacts_checked >= 60:
                     self.artifacts.expire()
+                    from .flash_tasks import FlashActions
+                    FlashActions(self).expire()
                     self.artifacts_checked = time.monotonic()
                 # 启动/重连只被动采集;自动回车或 USB 软拔插会干扰正在使用的控制台。
             except Exception as e:

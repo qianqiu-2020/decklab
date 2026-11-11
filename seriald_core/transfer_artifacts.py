@@ -277,7 +277,7 @@ class TransferArtifacts:
             row = self.get(artifact_id, actor, serial)
             with self._guard:
                 reading = self._readers.get(artifact_id, 0)
-            if reading or row['state'] in ('claimed', 'writing', 'sealing'):
+            if reading or self._maintenance_protected(row['task_id']) or row['state'] in ('claimed', 'writing', 'sealing'):
                 raise TaskError('artifact is owned by an active task', 409)
             self._update(artifact_id, state='deleted', updated=time.time())
             self._unlink(artifact_id)
@@ -300,7 +300,7 @@ class TransferArtifacts:
             row = self.get(artifact_id)
             with self._guard:
                 reading = self._readers.get(artifact_id, 0)
-            if reading or row['task_id'] != task_id:
+            if reading or self._maintenance_protected(row['task_id']) or row['task_id'] != task_id:
                 raise TaskError('artifact task changed or reader is still active', 409)
             self._update(artifact_id, state='failed', updated=time.time())
             self._unlink(artifact_id)
@@ -309,12 +309,22 @@ class TransferArtifacts:
         for suffix in ('.part', '.bin'):
             self._path(artifact_id, suffix).unlink(missing_ok=True)
 
+    def _maintenance_protected(self, task_id):
+        """Unknown external executions keep every source file and its quota."""
+        if not task_id:
+            return False
+        with self.store.lock:
+            return self.store.db.execute('SELECT 1 FROM flash_resource_holds WHERE task_id=? LIMIT 1',
+                                         (task_id,)).fetchone() is not None
+
     def recover(self):
         """Run after task restart recovery; never replay board commands."""
         with self.store.lock:
             rows = [dict(row) for row in self.store.db.execute('SELECT * FROM transfer_artifacts')]
         for row in rows:
             with self._lock(row['id']):
+                if self._maintenance_protected(row['task_id']):
+                    continue
                 state = row['state']
                 if state == 'claimed':
                     with self.store.lock:
@@ -350,6 +360,8 @@ class TransferArtifacts:
                     if self._readers.get(row['id'], 0):
                         continue
                 current = self.get(row['id'])
+                if self._maintenance_protected(current['task_id']):
+                    continue
                 ttl = self.policy.idle_seconds if current['state'] == 'receiving' else self.policy.ready_seconds
                 if current['state'] not in ('receiving', 'ready', 'available') or current['updated'] + ttl > now:
                     continue

@@ -281,3 +281,38 @@ use the same persistent task API, actor scope, ownership and cancellation rules.
 `GET /api/hardware?key=…` discovers permitted actions without running a tool.
 Configuration fixes argv and optional exclusive UART handoff; clients cannot
 choose host executables or image paths. See [HARDWARE_EXTENSIONS.md](HARDWARE_EXTENSIONS.md).
+
+## Board-level flash tasks
+
+`kind=flash` uses an immutable preview returned by `/api/flash-plan` and a
+registered board serial. Submit `plan_id`, `binding_revision` and a unique
+`request_id`. Its board target is independent of a UART `connection_id`, so an
+offline board or an expected serial reconnection does not select a different
+flash target. Existing identify, SSH, transfer and hardware tasks retain their
+connection checks. This local flow assumes the board is already in download
+mode; it does not reset the board.
+
+A flash task reserves its board and configured flash endpoint across UART
+disconnects. Passive serial capture continues, while competing input, probe,
+transfer and hardware actions are refused. Different boards may run in parallel
+when they use distinct resources. Details are exposed as `task.flash`; execution
+events are retained in a separate bounded stream queried through
+`GET /api/flash-events?id=…&after=…&key=…` rather than filling the final task result.
+Use the returned cursor and observe a reported retention gap.
+
+Repeated submission with the same actor, `request_id` and input digest returns
+the original task, including after completion. A reused request ID with changed
+input is rejected. Browser reconnection queries the original task instead of
+restarting the operation. Results distinguish `write_result`, `verify_result`
+and `boot_result`; a completed write with no boot observation is not a boot pass.
+Cancellation and timeout do not roll back writes or trigger automatic retries.
+On restart, unfinished tasks become `interrupted`; flash recovery ownership
+remains until executor cleanup can be confirmed, and no write is replayed.
+
+If the real partition layout becomes available only after temporary loader
+preparation, the same task pauses at `awaiting-selection` for up to ten minutes.
+`/api/flash-selection` previews the chosen storage/partition payloads against
+that task's `layout_digest`, then accepts its immutable `plan_id` and a unique
+selection `request_id`. The commit is deduplicated; it does not create another
+task or prepare the loader again. Cancellation or expiry stops the waiting
+operation without writing storage.

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -107,6 +108,56 @@ class KernelFixture:
 
 
 class WindowsProcessContractTests(unittest.TestCase):
+    def test_capture_stdout_inherits_only_null_and_pipe_writer(self):
+        class PipeKernel(KernelFixture):
+            def __init__(self):
+                super().__init__()
+                self.reader, self.writer = 2 ** 32 + 5, 2 ** 32 + 6
+
+            def CreatePipe(self, reader, writer, security, size):
+                self.assert_inheritable = dereference(security, win.SecurityAttributes).bInheritHandle
+                dereference(reader, win.HANDLE).value = self.reader
+                dereference(writer, win.HANDLE).value = self.writer
+                return True
+
+            def SetHandleInformation(self, handle, mask, flags):
+                assert handle.value == self.reader and mask == 1 and flags == 0
+                return True
+
+            def UpdateProcThreadAttribute(self, attributes, flags, name, value, size, previous, returned):
+                if name == 0x20002:
+                    assert size == 2 * C.sizeof(win.HANDLE)
+                    self.handles = list(C.cast(value, C.POINTER(win.HANDLE))[:2])
+                    # The existing fixture's creation checks stay applicable.
+                    self.attributes[name] = self.null
+                    return True
+                return super().UpdateProcThreadAttribute(attributes, flags, name, value, size, previous, returned)
+
+            def CreateProcessW(self, *arguments):
+                startup = dereference(arguments[-2], win.StartupInfoEx)
+                assert startup.StartupInfo.hStdOutput == self.writer
+                return super().CreateProcessW(*arguments)
+
+        kernel = PipeKernel()
+        read_descriptor, write_descriptor = os.pipe()
+        opened = []
+        def open_handle(handle, flags):
+            opened.append(handle)
+            return read_descriptor
+        with mock.patch.dict(sys.modules, {'msvcrt': types.SimpleNamespace(open_osfhandle=open_handle)}), \
+                mock.patch.object(os, 'O_BINARY', 0, create=True):
+            process = win.WindowsProcess([sys.executable], kernel, capture_stdout=True)
+        self.assertEqual(kernel.handles, [kernel.null, kernel.writer])
+        self.assertEqual(opened, [kernel.reader])
+        self.assertEqual(kernel.assert_inheritable, 1)
+        self.assertIn(kernel.writer, kernel.closed)
+        self.assertNotIn(kernel.reader, kernel.closed)
+        os.write(write_descriptor, b'{"event":"phase"}\n')
+        os.close(write_descriptor)
+        self.assertEqual(process.stdout.readline(), b'{"event":"phase"}\n')
+        process.close()
+        process.stdout.close()
+
     def test_x64_abi_uses_windows_fixed_width_fields_and_pointer_sized_handles(self):
         self.assertEqual(C.sizeof(win.DWORD), 4)
         if C.sizeof(win.HANDLE) == 8:

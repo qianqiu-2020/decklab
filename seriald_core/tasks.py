@@ -61,6 +61,41 @@ class TaskStore:
                                      [(task_id, serial, connection) for serial, connection in normalized])
         return task_id
 
+    def create_board(self, kind, actor, client_id, serial, request_id, input_digest,
+                     details, resources, connection_id=None, *, initial_state='queued',
+                     resource_state='active', error=''):
+        """Atomically bind one execution, idempotency key and durable resource holds."""
+        from .flash_store import encode_document, validate_request
+        validate_request(request_id, input_digest)
+        if kind not in ('flash', 'flash-inspect') or not isinstance(actor, str) or not actor or len(actor) > 80:
+            raise TaskError('invalid board task kind or actor')
+        if not isinstance(client_id, str) or len(client_id) > 80:
+            raise TaskError('invalid board task client')
+        if not isinstance(serial, str) or not serial or len(serial.encode()) > 100:
+            raise TaskError('invalid board task serial')
+        if connection_id is not None and (not isinstance(connection_id, str) or not connection_id
+                                           or len(connection_id) > 80):
+            raise TaskError('invalid board task connection snapshot')
+        if ((initial_state, resource_state) not in (('queued', 'active'), ('failed', 'recovery'))
+                or not isinstance(error, str) or len(error) > 2048):
+            raise TaskError('invalid board task initial state')
+        encoded = encode_document(details)
+        task_id, now = secrets.token_hex(12), time.time()
+        with self.store.lock, self.store.db:
+            if self.store.db.execute('SELECT serial FROM boards WHERE serial=?', (serial,)).fetchone() is None:
+                raise TaskError('flash board is not registered', 404)
+            self.store.db.execute('INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                (task_id, kind, actor, client_id if actor == 'web' else '', initial_state, '{}', None, error, now, now, 0))
+            self.store.db.execute('INSERT INTO task_board_targets VALUES(?,?)', (task_id, serial))
+            if connection_id is not None:
+                self.store.db.execute('INSERT INTO task_targets VALUES(?,?,?)', (task_id, serial, connection_id))
+            self.store.db.execute('INSERT INTO flash_requests VALUES(?,?,?,?)',
+                                  (actor, request_id, input_digest, task_id))
+            self.store.db.execute('INSERT INTO flash_details VALUES(?,?,0)', (task_id, encoded))
+            self.store.db.executemany('INSERT INTO flash_resource_holds VALUES(?,?,?,?)',
+                [(resource, task_id, resource_state, now) for resource in resources])
+        return task_id
+
     def get(self, task_id):
         with self.store.lock:
             row = self.store.db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
@@ -72,6 +107,15 @@ class TaskStore:
                 'LEFT JOIN connection_identities c ON c.connection_id=t.connection_id '
                 'WHERE task_id=? ORDER BY t.serial,t.connection_id',
                 (task_id,))]
+            board_targets = [row[0] for row in self.store.db.execute(
+                'SELECT serial FROM task_board_targets WHERE task_id=? ORDER BY serial', (task_id,))]
+            if board_targets:
+                record['board_targets'] = board_targets
+                detail = self.store.db.execute('SELECT document FROM flash_details WHERE task_id=?',
+                                                (task_id,)).fetchone()
+                if detail:
+                    from .flash_store import FlashStore
+                    record['flash'] = FlashStore(self.store).public_details(task_id)
         for target in record['targets']:
             if target['resolved_serial'] is None:
                 del target['resolved_serial']
@@ -101,12 +145,16 @@ class TaskStore:
             clauses.append('NOT EXISTS (SELECT 1 FROM task_targets t WHERE t.task_id=tasks.id AND '
                            + effective + ' NOT IN (' + placeholders + '))')
             arguments.extend(serials)
+            clauses.append('NOT EXISTS (SELECT 1 FROM task_board_targets b WHERE b.task_id=tasks.id '
+                           'AND b.serial NOT IN (' + placeholders + '))')
+            arguments.extend(serials)
         if target_serial is not None:
             if not isinstance(target_serial, str) or not target_serial or len(target_serial.encode()) > 100:
                 raise TaskError('invalid task target serial')
-            clauses.append('EXISTS (SELECT 1 FROM task_targets t WHERE t.task_id=tasks.id AND '
-                           + effective + '=?)')
-            arguments.append(target_serial)
+            clauses.append('(EXISTS (SELECT 1 FROM task_targets t WHERE t.task_id=tasks.id AND '
+                           + effective + '=?) OR EXISTS (SELECT 1 FROM task_board_targets b '
+                           'WHERE b.task_id=tasks.id AND b.serial=?))')
+            arguments.extend((target_serial, target_serial))
         if connection_id is not None:
             if not isinstance(connection_id, str) or not connection_id or len(connection_id) > 80:
                 raise TaskError('invalid task connection')
@@ -121,6 +169,8 @@ class TaskStore:
 
     @staticmethod
     def visible_serial(task, serial):
+        if task.get('board_targets'):
+            return all(value == serial for value in task['board_targets'])
         targets = task['targets']
         if len(targets) == 1 and not targets[0]['serial'] and 'resolved_serial' not in targets[0]:
             return task['kind'] == 'identify' and (task.get('result') or {}).get('serial') == serial
@@ -163,9 +213,12 @@ class TaskStore:
 
     def recover(self):
         with self.store.lock, self.store.db:
-            return self.store.db.execute(
+            count = self.store.db.execute(
                 "UPDATE tasks SET state='interrupted',updated=?,error=? WHERE state IN ('queued','running')",
                 (time.time(), 'collector restarted; execution outcome may be partial; not automatically replayed')).rowcount
+            self.store.db.execute("UPDATE flash_resource_holds SET state='recovery',updated=? "
+                                  "WHERE task_id IN (SELECT id FROM tasks WHERE state='interrupted')", (time.time(),))
+            return count
 
 
 class TaskContext:
@@ -230,6 +283,49 @@ class TaskManager:
                 self.store.update(task_id, state='failed', error='worker could not start')
                 raise
         return self.store.get(task_id)
+
+    def start_board(self, kind, actor, client_id, serial, run, *, request_id, input_digest,
+                    details=None, resources=(), maintenance=None, connection_id=None):
+        from .flash_store import FlashStore
+        if not callable(run) or maintenance is None:
+            raise TaskError('board task requires a runner and maintenance coordinator')
+        flashes = FlashStore(self.store.store)
+        with self._lock:
+            previous = flashes.find_request(actor, request_id, input_digest)
+            if previous is not None:
+                return self.store.get(previous)
+            if self._closing:
+                raise TaskError('collector is stopping', 503)
+            if len(self._active) >= self.max_active:
+                raise TaskError('too many active tasks', 429)
+            with maintenance.admission(serial, resources, actor, client_id) as selected:
+                task_id = self.store.create_board(kind, actor, client_id, serial, request_id, input_digest,
+                    details if details is not None else {}, selected, connection_id)
+            context = TaskContext(task_id, self.store)
+            worker = threading.Thread(target=self._run_board, args=(context, run, maintenance), daemon=True)
+            self._active[task_id] = (context, worker)
+            try:
+                worker.start()
+            except Exception:
+                self._active.pop(task_id)
+                self.store.update(task_id, state='failed', error='worker could not start')
+                maintenance.release(task_id, confirmed=True)
+                raise
+        return self.store.get(task_id)
+
+    def _run_board(self, context, run, maintenance):
+        entered = False
+        def invoke(current):
+            nonlocal entered
+            entered = True
+            return run(current)
+        try:
+            self._run(context, invoke)
+        finally:
+            # Cancellation before the worker enters the adapter has no external
+            # side effects. Once entered, only the adapter can confirm cleanup.
+            if not entered:
+                maintenance.release(context.id, confirmed=True)
 
     def _run(self, context, run):
         try:

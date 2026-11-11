@@ -102,7 +102,8 @@ class SerialHealth:
                     d.visibility.finish(token)
                     token = None
         except TransactionError as error:
-            if error.code not in ('busy', 'transfer-busy', 'input-owned', 'stale', 'disconnected', 'cancelled'):
+            if error.code not in ('busy', 'transfer-busy', 'input-owned', 'board-maintenance',
+                                  'stale', 'disconnected', 'cancelled'):
                 status, reason, delay = 'error', '串口主动探测失败：' + str(error), INTERVAL
         except Exception as error:
             status, reason, delay = 'error', '串口主动探测失败：' + str(error), INTERVAL

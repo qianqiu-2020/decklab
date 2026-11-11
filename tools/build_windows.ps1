@@ -75,7 +75,8 @@ try {
     & $python -m unittest discover -s tests -p test_profiles.py
     if ($LASTEXITCODE -ne 0) { throw 'Configuration tests failed.' }
     foreach ($suite in @('test_cli.py', 'test_schema.py', 'test_identity.py', 'test_identity_association.py',
-                         'test_tasks.py', 'test_task_actions.py',
+                         'test_tasks.py', 'test_task_actions.py', 'test_flash_foundation.py',
+                         'test_flash_runner.py', 'test_flash_integration.py', 'test_flash_recovery.py',
                          'test_transfer_artifacts.py', 'test_file_tasks.py',
                          'test_transfer_tasks.py', 'test_input_ownership.py',
                          'test_models.py', 'test_maintenance.py', 'test_agent_grants.py',

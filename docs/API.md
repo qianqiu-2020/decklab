@@ -242,6 +242,52 @@ transfer ID, connection ID and byte offsets; new clients should prefer tasks to
 avoid coordinating serial chunks themselves. Hardware task configuration and
 exclusive UART ownership are documented in [HARDWARE_EXTENSIONS.md](HARDWARE_EXTENSIONS.md).
 
+### Board-level flashing
+
+The dedicated `flash` task is separate from the legacy `hardware-flash` fixed
+command. It uses an administrator-configured local executor and an already
+registered board serial. Enter download mode before submitting; this flow does
+not operate reset pins. UART is optional and its connection generation is not
+the flash target. Other connection-bound operations keep their existing guards.
+
+| Method and route | Parameters / behavior |
+| --- | --- |
+| GET `/api/flash-capabilities` | `key`, expected `serial`; configured execution location, supported modes and ready artifacts; no reset or storage write |
+| POST `/api/flash-plan` | `key`, `serial`, `artifact_id`, `mode` (`full` or `partitions`), `binding_revision`, `verify` (`if-supported` or `required`), optional `selections` and optional full-disk `target_storage`; returns an immutable plan preview |
+| GET `/api/flash-events` | `key`, `serial`, task `id` and nonnegative `after` event cursor; bounded events and flash details |
+| POST `/api/flash-selection` | For the same task in `awaiting-selection`, `id`, `layout_digest` and `selections` with `preview=true` return a preview; submit its `plan_id` and unique `request_id` to continue |
+| POST `/api/flash-recovery` | Human-only recovery receipt: `key`, `serial`, task `id`, expected `attempt_id`, nonempty `reason` and `confirm_stopped=true`; releases recovery resources after the operator verifies the original executor stopped |
+| POST `/api/task-start`, `kind=flash` | `key`, `serial`, `plan_id`, `binding_revision` and unique `request_id`; creates or retrieves the same durable task |
+
+Partition selections contain `storage`, `partition` and `artifact_id`. Storage
+and partition together identify a destination; two disks may have the same
+partition name. A partition plan retains `write_layout=false`. Preview shows
+all writes, sizes and SHA-256 values. Missing reliable target layout, unsupported
+raw disk handling, capacity mismatch or required verification prevents writing.
+No request accepts an executable, command arguments or an arbitrary host path.
+For an original full disk image, `target_storage` fixes the exact storage ID;
+multiple eligible disks require an explicit selection. This parameter does not
+redirect package entries to another disk or apply to partition mode.
+When inspection requires a temporary loader, the preview marks preparation as
+pending; only the submitted task may load it. A partition task without a final
+selection waits for up to ten minutes after reading the real layout. Preview
+and commit refer to that same layout digest and task; they do not repeat loader
+preparation. Missing or changed layout rejects the selection before writing.
+
+Keep a submission's `request_id` when its response is lost. Reusing it with the
+same input retrieves the original task; different input is rejected. Poll the
+existing task and event cursor after a page reload. Closing a page does not stop
+execution. Query and cancellation use the ordinary task endpoints and actor
+scope. Cancellation may leave a partially written target. Write, verification
+and boot results are recorded separately; writing does not prove that an
+operating system booted. A restart never replays the write, and uncertain process
+cleanup keeps the board reserved for recovery.
+An inspection process with uncertain cleanup also creates a failed
+`flash-inspect` record with `recovery_required=true`; the failed preview response
+includes its `task_id`. Query it without retrying the inspection. Recovery
+confirmation records the operator's check, keeps the original task result and
+state, and does not retry, resume or declare the image successfully written.
+
 All low-level transfer POSTs include `key`, expected `serial`, `actor`, optional
 human `client_id` and the current `connection_id`. They return HTTP 200 plus
 `ok=true` on success; the transfer ID is separate from a background task ID.

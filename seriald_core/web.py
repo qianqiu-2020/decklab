@@ -21,6 +21,7 @@ from .maintenance import disk_status, diagnostic_summary
 from .task_actions import TaskActions
 from .artifact_actions import ArtifactActions, body_limit
 from .tasks import TaskError
+from .flash_tasks import FlashActions
 from .request_json import load_object
 from .terminal_backend import screen_for, terminal_payload
 
@@ -282,6 +283,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             actor = self.headers.get('X-Seriald-Actor') or 'web'
             return self._json(200, self.manager.hardware.available(device.serial or '', actor))
 
+        if route == '/api/flash-capabilities':
+            device = self._dev(q)
+            # Flashing belongs to the registered board across UART generations.
+            # Connection-scoped grants still fail _dev's explicit generation check.
+            self._read_guard = None
+            result = FlashActions(self.manager).capabilities(
+                device, self.headers.get('X-Seriald-Actor') or 'web')
+            return self._json(result.status, result.payload)
+
+        if route == '/api/flash-events':
+            result = FlashActions(self.manager).events(
+                (q.get('id') or [''])[0], (q.get('after') or ['0'])[0],
+                self.headers.get('X-Seriald-Actor') or 'web',
+                (q.get('serial') or [None])[0],
+                self.headers.get('X-Seriald-Connection'))
+            return self._json(result.status, result.payload)
+
         if route == '/api/operation':
             device = self._dev(q)
             if not device:
@@ -396,6 +414,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         actor = str(payload.get('actor') or 'web')[:80]
         if route == '/api/artifact-create':
             result = ArtifactActions(self.manager).execute('create', payload, actor, d)
+            return self._json(result.status, result.payload)
+        if route == '/api/flash-plan':
+            result = FlashActions(self.manager).plan(payload, d, actor)
+            return self._json(result.status, result.payload)
+        if route == '/api/flash-selection':
+            result = FlashActions(self.manager).selection(payload, d, actor)
+            return self._json(result.status, result.payload)
+        if route == '/api/flash-recovery':
+            result = FlashActions(self.manager).recovery(payload, d, actor)
             return self._json(result.status, result.payload)
         if route == '/api/task-start':
             result = TaskActions(self.manager).start(payload, d, actor)

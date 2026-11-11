@@ -95,8 +95,28 @@ def _registry_ssh_credentials(db):
                'ssh_user TEXT NOT NULL, ssh_password TEXT NOT NULL, revision INTEGER NOT NULL)')
 
 
+def _registry_flashing(db):
+    db.execute('CREATE TABLE IF NOT EXISTS task_board_targets ('
+               'task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, '
+               'serial TEXT NOT NULL REFERENCES boards(serial) ON UPDATE CASCADE, PRIMARY KEY(task_id,serial))')
+    db.execute('CREATE INDEX IF NOT EXISTS task_board_identity ON task_board_targets(serial,task_id)')
+    db.execute('CREATE TABLE IF NOT EXISTS flash_plans (id TEXT PRIMARY KEY, actor TEXT NOT NULL, '
+               'serial TEXT NOT NULL REFERENCES boards(serial) ON UPDATE CASCADE, digest TEXT NOT NULL, '
+               'document TEXT NOT NULL, created REAL NOT NULL)')
+    db.execute('CREATE TABLE IF NOT EXISTS flash_requests (actor TEXT NOT NULL, request_id TEXT NOT NULL, '
+               'input_digest TEXT NOT NULL, task_id TEXT NOT NULL REFERENCES tasks(id), '
+               'PRIMARY KEY(actor,request_id))')
+    db.execute('CREATE TABLE IF NOT EXISTS flash_details (task_id TEXT PRIMARY KEY REFERENCES tasks(id), '
+               'document TEXT NOT NULL, next_event INTEGER NOT NULL DEFAULT 0)')
+    db.execute('CREATE TABLE IF NOT EXISTS flash_events (task_id TEXT NOT NULL REFERENCES tasks(id), '
+               'cursor INTEGER NOT NULL, document TEXT NOT NULL, PRIMARY KEY(task_id,cursor))')
+    db.execute('CREATE TABLE IF NOT EXISTS flash_resource_holds (resource TEXT PRIMARY KEY, '
+               'task_id TEXT NOT NULL REFERENCES tasks(id), state TEXT NOT NULL, updated REAL NOT NULL)')
+
+
 REGISTRY_MIGRATIONS = (_registry_initial, _registry_history, _registry_tasks, _registry_artifacts,
-                       _registry_connections, _registry_probe_settings, _registry_ssh_credentials)
+                       _registry_connections, _registry_probe_settings, _registry_ssh_credentials,
+                       _registry_flashing)
 GRANT_MIGRATIONS = (_grants_initial, _grants_connections)
 _SCHEMAS = {
     'registry': (0x444C5247, REGISTRY_MIGRATIONS, {
@@ -111,6 +131,12 @@ _SCHEMAS = {
         'connection_identities': 'connection_id serial identified',
         'probe_settings': 'port document',
         'ssh_credentials': 'serial ssh_user ssh_password revision',
+        'task_board_targets': 'task_id serial',
+        'flash_plans': 'id actor serial digest document created',
+        'flash_requests': 'actor request_id input_digest task_id',
+        'flash_details': 'task_id document next_event',
+        'flash_events': 'task_id cursor document',
+        'flash_resource_holds': 'resource task_id state updated',
     }),
     'grants': (0x444C4147, GRANT_MIGRATIONS, {
         'grants': 'id token_hash actor scope serial created expires revoked key connection_id',

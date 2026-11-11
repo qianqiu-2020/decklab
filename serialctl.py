@@ -49,15 +49,18 @@ class Client:
         self.token = token
 
     def request(self, route, payload=None, query=None, timeout=None):
+        board_scoped = route in ('/api/flash-capabilities', '/api/flash-plan', '/api/flash-selection',
+                                '/api/flash-recovery', '/api/flash-events') or (
+            route == '/api/task-start' and isinstance(payload, dict) and payload.get('kind') == 'flash')
         if payload is not None:
             payload = dict(payload, actor=self.actor)
             if self.serial and payload.get('key') and route != '/api/task-cancel':
                 payload['serial'] = self.serial
-            if self.connection_id and payload.get('key') and route != '/api/task-cancel':
+            if self.connection_id and payload.get('key') and route != '/api/task-cancel' and not board_scoped:
                 payload.setdefault('connection_id', self.connection_id)
         if query and self.serial and query.get('key') and route not in ('/api/tasks', '/api/task'):
             query = dict(query, serial=self.serial)
-        if query and self.connection_id and query.get('key') and route not in ('/api/tasks', '/api/task'):
+        if query and self.connection_id and query.get('key') and route not in ('/api/tasks', '/api/task') and not board_scoped:
             query = dict(query, connection_id=self.connection_id)
         url = self.url + route
         if query:
@@ -265,15 +268,13 @@ def positive_timeout(value):
     return value
 
 
-def stage_upload_task(client, local, remote, overwrite=False):
-    """Send a bounded host artifact, then let the collector own UART transfer."""
+def stage_upload_artifact(client, local):
+    """Prepare a bounded, checksum-verified upload without operating the board."""
     path = Path(local).expanduser()
     if not path.is_file():
         raise ClientError('Local source must be a regular file')
     artifact = client.post('/api/artifact-create', name=path.name, size=path.stat().st_size)['artifact']
-    # A lost task-start response must never trigger deletion or automatic replay:
-    # the collector may already have claimed the artifact.
-    submitted = False
+    complete = False
     try:
         offset, digest = 0, hashlib.sha256()
         with path.open('rb') as source:
@@ -290,15 +291,53 @@ def stage_upload_task(client, local, remote, overwrite=False):
         sealed = client.post('/api/artifact-seal', id=artifact['id'])['artifact']
         if sealed.get('size') != offset or sealed.get('sha256') != digest.hexdigest():
             raise ClientError('Host staging SHA-256 mismatch')
-        submitted = True
-        return client.post('/api/task-start', kind='file-upload', artifact_id=artifact['id'],
-                           path=remote, overwrite=overwrite, connection_id=client.connection_id)
+        complete = True
+        return dict(sealed, id=artifact['id'])
     finally:
-        if not submitted:
+        if not complete:
             try:
                 client.post('/api/artifact-delete', id=artifact['id'])
             except ClientError:
                 pass  # Idle artifact expiry handles unreachable staging services.
+
+
+def stage_upload_task(client, local, remote, overwrite=False):
+    """Send a host artifact, then let the collector own UART transfer."""
+    artifact = stage_upload_artifact(client, local)
+    # A lost task-start response must never trigger deletion or automatic replay:
+    # the collector may already have claimed the artifact.
+    return client.post('/api/task-start', kind='file-upload', artifact_id=artifact['id'],
+                       path=remote, overwrite=overwrite, connection_id=client.connection_id)
+
+
+def flash_plan(client, artifact_id, mode, selections, verify, target_storage=None):
+    if mode == 'full' and (not artifact_id or selections):
+        raise ClientError('Full image mode requires --artifact and does not accept --partition')
+    if mode == 'partitions' and not artifact_id and not selections:
+        raise ClientError('Partition mode requires --artifact to prepare selection, or at least one --partition')
+    if mode == 'partitions' and not artifact_id:
+        artifact_id = selections[0][2]
+    if target_storage and mode != 'full':
+        raise ClientError('--target-storage selects a complete disk; partition mode uses --partition')
+    payload = {'mode': mode, 'verify': verify, 'selections': [
+        {'storage': storage, 'partition': partition, 'artifact_id': artifact}
+        for storage, partition, artifact in selections]}
+    if artifact_id:
+        payload['artifact_id'] = artifact_id
+    if target_storage:
+        payload['target_storage'] = target_storage
+    return client.post('/api/flash-plan', **payload)
+
+
+def submit_flash_request(client, route, request_id, **payload):
+    try:
+        return client.post(route, request_id=request_id, **payload)
+    except ClientError as error:
+        if error.status is not None:
+            raise
+        raise ClientError('Flash request %s: %s; submission is unconfirmed. Inspect tasks, '
+                          'or retry the identical plan with the same request ID.'
+                          % (request_id, error)) from error
 
 
 def wait_task(client, response):
@@ -450,6 +489,41 @@ def parser():
     commands.add_parser('capabilities', help='show supported protocol features without accessing boards')
     commands.add_parser('diagnostics', help='export a sanitized platform summary without logs or credentials')
     commands.add_parser('hardware', help='list configured board hardware actions without executing them')
+    commands.add_parser('flash-capabilities', help='inspect configured flashing capabilities without resetting the board')
+    flash_upload = commands.add_parser('flash-upload', help='stage an image with size/SHA-256 verification; does not flash')
+    flash_upload.add_argument('--local', required=True, help='local image or flashing package')
+    flash_preview = commands.add_parser('flash-plan', help='preview exact image/partition writes; does not reset or flash')
+    flash_preview.add_argument('--artifact', help='sealed image artifact returned by flash-upload')
+    flash_preview.add_argument('--mode', choices=('full', 'partitions'), default='full')
+    flash_preview.add_argument('--partition', nargs=3, action='append', default=[],
+                               metavar=('STORAGE', 'PARTITION', 'ARTIFACT'),
+                               help='explicit storage/partition and sealed payload; omit to prepare partition selection')
+    flash_preview.add_argument('--verify', choices=('required', 'if-supported'), default='if-supported')
+    flash_preview.add_argument('--target-storage', help='explicit storage ID for a complete disk image')
+    flash_start = commands.add_parser('flash-start', help='start one previewed flash; assumes download mode is ready')
+    flash_start.add_argument('plan_id')
+    flash_start.add_argument('--binding-revision', required=True, type=nonnegative)
+    flash_start.add_argument('--request-id', required=True,
+                             help='stable submission ID; reuse only for this exact plan after a lost response')
+    flash_events = commands.add_parser('flash-events', help='read bounded flash events after a saved cursor')
+    flash_events.add_argument('id', help='flash task ID')
+    flash_events.add_argument('--after', type=nonnegative, default=0)
+    flash_selection = commands.add_parser('flash-selection', help='preview selected partitions in an awaiting-selection task')
+    flash_selection.add_argument('id', help='original flash task ID')
+    flash_selection.add_argument('--layout-digest', required=True, help='actual layout digest returned by the task')
+    flash_selection.add_argument('--partition', nargs=3, action='append', required=True,
+                                 metavar=('STORAGE', 'PARTITION', 'ARTIFACT'))
+    flash_continue = commands.add_parser('flash-continue', help='submit the final preview to the same waiting flash task')
+    flash_continue.add_argument('id', help='original flash task ID')
+    flash_continue.add_argument('--layout-digest', required=True)
+    flash_continue.add_argument('--plan-id', required=True, help='plan returned by flash-selection')
+    flash_continue.add_argument('--request-id', required=True, help='stable ID for this exact selection submission')
+    flash_recovery = commands.add_parser('flash-recovery', help='confirm a stopped executor and release its recovery hold; web owner only')
+    flash_recovery.add_argument('id', help='original interrupted or failed flash task ID')
+    flash_recovery.add_argument('--attempt-id', required=True, help='original execution attempt from task details')
+    flash_recovery.add_argument('--reason', required=True, help='how execution termination was independently checked')
+    flash_recovery.add_argument('--confirm-stopped', action='store_true', required=True,
+                                help='explicit confirmation that no executor process remains active')
     tasks = commands.add_parser('tasks', help='list durable tasks; optionally select a device')
     tasks.add_argument('--limit', type=nonnegative, default=20)
     tasks.add_argument('--offset', type=nonnegative, default=0)
@@ -564,6 +638,29 @@ def main(argv=None):
             client.select(args.device)
             if args.action == 'task-start':
                 result = client.post('/api/task-start', kind=args.kind, connection_id=client.connection_id)
+            elif args.action == 'flash-capabilities':
+                result = client.get('/api/flash-capabilities')
+            elif args.action == 'flash-upload':
+                if not client.serial:
+                    raise ClientError('Flashing requires a registered board serial')
+                result = {'ok': True, 'artifact': stage_upload_artifact(client, args.local)}
+            elif args.action == 'flash-plan':
+                result = flash_plan(client, args.artifact, args.mode, args.partition, args.verify, args.target_storage)
+            elif args.action == 'flash-start':
+                result = submit_flash_request(client, '/api/task-start', args.request_id, kind='flash',
+                                              plan_id=args.plan_id, binding_revision=args.binding_revision)
+            elif args.action == 'flash-events':
+                result = client.get('/api/flash-events', id=args.id, after=args.after)
+            elif args.action == 'flash-selection':
+                result = client.post('/api/flash-selection', id=args.id, layout_digest=args.layout_digest,
+                    preview=True, selections=[{'storage': storage, 'partition': partition, 'artifact_id': artifact}
+                                              for storage, partition, artifact in args.partition])
+            elif args.action == 'flash-continue':
+                result = submit_flash_request(client, '/api/flash-selection', args.request_id, id=args.id,
+                                              layout_digest=args.layout_digest, plan_id=args.plan_id)
+            elif args.action == 'flash-recovery':
+                result = client.post('/api/flash-recovery', id=args.id, attempt_id=args.attempt_id,
+                                     reason=args.reason, confirm_stopped=args.confirm_stopped)
             elif args.action == 'read':
                 result, data = client.read(args.sid, args.off)
                 dropped = max(0, len(data) - args.tail) if args.tail else 0

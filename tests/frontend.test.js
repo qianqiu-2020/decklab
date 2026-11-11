@@ -1,4 +1,5 @@
 require('./serial-progress.test.js');
+require('./flashing.test.js');
 'use strict';
 
 // 无浏览器、无网络、无 tty：执行页面原脚本，用可控的延迟模拟最危险的交错。

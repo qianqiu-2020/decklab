@@ -51,6 +51,7 @@
         <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>识别设备</button>
         <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-info"/></svg>设备信息</button>
         <button id="b-probe-settings" type="button">探测设置</button>
+        <button id="b-flash" type="button">刷机</button>
         <button id="b-device-share" type="button" hidden title="分享链接直接打开当前设备；网页访问授权覆盖整个平台"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>分享设备</button>
         <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>分享给 Agent</button>
         <select id="language-select-detail" aria-label="Language / 语言" title="Language / 语言" data-language-select data-i18n-ignore><option value="zh-CN">中文</option><option value="en">English</option></select>
@@ -217,6 +218,33 @@ PasswordAuthentication yes</code></pre>
   <div id="ft-status" role="status">选择文件或填写绝对路径后开始。</div>
   <div class="ft-actions"><button id="ft-cancel" type="button" disabled>取消传输</button><button class="pri" id="ft-start" type="button">开始传输</button></div>
 </dialog>
+<dialog id="flash-dialog" class="flash-dialog" aria-labelledby="fl-title">
+  <div class="fl-head"><div><strong id="fl-title">刷机</strong><small id="fl-board" data-i18n-ignore></small></div><button id="fl-close" type="button">关闭</button></div>
+  <p class="fl-intro">请先让开发板进入下载模式。本次仅执行刷写，不控制复位；串口可继续被动观察。</p>
+  <dl id="fl-connections" class="fl-connections"></dl>
+  <div class="fl-inputs">
+    <label class="ft-field">镜像文件<input id="fl-files" type="file" multiple></label>
+    <button id="fl-upload" type="button">上传镜像</button>
+    <label class="ft-field">已准备镜像<select id="fl-artifact"></select></label>
+    <label class="ft-field">刷写方式<select id="fl-mode"><option value="full">完整镜像</option><option value="partitions">指定分区</option></select></label>
+    <label class="ft-field" id="fl-target-storage-field">原始整盘目标存储<select id="fl-target-storage"></select><small>仅用于原始磁盘镜像；刷机包始终按包内映射列出全部写入范围。</small></label>
+    <label class="ft-field">回读校验<select id="fl-verify"><option value="if-supported">能力支持时校验</option><option value="required">必须回读校验</option></select></label>
+  </div>
+  <fieldset id="fl-partitions-field" hidden><legend>选择存储、分区和载荷</legend><div id="fl-partitions"></div></fieldset>
+  <button id="fl-plan" type="button">预览写入范围</button>
+  <div id="fl-preview" class="fl-preview"></div>
+  <progress id="fl-progress" max="1" value="0" aria-label="刷机进度"></progress>
+  <p id="fl-status" role="status"></p>
+  <p id="fl-task-id" class="log-note" data-i18n-ignore></p>
+  <dl id="fl-results" class="fl-connections"></dl>
+  <fieldset id="fl-recovery-field" hidden><legend>恢复占用待处理</legend>
+    <p>执行器退出尚未确认。仅在你已确认外部刷机进程停止后释放占用；释放不表示写入成功，也不改变原任务结果。</p>
+    <label class="ft-field">确认依据<input id="fl-recovery-reason" type="text" maxlength="1000" placeholder="填写已确认进程停止的检查方式和结果"></label>
+    <button id="fl-release" type="button" disabled>确认外部刷机进程已停止，释放占用</button>
+  </fieldset>
+  <details><summary>执行事件</summary><p id="fl-event-status" role="status"></p><pre id="fl-events" data-i18n-ignore></pre></details>
+  <div class="ft-actions"><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+</dialog>
 <dialog id="probe-settings-dialog" class="probe-settings-dialog" aria-labelledby="probe-settings-title">
   <div class="agent-share-head"><strong id="probe-settings-title">探测设置</strong><button id="probe-settings-close" type="button">关闭</button></div>
   <p id="probe-settings-target" data-i18n-ignore></p>
@@ -285,6 +313,7 @@ Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\seriald-mcp.exe'</code></pre>
 <script src="/static/devices.js"></script>
 <script src="/static/tasks.js"></script>
 <script src="/static/file-transfer.js"></script>
+<script src="/static/flashing.js"></script>
 <script src="/static/boot-compare.js"></script>
 <script src="/static/share.js"></script>
 <script src="/static/app.js"></script>

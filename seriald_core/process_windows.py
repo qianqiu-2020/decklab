@@ -77,6 +77,8 @@ class NativeKernel:
             'WaitForSingleObject': (DWORD, [HANDLE, DWORD]),
             'GetExitCodeProcess': (BOOL, [HANDLE, C.POINTER(DWORD)]),
             'CloseHandle': (BOOL, [HANDLE]),
+            'CreatePipe': (BOOL, [C.POINTER(HANDLE), C.POINTER(HANDLE), C.POINTER(SecurityAttributes), DWORD]),
+            'SetHandleInformation': (BOOL, [HANDLE, DWORD, DWORD]),
         }
         for name, (result, arguments) in signatures.items():
             function = getattr(self.api, name)
@@ -90,14 +92,16 @@ class NativeKernel:
 
 
 class WindowsProcess:
-    def __init__(self, argv, kernel=None):
+    def __init__(self, argv, kernel=None, capture_stdout=False):
         self.kernel = kernel if kernel is not None else NativeKernel()
         self.job, self.process, self.returncode = None, None, None
+        self.stdout = None
         command = subprocess.list2cmdline(argv)
         if len(command.encode('utf-16-le')) // 2 >= 32767:
             raise ValueError('hardware command exceeds Windows command-line limit')
         k = self.kernel
         null, attributes, initialized, thread = None, None, False, None
+        pipe_read, pipe_write = HANDLE(), HANDLE()
         try:
             self.job = k.CreateJobObjectW(None, None)
             if not self.job:
@@ -110,6 +114,9 @@ class WindowsProcess:
             if null in (None, 0, HANDLE(-1).value):
                 null = None
                 raise k.error('CreateFileW')
+            if capture_stdout:
+                self._require(k.CreatePipe(C.byref(pipe_read), C.byref(pipe_write), C.byref(security), 0), 'CreatePipe')
+                self._require(k.SetHandleInformation(pipe_read, 1, 0), 'SetHandleInformation')
             size = SIZE_T()
             k.InitializeProcThreadAttributeList(None, 2, 0, C.byref(size))
             if not size.value:
@@ -117,7 +124,8 @@ class WindowsProcess:
             attributes = C.create_string_buffer(size.value)
             self._require(k.InitializeProcThreadAttributeList(attributes, 2, 0, C.byref(size)), 'InitializeProcThreadAttributeList')
             initialized = True
-            jobs, handles = (HANDLE * 1)(self.job), (HANDLE * 1)(null)
+            jobs = (HANDLE * 1)(self.job)
+            handles = ((HANDLE * 2)(null, pipe_write.value) if capture_stdout else (HANDLE * 1)(null))
             for name, value in ((0x2000D, jobs), (0x20002, handles)):
                 self._require(k.UpdateProcThreadAttribute(attributes, 0, name, value, C.sizeof(value), None, None),
                               'UpdateProcThreadAttribute')
@@ -125,6 +133,8 @@ class WindowsProcess:
             startup.StartupInfo.cb = C.sizeof(startup)
             startup.StartupInfo.dwFlags = 0x100  # USESTDHANDLES: only the NUL handle is inherited.
             startup.StartupInfo.hStdInput = startup.StartupInfo.hStdOutput = startup.StartupInfo.hStdError = null
+            if capture_stdout:
+                startup.StartupInfo.hStdOutput = pipe_write.value
             startup.lpAttributeList = C.cast(attributes, HANDLE)
             info = ProcessInfo()
             mutable_command = C.create_unicode_buffer(command)
@@ -132,6 +142,17 @@ class WindowsProcess:
                                           0x80000 | 0x8000000, None, None, C.byref(startup), C.byref(info)),
                           'CreateProcessW')  # EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW
             self.process, thread, self.pid = info.hProcess, info.hThread, info.dwProcessId
+            if capture_stdout:
+                # open_osfhandle transfers ownership to the Python stream. The
+                # read handle is never inherited; only the allowlisted writer is.
+                import msvcrt
+                descriptor = msvcrt.open_osfhandle(pipe_read.value, os.O_RDONLY | os.O_BINARY)
+                pipe_read = HANDLE()
+                try:
+                    self.stdout = os.fdopen(descriptor, 'rb', buffering=65536)
+                except BaseException:
+                    os.close(descriptor)
+                    raise
         except BaseException:
             try:
                 self.close()
@@ -145,6 +166,9 @@ class WindowsProcess:
                 k.DeleteProcThreadAttributeList(attributes)
             if null:
                 k.CloseHandle(null)
+            for handle in (pipe_read.value, pipe_write.value):
+                if handle:
+                    k.CloseHandle(handle)
 
     def _require(self, result, operation):
         if not result:

@@ -273,6 +273,121 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(ctl.main(['--device', 'board', 'task-cancel', 'task-id']), 0)
             client.post.assert_called_with('/api/task-cancel', id='task-id')
 
+    def test_flash_requests_pin_board_without_stale_uart_generation(self):
+        client = ctl.Client('http://127.0.0.1:8898')
+        client.key, client.serial, client.connection_id = 'board', 'SN-1', 'old-uart'
+        with mock.patch.object(ctl, 'urlopen', side_effect=lambda *args, **kwargs: response({'ok': True})) as request:
+            for route in ('/api/flash-capabilities', '/api/flash-events'):
+                client.get(route, id='task')
+                url = request.call_args.args[0].full_url
+                self.assertIn('serial=SN-1', url)
+                self.assertNotIn('connection_id=', url)
+            for route, payload in (('/api/flash-plan', {'mode': 'full', 'artifact_id': 'image'}),
+                                   ('/api/flash-selection', {'id': 'task', 'preview': True}),
+                                   ('/api/flash-recovery', {'id': 'task', 'confirm_stopped': True}),
+                                   ('/api/task-start', {'kind': 'flash', 'plan_id': 'plan'})):
+                client.post(route, **payload)
+                body = json.loads(request.call_args.args[0].data)
+                self.assertEqual(body['serial'], 'SN-1')
+                self.assertNotIn('connection_id', body)
+            client.post('/api/task-start', kind='identify')
+            self.assertEqual(json.loads(request.call_args.args[0].data)['connection_id'], 'old-uart')
+
+    def test_flash_cli_preserves_explicit_plan_request_and_event_cursor(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            client = factory.return_value
+            client.get.return_value = {'ok': True}
+            client.post.return_value = {'ok': True}
+            self.assertEqual(ctl.main(['--device', 'board', 'flash-capabilities']), 0)
+            client.get.assert_called_with('/api/flash-capabilities')
+            self.assertEqual(ctl.main(['--device', 'board', 'flash-plan', '--mode', 'partitions',
+                '--partition', 'emmc', 'rootfs', 'payload-1', '--partition', 'nvme', 'rootfs', 'payload-2',
+                '--verify', 'required']), 0)
+            client.post.assert_called_with('/api/flash-plan', mode='partitions', verify='required',
+                artifact_id='payload-1', selections=[
+                {'storage': 'emmc', 'partition': 'rootfs', 'artifact_id': 'payload-1'},
+                {'storage': 'nvme', 'partition': 'rootfs', 'artifact_id': 'payload-2'}])
+            self.assertEqual(ctl.main(['--device', 'board', 'flash-start', 'fixed-plan',
+                '--binding-revision', '7', '--request-id', 'same-submission']), 0)
+            client.post.assert_called_with('/api/task-start', kind='flash', plan_id='fixed-plan',
+                binding_revision=7, request_id='same-submission')
+            self.assertEqual(ctl.main(['--device', 'board', 'flash-events', 'task-id', '--after', '42']), 0)
+            client.get.assert_called_with('/api/flash-events', id='task-id', after=42)
+
+    def test_flash_preview_rejects_ambiguous_write_scope_without_submitting(self):
+        invalid = [
+            (None, 'full', []),
+            ('image', 'full', [('emmc', 'rootfs', 'payload')]),
+            (None, 'partitions', []),
+        ]
+        client = mock.Mock()
+        for artifact, mode, selections in invalid:
+            with self.subTest(mode=mode, selections=selections), self.assertRaises(ctl.ClientError):
+                ctl.flash_plan(client, artifact, mode, selections, 'if-supported')
+        client.post.assert_not_called()
+
+    def test_flash_cli_prepares_then_selects_on_the_same_task(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            client = factory.return_value
+            client.post.return_value = {'ok': True}
+            self.assertEqual(ctl.main(['--device', 'board', 'flash-plan', '--mode', 'partitions',
+                                      '--artifact', 'image']), 0)
+            client.post.assert_called_with('/api/flash-plan', mode='partitions', artifact_id='image',
+                                           selections=[], verify='if-supported')
+            self.assertEqual(ctl.main(['--device', 'board', 'flash-selection', 'original-task',
+                '--layout-digest', 'actual-layout', '--partition', 'nvme', 'rootfs', 'payload']), 0)
+            client.post.assert_called_with('/api/flash-selection', id='original-task',
+                layout_digest='actual-layout', preview=True,
+                selections=[{'storage': 'nvme', 'partition': 'rootfs', 'artifact_id': 'payload'}])
+            self.assertEqual(ctl.main(['--device', 'board', 'flash-continue', 'original-task',
+                '--layout-digest', 'actual-layout', '--plan-id', 'selected-plan', '--request-id', 'selection-001']), 0)
+            client.post.assert_called_with('/api/flash-selection', id='original-task',
+                layout_digest='actual-layout', plan_id='selected-plan', request_id='selection-001')
+            self.assertFalse(any(call.kwargs.get('kind') == 'flash' for call in client.post.call_args_list))
+
+    def test_flash_cli_pins_whole_disk_storage_and_original_recovery_attempt(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()):
+            client = factory.return_value
+            client.post.return_value = {'ok': True}
+            self.assertEqual(ctl.main(['--device', 'board', 'flash-plan', '--artifact', 'disk-image',
+                                      '--target-storage', 'nvme']), 0)
+            client.post.assert_called_with('/api/flash-plan', artifact_id='disk-image', mode='full',
+                selections=[], verify='if-supported', target_storage='nvme')
+            self.assertEqual(ctl.main(['--device', 'board', '--actor', 'web', 'flash-recovery', 'original-task',
+                '--attempt-id', 'original-attempt', '--reason', 'Checked stopped job', '--confirm-stopped']), 0)
+            client.post.assert_called_with('/api/flash-recovery', id='original-task', attempt_id='original-attempt',
+                reason='Checked stopped job', confirm_stopped=True)
+            self.assertFalse(any(call.args[0] == '/api/task-start' for call in client.post.call_args_list))
+        with self.assertRaises(ctl.ClientError):
+            ctl.flash_plan(client, 'image', 'partitions', [('nvme', 'rootfs', 'payload')],
+                           'if-supported', target_storage='emmc')
+
+    def test_flash_upload_only_stages_and_verifies_without_starting_a_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'image.bin'
+            path.write_bytes(b'image bytes')
+            client = mock.Mock()
+            client.post.side_effect = [
+                {'artifact': {'id': 'image-id'}},
+                {'artifact': {'received': path.stat().st_size}},
+                {'artifact': {'size': path.stat().st_size,
+                              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}},
+            ]
+            artifact = ctl.stage_upload_artifact(client, path)
+            self.assertEqual(artifact['id'], 'image-id')
+            self.assertEqual([call.args[0] for call in client.post.call_args_list],
+                ['/api/artifact-create', '/api/artifact-append', '/api/artifact-seal'])
+
+    def test_flash_submission_transport_loss_is_not_replayed(self):
+        with mock.patch.object(ctl, 'Client') as factory, contextlib.redirect_stdout(io.StringIO()) as output:
+            client = factory.return_value
+            client.post.side_effect = ctl.ClientError('response lost')
+            self.assertEqual(ctl.main(['--device', 'board', 'flash-start', 'fixed-plan',
+                '--binding-revision', '7', '--request-id', 'same-submission']), 1)
+            client.post.assert_called_once_with('/api/task-start', kind='flash', plan_id='fixed-plan',
+                binding_revision=7, request_id='same-submission')
+            self.assertIn('response lost', output.getvalue())
+
     def test_boot_marker_write_requires_explicit_cli_flag(self):
         for flag in ([], ['--init-boot-marker']):
             with self.subTest(flag=flag), mock.patch.object(ctl, 'Client') as factory, \

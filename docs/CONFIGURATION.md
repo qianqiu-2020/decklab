@@ -282,6 +282,18 @@ HTTP staging use these limits; browser and background CLI file transfers are int
 
 ## Hardware helpers
 
+`SERIALD_FLASH` selects the optional administrator-owned JSON configuration for
+dedicated board-level flashing. It is disabled when unset. Each registered board
+has a `binding_revision`, board profile, separate manual control/serial endpoint
+descriptions, and a local executor with an absolute executable and fixed USB bus
+and port path. The browser submits managed artifact IDs and plan IDs, never host
+paths or executable arguments. Configure an executor separately; the DeckLab
+Python package does not imply that goflash or a board-specific loader is bundled.
+Enter download mode manually for this flow. See the
+[hardware extension guide](HARDWARE_EXTENSIONS.md) for the adapter contract and
+capacity limits. Reload the collector to replace its cached binding configuration;
+new plans must match the binding revision and contents.
+
 `SERIALD_HARDWARE` optionally selects a bounded JSON file of explicitly configured
 per-serial power/reset/flashing argv (UTF-8 with optional BOM, at most 64 KiB).
 Default is disabled; no automatic action or
@@ -291,7 +303,7 @@ power commands, cancellation and exclusive UART handoff.
 
 ## Configuration review boundaries
 
-The 34 runtime environment names are covered by these groups. Host settings are
+Runtime environment names are covered by these groups. Host settings are
 read by the relevant entrypoint; board, maintenance, staging and helper settings
 belong to the collector. Windows launchers can select listener/authentication
 values before starting the host.
@@ -303,6 +315,7 @@ values before starting the host.
 | Retention and disk warnings | 3 | `maintenance.py`; maintenance tests; see [log operations](LOG_OPERATIONS.md) |
 | Transfer quotas and expiry | 6 | `transfer_artifacts.py`; artifact tests; see [transfer staging](TRANSFER_ARTIFACTS.md) |
 | Hardware helper file | 1 | `hardware.py`; helper/handoff tests; see [hardware extensions](HARDWARE_EXTENSIONS.md) |
+| Board-level flash binding file | 1 | `flash_runner.py`; executor, task, maintenance and HTTP integration tests |
 
 The configuration inventory checker verifies name coverage only. Platform
 behavior requires its adapter tests and installation checks; Linux fixtures and

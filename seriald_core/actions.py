@@ -1,6 +1,7 @@
 """Application actions shared by protocol adapters; no HTTP or global manager."""
 import time
 import re
+from contextlib import nullcontext
 from .results import response
 
 from .config import RESCUE_BIN
@@ -22,7 +23,7 @@ def capabilities():
                      'boot_archives': True, 'boot_compare': True,
                      'custom_probe_commands': True, 'unidentified_terminal_access': True,
                      'operation_status': True, 'operation_cancel': True, 'durable_tasks': True},
-        'tasks': {'kinds': ['identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download']
+        'tasks': {'kinds': ['identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download', 'flash']
                   + ['hardware-' + action for action in ACTIONS], 'restart': 'interrupt',
                   'file_transfer': ['copy', 'upload', 'download']},
         'artifacts': {'chunk_size': 1024 ** 2, 'append_body_limit': 2 * 1024 ** 2, 'download': 'stream'},
@@ -32,6 +33,8 @@ def capabilities():
         'input_ownership': 'optional-client',
         'hardware': {'actions': list(ACTIONS), 'configuration': 'explicit-serial',
                      'host_adapter': host_adapter(), 'default': 'disabled'},
+        'flashing': {'configuration': 'explicit-board-binding', 'default': 'disabled',
+                     'reset': 'manual', 'task_target': 'board'},
     })
 
 
@@ -80,6 +83,14 @@ class DeviceActions:
         if not isinstance(client_id, str) or client_id and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client_id):
             return response(400, {'error': 'invalid client_id'})
         with transactions_for(device).actor_scope(actor, client_id):
+            if action in ('session-send', 'ssh-connect', 'switch-mode', 'session-takeover'):
+                try:
+                    from .board_maintenance import maintenance_for
+                    maintenance = maintenance_for(self.manager)
+                    with maintenance.operation(device.serial) if maintenance is not None else nullcontext():
+                        return self._dispatch(action, payload, device, actor)
+                except TransactionError as error:
+                    return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
             if action in ('send', 'probe', 'identify', 'ssh-enable', 'rescue') or (
                     action.startswith('file-transfer/') and action != 'file-transfer/abort'):
                 try:

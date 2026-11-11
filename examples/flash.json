@@ -1,0 +1,37 @@
+{
+  "boards": {
+    "YOUR-REGISTERED-BOARD-SERIAL": {
+      "binding_revision": 1,
+      "profile": "example-adapter-not-a-board-preset",
+      "profile_data": {
+        "id": "example-adapter-not-a-board-preset",
+        "identity": {"product": "REPLACE-WITH-VERIFIED-PRODUCT"},
+        "storages": [
+          {
+            "id": "emmc",
+            "label": "Example eMMC",
+            "size_getvar": "storage-size:emmc",
+            "sector_size": 512,
+            "sector_size_getvar": "logical-sector-size:emmc",
+            "layout_getvar": "partition-layout:emmc",
+            "partitions": [],
+            "sparse": true
+          }
+        ]
+      },
+      "control": {"provider": "manual", "node": "local"},
+      "console": {"provider": "none", "node": "local"},
+      "flash": {
+        "provider": "goflash",
+        "node": "local",
+        "endpoint": "replace-with-fixed-usb-socket",
+        "argv": ["/usr/local/libexec/decklab-flash"],
+        "device": {"port_path": [1, 4]},
+        "timeout": 3600,
+        "allow_agent": false,
+        "max_expanded_bytes": 34359738368,
+        "max_cache_bytes": 68719476736
+      }
+    }
+  }
+}

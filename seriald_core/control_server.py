@@ -133,13 +133,13 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     trust_loopback = False
     share_seconds = 24 * 60 * 60
     default_language = ''
-    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js',
+    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
     public_agent_files = frozenset(('/serialctl.py', '/seriald_mcp.py', '/requirements-mcp.txt',
                                    '/pyproject.toml', '/skills/seriald-board/SKILL.md'))
     agent_denied_posts = frozenset(('/api/label', '/api/switch-mode', '/api/rescue',
-                                    '/api/ssh-enable', '/api/session-takeover', '/api/probe-settings'))
+                                    '/api/ssh-enable', '/api/session-takeover', '/api/probe-settings', '/api/flash-recovery'))
 
     def guess_type(self, path):
         route = urlparse(self.path).path
@@ -462,6 +462,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
                     payload['serial'] = grant['serial']
                 if grant and grant['scope'] == 'connection':
+                    if route in ('/api/flash-plan', '/api/flash-selection') or (route == '/api/task-start' and payload.get('kind') == 'flash'):
+                        return self._json(403, {'error': '刷机需要已登记板卡范围的授权'})
                     if not payload.get('key') and route not in ('/api/task-cancel',
                             '/api/artifact-append', '/api/artifact-seal', '/api/artifact-delete'):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
@@ -501,7 +503,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     target_path = urlunparse(parsed._replace(query=urlencode(query)))
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
-            if agent_actor or route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware'):
+            if agent_actor or route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware',
+                                       '/api/flash-capabilities', '/api/flash-events'):
                 headers['X-Seriald-Actor'] = agent_actor or 'web'
             if grant and grant['scope'] == 'connection':
                 headers['X-Seriald-Connection'] = grant['connection_id']
@@ -518,7 +521,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             slow = self.command == 'POST' and urlparse(self.path).path in (
                 '/api/identify', '/api/ssh-enable', '/api/ssh-connect',
                 '/api/file-transfer/start', '/api/file-transfer/chunk', '/api/file-transfer/batch',
-                '/api/file-transfer/finish', '/api/file-transfer/abort', '/api/artifact-seal')
+                '/api/file-transfer/finish', '/api/file-transfer/abort', '/api/artifact-seal', '/api/flash-plan', '/api/flash-selection')
             timeout = 300 if slow else 30
             connection = (http.client.HTTPConnection(*self.collector_socket, timeout=timeout)
                           if isinstance(self.collector_socket, tuple)
@@ -682,7 +685,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         return os.path.join(self.static_root, *route.split('/'))
 
     def end_headers(self):
-        if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
+        if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
                                         '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()

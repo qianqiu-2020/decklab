@@ -68,6 +68,11 @@ assert.equal(fixture('en', 'zh-CN').api.locale, 'en');
 assert.equal(fixture('invalid', 'en-US').api.locale, 'en');
 assert.equal(h.api.translate('未知文本'), '未知文本');
 h.api.setLocale('en');
+assert.equal(h.api.translate('载荷 513 字节，扇区尾部补零 511 字节'),
+  'Payload 513 bytes; sector tail zero padding: 511 bytes');
+assert.equal(h.api.translate('写入范围 SHA-256 · 载荷 SHA-256: abc'),
+  'Written-range SHA-256 · Payload SHA-256: abc');
+assert.equal(h.api.translate('写入结果未知或可能部分完成'), 'Write outcome unknown or possibly partial');
 assert.equal(h.api.translate('串口主动探测失败：等待板子完整响应超时'),
   'Serial round-trip probe failed: Timed out waiting for a complete board response');
 for (const [message, expected] of [

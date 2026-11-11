@@ -13,6 +13,11 @@ const probeSettingsPosts = [], grantPosts = [], sshConnectPosts = [];
 // This private fixture store survives page reloads. Only username/status metadata
 // goes through /api/devices; passwords never appear in a fixture API response.
 const savedSshCredentials = new Map(), sshAuthentications = [], fixtureSshSessions = [];
+// Flash fixtures exercise the real UI only. No executor or physical board runs.
+const flashPlans = [], flashSubmissions = [], flashRecords = [], flashRecoveryPosts = [];
+const flashArtifact = {id:'aaaaaaaaaaaaaaaaaaaaaaaa', name:'模拟镜像 · fixture.img', size:1048576, sha256:'a'.repeat(64)};
+const flashStorages = ['emmc', 'nvme'].map(id => ({id, name:id.toUpperCase(), size:8589934592,
+  partitions:[{id:'rootfs', name:'rootfs', size:4294967296}]}));
 let probeSettings = {mode: 'linux', command: '', default_command: "printf 'HOST=%s\\n' \"$(hostname)\""};
 let serialPayload = null;
 const serialLiveChunks = [];
@@ -37,6 +42,29 @@ const server = http.createServer((req, res) => {
   const json = data => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); };
   if (req.method === 'POST') {
     posts.push(u.pathname);
+    if (u.pathname === '/api/flash-recovery') {
+      let body = ''; req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        const payload = JSON.parse(body); flashRecoveryPosts.push(payload);
+        const task = flashRecords.find(item => item.id === payload.id);
+        if (!task || payload.attempt_id !== task.flash.attempt_id || !payload.reason || payload.confirm_stopped !== true) {
+          res.statusCode = 409; return json({ok:false,error:'invalid simulated recovery receipt'});
+        }
+        task.flash.recovery_required = false;
+        json({ok:true,task});
+      }); return;
+    }
+    if (u.pathname === '/api/flash-plan') {
+      let body = ''; req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        const payload = JSON.parse(body); flashPlans.push(payload);
+        const writes = payload.mode === 'partitions'
+          ? payload.selections.map(item => ({storage:item.storage, partition:item.partition, size:1048576, sha256:'a'.repeat(64)}))
+          : flashStorages.map(item => ({storage:item.id, partition:'rootfs', size:1048576, sha256:'a'.repeat(64)}));
+        json({ok:true, plan:{id:'bbbbbbbbbbbbbbbbbbbbbbbb', digest:'b'.repeat(64), binding_revision:7,
+          writes, write_layout:payload.mode !== 'partitions', warnings:['浏览器测试夹具：模拟计划，不接触硬件。']}});
+      }); return;
+    }
     if (u.pathname === '/api/probe-settings' || u.pathname === '/api/agent-share' || u.pathname === '/api/task-start') {
       let body = ''; req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
@@ -45,6 +73,17 @@ const server = http.createServer((req, res) => {
           probeSettingsPosts.push(payload); probeSettings = {...probeSettings, ...payload}; return json({ok:true, ...probeSettings});
         }
         if (u.pathname === '/api/task-start') {
+          if (payload.kind === 'flash') {
+            flashSubmissions.push(payload);
+            let task = flashRecords.find(item => item.flash.request_id === payload.request_id);
+            if (!task) {
+              task = {id:'cccccccccccccccccccccccc', kind:'flash', state:'running', actor:'web', created:Date.now()/1000,
+                targets:[], board_targets:[{serial:payload.serial}], progress:{done:524288,total:1048576,phase:'writing'},
+                flash:{request_id:payload.request_id,write_result:'writing',verify_result:'pending',boot_result:'not-requested'}};
+              flashRecords.push(task);
+            }
+            return json({ok:true,task});
+          }
           if (payload.kind !== 'ssh-connect') return json({ok:false, error:'unsupported fixture task'});
           sshConnectPosts.push(payload);
           const board = fixtures.find(device => device.key === payload.key
@@ -114,9 +153,17 @@ const server = http.createServer((req, res) => {
     mcp_enabled: true, mcp_url: '/mcp', mcp_error: '' });
   if (u.pathname === '/api/agent-grants') return json({grants: []});
   if (u.pathname === '/api/probe-settings') return json(probeSettings);
-  if (u.pathname === '/api/tasks') return json({tasks:[]});
+  if (u.pathname === '/api/flash-capabilities') return json({supported:true,board_serial:fixtures[1].serial,
+    binding_revision:7,profile:'模拟 K3 · 浏览器测试夹具',control:{provider:'manual'},
+    console:null,executor:{provider:'goflash',node:'local',endpoint:'fixture-usb-4'},
+    artifacts:[flashArtifact],storages:flashStorages,modes:['full','partitions'],verification:{required:true}});
+  if (u.pathname === '/api/flash-events') return json({events:Number(u.searchParams.get('after') || 0) < 1
+    ? [{seq:1,type:'progress',phase:'writing',done:524288,total:1048576,
+      message:'模拟事件 <script>window.flashInjected=true</script>'}] : [],next_after:1,truncated_before:0});
+  if (u.pathname === '/api/task' && flashRecords.length) return json({task:flashRecords[0]});
+  if (u.pathname === '/api/tasks') return json({tasks:flashRecords});
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, route)));
 });
@@ -644,8 +691,69 @@ let chrome, ws;
   await evaluate('document.querySelector("#ssh-credentials-form").requestSubmit()');
   await delay(100);
   assert.equal(sshConnectPosts.length,beforeStaleSubmit,'stale form must not submit credentials for a replacement connection');
+  // A registered offline board can plan flashing without opening a UART. The
+  // fixtures below only return data and record requests; no tool is executed.
+  await evaluate('document.querySelector(\'[data-key="riscv-118"]\').click();document.querySelector("#b-flash").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-artifact").options.length>1');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#flash-dialog").open'),true);
+  assert.ok(await evaluate('document.querySelector("#fl-board").textContent.includes("riscv-118")'));
+  assert.ok(await evaluate('document.querySelector("#fl-connections").textContent.includes("本次不执行复位")'));
+  assert.equal(flashSubmissions.length,0,'opening capabilities must not start flashing');
+  await evaluate('document.querySelector("#fl-artifact").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-artifact").dispatchEvent(new Event("change"));document.querySelector("#fl-mode").value="partitions";document.querySelector("#fl-mode").dispatchEvent(new Event("change"));document.querySelector("#fl-partitions input").checked=true;document.querySelector("#fl-partitions input").dispatchEvent(new Event("change"));document.querySelector("#fl-partitions select").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-plan").click()');
+  for(let n=0;n<40 && await evaluate('document.querySelector("#fl-start").disabled');n++)await delay(50);
+  assert.equal(flashPlans.length,1);
+  assert.deepEqual(flashPlans[0].selections,[{storage:'emmc',partition:'rootfs',artifact_id:flashArtifact.id}]);
+  assert.equal(flashPlans[0].mode,'partitions');
+  assert.equal(Object.hasOwn(flashPlans[0],'connection_id'),false);
+  assert.ok(await evaluate('document.querySelector("#fl-preview").textContent.includes("保留现有分区布局")'));
+  assert.equal(await evaluate('document.querySelectorAll("#fl-preview tr").length'),2,'partition preview must contain exactly the selected write');
+  assert.equal(flashSubmissions.length,0,'preview must not submit a write');
+  const flashPreviewShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-preview.png'),Buffer.from(flashPreviewShot.data,'base64'));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await delay(100);
+  assert.ok(await evaluate('(()=>{const d=document.querySelector("#flash-dialog"),r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&d.scrollWidth<=d.clientWidth+1;})()'), 'mobile flash form must stay inside the viewport');
+  const flashMobileShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-preview-mobile.png'),Buffer.from(flashMobileShot.data,'base64'));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  await evaluate('document.querySelector("#fl-start").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-task-id").textContent.includes("cccccccc")');n++)await delay(50);
+  assert.equal(flashSubmissions.length,1);
+  assert.equal(flashSubmissions[0].binding_revision,7);
+  assert.equal(Object.hasOwn(flashSubmissions[0],'connection_id'),false,'flash submission must use board identity rather than a UART generation');
+  assert.ok(flashSubmissions[0].request_id);
+  await evaluate('document.querySelector("#fl-close").click()');
+  assert.equal(flashRecords[0].state,'running','closing the dialog must leave server work running');
+  await rpc('Page.navigate',{url:address + '/#device=' + fixtures[1].serial});
+  for(let n=0;n<50 && !await evaluate('document.querySelector("#d-name").textContent.includes("riscv-118")');n++)await delay(100);
+  await evaluate('SerialdI18n.setLocale("zh-CN");document.querySelector("#b-flash").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-task-id").textContent.includes("cccccccc")');n++)await delay(50);
+  assert.equal(flashSubmissions.length,1,'reload must recover the original task without submitting again');
+  await evaluate('document.querySelector("#flash-dialog details").open=true');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-events").textContent.includes("模拟事件")');n++)await delay(50);
+  assert.equal(await evaluate('window.flashInjected === true'),false,'events must be rendered as text');
+  const flashTaskShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-task.png'),Buffer.from(flashTaskShot.data,'base64'));
+  flashRecords[0].state = 'failed';
+  Object.assign(flashRecords[0].flash,{recovery_required:true,attempt_id:'simulated-recovery-attempt',
+    write_result:'unknown-or-partial',verify_result:'not-completed'});
+  for(let n=0;n<50 && await evaluate('document.querySelector("#fl-recovery-field").hidden');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#fl-recovery-field").hidden'),false);
+  assert.equal(await evaluate('document.querySelector("#fl-release").disabled'),true,'recovery must require an operator reason');
+  await evaluate('document.querySelector("#fl-recovery-reason").value="浏览器模拟夹具：已在执行主机确认原进程停止";document.querySelector("#fl-recovery-reason").dispatchEvent(new Event("input"));document.querySelector("#fl-recovery-field").scrollIntoView({block:"center"})');
+  assert.equal(await evaluate('document.querySelector("#fl-release").disabled'),false);
+  const flashRecoveryShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-recovery.png'),Buffer.from(flashRecoveryShot.data,'base64'));
+  await evaluate('document.querySelector("#fl-release").click()');
+  for(let n=0;n<40 && flashRecoveryPosts.length<1;n++)await delay(50);
+  assert.equal(flashRecoveryPosts.length,1);
+  assert.equal(flashRecoveryPosts[0].attempt_id,'simulated-recovery-attempt');
+  assert.equal(flashRecoveryPosts[0].confirm_stopped,true);
+  assert.equal(flashRecords[0].state,'failed','releasing recovery must preserve the original failed state');
+  assert.equal(flashRecords[0].flash.write_result,'unknown-or-partial');
+  assert.equal(flashSubmissions.length,1,'recovery must not repeat the flash operation');
   assert.deepEqual(errors,[]);
-  console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing and server-remembered SSH credentials across page reloads (isolated simulated fixtures).');
+  console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing, server-remembered SSH credentials and offline-board flash preview/task recovery (isolated simulated fixtures).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(ws)ws.close(); if(chrome){chrome.kill('SIGTERM');await delay(500);}server.close();
   fs.rmSync(profile,{recursive:true,force:true});

@@ -82,13 +82,21 @@ class SerialTransactions:
         return owner['actor'] == actor and (actor != 'web' or owner.get('client_id', '') == client_id)
 
     def check_owner(self, actor, client_id=None):
+        self.check_maintenance()
         client_id = self.client_id if client_id is None else client_id
         with self._state_lock:
             owner = self._owner_locked()
             if owner and not self._same(owner, actor, client_id):
                 raise TransactionError('input-owned', '串口输入由 %s 占用；仍可查看输出' % owner['actor'], 423)
 
+    def check_maintenance(self):
+        from .board_maintenance import maintenance_for
+        maintenance = maintenance_for(getattr(self.device, 'manager', None))
+        if maintenance is not None:
+            maintenance.check(self.device.serial)
+
     def claim(self, actor, takeover=False):
+        self.check_maintenance()
         client_id = self.client_id if actor == 'web' else ''
         if takeover and actor != 'web':
             raise TransactionError('forbidden', '仅人工可以接管串口输入', 403)
@@ -164,6 +172,7 @@ class SerialTransactions:
 
     def check_context(self):
         """Recheck a request/task attachment immediately before starting device work."""
+        self.check_maintenance()
         task = getattr(self._local, 'task', None)
         if task is not None:
             if task[0].is_set():
@@ -179,7 +188,13 @@ class SerialTransactions:
         if not self.lock.acquire(blocking=False):
             raise TransactionError('busy', '已有控制台操作在进行中，稍后重试')
         lease = None
+        maintenance_scope = None
         try:
+            from .board_maintenance import maintenance_for
+            maintenance = maintenance_for(getattr(self.device, 'manager', None))
+            if maintenance is not None:
+                maintenance_scope = maintenance.operation(self.device.serial)
+                maintenance_scope.__enter__()
             task = getattr(self._local, 'task', None)
             self.check_context()
             if expected_connection is not None and expected_connection != self.device.connection_id:
@@ -205,6 +220,8 @@ class SerialTransactions:
                 with self._state_lock:
                     if self._active is lease:
                         self._active = None
+            if maintenance_scope is not None:
+                maintenance_scope.__exit__(None, None, None)
             self.lock.release()
 
     def snapshot(self):

@@ -75,7 +75,14 @@
     },
     retrySSH: function (task) {
       openSshCredentials(terminalView.current, task.result.ssh_user);
+    },
+    openFlash: function (task) {
+      var selected = deviceDirectory.find(deviceDirectory.selected);
+      if (selected) flashing.open(selected, task);
     }
+  });
+  var flashing = window.SerialdFlashing && window.SerialdFlashing.create({
+    byId: $, fetch: fetch, formatBytes: fmt
   });
   window.SerialdShareSelection = function () {
     return deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0] || null;
@@ -687,6 +694,10 @@
     if (!deviceDirectory.selected) return;
     var selected = deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0];
     if (selected) SerialdFileTransfer.open(selected, deviceDirectory.items);
+  });
+  $('b-flash').addEventListener('click', function () {
+    var selected = deviceDirectory.find(deviceDirectory.selected);
+    if (selected && flashing) flashing.open(selected);
   });
   $('b-boot-compare').addEventListener('click', function () {
     if (!deviceDirectory.selected) return;

@@ -7,10 +7,11 @@ from .transactions import transactions_for, TransactionError
 from .transfer_tasks import TransferCopy, TransferFile
 from .file_transfer import TransferError
 from .hardware import ACTIONS, HardwareOperation
+from .flash_tasks import FlashActions
 
 
 class TaskActions:
-    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download')) | frozenset(
+    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download', 'flash')) | frozenset(
         'hardware-' + action for action in ACTIONS)
 
     def __init__(self, manager):
@@ -32,6 +33,8 @@ class TaskActions:
                 raise TaskError('unsupported task kind')
             if not isinstance(actor, str) or not actor or len(actor) > 80:
                 raise TaskError('invalid task actor')
+            if kind == 'flash':
+                return FlashActions(self.manager).start(payload, device, actor)
             if kind == 'identify':
                 invalid = validate_identify_request(payload, actor)
                 if invalid is not None:
