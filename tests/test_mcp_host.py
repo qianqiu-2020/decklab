@@ -55,7 +55,7 @@ class MCPHostTests(unittest.TestCase):
                 mock.patch.object(sys, 'frozen', False, create=True):
             command = host._command(Path('/tmp/readiness.json'))
             self.assertEqual(command[0], '/opt/a path/python')
-            self.assertIn('/tmp/readiness.json', command)
+            self.assertIn(str(Path('/tmp/readiness.json')), command)
             self.assertEqual(command[-2:], ['--parent-pid', str(os.getpid())])
         with mock.patch.object(sys, 'frozen', True, create=True):
             self.assertEqual(host._command(Path('/tmp/status'))[:2], [sys.executable, 'mcp'])
