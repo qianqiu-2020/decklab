@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.7.1
+
+- Include the MCP SDK, Python runtime and dependencies in architecture-specific
+  Debian packages. Install and upgrade without pip or a separately configured
+  Python environment; keep the collector on its existing system Python.
+- Verify installed remote MCP in clean Ubuntu 22.04 and 24.04 containers with
+  networking disabled after package installation.
+- Preserve actionable MCP startup errors and bounded worker logs instead of
+  reporting every startup failure as a missing SDK.
+
 ## 1.7.0
 
 - Keep BusyBox/Buildroot probes below interactive shell input-line limits and

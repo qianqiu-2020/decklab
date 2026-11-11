@@ -6,7 +6,15 @@ permissions:
   contents: read
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,16 +30,25 @@ jobs:
       - run: python -m unittest discover -s tests
       - run: python tools/check_public_docs.py
       - run: node tests/frontend.test.js && node tests/share.test.js
-      - name: Verify installed Ubuntu package behavior
-        run: python tools/test_deb_container.py --image ubuntu:24.04
-      - run: python tools/build_deb.py
-      - run: sha256sum dist/*.deb > dist/linux-SHA256SUMS.txt
+      - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
+        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
+      - run: python tools/build_deb.py --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime'
+      - name: Fresh install and public MCP without network on Ubuntu 22.04
+        run: python tools/test_deb_container.py --image ubuntu:22.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb"
+      - name: Fresh install and public MCP without network on Ubuntu 24.04
+        run: python tools/test_deb_container.py --image ubuntu:24.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb"
+      - name: Fetch the checksum-pinned published thin package for upgrade acceptance
+        run: |
+          curl --fail --location --retry 3 https://github.com/qianqiu-2020/decklab/releases/download/v1.7.0/seriald_1.7.0_all.deb --output build/seriald_1.7.0_all.deb
+          echo 'b0020684d469cec4db2fa36f5e967f81c860deb236fbdd1d25da4831857cb1a9  build/seriald_1.7.0_all.deb' | sha256sum --check
+      - name: Verify installed Ubuntu 22.04 MCP and upgrade behavior without network
+        run: python tools/test_deb_container.py --image ubuntu:22.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb" --upgrade-from build/seriald_1.7.0_all.deb
+      - name: Verify installed Ubuntu 24.04 MCP and upgrade behavior without network
+        run: python tools/test_deb_container.py --image ubuntu:24.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb" --upgrade-from build/seriald_1.7.0_all.deb
       - uses: actions/upload-artifact@v4
         with:
-          name: seriald-linux
-          path: |
-            dist/*.deb
-            dist/linux-SHA256SUMS.txt
+          name: seriald-linux-${{ matrix.arch }}
+          path: dist/*.deb
   windows:
     uses: ./.github/workflows/windows-portable.yml
   publish:
@@ -54,7 +71,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cd packages
-          cp "seriald_${GITHUB_REF_NAME#v}_all.deb" seriald_latest_all.deb
+          cp "seriald_${GITHUB_REF_NAME#v}_amd64.deb" seriald_latest_amd64.deb
+          cp "seriald_${GITHUB_REF_NAME#v}_arm64.deb" seriald_latest_arm64.deb
+          # Keep existing x86 download links usable; the package metadata is amd64.
+          cp "seriald_${GITHUB_REF_NAME#v}_amd64.deb" seriald_latest_all.deb
+          sha256sum "seriald_${GITHUB_REF_NAME#v}_amd64.deb" "seriald_${GITHUB_REF_NAME#v}_arm64.deb" > linux-SHA256SUMS.txt
           cp "seriald-${GITHUB_REF_NAME#v}-windows-x64-setup.exe" seriald-windows-x64-setup.exe
           sha256sum *.deb *.exe *.zip > SHA256SUMS.txt
           python3 ../tools/verify_release.py . --version "${GITHUB_REF_NAME#v}"

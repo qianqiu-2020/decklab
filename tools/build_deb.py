@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Build an architecture-independent Ubuntu package without root or network access."""
+"""Build a native Ubuntu package from a prepared MCP runtime, entirely offline."""
 import argparse
 import hashlib
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from seriald_core import __version__
 from tools.package_docs import publish as publish_docs
+from tools.build_linux_mcp import validate_runtime
 
 
 def collector_build_id(root=ROOT):
@@ -32,9 +34,19 @@ def collector_build_id(root=ROOT):
     return digest.hexdigest()
 
 
-def build(output, version):
+def build(output, version, runtime=None):
+    if runtime is None:
+        architecture = {'x86_64': 'amd64', 'aarch64': 'arm64',
+                        'riscv64': 'riscv64'}.get(platform.machine())
+        runtime = ROOT / 'build/linux-mcp' / (architecture or platform.machine()) / 'runtime'
+    runtime = Path(runtime)
+    if not runtime.is_dir():
+        raise ValueError('Prepared MCP runtime is required. Run tools/build_linux_mcp.py '
+                         '--arch <amd64|arm64> first, then pass --runtime PATH.')
+    descriptor = validate_runtime(runtime)
+    architecture = descriptor['architecture']
     output.mkdir(parents=True, exist_ok=True)
-    artifact = output.resolve() / ('seriald_%s_all.deb' % version)
+    artifact = output.resolve() / ('seriald_%s_%s.deb' % (version, architecture))
     with tempfile.TemporaryDirectory(prefix='seriald-deb-') as folder:
         stage = Path(folder)
         def put(source, target, mode=0o644):
@@ -56,6 +68,12 @@ def build(output, version):
             for path in (ROOT / name).rglob('*'):
                 if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':
                     put(path.relative_to(ROOT), 'usr/lib/seriald/' + str(path.relative_to(ROOT)))
+        for path in sorted(runtime.rglob('*')):
+            if path.is_file():
+                destination = stage / 'usr/lib/seriald/mcp-runtime' / path.relative_to(runtime)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, destination)
+                destination.chmod(0o755 if path.stat().st_mode & 0o111 else 0o644)
         for name in ('SKILL.md', 'SKILL.zh-CN.md'):
             put('skills/seriald-board/' + name, 'usr/lib/seriald/skills/seriald-board/' + name)
         for command, invocation in [('serialctl', '/usr/lib/seriald/serialctl.py'),
@@ -78,7 +96,7 @@ def build(output, version):
         for name in ('postinst', 'prerm', 'postrm'):
             put('packaging/' + name, 'DEBIAN/' + name, 0o755)
         write('DEBIAN/conffiles', '/etc/seriald/seriald.env\n/etc/sudoers.d/seriald-rescue\n')
-        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: all\nMaintainer: seriald contributors <root@localhost>\nDepends: python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n' % version)
+        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture))
         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)
     return artifact
 
@@ -87,5 +105,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'dist')
     parser.add_argument('--version', default=__version__)
+    parser.add_argument('--runtime', type=Path, help='prepared architecture-specific MCP runtime')
     args = parser.parse_args()
-    print(build(args.output, args.version))
+    print(build(args.output, args.version, runtime=args.runtime))

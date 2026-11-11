@@ -1,8 +1,10 @@
 """MCP uses the existing HTTP boundary, tested without collectors or real ports."""
 import asyncio
 import base64
+from contextlib import redirect_stderr
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import io
 import os
 from pathlib import Path
 import socket
@@ -158,6 +160,16 @@ class AdapterTests(APICase):
             self.adapter.session_close('raw-A', 'serial')
         with self.assertRaises(ClientError):
             self.adapter.start_task('raw-A', 'unknown', connection_id='connection-A')
+
+
+class StartupFailureTests(unittest.TestCase):
+    def test_missing_transitive_dependency_is_not_hidden_by_sdk_import_guard(self):
+        output = io.StringIO()
+        with mock.patch.object(seriald_mcp, 'MCPServer', None), \
+                mock.patch.object(seriald_mcp, 'SDK_IMPORT_ERROR', 'No module named missing_native'), \
+                redirect_stderr(output):
+            self.assertEqual(seriald_mcp.main([]), 2)
+        self.assertIn('No module named missing_native', output.getvalue())
 
 
 @unittest.skipUnless(SDK, 'optional mcp==2.3.0 SDK is not installed')

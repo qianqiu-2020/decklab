@@ -1,6 +1,6 @@
 # Host and board configuration
 
-Configuration is read when the collector starts. Linux packages use
+Configuration is read when the relevant control or collector process starts. Linux packages use
 `/etc/seriald/seriald.env`; Windows launchers inherit environment variables.
 `SERIALD_BASE` selects runtime storage (the checkout root for source runs).
 `SERIALD_STATIC` selects application assets. Keep development and installed
@@ -24,15 +24,24 @@ from two collectors.
 | `SERIALD_AUTH_TOKEN` | Empty: open access. Nonempty: primary Basic/Bearer credential; browser Basic username is `seriald` |
 | `SERIALD_AGENT_TOKENS_FILE` | Linux control-only optional JSON actor/token map; requires primary authentication; not loaded by Windows entry point |
 | `SERIALD_TRUST_LOOPBACK` | Windows-only, exact value `1` allows credential-free loopback access; LAN authenticated launcher enables it. Linux control does not read it |
-| `SERIALD_MCP_ENABLED` | Automatic when the server SDK is available; `0` disables the integrated `/mcp` endpoint |
-| `SERIALD_MCP_PYTHON` | Optional server-side Python executable containing the MCP SDK, for example `/opt/decklab-mcp/bin/python`; no client installation is required |
+| `SERIALD_MCP_ENABLED` | Enabled by default; Debian 1.7.1+ and Windows packages include the server runtime. `0` disables the integrated `/mcp` endpoint |
+| `SERIALD_MCP_PYTHON` | Advanced/source setting: absolute Python executable containing the MCP SDK. An explicit value overrides the Debian bundled worker; normally leave unset. Windows frozen packages use their own MCP entry point. No client installation is required |
 | `SERIALD_MCP_ALLOWED_HOSTS` | Optional comma-separated public `hostname:port` authorities for MCP behind a proxy; local hostnames, loopback and local LAN addresses are discovered automatically. A port wildcard such as `decklab.example:*` is allowed; a wildcard hostname is not |
 
 Set host/auth variables before starting the entry point. Restart control to apply
-Linux listener/auth changes; restart collector for collector configuration.
+Linux listener/auth/MCP changes; restart collector for collector configuration.
 Windows uses one host process and requires restart. Authenticated-loopback mode
 trusts the direct peer address, so do not route untrusted proxy traffic through
 that bypass. See [installation](INSTALL.md) and [Windows launchers](WINDOWS.md).
+
+The Debian MCP worker is installed under `/usr/lib/seriald/mcp-runtime/` and
+does not depend on the system Python SDK. Without an explicit Python override,
+control selects this worker when present, then falls back to the source entry
+point using its own Python interpreter. A present but invalid bundled executable
+is an installation error. `SERIALD_STATIC` changes frontend assets only.
+Worker diagnostics are written to `<SERIALD_BASE>/mcp-worker.log` with mode 0600;
+one 64 KiB file and one 64 KiB `.1` backup are retained. See the
+[MCP guide](MCP.md) for startup errors, source setup and override migration.
 
 ### Serial and board defaults
 

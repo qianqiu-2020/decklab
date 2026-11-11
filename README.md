@@ -8,7 +8,8 @@ history attached to a stable board identity rather than a changing tty number.
 
 [Latest release](https://github.com/qianqiu-2020/decklab/releases/latest) ·
 [Windows installer](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald-windows-x64-setup.exe) ·
-[Ubuntu package](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_all.deb)
+[Ubuntu amd64](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb) ·
+[Ubuntu arm64](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_arm64.deb)
 
 ![DeckLab demo: shared terminal, board list and boot archives](docs/decklab-demo.png?v=ui-1.5.2)
 
@@ -29,9 +30,11 @@ failures. Agent grants are revocable and can be scoped to one board. Runtime
 service names, command names and installation paths retain the `seriald` name.
 
 Remote MCP clients connect to the host's `/mcp` URL with a web-issued Agent token;
-no client-side Python or adapter installation is required. The Windows package
-includes the server runtime. Linux host setup and optional compatibility modes
-are documented in the [MCP guide](docs/MCP.md).
+no client-side Python or adapter installation is required. Windows and Debian
+packages include the MCP server runtime. Debian 1.7.1 includes a private Python
+runtime and SDK, so installation needs no pip command or `SERIALD_MCP_PYTHON`
+setting. Source setup and optional compatibility modes are documented in the
+[MCP guide](docs/MCP.md).
 
 ## Install and use
 
@@ -41,12 +44,23 @@ Try without hardware: `python3 seriald_demo.py`, then open
 **http://127.0.0.1:8899/**. See the [demo guide](docs/DEMO.md) for simulated
 boot comparison, SSH and file transfers.
 
-Ubuntu packages are built with:
+Download the package matching the host architecture from the links above.
+Ubuntu 22.04 / 24.04 packages are available for amd64 and arm64. To build an
+amd64 package from source, prepare its MCP runtime on the Ubuntu 22.04 baseline
+first (Docker and build-time downloads are required by the default builder):
 
 ```sh
-python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.7.0_all.deb
+python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
+python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
+sudo apt install ./dist/seriald_1.7.1_amd64.deb
 ```
+
+For an arm64 host, build on the matching native runner with `--arch arm64` and
+the corresponding runtime/output paths. Debian assembly is offline once the
+runtime is prepared; a missing or invalid runtime stops the build. See the
+[installation guide](docs/INSTALL.md) for details and source use on other
+architectures. The legacy `seriald_latest_all.deb` download remains an amd64
+compatibility alias; its package architecture is no longer `all`.
 
 On Windows, build with Python 3.12 x64 and Inno Setup 6.5+ using
 `Build-seriald.cmd`, then run the generated Setup EXE. Upgrades retain runtime

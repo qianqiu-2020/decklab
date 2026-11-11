@@ -1,0 +1,74 @@
+{
+  "schema": 1,
+  "scope": "Linux-MCP-additional-source-notices-not-exact-binary-SBOM",
+  "files": {
+    "portable-atomic-1.14.0/LICENSE-APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+    "portable-atomic-1.14.0/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "rust-1.91.1/LICENSE-MIT": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+    "rust-1.91.1/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "rust-1.91.1/COPYRIGHT": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+    "rust-1.91.1/COPYRIGHT-library.html": "3aa41caccecaeddad6fcf2f36ce14146ab7baae57064b05b12ecc6b52d5e917f"
+  },
+  "crates": [
+    {
+      "name": "portable-atomic",
+      "version": "1.14.0",
+      "checksum": "3d20d5497ef88037a52ff98267d066e7f11fcc5e99bbfbd58a42336193aacec3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "url": "https://static.crates.io/crates/portable-atomic/portable-atomic-1.14.0.crate",
+      "notice_files": [
+        {
+          "member": "portable-atomic-1.14.0/LICENSE-APACHE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "size": 10174
+        },
+        {
+          "member": "portable-atomic-1.14.0/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "size": 1023
+        }
+      ],
+      "license_expression": "Apache-2.0 OR MIT",
+      "graph_scope": "complete-committed-source-lock-superset-including-build-test-and-non-Linux-nodes"
+    }
+  ],
+  "rust_toolchains": [
+    {
+      "version": "1.91.1",
+      "commit": "ed61e7d7e242494fb7057f2657300d9e77bb4fcb",
+      "target": "x86_64-unknown-linux-gnu",
+      "binary_evidence": "Observed Linux rpds0.30.0 wheel rustc path commit matches official release channel git_commit_hash",
+      "archive": "https://static.rust-lang.org/dist/2025-11-10/rustc-1.91.1-x86_64-unknown-linux-gnu.tar.xz",
+      "archive_sha256": "4b4c596fc5268435c310a79c2e231a5a3567572c930ac0740ef9e147e83baf4e",
+      "channel": "https://static.rust-lang.org/dist/channel-rust-1.91.1.toml",
+      "channel_sha256": "483bb8b271168ee654e3be4f111beefa23b9d0c8b7f4a563a8278978dbe982e5",
+      "notices": [
+        {
+          "file": "rust-1.91.1/LICENSE-MIT",
+          "source_member": "rustc-1.91.1-x86_64-unknown-linux-gnu/LICENSE-MIT",
+          "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+        },
+        {
+          "file": "rust-1.91.1/LICENSE-APACHE",
+          "source_member": "rustc-1.91.1-x86_64-unknown-linux-gnu/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "file": "rust-1.91.1/COPYRIGHT",
+          "source_member": "rustc-1.91.1-x86_64-unknown-linux-gnu/COPYRIGHT",
+          "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af"
+        },
+        {
+          "file": "rust-1.91.1/COPYRIGHT-library.html",
+          "source_member": "rustc-1.91.1-x86_64-unknown-linux-gnu/rustc/share/doc/rust/COPYRIGHT-library.html",
+          "sha256": "3aa41caccecaeddad6fcf2f36ce14146ab7baae57064b05b12ecc6b52d5e917f"
+        }
+      ],
+      "scope": "standard-library-source-notices-from-observed-compiler-release-not-exact-native-SBOM"
+    }
+  ],
+  "limitations": [
+    "Source notices cover exact source releases and complete committed Rust source locks, including build, test and non-Linux nodes.",
+    "Compiler notice collection identifies an observed compiler release, not native wheel build features or an exact binary SBOM."
+  ]
+}

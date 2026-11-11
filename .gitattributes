@@ -2,4 +2,5 @@
 packaging/third-party/** -text
 # Preserve upstream license whitespace too; integrity is checked by pinned hashes.
 packaging/third-party/native-source-notices/** -whitespace
+packaging/third-party/linux-mcp-native-notices/** -whitespace
 vendor/terminal/** -text

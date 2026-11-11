@@ -1,19 +1,52 @@
 # Ubuntu 安装与升级
 
-支持 Ubuntu 22.04 / 24.04 的 Python 3.10+ 环境，包为 `Architecture: all`，适用于 amd64、arm64 等架构。构建不访问网络、不需要 root；安装依赖由 apt 处理。
+支持 Ubuntu 22.04 / 24.04，发布包分别为 `Architecture: amd64` 和 `Architecture: arm64`。
+1.7.1 起，deb 内置 MCP 所需的私有 Python、官方 SDK 及依赖；安装过程中不运行 pip，
+不需要手动配置 `SERIALD_MCP_PYTHON`。核心服务仍使用系统 Python 3.10+，系统依赖由 apt 处理。
+其他上位机架构可使用源码运行方式，目前不提供对应的预编译 deb。
 
 统一终端解析需要发行版 `nodejs`（Node 12+）；`apt install ./dist/…deb` 会一并安装。
 如果用 `dpkg -i` 安装且提示缺少依赖，执行一次 `sudo apt -f install`。
 Windows 安装器已内置该运行时，使用者无需额外安装。
 
-## 构建和安装
+## 下载和安装
+
+用 `dpkg --print-architecture` 核对上位机架构，从固定地址下载对应包：
+
+- [amd64 最新安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb)
+- [arm64 最新安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_arm64.deb)
+
+例如安装已下载的 amd64 固定文件名安装包：
 
 ```sh
-python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.7.0_all.deb
+sudo apt install ./seriald_latest_amd64.deb
 systemctl status seriald
 serialctl devices
 ```
+
+下载链接跟随 GitHub Latest 正式发布，草稿不改变下载目标。历史链接
+`seriald_latest_all.deb` 保留为 amd64 兼容别名，文件内的 `Architecture` 是 `amd64`，
+不能用于 arm64 安装。
+
+## 从源码构建安装包
+
+在与目标架构匹配的原生构建机上，先冻结 Ubuntu 22.04 / glibc 2.35 基线的 MCP 运行时，
+再离线组装 deb。默认运行时构建使用 Docker，并下载锁定版本和哈希的构建依赖；
+组装步骤不访问网络、不需要 root：
+
+```sh
+python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
+python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
+sudo apt install ./dist/seriald_1.7.1_amd64.deb
+```
+
+arm64 构建将上述 `amd64` 改为 `arm64`，在对应原生构建机执行。
+`build_deb.py` 未传 `--runtime` 时只查找本机架构的 `build/linux-mcp/<arch>/runtime`；
+不存在或校验失败会停止构建，不生成缺少 MCP 依赖的包。已准备运行时还可通过
+`python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime --verify`
+离线核对清单及内容。
+
+## 服务与配置
 
 包安装后自动启动 `seriald-collector.service` 和 `seriald.service`。collector 是唯一串口读者；
 `seriald.service` 是可独立重启的 Web/API 控制面。**同一组串口不可同时运行源码服务和包服务**，切换安装前先停止旧服务。
@@ -21,8 +54,9 @@ serialctl devices
 安装脚本会按配置端口打印本机与探测到的局域网 URL；若局域网地址未出现，请检查网卡配置。
 
 远程 MCP 使用同一地址的 `/mcp` 路径，AI 客户端只需填写 URL 和网页生成的 Agent 令牌。
-Linux 上位机首次部署需安装服务端 SDK 并配置其 Python 环境；详见 [MCP 接入](MCP.md)。
-这一步在上位机执行一次，不要求每个客户端安装组件。
+Debian 包的内置 MCP 由 control 自动管理；升级到 1.7.1 后无需另装服务端 SDK。
+若旧配置设置了 `SERIALD_MCP_PYTHON`，它会继续优先使用；要改用内置运行时，删除该项并重启
+`seriald.service`，无需重启 collector。源码部署与故障排查见 [MCP 接入](MCP.md)。
 
 编辑 `/etc/seriald/seriald.env` 后，监听地址和认证配置通过
 `sudo systemctl restart seriald` 生效；板卡密码、串口参数、profile、日志和传输配置
@@ -64,9 +98,11 @@ agent 使用其专用令牌时，control 会覆盖请求中的 `actor`，操作�
 | 路径 | 内容 |
 | --- | --- |
 | `/usr/lib/seriald` | Python 后端、网页和本地 xterm 资源 |
+| `/usr/lib/seriald/mcp-runtime/` | root 拥有的私有 MCP/Python 运行时及第三方清单；服务账户不可修改 |
 | `/usr/bin/serialctl`、`seriald-admin` | CLI 与迁移工具 |
 | `/etc/seriald/seriald.env` | 可修改的服务配置 |
 | `/data/seriald-data/registry.sqlite3` | 设备与会话档案 |
+| `/data/seriald-data/mcp-worker.log` | MCP 进程诊断日志，0600；每份最多 64 KiB，保留一份 `.1` 轮转 |
 | `/data/seriald-data/logs/<serial>/` | 已确认身份的串口及独立 SSH 日志 |
 | `/data/seriald-data/logs/_provisional/<source>/<serial>/` | SoC/eFuse 或 `/boot` 候选身份日志；旧版本 DT 候选目录在确认后迁移，有效 DT 编号现直接确认 |
 | `/data/seriald-data/logs/_unprovisioned/<path-hash>/<connection-id>/` | 没有可用编号时按连接隔离的临时日志 |

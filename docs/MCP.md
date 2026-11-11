@@ -39,33 +39,63 @@ Orca Web 的 MCP 连接由 Orca 服务端运行；应确保 Orca 服务端能访
 当前连接在拔插、准备换板或采集器重启后变化，旧授权不能访问替代连接。
 授权默认不限期，网页可随时撤销。开放的网页服务也不会让 MCP 匿名访问。
 
-## 上位机部署：管理员只配置一次
+## 上位机运行机制与部署
 
 MCP 服务与设备服务部署在上位机，客户端不安装组件。公开入口是控制面的 `/mcp`，
 官方 SDK 服务运行在私有回环端口，由控制面启动和关闭；客户端不需要知道内部端口。
 控制面逐次转发调用方自己的 Bearer 令牌，既不使用管理凭证兜底，也不扩大授权范围。
 
-Windows 安装包内置 MCP 运行依赖，正常启动后由控制面管理 MCP 服务。
-Linux 源码或 Debian 包环境若尚未安装 SDK，普通终端与日志仍可使用，网页会提示服务器
-缺少 MCP 组件；管理员可在上位机创建独立环境：
+Windows 安装包和 1.7.1 起的 Debian 包内置 MCP 运行依赖，正常启动后由控制面管理，
+安装时无需 pip，也无需设置 `SERIALD_MCP_PYTHON`。Debian 的私有 Python、官方 SDK
+及依赖位于 `/usr/lib/seriald/mcp-runtime/`，由 root 拥有，服务账户不可修改。
+发布的 deb 分为 amd64 和 arm64，使用 Ubuntu 22.04 基线构建，在 Ubuntu 22.04 / 24.04 验收。
+核心服务继续使用系统 Python，MCP 依赖不安装到系统 Python 环境。
+
+通信过程是：AI 客户端连接公开 `/mcp`，control 校验授权并转发到本机私有 MCP 进程；
+官方 SDK 处理协议后通过原有 HTTP API 访问 control/collector。MCP 进程不会打开串口，
+也不会用共享管理令牌代替客户端授权。
+
+### 源码与高级 Python 覆盖
+
+只有源码部署或主动更换 SDK 环境时，才需要自行准备 Python 依赖。例如在源码目录执行：
 
 ```sh
-sudo apt install python3-venv
-sudo python3 -m venv /opt/decklab-mcp
-sudo /opt/decklab-mcp/bin/python -m pip install -r /usr/lib/seriald/requirements-mcp.txt
+python3 -m venv .venv-mcp
+.venv-mcp/bin/python -m pip install -r requirements-mcp.txt
 ```
 
-在 `/etc/seriald/seriald.env` 设置：
+用该解释器启动源码 control，它会自动使用同一个 Python 启动 MCP；源码 collector/control
+的启动步骤见 [安装说明](INSTALL.md)。如果要让现有 control 选择另一个解释器，可设置
+`SERIALD_MCP_PYTHON` 为其绝对路径。包服务的配置位置是 `/etc/seriald/seriald.env`，例如：
 
 ```text
-SERIALD_MCP_PYTHON=/opt/decklab-mcp/bin/python
+SERIALD_MCP_PYTHON=/absolute/path/to/.venv-mcp/bin/python
 ```
 
 然后执行 `sudo systemctl restart seriald` 重启控制面。无需重启 collector 或重复打开串口。
-源码运行时，把 requirements 路径改为源码目录中的 `requirements-mcp.txt`。
+显式设置的 `SERIALD_MCP_PYTHON` 优先于 Debian 内置运行时；从旧版升级后，删除旧设置
+并重启 control 才会改用内置运行时。Windows 冻结安装包始终使用自身内置入口。
+`SERIALD_STATIC` 只改变页面资源位置，不改变 MCP 程序的位置。
+
 `SERIALD_MCP_ENABLED=0` 可关闭服务器 MCP 入口；这不会关闭原有终端 API。
 通过反向代理使用额外域名时，在上位机配置 `SERIALD_MCP_ALLOWED_HOSTS=decklab.example:443`
 并重启控制面；可用逗号配置多个地址。服务校验公开 Host 与 Origin，避免代理绕过 SDK 的主机检查。
+
+### 启动故障与日志
+
+网页会区分程序路径、执行权限、依赖加载、启动信息和超时等故障，并给出退出码或诊断日志路径。
+完整诊断保存在 `SERIALD_BASE/mcp-worker.log`；Debian 默认路径为
+`/data/seriald-data/mcp-worker.log`。日志权限为 0600，每份最多 64 KiB，保留一份 `.1`
+轮转；stdout/stderr 持续读取，避免子进程因输出填满管道而卡住。日志中的 Bearer 令牌、
+Agent 令牌和 URL 用户凭据会被脱敏，网页不会显示完整 traceback。
+
+```sh
+sudo journalctl -u seriald -n 80 --no-pager
+sudo tail -n 80 /data/seriald-data/mcp-worker.log
+```
+
+Debian 包的依赖或内置程序损坏时，先确认没有遗留的 Python 覆盖配置，再使用对应架构的
+完整安装包修复；正常安装不需要补装 SDK。源码环境则检查所选解释器及 `requirements-mcp.txt`。
 
 ## 工具与终端行为
 
@@ -125,6 +155,9 @@ stdio 从环境变量读取 `SERIALD_URL`、`SERIALD_TOKEN`，以 `seriald-mcp` 
 真实 control/collector 权限处理链、未知系统的终端读写、连接变化、撤销及不同授权的并发隔离。
 设备输入输出由隔离模拟连接提供，不操作真实串口。BusyBox 命令兼容另以实际镜像中的
 shell 在 QEMU 交互终端验证，不等同于真实板卡启动或 SSH 登录验收。
+Debian 包另在原生 amd64、arm64 流水线构建，并在 Ubuntu 22.04 / 24.04 中覆盖安装、
+从旧版升级和公开 `/mcp` 入口调用；运行验收阶段断开容器网络，且系统 Python 不安装 MCP SDK。
+这项检查验证包的依赖完整性，不代表真实硬件测试。
 
 协议与 SDK 参考：[MCP 官方 Python SDK](https://py.sdk.modelcontextprotocol.io/)、
 [标准传输](https://modelcontextprotocol.io/specification/latest/basic/transports)。

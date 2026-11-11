@@ -7,18 +7,40 @@ permissions:
   contents: read
 jobs:
   package_install:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        image: ['ubuntu:22.04', 'ubuntu:24.04']
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install, upgrade and purge in an isolated Ubuntu container
-        run: python tools/test_deb_container.py --image '${{ matrix.image }}'
+      - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
+        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
+      - name: Build the matching Debian architecture package
+        run: python tools/build_deb.py --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime'
+      - name: Fresh install and public MCP without network on Ubuntu 22.04
+        run: python tools/test_deb_container.py --image ubuntu:22.04 --package dist/seriald_*_${{ matrix.arch }}.deb
+      - name: Fresh install and public MCP without network on Ubuntu 24.04
+        run: python tools/test_deb_container.py --image ubuntu:24.04 --package dist/seriald_*_${{ matrix.arch }}.deb
+      - name: Fetch the checksum-pinned published thin package for upgrade acceptance
+        run: |
+          curl --fail --location --retry 3 https://github.com/qianqiu-2020/decklab/releases/download/v1.7.0/seriald_1.7.0_all.deb --output build/seriald_1.7.0_all.deb
+          echo 'b0020684d469cec4db2fa36f5e967f81c860deb236fbdd1d25da4831857cb1a9  build/seriald_1.7.0_all.deb' | sha256sum --check
+      - name: Install, upgrade and use public MCP without network or system SDK on Ubuntu 22.04
+        run: python tools/test_deb_container.py --image ubuntu:22.04 --package dist/seriald_*_${{ matrix.arch }}.deb --upgrade-from build/seriald_1.7.0_all.deb
+      - name: Install, upgrade and use public MCP without network or system SDK on Ubuntu 24.04
+        run: python tools/test_deb_container.py --image ubuntu:24.04 --package dist/seriald_*_${{ matrix.arch }}.deb --upgrade-from build/seriald_1.7.0_all.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seriald-linux-${{ matrix.arch }}
+          path: dist/*.deb
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -61,18 +83,6 @@ jobs:
         run: |
           sudo apt-get install -y vim
           node tools/shared_terminal_smoke.js
-      - name: Build Linux package
-        if: matrix.python == '3.12'
-        run: |
-          python tools/build_deb.py
-          sha256sum dist/*.deb > dist/linux-SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
-        if: matrix.python == '3.12'
-        with:
-          name: seriald-linux
-          path: |
-            dist/*.deb
-            dist/linux-SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         if: always() && matrix.python == '3.12'
         with:

@@ -6,3 +6,17 @@ Contributor checks and conventions: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The detailed historical fix diary and completed plans remain in Git history.
 This entry point is retained for existing contributor instructions.
+
+Debian 1.7.1+ packages include a private frozen MCP/Python runtime, built on the
+native Ubuntu 22.04 baseline for amd64 and arm64. Installation must not download
+Python packages or require `SERIALD_MCP_PYTHON`. The package builder requires a
+validated runtime; it must not silently produce a thin package. An explicit
+Python override remains available for source/advanced deployments. See
+[installation](docs/INSTALL.md), [MCP](docs/MCP.md) and
+[release acceptance](docs/RELEASING.md).
+
+The MCP worker remains a control-owned private loopback process and uses the
+existing authenticated API; it never becomes a second serial reader. Startup
+diagnostics are bounded, credential-redacted and private under
+`SERIALD_BASE/mcp-worker.log`, with one `.1` backup. A failed worker leaves the
+terminal and log APIs available.

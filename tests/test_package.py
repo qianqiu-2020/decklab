@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import struct
 import subprocess
 import tempfile
 import time
@@ -17,12 +18,38 @@ from urllib.request import Request, urlopen
 from seriald_core.storage import Store
 from seriald_core import __version__
 from tools.build_deb import build, collector_build_id
+from tools import build_linux_mcp as mcp_builder
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
 @unittest.skipUnless(shutil.which('dpkg-deb'), 'requires dpkg-deb')
 class PackageTests(unittest.TestCase):
+    def prepare_runtime_fixture(self, root):
+        # Package layout tests use an inert ELF header. Real frozen worker and
+        # license validation run in the clean Ubuntu installation gate.
+        runtime = root / 'runtime'
+        runtime.mkdir()
+        executable = runtime / mcp_builder.EXECUTABLE
+        executable.write_bytes(b'\x7fELF\x02\x01' + bytes(12) + struct.pack('<H', 62))
+        executable.chmod(0o755)
+        (runtime / 'third-party').mkdir()
+        (runtime / 'third-party/inventory.json').write_text('{"schema": 1}')
+        manifest = {
+            'schema': 1, 'architecture': 'amd64', 'elf_machine': 62,
+            'executable': mcp_builder.EXECUTABLE, 'python_version': '3.10.12', 'mcp_version': '2.3.0',
+            'build_platform': {'os': 'ubuntu', 'version': '22.04', 'glibc': '2.35', 'machine': 'x86_64'},
+            'requirements_sha256': mcp_builder.sha256(mcp_builder.LOCK),
+            'source_files': {name: mcp_builder.sha256(SOURCE_ROOT / name) for name in mcp_builder.SOURCES},
+            'notices': 'third-party/inventory.json', 'files': mcp_builder.runtime_files(runtime)}
+        (runtime / 'runtime-manifest.json').write_text(json.dumps(manifest))
+        return runtime
+
+    def test_packaging_requires_prepared_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, 'Prepared MCP runtime is required'):
+                build(Path(temporary) / 'dist', __version__, runtime=Path(temporary) / 'missing')
+
     def test_collector_build_id_ignores_control_but_tracks_collector(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -47,11 +74,22 @@ class PackageTests(unittest.TestCase):
     def test_extracted_package_runs_and_preserves_offline_registry(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            package = build(root / 'dist', __version__)
+            runtime = self.prepare_runtime_fixture(root)
+            with mock.patch.object(mcp_builder, 'notice_module') as notices:
+                package = build(root / 'dist', __version__, runtime=runtime)
+                notices.return_value.verify.assert_called_once_with(runtime / 'third-party', bundle=runtime)
+            self.assertEqual(package.name, 'seriald_%s_amd64.deb' % __version__)
             extracted = root / 'extract'
             subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True,
                            stdout=subprocess.DEVNULL)
             subprocess.run(['dpkg-deb', '--control', str(package), str(root / 'control')], check=True)
+            self.assertIn('Architecture: amd64\n', (root / 'control/control').read_text())
+            packaged_runtime = extracted / 'usr/lib/seriald/mcp-runtime'
+            self.assertEqual((packaged_runtime / 'runtime-manifest.json').read_bytes(),
+                             (runtime / 'runtime-manifest.json').read_bytes())
+            worker = packaged_runtime / mcp_builder.EXECUTABLE
+            self.assertEqual(worker.read_bytes(), (runtime / mcp_builder.EXECUTABLE).read_bytes())
+            self.assertEqual(worker.stat().st_mode & 0o777, 0o755)
             for script in ('preinst', 'postinst', 'prerm', 'postrm'):
                 subprocess.run(['sh', '-n', str(root / 'control' / script)], check=True)
             preinst = (root / 'control/preinst').read_text()

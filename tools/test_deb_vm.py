@@ -19,7 +19,7 @@ from build_deb import build, collector_build_id, __version__
 
 
 CHECK = r'''
-import pathlib, subprocess, time
+import importlib.util, os, pathlib, pwd, subprocess, time
 from urllib.request import urlopen
 import json
 
@@ -41,8 +41,30 @@ def install(path):
     return result
 
 subprocess.run(['apt-get', 'update', '-qq'], check=True)
-subprocess.run(['apt-get', 'install', '-y', '/tmp/seriald.deb'], check=True)
+previous = pathlib.Path('/tmp/seriald-previous.deb').is_file()
+initial = '/tmp/seriald-previous.deb' if previous else '/tmp/seriald.deb'
+subprocess.run(['apt-get', 'install', '-y', initial], check=True)
+# Keep the connected SSH path on the local virtual subnet, but remove Internet
+# routing before MCP acceptance and upgrades. No pip or SDK is installed here.
+for family in ('-4', '-6'):
+    if command('ip', family, 'route', 'show', 'default').strip():
+        subprocess.run(['ip', family, 'route', 'del', 'default'], check=True)
+    assert not command('ip', family, 'route', 'show', 'default').strip()
+assert importlib.util.find_spec('mcp') is None
+assert not os.environ.get('SERIALD_MCP_PYTHON')
 first = ready()
+if previous:
+    with urlopen('http://127.0.0.1:8898/api/access', timeout=3) as response:
+        assert not json.load(response)['mcp_enabled']
+    upgrade = install('/tmp/seriald.deb')
+    assert 'collector kept running (collector code unchanged)' in upgrade
+    assert ready() == first
+    print('PASS: real systemd upgrade from published 1.7.0 thin package retains collector PID', flush=True)
+subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:8898'],
+               check=True, timeout=30)
+account = pwd.getpwnam('seriald')
+control_pid = command('systemctl', 'show', '-p', 'MainPID', '--value', 'seriald.service').strip()
+assert pathlib.Path('/proc/' + control_pid).stat().st_uid == account.pw_uid
 for unit in ('seriald.service', 'seriald-collector.service'):
     assert command('systemctl', 'is-active', unit).strip() == 'active'
 subprocess.run(['serialctl', 'devices'], check=True)
@@ -55,6 +77,12 @@ config.write_bytes(saved)
 unchanged = install('/tmp/seriald.deb')
 assert 'collector kept running (collector code unchanged)' in unchanged
 assert ready() == first
+subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:8898'],
+               check=True, timeout=30)
+subprocess.run(['systemctl', 'restart', 'seriald.service'], check=True)
+assert ready() == first
+subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:8898'],
+               check=True, timeout=30)
 changed = install('/tmp/seriald-changed.deb')
 assert 'collector restarted (collector code changed)' in changed
 second = ready()
@@ -103,7 +131,13 @@ def main():
     parser.add_argument('--image', type=Path, required=True)
     parser.add_argument('--sha256', required=True, help='expected hash from the cloud image provider')
     parser.add_argument('--accel', choices=('kvm', 'tcg'), default='kvm')
+    parser.add_argument('--runtime', type=Path, help='prepared native MCP runtime directory')
+    parser.add_argument('--package', type=Path, help='test this already-built package instead of building')
+    parser.add_argument('--upgrade-from', type=Path, help='published 1.7.0 thin package to install first')
     args = parser.parse_args()
+    for package_path in (args.package, args.upgrade_from):
+        if package_path is not None and not package_path.is_file():
+            parser.error('package must be an existing regular file: ' + str(package_path))
     image = args.image.resolve()
     if not image.is_file():
         parser.error('image must be a regular cloud image file')
@@ -120,7 +154,7 @@ def main():
         parser.error('unsupported backing image format')
     with tempfile.TemporaryDirectory(prefix='decklab-systemd-vm-') as directory:
         root = Path(directory)
-        package = build(root, __version__)
+        package = args.package.resolve() if args.package else build(root, __version__, runtime=args.runtime)
         changed = changed_package(package, root)
         key = root / 'key'
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)], check=True)
@@ -166,7 +200,11 @@ def main():
                 scp = ['scp', '-F', '/dev/null', '-i', str(key), '-P', str(port), '-o', 'BatchMode=yes',
                        '-o', 'IdentitiesOnly=yes', '-o', 'PasswordAuthentication=no',
                        '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + str(root / 'known_hosts')]
-                for source, destination in ((package, 'seriald.deb'), (changed, 'seriald-changed.deb'), (check, 'check.py')):
+                files = [(package, 'seriald.deb'), (changed, 'seriald-changed.deb'), (check, 'check.py'),
+                         (Path(__file__).with_name('installed_mcp_check.py'), 'installed_mcp_check.py')]
+                if args.upgrade_from:
+                    files.append((args.upgrade_from.resolve(), 'seriald-previous.deb'))
+                for source, destination in files:
                     subprocess.run(scp + [str(source), 'decklab@127.0.0.1:/tmp/' + destination], check=True)
                 subprocess.run(ssh + ['sudo env DEBIAN_FRONTEND=noninteractive python3 /tmp/check.py'], check=True, timeout=600)
                 print('Tested cloud image SHA-256:', expected)

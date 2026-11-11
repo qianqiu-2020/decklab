@@ -6,7 +6,8 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 
 [最新发布](https://github.com/qianqiu-2020/decklab/releases/latest) ·
 [Windows 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald-windows-x64-setup.exe) ·
-[Ubuntu 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_all.deb)
+[Ubuntu amd64 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb) ·
+[Ubuntu arm64 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_arm64.deb)
 
 ![DeckLab Demo：共享终端、设备列表与启动日志归档](docs/decklab-demo-zh.png?v=ui-1.5.2)
 
@@ -50,10 +51,20 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 不会访问真实硬件或执行主机命令。Windows 安装包可运行 `seriald.exe demo`。
 详见 [Demo 使用说明](docs/DEMO.md)。
 
+从上方固定地址下载与上位机架构匹配的安装包，支持 Ubuntu 22.04 / 24.04 的 amd64 和 arm64。
+1.7.1 起，deb 内置 MCP 服务所需的私有 Python 和依赖；安装时无需执行 pip 或配置
+`SERIALD_MCP_PYTHON`。从源码构建 amd64 包时，先准备 Ubuntu 22.04 基线的运行时：
+
 ```sh
-python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.7.0_all.deb
+python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
+python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
+sudo apt install ./dist/seriald_1.7.1_amd64.deb
 ```
+
+默认运行时构建需要 Docker 和构建时下载；运行时准备后，deb 组装不访问网络。
+arm64 包在对应原生构建机使用 `--arch arm64` 及对应目录。旧链接
+`seriald_latest_all.deb` 保留为 amd64 兼容别名，包内架构并非 `all`；
+其他上位机架构请参考源码运行说明，目前不提供对应的预编译 deb。
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
 生产数据保存在 `/data/seriald-data`。安装输出会打印本机和可用的局域网访问地址。
@@ -64,7 +75,7 @@ sudo apt install ./dist/seriald_1.7.0_all.deb
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
 
 Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。安装构建依赖后，
-双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.7.0-windows-x64-setup.exe`：
+双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.7.1-windows-x64-setup.exe`：
 首次选择安装目录，后续升级记住原目录，保留 `data/`，无需手动解压覆盖。首次从便携版迁移时选中原目录。
 开始菜单提供本机、局域网无密码、局域网有密码三个入口。详见 [Windows 构建与安装](docs/WINDOWS.md)。
 也支持 Windows Docker 容器构建；IT 可按 EXE SHA-256 审批防火墙规则，升级后需重新审批。
@@ -74,8 +85,9 @@ Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API
 ## Agent 使用
 
 支持远程 MCP 的 AI 客户端只需配置上位机的 `/mcp` 地址和网页生成的 Agent 令牌，
-无需在客户端安装脚本或 Python。Windows 安装包内置服务端运行依赖；Linux 上位机的
-一次性部署步骤见 [MCP 接入](docs/MCP.md)。网页同时保留 CLI 和本地 stdio 兼容方式。
+无需在客户端安装脚本或 Python。Windows 安装包和 1.7.1 起的 Debian 包均内置服务端
+MCP 运行依赖，正常启动即可使用。源码环境与兼容方式见 [MCP 接入](docs/MCP.md)。
+网页同时保留 CLI 和本地 stdio 兼容方式。
 
 ```sh
 serialctl devices
@@ -111,12 +123,14 @@ node tests/frontend.test.js
 node tools/browser_smoke.js
 python3 -m compileall -q seriald_core seriald.py serialctl.py
 bash -n rescue.sh
-python3 tools/build_deb.py
+python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
+python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
 ```
 
 `seriald.py` 是 control 薄入口，collector 入口为 `python3 -m seriald_core.collector_server`；后端在
 `seriald_core/`，布局、样式和交互分属 `index.html`、`static/app.css`、`static/app.js`。
-Python 后端使用标准库，SSH 需要系统 `ssh` 与 `sshpass`；前端依赖本地 `vendor/`。
+核心 Python 后端使用标准库，SSH 需要系统 `ssh` 与 `sshpass`；前端依赖本地 `vendor/`。
+MCP 使用独立进程及官方 SDK；源码运行的依赖安装见 [MCP 接入](docs/MCP.md)。
 浏览器检查需要 Node.js 22+ 和 Chrome（可用 `CHROME_BIN` 指定），使用隔离模拟设备验证真实 xterm，截图输出到 `dist/`。
 源码运行必须先启动 collector，再运行 `python3 seriald.py 8898 127.0.0.1`；只有 collector 打开串口。
 隔离开发可设置 `SERIALD_BASE` 为临时目录、`SERIALD_BY_PATH` 为空测试目录；不要打开真实串口验证改动。
