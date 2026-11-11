@@ -36,11 +36,19 @@ glibc 2.35 为基线，包含私有 Python、MCP SDK 与全部 Python 依赖；�
 与目标架构一致。未传 `--runtime` 时仅查找本机架构的默认目录；缺失或校验失败
 会停止构建，不允许发布缺少 MCP 的薄包。
 
+CI 先复用 runner 已有的 BusyBox/Vim，缺失时才安装；真实 ash/PTY 和 Vim 检查仍执行。
+Ubuntu 包任务通过 `tools/ci_ubuntu_network.py --repair` 检查软件源解析。该工具默认只诊断；
+修复模式只允许在 GitHub-hosted 临时 runner 中运行，先核对普通用户与 `_apt` 的解析，
+再验证公共 DNS 的实际响应，满足条件后才用 `resolvectl` 调整临时解析器并复验。
+它不替换 APT 源、关闭签名校验或复用未经本次验证的安装包。失败时保留作业日志，
+区分网络预检与应用测试失败，不直接重复触发构建。
+
 Linux CI 对每个架构在 Ubuntu 22.04 和 24.04 容器中安装候选包并从固定 SHA-256 的
 已发布 1.7.0 `all` 包升级。安装系统依赖后断开容器网络，以 `seriald` 服务账户运行
 已安装的 collector/control，系统 Python 不安装 SDK，也不设置 `SERIALD_MCP_PYTHON`。
 验收覆盖公开 `/mcp` 的授权、工具调用与撤销，独立重启 control，保留配置和运行数据，
-以及升级前后 collector PID 不变。容器不访问真实串口，不验证 systemd 激活或 USB recovery；
+以及 collector 指纹不变时保留进程、变化时请求重启，并核验凭据及私有备份在重装后保留。
+容器不访问真实串口，不验证 systemd 激活或 USB recovery；
 候选包仍需按本次改动范围补充真实安装与硬件验收。
 
 发布前下载草稿的全部附件，对下载内容再次执行：

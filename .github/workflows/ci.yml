@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify Ubuntu archive DNS on the temporary runner
+        run: python tools/ci_ubuntu_network.py --repair
       - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
         run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
       - name: Build the matching Debian architecture package
@@ -60,7 +62,14 @@ jobs:
         run: python -m pip install -r requirements-mcp.txt
       - name: Install BusyBox for the ash terminal resize regression
         if: matrix.python == '3.12'
-        run: sudo apt-get update -qq && sudo apt-get install -y busybox
+        run: |
+          if ! command -v busybox >/dev/null; then
+            python tools/ci_ubuntu_network.py --repair
+            sudo apt-get update -qq
+            sudo apt-get install -y busybox
+          fi
+          busybox ash -c ':'
+          busybox stty --help
       - name: Check UART archives with a non-UTF-8 locale
         env:
           LC_ALL: C
@@ -84,7 +93,11 @@ jobs:
       - name: Shared SSH and serial screens with real Vim on local PTYs
         if: matrix.python == '3.12'
         run: |
-          sudo apt-get install -y vim
+          if ! command -v vim >/dev/null; then
+            python tools/ci_ubuntu_network.py --repair
+            sudo apt-get update -qq
+            sudo apt-get install -y vim
+          fi
           node tools/shared_terminal_smoke.js
       - uses: actions/upload-artifact@v4
         if: always() && matrix.python == '3.12'
