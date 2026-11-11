@@ -26,7 +26,8 @@ import json
 def command(*args):
     return subprocess.check_output(args, text=True)
 def ready():
-    for attempt in range(100):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         try:
             with urlopen('http://127.0.0.1:8898/api/health', timeout=2) as response:
                 value = json.load(response)
