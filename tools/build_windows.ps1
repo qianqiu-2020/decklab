@@ -58,6 +58,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Windows portable tests failed.' }
     & $python -m unittest discover -s tests -p test_windows_entrypoint.py
     if ($LASTEXITCODE -ne 0) { throw 'Windows offline administration entrypoint tests failed.' }
+    & $python -m unittest discover -s tests -p test_mcp.py
+    if ($LASTEXITCODE -ne 0) { throw 'MCP transport and client tests failed.' }
+    & $python -m unittest discover -s tests -p test_mcp_integration.py
+    if ($LASTEXITCODE -ne 0) { throw 'MCP authorization integration tests failed.' }
+    & $python -m unittest discover -s tests -p test_mcp_host.py
+    if ($LASTEXITCODE -ne 0) { throw 'Server-managed MCP lifecycle tests failed.' }
+    & $python -m unittest discover -s tests -p test_mcp_host_proxy.py
+    if ($LASTEXITCODE -ne 0) { throw 'Single-port MCP proxy tests failed.' }
     & $python -m unittest discover -s tests -p test_session_contract.py
     if ($LASTEXITCODE -ne 0) { throw 'Shared SSH lifecycle and archive tests failed.' }
     & $python -m unittest discover -s tests -p test_protocol.py
@@ -102,6 +110,14 @@ try {
 
     & $pyinstaller --noconfirm --clean --onedir --name seriald `
         --hidden-import serialctl `
+        --hidden-import seriald_mcp `
+        --collect-submodules mcp.server `
+        --collect-submodules mcp.shared `
+        --collect-submodules mcp.client `
+        --collect-data mcp `
+        --collect-data mcp_types `
+        --collect-all uvicorn `
+        --recursive-copy-metadata mcp `
         --icon packaging/decklab.ico `
         --add-data 'index.html;.' `
         --add-data 'static;static' `
@@ -137,6 +153,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI launcher failed.' }
     & (Join-Path $bundle 'seriald.exe') admin resolve-conflict --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged offline administration launcher failed.' }
+    & (Join-Path $bundle 'seriald.exe') mcp --help | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP worker launcher failed.' }
+    & $python tools/test_windows_mcp.py --executable (Join-Path $bundle 'seriald.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP worker protocol smoke failed.' }
 
     # A content-specific ICO path makes shortcuts independent of the EXE icon cache.
     $iconSource = Join-Path $root 'packaging\decklab.ico'

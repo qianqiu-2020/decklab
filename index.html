@@ -201,9 +201,13 @@
     <label>连接位置<select id="agent-share-address-mode"><option value="local">本机</option><option value="lan">局域网</option></select></label>
     <label>Agent 可访问的服务地址<input id="agent-share-url" type="url" spellcheck="false" placeholder="http://上位机IP:8898"></label>
   </div>
-  <label class="agent-share-format">接入方式<select id="agent-share-format"><option value="mcp">MCP 客户端配置</option><option value="cli">CLI 接入指引</option></select></label>
-  <p id="agent-share-setup">在 AI 客户端所在机器安装 MCP 适配器；独立环境中的程序请填写实际绝对路径。将生成的 JSON 添加到客户端 MCP 设置后重启连接。令牌属于客户端配置，请勿粘贴到对话中。</p>
-  <div id="agent-share-mcp-options">
+  <label class="agent-share-format">接入方式<select id="agent-share-format"><option value="mcp">远程 MCP（推荐）</option><option value="stdio">本地 stdio（兼容方式）</option><option value="cli">CLI 接入指引</option></select></label>
+  <p id="agent-share-setup">客户端无需安装适配器。将 MCP 服务地址和令牌填入客户端，或复制下方 JSON 配置。不同客户端的配置格式可能不同。</p>
+  <div id="agent-share-mcp-remote">
+    <label class="agent-share-launcher">MCP 服务地址<input id="agent-share-endpoint" type="url" readonly spellcheck="false" aria-label="MCP 服务地址" data-i18n-ignore></label>
+    <p id="agent-share-mcp-status" role="status"></p>
+  </div>
+  <div id="agent-share-mcp-options" hidden>
     <label class="agent-share-launcher">MCP 可执行文件<input id="agent-share-command" type="text" value="seriald-mcp" spellcheck="false" autocomplete="off" aria-label="MCP 可执行文件"></label>
     <details class="agent-share-install"><summary>首次安装：使用独立 Python 环境</summary>
       <p>先下载 DeckLab 源码，并将下方源码目录替换为实际路径。最后一行显示应填写的可执行文件路径。</p>

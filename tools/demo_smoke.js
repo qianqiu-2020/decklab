@@ -139,6 +139,17 @@ async function until(check, description) {
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("/tmp/browser-copy.log")'), 'copy history after reload');
   await evaluate('document.querySelector(\'[data-key="demo-k3"]\').click()');
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("/tmp/browser-copy.log")'), 'copy visible under destination board');
+  // A fresh board view schedules its initial size/environment setup after an
+  // idle prompt. Wait for its published completion before submitting UART work.
+  await until(async () => {
+    const [operation, packet] = await Promise.all([
+      fetch(address + 'api/operation?key=demo-k3').then(response => response.json()),
+      fetch(address + 'api/session?key=demo-k3&sid=serial&off=0&screen=1').then(response => response.json())
+    ]);
+    const state = packet.terminal_state || {};
+    return packet.key === 'demo-k3' && !operation.operation && state.serial_ready
+      && state.serial_configured && !state.internal_output;
+  }, 'destination serial setup and idle console');
   // Submit upload/download through the real dialog, never the foreground UART API.
   const uploadedBytes = Buffer.from('browser upload verified\n'.repeat(8192));
   await evaluate('document.querySelector("#b-file-transfer").click()');

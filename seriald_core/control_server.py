@@ -23,6 +23,7 @@ from .httpd import BoundedThreadingTCPServer
 from . import __version__
 from .results import response as api_response
 from .request_json import load_object
+from .mcp_host import MCPHost, local_control_url
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -58,6 +59,68 @@ def lan_hosts():
             ipaddress.ip_network('192.168.0.0/16')))
     return sorted((host for host in hosts if is_lan(host)),
                   key=lambda host: (not host.startswith('10.'), host))
+
+
+def _mcp_authority(value):
+    if not isinstance(value, str) or not value or any(char.isspace() for char in value) or value.endswith(':'):
+        raise ValueError('invalid public MCP authority')
+    parsed = urlparse('//' + value)
+    if parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment or not parsed.hostname:
+        raise ValueError('invalid public MCP authority')
+    host, port = parsed.hostname.lower(), parsed.port
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        if not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?', host):
+            raise ValueError('invalid public MCP hostname')
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError('invalid public MCP port')
+    return host, port
+
+
+def public_mcp_host_allowed(server, authority):
+    """Keep SDK DNS-rebinding protection at the public reverse-proxy boundary."""
+    if server is None:
+        return False
+    try:
+        requested = _mcp_authority(authority)
+    except ValueError:
+        return False
+    allowed = getattr(server, '_mcp_public_hosts', None)
+    if allowed is None:
+        address = getattr(server, 'server_address', ('127.0.0.1', 8898))
+        bind, port = address[:2]
+        names = {'localhost', '127.0.0.1', '::1', socket.gethostname().lower(), socket.getfqdn().lower()}
+        try:
+            names.update(item[4][0].lower() for item in socket.getaddrinfo(
+                socket.gethostname(), None, socket.AF_UNSPEC, socket.SOCK_STREAM))
+        except OSError:
+            pass
+        if bind not in ('0.0.0.0', '::', ''):
+            names.add(bind.lower())
+        names.update(lan_hosts())
+        allowed = {(name, port) for name in names if name}
+        for value in os.environ.get('SERIALD_MCP_ALLOWED_HOSTS', '').split(','):
+            value = value.strip()
+            if not value:
+                continue
+            try:
+                if value.endswith(':*'):
+                    host, specified = _mcp_authority(value[:-2])
+                    if specified is not None:
+                        continue
+                    allowed.add((host, '*'))
+                else:
+                    host, specified = _mcp_authority(value)
+                    allowed.add((host, specified))
+                    if specified in (80, 443):
+                        allowed.add((host, None))
+            except ValueError:
+                continue  # Invalid configured names never broaden the policy.
+        if port in (80, 443):
+            allowed.update((name, None) for name in names if name)
+        server._mcp_public_hosts = frozenset(allowed)
+    return requested in allowed or (requested[0], '*') in allowed
 
 
 class ControlHandler(http.server.SimpleHTTPRequestHandler):
@@ -266,6 +329,99 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             connection.close()
 
+    def _mcp_status(self):
+        host = getattr(getattr(self, 'server', None), 'mcp_host', None)
+        if host is None:
+            return {'mcp_enabled': False, 'mcp_url': '/mcp', 'mcp_error': '服务端 MCP 尚未启用'}
+        return host.snapshot()
+
+    def _mcp_proxy(self):
+        """Forward MCP unchanged; the ordinary API actor rewrite is inapplicable.
+
+        Even open-access and trusted-loopback hosts require an explicit current
+        agent grant here. The worker and every tool API call validate that same
+        credential again; no browser cookie or owner authority is forwarded.
+        """
+        if not self._agent_grant():
+            self.send_response(401)
+            self.send_header('WWW-Authenticate', 'Bearer')
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Cache-Control', 'no-store')
+            body = b'{"error":"a current agent grant is required","code":"unauthorized"}'
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        parsed = urlparse(self.path)
+        if parsed.query or parsed.fragment:
+            return self._json(400, {'error': 'MCP credentials belong in the Authorization header'})
+        server = getattr(self, 'server', None)
+        if not public_mcp_host_allowed(server, self.headers.get('Host', '')):
+            return self._json(403, {'error': 'MCP Host is not an allowed public service address'})
+        origin = self.headers.get('Origin')
+        if origin:
+            try:
+                source = urlparse(origin)
+            except ValueError:
+                return self._json(403, {'error': 'invalid MCP Origin'})
+            if (source.scheme not in ('http', 'https') or source.username or source.password
+                    or source.netloc.lower() != self.headers.get('Host', '').lower()
+                    or source.path not in ('', '/') or source.query or source.fragment):
+                return self._json(403, {'error': 'MCP Origin does not match the public service'})
+        host = getattr(getattr(self, 'server', None), 'mcp_host', None)
+        target = host.target if host is not None else None
+        if not target:
+            return self._json(503, {'error': self._mcp_status()['mcp_error'], 'code': 'unavailable'})
+        connection = None
+        headers_sent = False
+        slots = getattr(host, 'requests', None)
+        if slots is not None and not slots.acquire(blocking=False):
+            return self._json(429, {'error': 'too many concurrent MCP requests', 'code': 'busy'})
+        try:
+            if self.headers.get('Transfer-Encoding'):
+                return self._json(400, {'error': 'transfer encoding unsupported'})
+            length = int(self.headers.get('Content-Length') or 0)
+            if length < 0 or length > 65536:
+                return self._json(413, {'error': 'MCP request body must be at most 65536 bytes'})
+            body = self.rfile.read(length) if length else None
+            if length and len(body) != length:
+                return self._json(400, {'error': 'incomplete body'})
+            headers = {name: self.headers[name] for name in (
+                'Authorization', 'Content-Type', 'Accept', 'MCP-Protocol-Version',
+                'Mcp-Session-Id', 'Last-Event-ID') if self.headers.get(name) is not None}
+            if length:
+                headers['Content-Length'] = str(length)
+            connection = http.client.HTTPConnection(*target, timeout=3620)
+            connection.request(self.command, '/mcp', body=body, headers=headers)
+            result = connection.getresponse()
+            # This worker uses stateless JSON responses, never an unbounded SSE
+            # stream. Read before sending headers so oversized responses fail
+            # atomically instead of exposing an apparently successful prefix.
+            data = result.read(8 * 1024 * 1024 + 1)
+            if len(data) > 8 * 1024 * 1024:
+                return self._json(502, {'error': 'MCP response exceeded the service limit'})
+            self.send_response(result.status)
+            for name in ('Content-Type', 'WWW-Authenticate', 'Allow', 'Mcp-Session-Id',
+                         'MCP-Protocol-Version'):
+                value = result.getheader(name)
+                if value:
+                    self.send_header(name, value)
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            headers_sent = True
+            self.wfile.write(data)
+        except ValueError:
+            return self._json(400, {'error': 'bad content length'})
+        except (OSError, http.client.HTTPException, TimeoutError):
+            if not headers_sent:
+                return self._json(503, {'error': 'MCP worker unavailable', 'code': 'unavailable'})
+        finally:
+            if connection is not None:
+                connection.close()
+            if slots is not None:
+                slots.release()
+
     def _proxy(self):
         connection = None
         headers_sent = False
@@ -430,6 +586,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         route = urlparse(self.path).path
+        if route == '/mcp':
+            return self._mcp_proxy()
         if route.startswith('/share/'):
             return self._accept_share(route[len('/share/'):])
         if route in self.public_agent_files:
@@ -442,7 +600,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                                     'open_access': not bool(self.auth_token),
                                     'loopback_open': bool(self.trust_loopback),
                                     'default_language': self.default_language,
-                                    'lan_hosts': lan_hosts()})
+                                    'lan_hosts': lan_hosts(), **self._mcp_status()})
         if route == '/api/agent-grants':
             if not self._agent_share_authorized() or not self.grant_store:
                 return self._json(403, {'error': '需要有效的网页访问凭证才能管理 Agent 授权'})
@@ -461,6 +619,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         return self._json(404, {'error': 'not found'})
 
     def do_POST(self):
+        if urlparse(self.path).path == '/mcp':
+            return self._mcp_proxy()
         if self._require_auth():
             return
         route = urlparse(self.path).path
@@ -508,6 +668,11 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return self._proxy()
         return self._json(404, {'error': 'not found'})
 
+    def do_DELETE(self):
+        if urlparse(self.path).path == '/mcp':
+            return self._mcp_proxy()
+        return self._json(404, {'error': 'not found'})
+
     def translate_path(self, path):
         route = urlparse(path).path.lstrip('/')
         if route == 'skills/seriald-board/SKILL.md':
@@ -549,11 +714,13 @@ def main():
         ControlHandler.agent_tokens = tokens
     try:
         with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as server:
-            print('seriald control on http://%s:%d/' % (args.bind, args.port), flush=True)
-            try:
-                server.serve_forever()
-            except KeyboardInterrupt:
-                pass
+            with MCPHost(local_control_url(server)) as mcp:
+                server.mcp_host = mcp
+                print('seriald control on http://%s:%d/' % (args.bind, server.server_address[1]), flush=True)
+                try:
+                    server.serve_forever()
+                except KeyboardInterrupt:
+                    pass
     finally:
         ControlHandler.grant_store.close()
 

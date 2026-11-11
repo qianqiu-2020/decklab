@@ -24,6 +24,9 @@ from two collectors.
 | `SERIALD_AUTH_TOKEN` | Empty: open access. Nonempty: primary Basic/Bearer credential; browser Basic username is `seriald` |
 | `SERIALD_AGENT_TOKENS_FILE` | Linux control-only optional JSON actor/token map; requires primary authentication; not loaded by Windows entry point |
 | `SERIALD_TRUST_LOOPBACK` | Windows-only, exact value `1` allows credential-free loopback access; LAN authenticated launcher enables it. Linux control does not read it |
+| `SERIALD_MCP_ENABLED` | Automatic when the server SDK is available; `0` disables the integrated `/mcp` endpoint |
+| `SERIALD_MCP_PYTHON` | Optional server-side Python executable containing the MCP SDK, for example `/opt/decklab-mcp/bin/python`; no client installation is required |
+| `SERIALD_MCP_ALLOWED_HOSTS` | Optional comma-separated public `hostname:port` authorities for MCP behind a proxy; local hostnames, loopback and local LAN addresses are discovered automatically. A port wildcard such as `decklab.example:*` is allowed; a wildcard hostname is not |
 
 Set host/auth variables before starting the entry point. Restart control to apply
 Linux listener/auth changes; restart collector for collector configuration.

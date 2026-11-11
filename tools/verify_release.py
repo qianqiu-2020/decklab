@@ -66,7 +66,13 @@ def inspect_release(directory, version):
     deb = 'seriald_%s_all.deb' % version
     setup = 'seriald-%s-windows-x64-setup.exe' % version
     portable = 'seriald-windows-portable.zip'
-    checksums(directory, 'SHA256SUMS.txt', (deb, setup, portable))
+    aliases = ({'seriald_latest_all.deb': deb, 'seriald-windows-x64-setup.exe': setup}
+               if tuple(map(int, version.split('.'))) >= (1, 7, 0) else {})
+    checksums(directory, 'SHA256SUMS.txt', (deb, setup, portable, *aliases))
+    for alias, canonical in aliases.items():
+        if hashlib.sha256((directory / alias).read_bytes()).digest() != hashlib.sha256(
+                (directory / canonical).read_bytes()).digest():
+            raise ValueError('stable download alias differs from versioned package: ' + alias)
     # Older workflow output names the build directory; artifacts retain basenames.
     checksums(directory, 'linux-SHA256SUMS.txt', (deb,), source_prefix='dist/')
     digest = (directory / (setup + '.sha256')).read_text(encoding='ascii').strip()

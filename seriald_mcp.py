@@ -6,12 +6,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 import hashlib
 import math
+import json
 import os
 import re
 import sys
 import threading
 from typing import Any, Literal
 import weakref
+from pathlib import Path
+import time
 
 from serialctl import Client, ClientError, DEFAULT_URL, execute
 
@@ -320,6 +323,31 @@ def create_http_app(settings, host='127.0.0.1', allowed_hosts=None, allowed_orig
     return app
 
 
+def watch_parent(pid):
+    """An abruptly closed host must not leave its private SDK worker running."""
+    def wait():
+        if os.name == 'nt':
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel.WaitForSingleObject.restype = wintypes.DWORD
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+            if handle:
+                try:
+                    kernel.WaitForSingleObject(handle, 0xffffffff)
+                finally:
+                    kernel.CloseHandle(handle)
+        else:
+            while os.getppid() == pid:
+                time.sleep(.5)
+        os._exit(0)
+    threading.Thread(target=wait, name='mcp-parent-watch', daemon=True).start()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url', default=os.environ.get('SERIALD_URL', DEFAULT_URL))
@@ -328,19 +356,40 @@ def main(argv=None):
     parser.add_argument('--port', type=int, default=8899)
     parser.add_argument('--allow-host', action='append', default=[], help='allowed HTTP Host, e.g. decklab.example:443')
     parser.add_argument('--allow-origin', action='append', default=[], help='explicit browser Origin if needed')
+    parser.add_argument('--ready-file', help=argparse.SUPPRESS)
+    parser.add_argument('--parent-pid', type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
-        if not 1 <= args.port <= 65535:
-            raise ValueError('port must be between 1 and 65535')
+        if not 0 <= args.port <= 65535 or args.port == 0 and args.transport != 'streamable-http':
+            raise ValueError('port must be between 1 and 65535 (or 0 for an ephemeral HTTP listener)')
         settings = Settings(url=args.url, token=os.environ.get('SERIALD_TOKEN', ''),
                             actor=os.environ.get('SERIALD_ACTOR', 'decklab-mcp'),
                             http=args.transport == 'streamable-http')
         if MCPServer is None:
             raise RuntimeError('Install MCP support: python3 -m pip install -r requirements-mcp.txt')
+        if args.parent_pid is not None:
+            if not args.ready_file or args.parent_pid <= 0:
+                raise ValueError('parent watchdog requires an internal worker readiness file')
+            watch_parent(args.parent_pid)
         if settings.http:
             import uvicorn
-            uvicorn.run(create_http_app(settings, args.host, args.allow_host, args.allow_origin),
-                        host=args.host, port=args.port, log_level='warning', access_log=False)
+            config = uvicorn.Config(create_http_app(settings, args.host, args.allow_host, args.allow_origin),
+                                    host=args.host, port=args.port, log_level='warning', access_log=False)
+            if args.ready_file:
+                if args.host != '127.0.0.1':
+                    raise ValueError('worker readiness is only supported on loopback')
+                listener = config.bind_socket()
+                try:
+                    ready = Path(args.ready_file)
+                    temporary = ready.with_name(ready.name + '.tmp')
+                    temporary.write_text(json.dumps(
+                        {'host': args.host, 'port': listener.getsockname()[1]}), encoding='utf-8')
+                    temporary.replace(ready)
+                    uvicorn.Server(config).run(sockets=[listener])
+                finally:
+                    listener.close()
+            else:
+                uvicorn.Server(config).run()
         else:
             create_server(settings).run()
         return 0

@@ -241,6 +241,28 @@ class NoticeTests(unittest.TestCase):
 
 
 class NativeSourceNoticeTests(unittest.TestCase):
+    def test_mcp_source_catalog_guards_both_new_rust_providers_and_all_lock_notices(self):
+        source = notices.ROOT / 'packaging/third-party/native-source-notices'
+        raw = (source / 'inventory.json').read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), notices.NATIVE_SOURCE_CATALOG_HASH)
+        catalog = json.loads(raw)
+        expected = {'_internal/pydantic_core/_pydantic_core.cp312-win_amd64.pyd',
+                    '_internal/rpds/rpds.cp312-win_amd64.pyd'}
+        self.assertTrue(expected.issubset(catalog['providers']))
+        graphs = catalog['supplemental_source_locks']
+        self.assertEqual({row['name'] for row in graphs}, {'pydantic_core', 'rpds-py'})
+        crates = {(row['name'], row['version']): row for row in catalog['crates']}
+        for graph in graphs:
+            self.assertIn('superset', graph['graph_scope'])
+            self.assertGreater(len(graph['packages']), 0)
+            for package in graph['packages']:
+                row = crates[package['name'], package['version']]
+                self.assertEqual(row['checksum'], package['checksum'])
+                self.assertTrue(row['notice_files'])
+        for relative, checksum in catalog['files'].items():
+            self.assertEqual(hashlib.sha256((source / relative).read_bytes()).hexdigest(), checksum,
+                             relative)
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -292,9 +314,10 @@ class NativeSourceNoticeTests(unittest.TestCase):
         data = (source / 'inventory.json').read_bytes()
         self.assertEqual(hashlib.sha256(data).hexdigest(), notices.NATIVE_SOURCE_CATALOG_HASH)
         catalog = json.loads(data)
-        self.assertEqual(len(catalog['crates']), 67)
+        self.assertEqual(len(catalog['crates']), 183)
         self.assertEqual(len(catalog['embedded_cffi_source_headers']['headers']), 8)
-        self.assertEqual([row['version'] for row in catalog['rust_toolchains']], ['1.90.0', '1.98.1'])
+        self.assertEqual([row['version'] for row in catalog['rust_toolchains']],
+                         ['1.90.0', '1.98.1', '1.99.1', '1.91.0'])
         for relative, checksum in catalog['files'].items():
             self.assertEqual(hashlib.sha256((source / relative).read_bytes()).hexdigest(), checksum)
 

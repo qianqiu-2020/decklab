@@ -59,7 +59,7 @@ def protected_connection():
                 worker.start()
             fixture = SimpleNamespace(url='http://127.0.0.1:%d' % control.server_address[1],
                 owner_token=Control.auth_token, grant_store=grants, manager=manager,
-                device=device, send=send, probe=probe)
+                device=device, send=send, probe=probe, control=control)
             try:
                 status, issued = api_request(fixture.url, '/api/agent-share', fixture.owner_token,
                     {'scope': 'connection', 'key': device.key, 'connection_id': device.connection_id})

@@ -24,6 +24,13 @@ if len(sys.argv) > 1 and sys.argv[1] == 'admin':
     sys.argv.pop(1)
     raise SystemExit(admin_main())
 
+# The bundled MCP worker is a separate process and must never discover COM
+# ports or create a second collector. The public host proxies /mcp to it.
+if len(sys.argv) > 1 and sys.argv[1] == 'mcp':
+    import seriald_mcp
+    sys.argv.pop(1)
+    raise SystemExit(seriald_mcp.main())
+
 import argparse
 import threading
 import webbrowser
@@ -37,6 +44,7 @@ from seriald_core.httpd import BoundedThreadingTCPServer
 from seriald_core.storage import Store
 from seriald_core.windows_manager import WindowsManager
 from seriald_core.profiles import ProfileBook
+from seriald_core.mcp_host import MCPHost, local_control_url
 
 
 def main():
@@ -51,7 +59,9 @@ def main():
     args = parser.parse_args()
     profiles = ProfileBook.from_env()
     # Bind the public port first, so a second copy never takes ownership of COM ports.
-    with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as control:
+    with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as control, \
+            MCPHost(local_control_url(control)) as mcp:
+        control.mcp_host = mcp
         os.makedirs(LOG_ROOT, exist_ok=True)
         store = Store(os.path.join(BASE, 'registry.sqlite3'))
         grants = AgentGrantStore(os.path.join(BASE, 'agent-grants.sqlite3'))
@@ -79,6 +89,7 @@ def main():
                 except KeyboardInterrupt:
                     pass
                 finally:
+                    mcp.close()
                     connections = manager.close()
                     write_handoff(HANDOFF, connections)
                     collector.shutdown()

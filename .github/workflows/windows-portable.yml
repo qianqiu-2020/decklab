@@ -10,6 +10,9 @@ on:
       - 'seriald_demo.py'
       - 'seriald_core/**'
       - 'serialctl.py'
+      - 'seriald_mcp.py'
+      - 'requirements-mcp.txt'
+      - 'pyproject.toml'
       - 'static/**'
       - 'vendor/**'
       - 'index.html'
@@ -31,6 +34,7 @@ on:
       - 'tools/prepare_terminal_runtime.py'
       - 'tools/prepare_terminal_assets.py'
       - 'tools/check_public_docs.py'
+      - 'tools/test_windows_mcp.py'
       - 'tools/bundle_manifest.py'
       - 'tools/windows-launchers/**'
       - 'packaging/seriald-windows.iss'
@@ -82,6 +86,11 @@ jobs:
             if ($response.PSObject.Properties.Name -notcontains 'devices') { throw 'Collector API unavailable' }
             $access = Invoke-RestMethod http://127.0.0.1:18898/api/access -TimeoutSec 5
             if ($access.default_language -ne 'en') { throw 'Host did not expose the installation UI language.' }
+            if (-not $access.mcp_enabled -or $access.mcp_url -ne '/mcp') {
+              throw ('Packaged remote MCP worker unavailable: ' + $access.mcp_error)
+            }
+            & .\build\windows-venv\Scripts\python.exe tools/test_windows_mcp.py --control-url http://127.0.0.1:18898
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged same-origin remote MCP protocol failed.' }
             $script = Invoke-WebRequest http://127.0.0.1:18898/static/i18n.js -TimeoutSec 5
             if ($script.StatusCode -ne 200) { throw 'Packaged UI translations unavailable.' }
             $englishSkill = Invoke-WebRequest 'http://127.0.0.1:18898/skills/seriald-board/SKILL.md?lang=en' -TimeoutSec 5

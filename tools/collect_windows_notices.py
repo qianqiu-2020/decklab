@@ -29,7 +29,7 @@ RUNTIME_SOURCE_NOTICES = (
      'https://github.com/python/cpython-source-deps/blob/zlib-1.3.1/LICENSE'),
     ('xz-COPYING', 'bcb02973ef6e87ea73d331b3a80df7748407f17efdb784b61b47e0e610d3bb5c',
      'https://github.com/python/cpython-source-deps/blob/xz-5.2.5/COPYING'))
-NATIVE_SOURCE_CATALOG_HASH = '0b7c0ecc475b987eabe20c9165cdd3793853d007b4ae33f126a60b2daae02b51'
+NATIVE_SOURCE_CATALOG_HASH = 'a20d92f7de96c8ac7a30fa7f352e2444f0da9bbc4f90e11d63eeb76cd3ae0273'
 PARAMIKO_SOURCE_HASH = '6a25f07b380cc9c9a88d2b920ad37167ac4667f8d9886ccebd8f90f654b5d69f'
 
 

@@ -16,6 +16,9 @@
   var setup = document.getElementById('agent-share-setup');
   var mcpOptions = document.getElementById('agent-share-mcp-options');
   var mcpCommand = document.getElementById('agent-share-command');
+  var mcpRemote = document.getElementById('agent-share-mcp-remote');
+  var mcpEndpointField = document.getElementById('agent-share-endpoint');
+  var mcpStatus = document.getElementById('agent-share-mcp-status');
   var addressMode = document.getElementById('agent-share-address-mode');
   var address = document.getElementById('agent-share-url');
   var hint = document.getElementById('agent-share-hint');
@@ -29,11 +32,20 @@
   var selected = null;
   var lanHosts = [];
   var instructions = null;
+  var mcpEnabled = false;
+  var mcpPath = '';
+  var mcpError = '正在检查服务端 MCP…';
+  var dialogVersion = 0;
+  var creating = false;
+  var creatingScope = '';
 
   fetch('/api/access', { cache: 'no-store' }).then(function (response) { return response.json(); })
     .then(function (access) {
       if (window.SerialdI18n) window.SerialdI18n.setDefaultLocale(access.default_language);
       openAccess = !!access.open_access;
+      mcpEnabled = access.mcp_enabled === true;
+      mcpPath = access.mcp_url || '';
+      mcpError = access.mcp_error || '服务端 MCP 尚未启用，请联系上位机管理员。';
       lanHosts = Array.isArray(access.lan_hosts) ? access.lan_hosts : [];
       canPageShare = openAccess || !!access.share_enabled;
       button.hidden = !canPageShare;
@@ -50,16 +62,21 @@
         element.title = access.agent_share_enabled ? '生成可撤销的 Agent 接入令牌'
           : '当前访问凭证无权生成 Agent 授权';
       });
+      if (dialog.open) { renderInstructions(); updateHint(); }
     }).catch(function () {
       shareButtons.forEach(function (element) { element.hidden = true; });
       topAgent.disabled = deviceAgent.disabled = true;
     });
 
-  async function copy(text) {
+  async function copy(text, isCurrent) {
+    if (isCurrent && !isCurrent()) return;
     if (navigator.clipboard && navigator.clipboard.writeText) {
       try { await navigator.clipboard.writeText(text); return; }
       catch (_) { /* Non-secure HTTP or browser permissions may reject this API. */ }
     }
+    // A rejected asynchronous Clipboard API request can outlive its dialog.
+    // Do not start the synchronous fallback using credentials from an old view.
+    if (isCurrent && !isCurrent()) return;
     var field = output.value === text ? output : document.createElement('textarea');
     if (field !== output) {
       field.value = text;
@@ -91,6 +108,8 @@
   function selectAddress() {
     address.value = addressMode.value === 'lan' ? lanUrl() : localUrl();
     agentStatus.textContent = address.value ? '' : '未发现局域网地址，请在下方填写上位机 IP。';
+    renderInstructions();
+    updateHint();
   }
 
   function shellQuote(value) { return "'" + value.replace(/'/g, "'\\''") + "'"; }
@@ -112,6 +131,12 @@
       create.disabled = false;
     }
     if (openAccess) hint.textContent += ' 当前服务为开放模式；其他客户端仍可不带令牌直接访问。';
+    if (format.value === 'mcp') {
+      try { remoteEndpoint(); }
+      catch (_) { create.disabled = true; }
+      if (!mcpEnabled) create.disabled = true;
+    }
+    if (creating) create.disabled = true;
   }
   function baseUrl() {
     var url = new URL(address.value.trim());
@@ -119,6 +144,14 @@
         || (url.pathname !== '/' && url.pathname !== ''))
       throw new Error('服务地址应为 http(s)://上位机:端口');
     return url.origin;
+  }
+  function remoteEndpoint() {
+    if (!mcpPath || mcpPath.charAt(0) !== '/' || mcpPath.slice(0, 2) === '//')
+      throw new Error('服务端未提供 MCP 地址，请联系上位机管理员。');
+    var endpoint = new URL(mcpPath, baseUrl());
+    if (endpoint.origin !== baseUrl() || endpoint.search || endpoint.hash)
+      throw new Error('服务端 MCP 地址无效，请联系上位机管理员。');
+    return endpoint.href;
   }
   function agentText(url, token, grant, board) {
     var english = window.SerialdI18n && window.SerialdI18n.locale === 'en';
@@ -169,13 +202,37 @@
   function renderInstructions() {
     setup.textContent = format.value === 'cli'
       ? 'CLI 指引用于客户端主机的终端。令牌不要粘贴到对话中；当前授权同样适用于 MCP。'
-      : '在 AI 客户端所在机器安装 MCP 适配器；独立环境中的程序请填写实际绝对路径。将生成的 JSON 添加到客户端 MCP 设置后重启连接。令牌属于客户端配置，请勿粘贴到对话中。';
-    mcpOptions.hidden = format.value === 'cli';
+      : format.value === 'stdio'
+        ? '兼容不支持远程 MCP 的客户端：在客户端机器安装本地适配器，并填写可执行文件的实际路径。远程 MCP 无需此步骤。'
+        : '客户端无需安装适配器。将 MCP 服务地址和令牌填入客户端，或复制下方 JSON 配置。不同客户端的配置格式可能不同。';
+    mcpOptions.hidden = format.value !== 'stdio';
+    mcpRemote.hidden = format.value !== 'mcp';
+    var endpoint = '', url = '';
+    try {
+      url = baseUrl();
+      if (format.value === 'mcp') endpoint = remoteEndpoint();
+      mcpEndpointField.value = endpoint;
+      mcpStatus.textContent = mcpEnabled
+        ? '服务已启用；客户端使用 Streamable HTTP，并发送 Authorization: Bearer 令牌。'
+        : mcpError;
+    } catch (error) {
+      mcpEndpointField.value = '';
+      if (format.value === 'mcp') mcpStatus.textContent = error.message;
+      output.value = '';
+      copyButton.disabled = true;
+      return;
+    }
     if (!instructions) return;
+    if (format.value === 'mcp' && !mcpEnabled) {
+      output.value = ''; copyButton.disabled = true; return;
+    }
     output.value = format.value === 'cli'
-      ? agentText(instructions.url, instructions.token, instructions.grant, instructions.board)
-      : JSON.stringify({ mcpServers: { decklab: { command: mcpCommand.value.trim() || 'seriald-mcp', args: [],
-        env: { SERIALD_URL: instructions.url, SERIALD_TOKEN: instructions.token } } } }, null, 2);
+      ? agentText(url, instructions.token, instructions.grant, instructions.board)
+      : JSON.stringify({ mcpServers: { decklab: format.value === 'stdio'
+        ? { command: mcpCommand.value.trim() || 'seriald-mcp', args: [],
+            env: { SERIALD_URL: url, SERIALD_TOKEN: instructions.token } }
+        : { url: endpoint, headers: { Authorization: 'Bearer ' + instructions.token } } } }, null, 2);
+    copyButton.disabled = false;
   }
 
   async function loadGrants() {
@@ -217,6 +274,9 @@
     } catch (error) { grants.textContent = '读取授权失败：' + error.message; }
   }
   function openAgent(initialScope) {
+    dialogVersion++;
+    creating = false;
+    scope.disabled = false;
     selected = selectedDevice();
     scope.value = initialScope;
     format.value = 'mcp';
@@ -233,23 +293,47 @@
   }
   topAgent.addEventListener('click', function () { openAgent('all'); });
   deviceAgent.addEventListener('click', function () { openAgent('device'); });
-  scope.addEventListener('change', updateHint);
-  format.addEventListener('change', renderInstructions);
+  scope.addEventListener('change', function () {
+    if (creating) scope.value = creatingScope;
+    else {
+      instructions = null;
+      output.value = '';
+      copyButton.disabled = true;
+    }
+    updateHint();
+  });
+  format.addEventListener('change', function () { renderInstructions(); updateHint(); });
   mcpCommand.addEventListener('input', renderInstructions);
+  address.addEventListener('input', function () { renderInstructions(); updateHint(); });
   addressMode.addEventListener('change', selectAddress);
   document.getElementById('agent-share-close').addEventListener('click', function () {
-    output.value = ''; instructions = null; dialog.close();
+    invalidateAgent(); dialog.close();
   });
-  dialog.addEventListener('close', function () { output.value = ''; instructions = null; copyButton.disabled = true; });
+  function invalidateAgent() {
+    dialogVersion++;
+    creating = false;
+    scope.disabled = false;
+    output.value = ''; instructions = null; copyButton.disabled = true;
+  }
+  dialog.addEventListener('close', function () { if (!dialog.open) invalidateAgent(); });
   if (window.addEventListener) window.addEventListener('decklab-language-change', function () {
     if (dialog.open) renderInstructions();
   });
   document.getElementById('agent-share-refresh').addEventListener('click', loadGrants);
   create.addEventListener('click', async function () {
+    if (creating || create.disabled) return;
+    var version = dialogVersion;
+    creating = true;
+    creatingScope = scope.value;
+    scope.disabled = true;
     create.disabled = true;
     agentStatus.textContent = '正在生成授权…';
     try {
       var url = baseUrl();
+      if (format.value === 'mcp') {
+        if (!mcpEnabled) throw new Error(mcpError);
+        remoteEndpoint();
+      }
       var board = selected;
       var request = { scope: scope.value, serial: '' };
       if (scope.value === 'device') {
@@ -262,19 +346,37 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request) });
       var result = await response.json();
+      if (version !== dialogVersion || !dialog.open) return;
       if (!response.ok || !result.token) throw new Error(result.error || '授权失败');
       instructions = { url: url, token: result.token, grant: result.grant, board: board };
       renderInstructions();
-      copyButton.disabled = false;
-      try { await copy(output.value); agentStatus.textContent = '已复制接入配置；令牌只显示这一次'; }
-      catch (_) { agentStatus.textContent = '已生成；请点击“再次复制”或手动复制下方文本'; }
+      if (output.value) {
+        try {
+          await copy(output.value, function () { return version === dialogVersion && dialog.open; });
+          if (version === dialogVersion && dialog.open) agentStatus.textContent = '已复制接入配置；令牌只显示这一次';
+        } catch (_) {
+          if (version === dialogVersion && dialog.open) agentStatus.textContent = '已生成；请点击“再次复制”或手动复制下方文本';
+        }
+      } else agentStatus.textContent = '授权已生成；请修正连接地址后复制配置。';
+      if (version !== dialogVersion || !dialog.open) return;
       await loadGrants();
-    } catch (error) { agentStatus.textContent = '生成失败：' + error.message; }
-    finally { updateHint(); }
+    } catch (error) {
+      if (version === dialogVersion && dialog.open) agentStatus.textContent = '生成失败：' + error.message;
+    } finally {
+      if (version === dialogVersion) { creating = false; scope.disabled = false; updateHint(); }
+    }
   });
   copyButton.addEventListener('click', async function () {
-    try { await copy(output.value); agentStatus.textContent = '接入配置已复制'; }
-    catch (_) { output.focus(); output.select(); agentStatus.textContent = '请手动复制选中的接入配置'; }
+    if (copyButton.disabled || !output.value || !dialog.open) return;
+    var version = dialogVersion;
+    try {
+      await copy(output.value, function () { return version === dialogVersion && dialog.open; });
+      if (version === dialogVersion && dialog.open) agentStatus.textContent = '接入配置已复制';
+    } catch (_) {
+      if (version === dialogVersion && dialog.open) {
+        output.focus(); output.select(); agentStatus.textContent = '请手动复制选中的接入配置';
+      }
+    }
   });
 
   async function sharePage(source) {

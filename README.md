@@ -6,6 +6,10 @@ A shared development-board workbench for OS and BSP developers. Capture serial
 output continuously, access boards through a browser or agent, and keep boot
 history attached to a stable board identity rather than a changing tty number.
 
+[Latest release](https://github.com/qianqiu-2020/decklab/releases/latest) ·
+[Windows installer](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald-windows-x64-setup.exe) ·
+[Ubuntu package](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_all.deb)
+
 ![DeckLab demo: shared terminal, board list and boot archives](docs/decklab-demo.png?v=ui-1.5.2)
 
 Actual UI with simulated boards; no physical hardware is required. Demo devices
@@ -24,6 +28,11 @@ Ordinary commands should use SSH; use serial for bootloader, kernel and networki
 failures. Agent grants are revocable and can be scoped to one board. Runtime
 service names, command names and installation paths retain the `seriald` name.
 
+Remote MCP clients connect to the host's `/mcp` URL with a web-issued Agent token;
+no client-side Python or adapter installation is required. The Windows package
+includes the server runtime. Linux host setup and optional compatibility modes
+are documented in the [MCP guide](docs/MCP.md).
+
 ## Install and use
 
 ![DeckLab architecture](docs/seriald-architecture-en.png?v=english-1)
@@ -36,7 +45,7 @@ Ubuntu packages are built with:
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.6.5_all.deb
+sudo apt install ./dist/seriald_1.7.0_all.deb
 ```
 
 On Windows, build with Python 3.12 x64 and Inno Setup 6.5+ using

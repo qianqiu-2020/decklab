@@ -3,22 +3,22 @@
 ## 发布新版本
 
 版本号以 `seriald_core/version.py` 为准，标签必须是对应的 `v版本号`。
-例如发布 1.5.2：
+例如发布 1.7.0：
 
-1. 更新 `__version__` 为 `1.5.2`；将 CHANGELOG.md 的待发布内容整理为
-   `## 1.5.2`，保留新的 `## Unreleased`。同步安装示例中的版本号。
+1. 更新 `__version__` 为 `1.7.0`；将 CHANGELOG.md 的待发布内容整理为
+   `## 1.7.0`，保留新的 `## Unreleased`。同步安装示例中的版本号。
 2. 按 [贡献指南](../CONTRIBUTING.md) 运行检查并提交改动。确认 main 的
    Linux 和 Windows 流水线通过，再给该提交打标签。
 3. 推送标签至 GitHub。当前开发仓库的 GitHub remote 名为 `github`；
    从 GitHub 克隆的仓库通常是 `origin`，以 `git remote -v` 为准。
 
 ```sh
-python3 tools/check_release_tag.py v1.5.2
+python3 tools/check_release_tag.py v1.7.0
 python3 tools/release_notes.py /tmp/decklab-release-notes.md
 git push github main
 # 等待该提交的检查通过后执行：
-git tag -a v1.5.2 -m "DeckLab 1.5.2"
-git push github v1.5.2
+git tag -a v1.7.0 -m "DeckLab 1.7.0"
+git push github v1.7.0
 ```
 
 标签推送触发 `Tagged packages`：构建 Debian 包、Windows 安装包和便携 ZIP，
@@ -27,6 +27,17 @@ git push github v1.5.2
 打开该草稿并点击 **Publish release**。普通代码推送运行检查，并在 Actions
 运行页面底部的 Artifacts 提供 `seriald-linux` 和 `seriald-windows` 测试包，
 不创建正式 Release。不要移动已发布标签；修复应使用新版本号。
+
+从 1.7.0 起，草稿同时提供固定文件名的下载别名，内容必须与同次发布的
+版本化安装包完全一致，且一起纳入 `SHA256SUMS.txt`：
+
+- Windows：`seriald-windows-x64-setup.exe`。
+- Ubuntu：`seriald_latest_all.deb`。
+
+对外文档使用 [Latest 发布页](https://github.com/qianqiu-2020/decklab/releases/latest)，
+或 `https://github.com/qianqiu-2020/decklab/releases/latest/download/<固定文件名>`。
+这些地址跟随 GitHub 的 Latest Release；发布草稿不会改变它们。验证当前标签
+草稿的所有附件后，再正式发布并设为 Latest。历史版本仍可通过原来的版本化文件名获取。
 
 ## 第三方依赖
 

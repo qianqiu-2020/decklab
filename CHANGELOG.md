@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.7.0
+
 - Keep BusyBox/Buildroot probes below interactive shell input-line limits and
   detect existing SSH services without requiring systemd.
 - Configure custom POSIX probe scripts or manual consoles in the browser.
@@ -9,9 +11,14 @@
   created when an operating system cannot report a hardware identity.
 - Share an unidentified live connection with an AI using a revocable grant that
   expires on connection replacement or board switching.
-- Add an optional MCP adapter with stdio and authenticated Streamable HTTP,
-  browser-generated client configuration, bounded terminal reads, input, SSH
-  execution, task operations and boot history through the protected control API.
+- Add remote MCP access through the DeckLab service with revocable per-client
+  grants. AI clients configure a URL and Bearer token; no client-side adapter
+  installation is required. Keep stdio available for local integration.
+- Generate remote MCP configuration in the browser and expose bounded terminal
+  reads, input, SSH execution, task operations and boot history through the
+  protected control API.
+- Publish stable installer and Debian-package asset names alongside versioned
+  files, so download links can follow the latest release automatically.
 
 ## 1.6.5
 

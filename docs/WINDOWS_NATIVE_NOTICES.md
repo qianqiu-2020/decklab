@@ -143,3 +143,35 @@ The complete bundle manifest checks distributed file integrity. Neither check
 proves embedded dependency attribution. See the
 [1.5.1 acceptance record](https://github.com/qianqiu-2020/decklab/blob/f0ffcbc/docs/RELEASE_ACCEPTANCE.md)
 and the [third-party summary](../THIRD_PARTY.md).
+
+## MCP server additions
+
+The bundled remote MCP server adds pinned Windows CPython 3.12 x64 providers
+from pydantic-core 2.50.4 and rpds-py 0.30.0. Their unchanged wheel members are
+recorded in the native source catalog and must match their SHA-256 before any
+supplemental notices are copied. This extends the existing provider gate rather
+than treating the older crypto-only review as coverage for new binaries.
+
+Both source archives were checked against PyPI's published hashes. The reviewed
+supplement uses **every registry package in their committed Cargo.lock files**
+as a conservative notice-coverage superset. It includes build/test dependencies
+and non-Windows target nodes; it is not labeled a filtered Windows resolve graph
+or an attestation of upstream wheel feature flags. Cargo's target-filtered
+metadata inspection encountered repeated index timeouts, so the broader lock
+coverage and its method are recorded explicitly, with exact source-lock hashes.
+No Cargo build or package build script was executed during inspection.
+
+The r-efi crate retains its original permission terms in AUTHORS, which is
+included as a notice. The wit-bindgen-rt source archive omits its license files;
+the copied texts come from the exact upstream commit recorded in that crate's
+`.cargo_vcs_info.json`, with source URLs and hashes in the catalog. The observed
+compiler commits match official Rust 1.99.1 and 1.91.0 channel metadata. Their
+verified Windows compiler archives contribute the library-only copyright
+summaries and original MIT/Apache/copyright texts; compiler binaries are not
+redistributed as notices.
+
+The pywin32 312 wheel observation records all native members and its included
+notices, including the scoped Microsoft MAPI notice. The ordinary distribution
+inventory copies these package notices. The observation does not claim that all
+pywin32 extensions are frozen into the product; the final bundle manifest and
+actual member matching remain separate release checks.

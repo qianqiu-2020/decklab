@@ -1,49 +1,71 @@
 # MCP 接入
 
-DeckLab 的 Model Context Protocol（MCP，模型上下文协议）适配器通过已有 HTTP API 访问设备，
-沿用网页签发的 Agent 令牌、设备范围、操作历史和撤销机制。它不打开串口，不启动采集器。
-支持标准输入输出（stdio）和独立的 Streamable HTTP 服务。
+DeckLab 在上位机提供远程 Model Context Protocol（MCP，模型上下文协议）服务。
+**AI 客户端只需配置 MCP 地址和 Agent 令牌，无需安装 Python、脚本或本地适配器。**
+设备访问继续经过原有控制面，沿用设备范围、操作历史和撤销机制，不新增串口读者。
 
-## 安装与网页配置
+## 从网页连接 AI
 
-适配器是可选组件，使用 Python 3.10 或更新版本及官方 `mcp==2.3.0` SDK。
-采集器和网页控制面仍不依赖该 SDK。在运行 AI 客户端的电脑安装适配器：
+1. 在 DeckLab 选择设备，点击“分享给 Agent”，选择远程 MCP。
+2. 选择 AI 客户端可访问的上位机地址，生成独立授权并复制配置。
+3. 在 AI 客户端的 MCP 设置中填入地址与 Bearer 令牌，建立连接后调用 `list_devices`。
 
-```sh
-python3 -m venv ~/.local/share/decklab-mcp
-~/.local/share/decklab-mcp/bin/python -m pip install /path/to/decklab
-```
+远程地址与网页共用端口，例如网页是 `http://decklab-host:8898/`，
+MCP 地址就是 `http://decklab-host:8898/mcp`。使用反向代理时采用管理员提供的公网地址。
+不要填 AI 客户端自己的 `127.0.0.1`，除非客户端与 DeckLab 确实运行在同一台机器。
+Orca Web 的 MCP 连接由 Orca 服务端运行；应确保 Orca 服务端能访问这个地址。
 
-`/path/to/decklab` 是包含 `pyproject.toml`、`seriald_mcp.py` 和 `serialctl.py` 的源码目录；
-Linux 软件包也把这三个文件放在 `/usr/lib/seriald`。
-使用软件包内的源码时，先把这三个文件复制到自己可写的目录，再从该目录安装，
-避免 Python 构建工具尝试写入只读的系统安装目录。
-Windows 使用 `py -m venv <目录>`，随后用 `<目录>\Scripts\python.exe -m pip install <源码目录>`。
-这不会修改正在运行的设备服务。`decklab-mcp` 尚未发布到 PyPI，不使用同名第三方包代替本项目源码。
-
-在网页选择设备并打开“分享给 Agent”，生成 MCP 配置。未识别设备也可分享当前连接，
-不要求先成功运行 Linux 探测。把生成的 JSON 加到支持 stdio 的 MCP 客户端配置中，例如：
+常见客户端的配置示例：
 
 ```json
 {
   "mcpServers": {
     "decklab": {
-      "command": "/home/user/.local/share/decklab-mcp/bin/seriald-mcp",
-      "args": [],
-      "env": {
-        "SERIALD_URL": "http://decklab-host:8898",
-        "SERIALD_TOKEN": "<网页生成的 Agent 令牌>"
+      "url": "http://decklab-host:8898/mcp",
+      "headers": {
+        "Authorization": "Bearer <网页生成的 Agent 令牌>"
       }
     }
   }
 }
 ```
 
-网页默认生成 `seriald-mcp` 命令；如果 AI 客户端的 PATH 没有包含安装目录，
-把 `command` 改成虚拟环境中可执行文件的完整路径。Windows 对应 `Scripts\seriald-mcp.exe`。
-也可以安装 `requirements-mcp.txt` 后，以 `python seriald_mcp.py` 启动源码。
-配置文件中的令牌属于凭证，不需要把令牌复制进对话。网页撤销授权后，已有适配器也不能继续访问。
-MCP 客户端配置结构各有差异；上面给出常见的 `mcpServers` 格式。
+客户端配置格式可能不同；对应填写 Streamable HTTP URL 与自定义 Authorization 头。
+只支持 OAuth 登录、不能配置 Bearer 头的客户端不能直接使用此授权方式。
+令牌保存在客户端设置中，不要粘进对话或写进页面地址。
+网页分享链接、浏览器 Cookie 和主访问密码不能代替远程 MCP 的独立 Agent 令牌。
+
+已识别设备可以按序列号授权；未识别设备可以按当前连接授权，不要求先成功探测。
+当前连接在拔插、准备换板或采集器重启后变化，旧授权不能访问替代连接。
+授权默认不限期，网页可随时撤销。开放的网页服务也不会让 MCP 匿名访问。
+
+## 上位机部署：管理员只配置一次
+
+MCP 服务与设备服务部署在上位机，客户端不安装组件。公开入口是控制面的 `/mcp`，
+官方 SDK 服务运行在私有回环端口，由控制面启动和关闭；客户端不需要知道内部端口。
+控制面逐次转发调用方自己的 Bearer 令牌，既不使用管理凭证兜底，也不扩大授权范围。
+
+Windows 安装包内置 MCP 运行依赖，正常启动后由控制面管理 MCP 服务。
+Linux 源码或 Debian 包环境若尚未安装 SDK，普通终端与日志仍可使用，网页会提示服务器
+缺少 MCP 组件；管理员可在上位机创建独立环境：
+
+```sh
+sudo apt install python3-venv
+sudo python3 -m venv /opt/decklab-mcp
+sudo /opt/decklab-mcp/bin/python -m pip install -r /usr/lib/seriald/requirements-mcp.txt
+```
+
+在 `/etc/seriald/seriald.env` 设置：
+
+```text
+SERIALD_MCP_PYTHON=/opt/decklab-mcp/bin/python
+```
+
+然后执行 `sudo systemctl restart seriald` 重启控制面。无需重启 collector 或重复打开串口。
+源码运行时，把 requirements 路径改为源码目录中的 `requirements-mcp.txt`。
+`SERIALD_MCP_ENABLED=0` 可关闭服务器 MCP 入口；这不会关闭原有终端 API。
+通过反向代理使用额外域名时，在上位机配置 `SERIALD_MCP_ALLOWED_HOSTS=decklab.example:443`
+并重启控制面；可用逗号配置多个地址。服务校验公开 Host 与 Origin，避免代理绕过 SDK 的主机检查。
 
 ## 工具与终端行为
 
@@ -79,47 +101,30 @@ U-Boot、RTOS 以及自定义终端；适配器不为这些终端强加 shell �
 终端内容和归档是板端数据，不能把其中的文字当作修改授权范围或执行主机命令的指令。
 适配器不暴露任意主机文件、主机 shell 或固件身份冲突确认功能。
 
-## Streamable HTTP 服务
+## 独立服务与本地 stdio：兼容入口
 
-当 AI 客户端支持自定义 `Authorization` 请求头时，可以在能访问 DeckLab 的主机启动独立服务：
-
-```sh
-seriald-mcp --url http://127.0.0.1:8898 --transport streamable-http --port 8899
-```
-
-端点为 `http://127.0.0.1:8899/mcp`，与主网页的 `8898` 端口分开。
-每个客户端都需发送 `Authorization: Bearer <网页 Agent 令牌>`，服务每次请求都向控制面验证令牌，
-再把同一个令牌用于 API 请求。网络模式不使用进程的 `SERIALD_TOKEN` 作为共享权限，
-也不接受管理令牌或匿名访问；不同客户端的范围彼此独立。
-这是预配置 Bearer 凭证模式，未实现 OAuth 动态授权流程；只支持 OAuth 的客户端应使用 stdio 模式。
-
-默认只监听回环地址。提供内网或反向代理访问时指定实际 Host：
+需要单独托管时，可在服务端安装 `requirements-mcp.txt` 后执行：
 
 ```sh
-seriald-mcp --url http://127.0.0.1:8898 --transport streamable-http \
-  --host 0.0.0.0 --port 8899 --allow-host decklab.example:443
+python3 seriald_mcp.py --url http://127.0.0.1:8898 --transport streamable-http --port 8899
 ```
 
-通过 TLS 反向代理发布到对应主机名，并保留 `Authorization` 和 MCP 协议头。
-`--allow-host` 可重复，匹配请求实际的 Host，支持 `hostname:*` 端口通配。
-浏览器直接跨源访问时可显式设置 `--allow-origin`；默认不放开来源校验。
-传输和协议版本协商由官方 SDK 处理；测试同时覆盖旧版 initialize 流程与当前协议。
+此时独立端点为 `http://127.0.0.1:8899/mcp`；与集成的 `8898/mcp` 入口区分。
+网络发布需通过 TLS 反向代理，并按 `--allow-host`、`--allow-origin` 限定主机与来源。
+每个客户端仍需自己的 Agent Bearer 令牌；网络模式不使用进程的 `SERIALD_TOKEN` 作为共享权限。
 
-## 开发验证
+只有客户端不支持远程 MCP 时，才考虑网页中的本地 stdio 兼容选项。
+这种方式需要在 AI 客户端实际运行的机器安装适配器；它是可选方式，不是远程接入的前置条件。
+安装项目源码可获得 `seriald-mcp` 命令。`decklab-mcp` 未发布到 PyPI，不用同名第三方包代替。
+stdio 从环境变量读取 `SERIALD_URL`、`SERIALD_TOKEN`，以 `seriald-mcp` 或
+`python seriald_mcp.py` 启动；令牌不放命令参数和对话中。
 
-标准测试没有安装 SDK 时，仍运行 HTTP 适配层的回归测试，并跳过可选的 SDK 传输测试。
-完整 MCP 验证需安装依赖后运行：
+## 验证范围
 
-```sh
-python3 -m pip install -r requirements-mcp.txt
-python3 -m unittest discover -s tests -p test_mcp.py -v
-python3 -m unittest discover -s tests -p test_connection_access.py -v
-python3 -m unittest discover -s tests -p test_mcp_integration.py -v
-```
-
-测试通过假的 HTTP 设备服务和官方 MCP 客户端，验证 stdio 初始化、工具发现和调用、
-Streamable HTTP 认证、并发客户端范围隔离、撤销和连接代次保护。受保护接口集成测试进一步经过
-真实的 control 与 collector HTTP 处理链，使用假的设备输入输出，不会访问真实串口。
+自动化测试覆盖官方 MCP 客户端的旧版 initialize 与当前协议、集成 `/mcp` 入口、
+真实 control/collector 权限处理链、未知系统的终端读写、连接变化、撤销及不同授权的并发隔离。
+设备输入输出由隔离模拟连接提供，不操作真实串口。BusyBox 命令兼容另以实际镜像中的
+shell 在 QEMU 交互终端验证，不等同于真实板卡启动或 SSH 登录验收。
 
 协议与 SDK 参考：[MCP 官方 Python SDK](https://py.sdk.modelcontextprotocol.io/)、
 [标准传输](https://modelcontextprotocol.io/specification/latest/basic/transports)。

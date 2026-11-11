@@ -10,7 +10,7 @@ Windows 安装器已内置该运行时，使用者无需额外安装。
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.6.5_all.deb
+sudo apt install ./dist/seriald_1.7.0_all.deb
 systemctl status seriald
 serialctl devices
 ```
@@ -19,6 +19,10 @@ serialctl devices
 `seriald.service` 是可独立重启的 Web/API 控制面。**同一组串口不可同时运行源码服务和包服务**，切换安装前先停止旧服务。
 默认监听 `0.0.0.0:8898`；浏览器访问 `http://上位机地址:8898`。
 安装脚本会按配置端口打印本机与探测到的局域网 URL；若局域网地址未出现，请检查网卡配置。
+
+远程 MCP 使用同一地址的 `/mcp` 路径，AI 客户端只需填写 URL 和网页生成的 Agent 令牌。
+Linux 上位机首次部署需安装服务端 SDK 并配置其 Python 环境；详见 [MCP 接入](MCP.md)。
+这一步在上位机执行一次，不要求每个客户端安装组件。
 
 编辑 `/etc/seriald/seriald.env` 后，监听地址和认证配置通过
 `sudo systemctl restart seriald` 生效；板卡密码、串口参数、profile、日志和传输配置

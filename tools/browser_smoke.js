@@ -82,7 +82,8 @@ const server = http.createServer((req, res) => {
       right_spans: [{text:'clock=1',changed:false},{text:'6',changed:true},{text:'0MHz',changed:false}] },
       { type: 'insert', left_no: null, left: '', right_no: 2, right: 'mmc timeout' }], truncated: false });
   if (u.pathname === '/api/log') return json({ data: log, off: log.length, start_off: 0, size: log.length, more: false });
-  if (u.pathname === '/api/access') return json({ share_enabled: false, agent_share_enabled: true, lan_hosts: ['127.0.0.1'] });
+  if (u.pathname === '/api/access') return json({ share_enabled: false, agent_share_enabled: true, lan_hosts: ['127.0.0.1'],
+    mcp_enabled: true, mcp_url: '/mcp', mcp_error: '' });
   if (u.pathname === '/api/agent-grants') return json({grants: []});
   if (u.pathname === '/api/probe-settings') return json(probeSettings);
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
@@ -513,8 +514,9 @@ let chrome, ws;
   for(let n=0;n<30 && !await evaluate('document.querySelector("#agent-share-text").value.includes("mcpServers")');n++)await delay(50);
   assert.equal(grantPosts[0].scope,'connection');
   const generatedConfig=await evaluate('JSON.parse(document.querySelector("#agent-share-text").value)');
-  assert.equal(generatedConfig.mcpServers.decklab.command,'seriald-mcp');
-  assert.equal(generatedConfig.mcpServers.decklab.env.SERIALD_TOKEN,'seriald-ag-simulated-fixture-only');
+  assert.equal(generatedConfig.mcpServers.decklab.url, address + '/mcp');
+  assert.equal(generatedConfig.mcpServers.decklab.headers.Authorization,'Bearer seriald-ag-simulated-fixture-only');
+  assert.equal(await evaluate('document.querySelector("#agent-share-mcp-options").hidden'),true);
   const mcpShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-share-mcp.png'),Buffer.from(mcpShot.data,'base64'));
   assert.deepEqual(errors,[]);

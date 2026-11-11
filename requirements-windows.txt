@@ -1,3 +1,9 @@
 pyserial>=3.5,<4
 paramiko>=3.4,<5
 pyinstaller>=6,<8
+mcp==2.3.0
+# Reviewed native providers used by the bundled MCP runtime.
+pydantic==2.14.3
+pydantic_core==2.50.4
+rpds-py==0.30.0
+pywin32==312

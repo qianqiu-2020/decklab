@@ -4,6 +4,10 @@
 
 DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统一提供网页终端、SSH、历史日志和 Agent 接口。支持 Ubuntu 服务安装及 Windows 上位机。底层项目、命令与服务名保留 `seriald`。
 
+[最新发布](https://github.com/qianqiu-2020/decklab/releases/latest) ·
+[Windows 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald-windows-x64-setup.exe) ·
+[Ubuntu 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_all.deb)
+
 ![DeckLab Demo：共享终端、设备列表与启动日志归档](docs/decklab-demo-zh.png?v=ui-1.5.2)
 
 真实应用界面，使用模拟设备，无需接入硬件。Demo 中的设备不代表对应版型已经实测支持。
@@ -48,7 +52,7 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 
 ```sh
 python3 tools/build_deb.py
-sudo apt install ./dist/seriald_1.6.5_all.deb
+sudo apt install ./dist/seriald_1.7.0_all.deb
 ```
 
 包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
@@ -60,7 +64,7 @@ sudo apt install ./dist/seriald_1.6.5_all.deb
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
 
 Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。安装构建依赖后，
-双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.6.5-windows-x64-setup.exe`：
+双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.7.0-windows-x64-setup.exe`：
 首次选择安装目录，后续升级记住原目录，保留 `data/`，无需手动解压覆盖。首次从便携版迁移时选中原目录。
 开始菜单提供本机、局域网无密码、局域网有密码三个入口。详见 [Windows 构建与安装](docs/WINDOWS.md)。
 也支持 Windows Docker 容器构建；IT 可按 EXE SHA-256 审批防火墙规则，升级后需重新审批。
@@ -68,6 +72,10 @@ Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API
 ![DeckLab 架构图](docs/seriald-architecture.png?v=30ea099)
 
 ## Agent 使用
+
+支持远程 MCP 的 AI 客户端只需配置上位机的 `/mcp` 地址和网页生成的 Agent 令牌，
+无需在客户端安装脚本或 Python。Windows 安装包内置服务端运行依赖；Linux 上位机的
+一次性部署步骤见 [MCP 接入](docs/MCP.md)。网页同时保留 CLI 和本地 stdio 兼容方式。
 
 ```sh
 serialctl devices

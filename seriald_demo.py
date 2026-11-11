@@ -18,7 +18,8 @@ def main():
         os.environ['SERIALD_STATIC'] = str(Path(__file__).resolve().parent)
         os.environ['SERIALD_AUTH_TOKEN'] = ''
         for key in list(os.environ):
-            if key.startswith('SERIALD_') and key not in ('SERIALD_BASE', 'SERIALD_STATIC', 'SERIALD_AUTH_TOKEN'):
+            if key.startswith('SERIALD_') and key not in ('SERIALD_BASE', 'SERIALD_STATIC', 'SERIALD_AUTH_TOKEN',
+                                                        'SERIALD_MCP_ENABLED', 'SERIALD_MCP_PYTHON'):
                 del os.environ[key]
         from seriald_core import web
         from seriald_core.config import STATIC
@@ -26,15 +27,21 @@ def main():
         from seriald_core.demo import DemoManager
         from seriald_core.httpd import BoundedThreadingTCPServer
         from seriald_core.storage import Store
+        from seriald_core.agent_grants import AgentGrantStore
+        from seriald_core.mcp_host import MCPHost
 
-        with BoundedThreadingTCPServer(('127.0.0.1', args.port), ControlHandler) as control:
+        with BoundedThreadingTCPServer(('127.0.0.1', args.port), ControlHandler) as control, \
+                MCPHost('http://127.0.0.1:%d' % control.server_address[1]) as mcp:
+            control.mcp_host = mcp
             with BoundedThreadingTCPServer(('127.0.0.1', 0), web.Handler) as collector:
                 store = Store(os.path.join(temporary, 'registry.sqlite3'))
+                grants = AgentGrantStore(os.path.join(temporary, 'agent-grants.sqlite3'))
                 manager = DemoManager(store)
                 collector.manager = manager
                 ControlHandler.collector_socket = collector.server_address
                 ControlHandler.static_root = STATIC
                 ControlHandler.auth_token = ''
+                ControlHandler.grant_store = grants
                 worker = threading.Thread(target=collector.serve_forever, daemon=True)
                 worker.start()
                 signal.signal(signal.SIGTERM, lambda *_:
@@ -46,10 +53,12 @@ def main():
                 except KeyboardInterrupt:
                     pass
                 finally:
+                    mcp.close()
                     manager.close()
                     collector.shutdown()
                     worker.join(timeout=6)
                     store.close()
+                    grants.close()
 
 
 if __name__ == '__main__':

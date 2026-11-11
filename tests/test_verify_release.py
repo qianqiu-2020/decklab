@@ -105,3 +105,32 @@ class ReleaseVerificationTests(unittest.TestCase):
         with patch('tools.verify_release.subprocess.run', return_value=result):
             with self.assertRaisesRegex(ValueError, 'native source catalog missing'):
                 inspect_release(self.root, '1.5.1')
+
+    def test_stable_aliases_are_required_and_must_match_even_with_valid_checksums(self):
+        version = '1.7.0'
+        self.fixture(version)
+        result = SimpleNamespace(stdout='Package: seriald\nVersion: 1.7.0\nArchitecture: all\n')
+        aliases = {'seriald_latest_all.deb': 'seriald_1.7.0_all.deb',
+                   'seriald-windows-x64-setup.exe': 'seriald-1.7.0-windows-x64-setup.exe'}
+        with self.assertRaisesRegex(ValueError, 'file set mismatch'):
+            inspect_release(self.root, version)
+        for alias, canonical in aliases.items():
+            (self.root / alias).write_bytes((self.root / canonical).read_bytes())
+
+        def update_manifest():
+            names = ['seriald_1.7.0_all.deb', 'seriald-1.7.0-windows-x64-setup.exe',
+                     'seriald-windows-portable.zip', *aliases]
+            (self.root / 'SHA256SUMS.txt').write_text('\n'.join(
+                hashlib.sha256((self.root / name).read_bytes()).hexdigest() + '  ' + name
+                for name in names) + '\n')
+
+        update_manifest()
+        # The old notice fixture intentionally lacks the post-1.5.0 source
+        # supplements. Reaching that independent gate proves aliases passed.
+        with patch('tools.verify_release.subprocess.run', return_value=result):
+            with self.assertRaisesRegex(ValueError, 'native source catalog missing'):
+                inspect_release(self.root, version)
+        (self.root / 'seriald-windows-x64-setup.exe').write_bytes(b'MZ different installer')
+        update_manifest()  # A checksum alone must not bless a mismatched alias.
+        with self.assertRaisesRegex(ValueError, 'alias differs'):
+            inspect_release(self.root, version)

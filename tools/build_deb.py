@@ -16,7 +16,7 @@ from tools.package_docs import publish as publish_docs
 
 def collector_build_id(root=ROOT):
     """Hash code and service policy that require replacing the live collector."""
-    excluded = {'admin.py', 'control_server.py', 'version.py'}
+    excluded = {'admin.py', 'control_server.py', 'mcp_host.py', 'version.py'}
     sources = [path for path in (root / 'seriald_core').glob('*.py')
                if path.name not in excluded]
     sources.append(root / 'packaging/seriald-collector.service')

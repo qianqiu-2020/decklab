@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 
 from seriald_core import admin
+import seriald_mcp
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class WindowsEntrypointTests(unittest.TestCase):
     def run_admin(self, arguments):
+        return self.run_dispatch('admin', arguments)
+
+    def run_dispatch(self, command, arguments):
         original_import = builtins.__import__
 
         def without_host(name, *args, **kwargs):
@@ -29,7 +33,7 @@ class WindowsEntrypointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             unused = Path(directory) / 'unused'
             with mock.patch.object(sys, 'platform', 'win32'), \
-                    mock.patch.object(sys, 'argv', ['seriald.exe', 'admin'] + arguments), \
+                    mock.patch.object(sys, 'argv', ['seriald.exe', command] + arguments), \
                     mock.patch.dict(os.environ, {'SERIALD_BASE': str(unused)}), \
                     mock.patch('builtins.__import__', side_effect=without_host), \
                     self.assertRaises(SystemExit) as stopped:
@@ -54,6 +58,20 @@ class WindowsEntrypointTests(unittest.TestCase):
     def test_invalid_admin_arguments_keep_failure_exit_status(self):
         with redirect_stderr(io.StringIO()):
             self.assertEqual(self.run_admin(['not-an-admin-command']), 2)
+
+    def test_mcp_dispatch_preserves_arguments_without_loading_com_host(self):
+        arguments = ['--transport', 'streamable-http', '--url', 'http://127.0.0.1:8898',
+                     '--host', '127.0.0.1', '--port', '18899']
+        received = []
+        with mock.patch.object(seriald_mcp, 'main', side_effect=lambda: received.extend(sys.argv[1:])):
+            self.assertIsNone(self.run_dispatch('mcp', arguments))
+        self.assertEqual(received, arguments)
+
+    def test_mcp_help_never_starts_a_collector_or_creates_storage(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(self.run_dispatch('mcp', ['--help']), 0)
+        self.assertIn('streamable-http', output.getvalue())
 
 
 if __name__ == '__main__':

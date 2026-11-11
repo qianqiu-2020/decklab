@@ -229,7 +229,7 @@ and command examples; do not call the collector's internal revocation endpoint.
 
 | Control route | Payload / response |
 | --- | --- |
-| GET `/api/access` | `share_enabled`, `agent_share_enabled`, `open_access`, `loopback_open`, `lan_hosts`, `default_language` (`en`, `zh-CN` or empty); UI capability hints and host language default |
+| GET `/api/access` | `share_enabled`, `agent_share_enabled`, `open_access`, `loopback_open`, `lan_hosts`, `default_language` (`en`, `zh-CN` or empty), `mcp_enabled`, `mcp_url`, `mcp_error`; UI capability hints and host language default |
 | GET `/api/agent-grants` | `grants` metadata, at most 200 newest rows; includes revoked rows and never returns token secrets |
 | POST `/api/agent-share` | `scope=all`, `device`, or `connection`; device scope requires nonempty `serial` (at most 128 characters); connection scope requires live `key` and expected `connection_id`; returns `token` once and `grant` metadata |
 | POST `/api/agent-revoke` | Grant `id` (16 lowercase hex characters); returns revoked `id` and `sessions_closed` cleanup confirmation |
@@ -293,6 +293,17 @@ Chinese, and `?lang=en` explicitly selects English. Both return UTF-8 Markdown.
 credential. Browser share links last 24 hours; agent grants default to no expiry
 and remain revocable. Query parameters are URL-encoded; POST JSON uses actual
 booleans, not strings such as `"true"`.
+
+## Remote MCP
+
+`/mcp` is the same-origin Streamable HTTP endpoint, independently of the
+`/api/*` JSON API. It accepts MCP protocol messages without rewriting their
+actor or JSON-RPC fields. Every caller supplies its own revocable Agent Bearer
+grant; owner passwords, browser share cookies and anonymous access do not grant
+MCP access. The SDK runs on a private loopback endpoint managed by control.
+`mcp_enabled` reports current server availability; when unavailable, terminal
+and log API access continue. Clients only configure the public URL and token.
+See [MCP deployment and client configuration](MCP.md).
 
 ## Source review coverage
 

@@ -1,3 +1,5 @@
 # Upstream notice bytes are pinned by SHA-256; never rewrite their line endings.
 packaging/third-party/** -text
+# Preserve upstream license whitespace too; integrity is checked by pinned hashes.
+packaging/third-party/native-source-notices/** -whitespace
 vendor/terminal/** -text

@@ -28,13 +28,14 @@ class PackageTests(unittest.TestCase):
             root = Path(temporary)
             (root / 'seriald_core').mkdir()
             (root / 'packaging').mkdir()
-            for name in ('__init__.py', 'admin.py', 'control_server.py', 'version.py',
+            for name in ('__init__.py', 'admin.py', 'control_server.py', 'mcp_host.py', 'version.py',
                          'collector_server.py'):
                 (root / 'seriald_core' / name).write_text(name)
             unit = root / 'packaging/seriald-collector.service'
             unit.write_text('collector unit')
             original = collector_build_id(root)
             (root / 'seriald_core/control_server.py').write_text('new control')
+            (root / 'seriald_core/mcp_host.py').write_text('new control-owned MCP worker')
             (root / 'seriald_core/version.py').write_text("__version__ = 'next'")
             self.assertEqual(collector_build_id(root), original)
             (root / 'seriald_core/collector_server.py').write_text('new collector')
