@@ -115,6 +115,14 @@ class TaskActions:
                             'code': 'identity-confirmation-required',
                             'identity_confirmation': {key: confirmation[key] for key in fields
                                                       if key in confirmation}})
+                    elif (kind == 'ssh-connect'
+                            and result.payload.get('code') == 'ssh-authentication-failed'):
+                        # Failed authentication is actionable after a page refresh.
+                        # Keep the account name, never request credentials or raw output.
+                        user = result.payload.get('ssh_user')
+                        self.tasks.store.update(context.id, result={
+                            'code': 'ssh-authentication-failed',
+                            'ssh_user': user if isinstance(user, str) and len(user) <= 128 else ''})
                     raise TaskError(result.payload.get('error', 'operation failed'), result.status)
                 if kind == 'ssh-connect' and context.cancelled.is_set():
                     sid = result.payload.get('sid', '')

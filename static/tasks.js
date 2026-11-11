@@ -50,8 +50,14 @@
     }
     function start(payload, onUpdate, ctx) {
       // Never retry a start whose response was lost: execution may already exist.
-      return request('/api/task-start', payload).then(function (data) {
-        return watch(data.task, ctx || payload, onUpdate);
+      // Keep credentials out of the watcher that can survive for a long task.
+      var watchContext = ctx || { key: payload.key, serial: payload.serial };
+      return request('/api/task-start', payload).catch(function (error) {
+        // A missing start response cannot tell us whether execution began.
+        if (!error.result) error.submissionUnknown = true;
+        throw error;
+      }).then(function (data) {
+        return watch(data.task, watchContext, onUpdate);
       });
     }
     return { request: request, watch: watch, start: start };
@@ -71,6 +77,11 @@
       var payload = { key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId,
         kind: kind, actor: 'web' };
       if (extra && Object.prototype.hasOwnProperty.call(extra, 'association')) payload.association = extra.association;
+      if (kind === 'ssh-connect' && extra) {
+        ['ssh_user', 'ssh_password'].forEach(function (name) {
+          if (Object.prototype.hasOwnProperty.call(extra, name)) payload[name] = extra[name];
+        });
+      }
       return client.start(payload, function () {
           if (!refreshed) { refreshed = true; refresh(); }
         });
@@ -108,6 +119,21 @@
               });
           });
           row.appendChild(cancel);
+        } else if (task.kind === 'ssh-connect' && task.state === 'failed' && task.result
+            && task.result.code === 'ssh-authentication-failed' && options.retrySSH) {
+          var retry = document.createElement('button'); retry.type = 'button';
+          retry.textContent = '使用该账号重试';
+          function matchesConnection() {
+            var current = options.getView();
+            return sameSelection(selected) && !!current && !!current.connectionId
+              && (task.targets || []).some(function (target) {
+                return target.connection_id === current.connectionId
+                  && (!current.serial || (target.resolved_serial || target.serial) === current.serial);
+              });
+          }
+          retry.disabled = !matchesConnection();
+          retry.addEventListener('click', function () { if (matchesConnection()) options.retrySSH(task); });
+          row.appendChild(retry);
         } else if (task.state === 'completed' && task.result && task.result.artifact_id) {
           var download = document.createElement('a'); download.className = 'log-download';
           download.textContent = '下载文件'; download.download = task.result.name || '';

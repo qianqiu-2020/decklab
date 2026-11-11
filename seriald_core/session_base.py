@@ -9,6 +9,24 @@ from .config import ANSI, DATE_FMT, SCROLLBACK
 from .terminal_backend import SharedTerminal
 
 
+class SSHAuthenticationError(RuntimeError):
+    """Authentication was rejected; credentials never belong in error metadata."""
+    def __init__(self, user):
+        self.user = user
+        super().__init__('SSH 认证失败，请填写 SSH 用户和密码后重试')
+
+
+def valid_ssh_user(value):
+    return (isinstance(value, str) and 0 < len(value) <= 128 and value.isprintable()
+            and not value.startswith('-') and '@' not in value
+            and not any(char.isspace() for char in value))
+
+
+def valid_ssh_password(value):
+    return (isinstance(value, str) and len(value) <= 4096
+            and not any(char in value for char in '\r\n\x00'))
+
+
 class SessionBase:
     transport_errors = (OSError, RuntimeError)
     join_timeout = None
@@ -39,6 +57,12 @@ class SessionBase:
         self._log_pending, self._log_finished = '', False
         self._open_log(logdir)
 
+    def _diagnostic(self, error):
+        """Redact exception diagnostics without changing ordinary terminal data."""
+        text = str(error)
+        password = self.password
+        return text.replace(password, '<redacted>') if password else text
+
     def _open_log(self, logdir):
         try:
             os.makedirs(logdir, exist_ok=True)
@@ -48,7 +72,7 @@ class SessionBase:
             self.logpath, self._logday, self.log_error = path, day, ''
         except OSError as error:
             self.logf = None
-            self.log_error = str(error)
+            self.log_error = self._diagnostic(error)
             self._log_retry_after = time.monotonic() + 5
 
     def _release_log_handle(self):
@@ -56,7 +80,7 @@ class SessionBase:
             try:
                 self.logf.close()
             except OSError as error:
-                self.log_error = str(error)
+                self.log_error = self._diagnostic(error)
             self.logf = None
 
     def _log(self, data, final=False):
@@ -83,7 +107,7 @@ class SessionBase:
                         self.logf.write('%s  %s\n' % (stamp, line))
                 self.log_error = ''
             except OSError as error:
-                self.log_error = str(error)
+                self.log_error = self._diagnostic(error)
                 self._release_log_handle()
                 self._log_retry_after = time.monotonic() + 5
 
@@ -124,8 +148,8 @@ class SessionBase:
                 self._thread.start()
                 return True
             except self.transport_errors as error:
-                self.transport_error = str(error)
-                self._append('\r\n*** 建立 SSH 会话失败: %s ***\r\n' % error, live=False)
+                self.transport_error = self._diagnostic(error)
+                self._append('\r\n*** 建立 SSH 会话失败: %s ***\r\n' % self.transport_error, live=False)
                 self._thread = None
                 self._finish()
                 return False
@@ -138,7 +162,7 @@ class SessionBase:
                 except (BlockingIOError, InterruptedError, TimeoutError):
                     continue
                 except self.transport_errors as error:
-                    self.transport_error = str(error)
+                    self.transport_error = self._diagnostic(error)
                     break
                 if data is None:
                     continue
@@ -149,7 +173,7 @@ class SessionBase:
             try:
                 self._append('\r\n*** SSH 会话已结束 ***\r\n', live=False)
             except self.transport_errors as error:
-                self.transport_error = str(error)
+                self.transport_error = self._diagnostic(error)
             finally:
                 self._finish()
 
@@ -166,7 +190,7 @@ class SessionBase:
                         self.cv.notify_all()
                     self._dispose_transport(fd)
             except self.transport_errors as error:
-                self.transport_error = str(error)
+                self.transport_error = self._diagnostic(error)
             finally:
                 self._close_log()
                 self.terminal.close()
@@ -186,7 +210,7 @@ class SessionBase:
             try:
                 self._interrupt_transport()
             except self.transport_errors as error:
-                self.transport_error = str(error)
+                self.transport_error = self._diagnostic(error)
             if self._thread is not None:
                 self._thread.join(timeout=self.join_timeout)
             self._finish()
@@ -215,7 +239,8 @@ class SessionBase:
             try:
                 self._send(fd, text.encode('utf-8', 'replace'))
                 return True
-            except self.transport_errors:
+            except self.transport_errors as error:
+                self.transport_error = self._diagnostic(error)
                 return False
 
     def resize(self, cols, rows, actor=None, client_id=''):
@@ -238,7 +263,8 @@ class SessionBase:
                     self.terminal.resize(cols, rows)
                     self.cv.notify_all()
                     return True
-                except self.transport_errors:
+                except self.transport_errors as error:
+                    self.transport_error = self._diagnostic(error)
                     self.cols, self.rows = previous
                     return False
 

@@ -9,6 +9,7 @@ from seriald_core.devices import Manager
 from seriald_core.storage import Store
 from seriald_core.task_actions import TaskActions
 from seriald_core.transactions import TransactionError
+from seriald_core.results import response
 from seriald_core import web
 
 
@@ -108,6 +109,38 @@ class TaskActionTests(unittest.TestCase):
         self.assertEqual(task['state'], 'failed')
         self.assertIsNone(task['result'])
         self.assertNotIn('private archive', json.dumps(task))
+
+    def test_failed_ssh_task_retains_retry_account_but_no_credentials(self):
+        failure = {'ok': False, 'error': 'SSH 认证失败，请填写用户和密码',
+                   'code': 'ssh-authentication-failed', 'ssh_user': 'ubuntu',
+                   'ssh_password': 'submitted-private-password', 'raw': 'private authentication output'}
+        payload = {'kind': 'ssh-connect', 'key': 'board', 'serial': 'SN1',
+                   'connection_id': self.device.connection_id, 'actor': 'web', 'client_id': 'page',
+                   'ssh_user': 'ubuntu', 'ssh_password': 'submitted-private-password'}
+        with mock.patch('seriald_core.task_actions.DeviceActions.execute',
+                        return_value=response(502, failure)) as execute:
+            code, result = self.http('/api/task-start', payload)
+            self.assertEqual(code, 202)
+            task_id = result['task']['id']
+            self.wait_task(task_id)
+        self.assertEqual(execute.call_args.args[1]['ssh_password'], 'submitted-private-password')
+        code, result = self.http('/api/task?id=' + task_id)
+        self.assertEqual(code, 200)
+        task = result['task']
+        self.assertEqual(task['state'], 'failed')
+        self.assertEqual(task['result'], {'code': 'ssh-authentication-failed', 'ssh_user': 'ubuntu'})
+        self.assertNotIn('submitted-private-password', json.dumps(task))
+        self.assertNotIn('private authentication output', json.dumps(task))
+
+    def test_other_ssh_failure_does_not_offer_a_credential_retry(self):
+        with mock.patch('seriald_core.task_actions.DeviceActions.execute', return_value=response(502, {
+                'ok': False, 'error': 'SSH 连接超时', 'ssh_user': 'ubuntu', 'ssh_password': 'private'})):
+            result = self.actions.start({'kind': 'ssh-connect', 'key': 'board',
+                'connection_id': self.device.connection_id}, self.device, 'web')
+            self.wait_task(result.payload['task']['id'])
+        task = self.manager.tasks.store.get(result.payload['task']['id'])
+        self.assertEqual(task['state'], 'failed')
+        self.assertIsNone(task['result'])
 
     def test_confirmed_identify_task_passes_explicit_association_to_probe(self):
         association = {'nonce': 'one-time-confirmation', 'serial': 'SN1',

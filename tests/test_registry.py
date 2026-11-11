@@ -6,6 +6,8 @@ import unittest
 from unittest import mock
 
 from seriald_core import device as seriald
+from seriald_core.transactions import TransactionError
+from seriald_core.profiles import BoardProfile
 
 
 class FakeSession:
@@ -132,37 +134,114 @@ class SessionRegistryTests(unittest.TestCase):
         self.assertNotEqual(session.sid, 'ssh1')
         self.assertIs(device.get_session(session.sid), session)
 
-    def test_default_root_auth_failure_configures_serial_then_rechecks(self):
+    def test_default_password_falls_back_without_changing_board(self):
         with mock.patch.object(seriald, 'check_password_login',
                                side_effect=[(False, True, 'SSH 认证失败'), (True, False, '')]) as check, \
-                mock.patch.object(self.device, 'configure_root_ssh', return_value=(True, '')) as configure:
+                mock.patch.object(seriald, 'SshSession', side_effect=FakeSession) as opening, \
+                mock.patch.object(self.device, 'configure_root_ssh') as configure, \
+                mock.patch.object(self.device, '_write') as write:
             session, error = self.device.ssh_connect()
         self.assertEqual(error, '')
         self.assertIsNotNone(session)
-        self.assertEqual(check.call_count, 2)
-        configure.assert_called_once()
+        self.assertEqual(check.call_args_list,
+                         [mock.call('192.0.2.1', 'root', 'bianbu'),
+                          mock.call('192.0.2.1', 'root', 'debian')])
+        self.assertEqual(opening.call_args.kwargs, {'user': 'root', 'password': 'debian'})
+        self.assertFalse(session.auto_configured)
+        configure.assert_not_called()
+        write.assert_not_called()
 
-    def test_serial_setup_failure_does_not_create_ssh_session(self):
+    def test_all_authentication_failures_offer_manual_configuration_without_serial_writes(self):
         with mock.patch.object(seriald, 'check_password_login',
                                return_value=(False, True, 'SSH 认证失败')) as check, \
-                mock.patch.object(self.device, 'configure_root_ssh',
-                                  return_value=(False, '串口未登录')):
-            session, error = self.device.ssh_connect()
-        self.assertIsNone(session)
-        self.assertEqual(error, '串口未登录')
-        check.assert_called_once()
+                mock.patch.object(seriald, 'SshSession') as opening, \
+                mock.patch.object(self.device, 'configure_root_ssh') as configure, \
+                mock.patch.object(self.device, '_write') as write:
+            with self.assertRaises(seriald.SSHAuthenticationError) as caught:
+                self.device.ssh_connect()
+        self.assertEqual(caught.exception.user, 'root')
+        self.assertNotIn('bianbu', str(caught.exception))
+        self.assertNotIn('debian', str(caught.exception))
+        self.assertEqual(check.call_count, 2)
+        opening.assert_not_called()
+        configure.assert_not_called()
+        write.assert_not_called()
         self.assertEqual(self.device.ssh_pending, 0)
         self.assertEqual(self.device.ssh_sessions, {})
 
-    def test_network_failure_or_explicit_user_never_changes_board(self):
+    def test_network_failure_never_tries_another_password(self):
         with mock.patch.object(seriald, 'check_password_login',
-                               return_value=(False, False, 'SSH 连接超时')), \
+                               return_value=(False, False, 'SSH 连接超时')) as check, \
                 mock.patch.object(self.device, 'configure_root_ssh') as configure:
             session, error = self.device.ssh_connect()
             self.assertIsNone(session)
             self.assertEqual(error, 'SSH 连接超时')
-            self.device.ssh_connect(ssh_user='ubuntu', ssh_password='different')
+        check.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
         configure.assert_not_called()
+
+    def test_explicit_user_or_password_is_tried_once(self):
+        for credentials in ({'ssh_user': 'ubuntu', 'ssh_password': 'different'},
+                            {'ssh_user': 'root'}, {'ssh_password': 'bianbu'}):
+            with self.subTest(credentials=list(credentials)), \
+                    mock.patch.object(seriald, 'check_password_login',
+                                      return_value=(False, True, 'denied')) as check, \
+                    mock.patch.object(self.device, 'configure_root_ssh') as configure:
+                with self.assertRaises(seriald.SSHAuthenticationError):
+                    self.device.ssh_connect(**credentials)
+                self.assertEqual(check.call_count, 1)
+                configure.assert_not_called()
+                self.assertEqual(self.device.ssh_pending, 0)
+
+    def test_profile_password_order_is_deduplicated_for_non_root_users_too(self):
+        for configured, expected in (('private', ['private', 'bianbu', 'debian']),
+                                     ('bianbu', ['bianbu', 'debian']),
+                                     ('debian', ['debian', 'bianbu'])):
+            with self.subTest(configured=configured), \
+                    mock.patch.object(seriald.Device, 'profile', new_callable=mock.PropertyMock,
+                                      return_value=BoardProfile(ssh_user='ubuntu', ssh_password=configured,
+                                                               auto_configure_ssh=False)), \
+                    mock.patch.object(seriald, 'check_password_login',
+                                      return_value=(False, True, 'denied')) as check:
+                with self.assertRaises(seriald.SSHAuthenticationError) as caught:
+                    self.device.ssh_connect()
+                self.assertEqual(caught.exception.user, 'ubuntu')
+                self.assertEqual(check.call_args_list,
+                                 [mock.call('192.0.2.1', 'ubuntu', value) for value in expected])
+                self.assertEqual(self.device.ssh_pending, 0)
+
+    def test_replug_during_authentication_stops_before_retrying_credentials(self):
+        def deny_and_replug(*args):
+            self.device.connection_id = 'replacement'
+            return False, True, 'denied'
+        with mock.patch.object(seriald, 'check_password_login', side_effect=deny_and_replug) as check:
+            session, error = self.device.ssh_connect()
+        self.assertIsNone(session)
+        self.assertIn('重新枚举', error)
+        self.assertEqual(check.call_count, 1)
+        self.assertEqual(self.device.ssh_pending, 0)
+
+    def test_task_cancellation_during_authentication_prevents_further_attempts(self):
+        cancelled = threading.Event()
+        def deny_and_cancel(*args):
+            cancelled.set()
+            return False, True, 'denied'
+        with self.device.transactions.task_scope(cancelled, self.device.connection_id, self.device.stop), \
+                mock.patch.object(seriald, 'check_password_login', side_effect=deny_and_cancel) as check:
+            with self.assertRaises(TransactionError) as caught:
+                self.device.ssh_connect()
+        self.assertEqual(caught.exception.code, 'cancelled')
+        self.assertEqual(check.call_count, 1)
+        self.assertEqual(self.device.ssh_pending, 0)
+
+    def test_transport_error_does_not_expose_an_attempted_password(self):
+        for failure in ((False, False, 'server echoed secret-value'), RuntimeError('secret-value')):
+            with self.subTest(exception=isinstance(failure, Exception)):
+                options = {'side_effect': failure} if isinstance(failure, Exception) else {'return_value': failure}
+                with mock.patch.object(seriald, 'check_password_login', **options):
+                    session, error = self.device.ssh_connect(ssh_password='secret-value')
+                self.assertIsNone(session)
+                self.assertNotIn('secret-value', error)
+                self.assertIn('<redacted>', error)
 
     def test_named_agent_reuses_live_persistent_session(self):
         device = self.device

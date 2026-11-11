@@ -11,7 +11,7 @@ from .transactions import transactions_for, TransactionError
 from . import __version__
 from .hardware import ACTIONS, host_adapter
 from .terminal_backend import SharedTerminal, control_session, screen_for
-from .session_base import SessionBase
+from .session_base import SessionBase, SSHAuthenticationError, valid_ssh_user, valid_ssh_password
 
 
 def capabilities():
@@ -250,13 +250,16 @@ class DeviceActions:
             # 一键 SSH:起一条与串口并存的独立会话,输出单独落盘
             ssh_user = payload.get('ssh_user')
             ssh_password = payload.get('ssh_password')
-            if ssh_user is not None and (not isinstance(ssh_user, str) or not ssh_user.strip()):
-                return response(400, {'ok': False, 'error': 'ssh_user must be a non-empty string'})
-            if ssh_password is not None and not isinstance(ssh_password, str):
-                return response(400, {'ok': False, 'error': 'ssh_password must be a string'})
-            s, err = d.ssh_connect(actor=actor, title=str(payload.get('title') or '')[:2048],
-                                    ssh_user=ssh_user.strip() if isinstance(ssh_user, str) else None,
-                                    ssh_password=ssh_password)
+            if ssh_user is not None and not valid_ssh_user(ssh_user):
+                return response(400, {'ok': False, 'error': 'ssh_user must be an unambiguous login name of at most 128 characters'})
+            if ssh_password is not None and not valid_ssh_password(ssh_password):
+                return response(400, {'ok': False, 'error': 'ssh_password must be a single-line string of at most 4096 characters'})
+            try:
+                s, err = d.ssh_connect(actor=actor, title=str(payload.get('title') or '')[:2048],
+                                      ssh_user=ssh_user, ssh_password=ssh_password)
+            except SSHAuthenticationError as error:
+                return response(502, {'ok': False, 'code': 'ssh-authentication-failed',
+                                      'ssh_user': error.user, 'error': str(error)})
             if not s:
                 return response(502, {'ok': False, 'error': err})
             return response(200, {'ok': True, 'sid': s.sid, 'ip': s.ip,

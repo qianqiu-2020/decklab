@@ -399,7 +399,7 @@ test('late session, log and identify responses stay with their original device',
   sessions.resolve({ key: 'A', sessions: [{ sid: 'ssh-old', kind: 'ssh' }] });
   logs.resolve({ key: 'A', label: 'A logs', files: [{ name: 'old.log', path: 'old', size: 1 }] });
   identify.resolve({ ok: true, task: { id: 'identify-old', state: 'completed', result: { ok: true, serial: 'A serial' } } }); await drain();
-  assert.deepEqual(h.get('d-tabs').children.map(x => x.textContent), ['串口', '+ SSH 会话']);
+  assert.deepEqual(h.get('d-tabs').children.map(x => x.textContent), ['串口', '+ SSH 会话SSH 设置']);
   assert.equal(h.get('d-logs').children.length, 0);
   assert.equal(h.get('d-info').hidden, true);
   assert.equal(h.get('d-status').textContent, '');
@@ -518,7 +518,8 @@ test('SSH identification adopts the canonical label before reading or sending', 
   h.take('/api/task-start').resolve({ ok: true, task: { id: 'ssh-task', state: 'completed', result: { ok: true, sid: 'ssh123', ip: '192.0.2.1',
     device_key: 'musepi2', serial: 'SN001', auto_configured: true } } });
   await drain();
-  assert.ok(h.get('d-status').textContent.includes('已通过串口配置 root SSH'));
+  assert.ok(h.get('d-status').textContent.includes('已连接'));
+  assert.ok(!h.get('d-status').textContent.includes('配置 root'));
   const currentRead = h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1);
   const query = new URL(currentRead.url, 'http://fixture').searchParams;
   assert.equal(query.get('key'), 'musepi2');
@@ -528,6 +529,147 @@ test('SSH identification adopts the canonical label before reading or sending', 
   assert.deepEqual(h.sends().at(-1).body, {
     key: 'musepi2', serial: 'SN001', sid: 'ssh123', data: 'uname -a\r', client_id: h.clientId,
   });
+});
+
+function sshBoards(connection = 'connection-A') {
+  return ['A', 'B'].map(key => ({key, label: key, serial: 'SN-' + key, alive: true,
+    dev: '/mock/' + key, connection_id: key === 'A' ? connection : 'connection-B'}));
+}
+async function sshCredentialFixture() {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: sshBoards()});
+  await drain(); h.select('A');
+  return h;
+}
+function sshAuthFailure(request, user = 'root') {
+  request.resolve({ok: true, task: {id: 'ssh-auth-failure', state: 'failed', error: 'SSH 认证失败',
+    result: {code: 'ssh-authentication-failed', ssh_user: user}}});
+}
+function submitSshCredentials(h, user = 'ubuntu', password = 'private-ssh-password') {
+  h.get('ssh-credentials-user').value = user;
+  h.get('ssh-credentials-password').value = password;
+  h.get('ssh-credentials-form').emit('submit', {preventDefault() {}});
+}
+
+test('SSH authentication failures offer explicit credentials without replaying default guesses', async () => {
+  const h = await sshCredentialFixture();
+  h.get('d-tabs').children.at(-1).children[0].click();
+  sshAuthFailure(h.take('/api/task-start'));
+  await drain();
+  assert.equal(h.get('ssh-credentials-dialog').open, true);
+  assert.equal(h.get('ssh-credentials-user').value, 'root');
+  assert.equal(h.get('ssh-credentials-password').value, '');
+  submitSshCredentials(h);
+  const retry = h.take('/api/task-start');
+  assert.deepEqual(retry.body, {key: 'A', serial: 'SN-A', connection_id: 'connection-A', kind: 'ssh-connect',
+    actor: 'web', client_id: h.clientId, ssh_user: 'ubuntu', ssh_password: 'private-ssh-password'});
+  assert.equal(h.get('ssh-credentials-dialog').open, false);
+  assert.equal(h.get('ssh-credentials-password').value, '');
+  h.get('ssh-credentials-form').emit('submit', {preventDefault() {}});
+  assert.equal(h.requests.filter(request => request.url === '/api/task-start').length, 2);
+  sshAuthFailure(retry, 'ubuntu'); await drain();
+  assert.equal(h.get('ssh-credentials-dialog').open, true);
+  assert.equal(h.get('ssh-credentials-user').value, 'ubuntu');
+  assert.equal(h.get('ssh-credentials-password').value, '');
+  // A close event queued by consuming the previous form cannot close this new offer.
+  h.get('ssh-credentials-dialog').emit('close');
+  assert.equal(h.get('ssh-credentials-dialog').open, true);
+  assert.equal(h.requests.filter(request => request.url === '/api/task-start').length, 2);
+});
+
+test('SSH settings reopen directly and never submit credentials after cancellation or a view change', async () => {
+  for (const action of ['cancel', 'escape', 'device', 'close', 'connection']) {
+    const h = await sshCredentialFixture();
+    h.get('d-tabs').children.at(-1).children[1].click();
+    assert.equal(h.requests.filter(request => request.url === '/api/task-start').length, 0);
+    h.get('ssh-credentials-password').value = 'must-be-cleared';
+    if (action === 'cancel') h.get('ssh-credentials-cancel').click();
+    else if (action === 'escape') h.get('ssh-credentials-dialog').emit('cancel');
+    else if (action === 'device') h.select('B');
+    else if (action === 'close') h.get('b-close').click();
+    else {
+      h.intervals.find(interval => interval.delay === 3000).fn();
+      h.take('/api/devices').resolve({devices: sshBoards('replacement-A')});
+      await drain();
+    }
+    assert.equal(h.get('ssh-credentials-dialog').open, false, action);
+    assert.equal(h.get('ssh-credentials-password').value, '', action);
+    h.get('ssh-credentials-form').emit('submit', {preventDefault() {}});
+    assert.equal(h.requests.filter(request => request.url === '/api/task-start').length, 0, action);
+    if (action === 'cancel' || action === 'escape') {
+      h.get('d-tabs').children.at(-1).children[1].click();
+      assert.equal(h.get('ssh-credentials-dialog').open, true);
+      assert.equal(h.get('ssh-credentials-password').value, '');
+    }
+  }
+});
+
+test('late SSH authentication failures cannot open credentials for another or replacement connection', async () => {
+  for (const action of ['device', 'close', 'connection']) {
+    const h = await sshCredentialFixture();
+    h.get('d-tabs').children.at(-1).children[0].click();
+    const request = h.take('/api/task-start');
+    if (action === 'device') h.select('B');
+    else if (action === 'close') h.get('b-close').click();
+    else {
+      h.intervals.find(interval => interval.delay === 3000).fn();
+      h.take('/api/devices').resolve({devices: sshBoards('replacement-A')});
+      await drain();
+    }
+    sshAuthFailure(request); await drain();
+    assert.notEqual(h.get('ssh-credentials-dialog').open, true, action);
+    assert.equal(h.get('ssh-credentials-password').value, '', action);
+  }
+});
+
+test('SSH network failures and lost submissions do not ask for passwords or replay the request', async () => {
+  const h = await sshCredentialFixture();
+  h.get('d-tabs').children.at(-1).children[0].click();
+  h.take('/api/task-start').resolve({ok: true, task: {id: 'network-failure', state: 'failed',
+    error: 'SSH 连接超时', result: null}});
+  await drain();
+  assert.notEqual(h.get('ssh-credentials-dialog').open, true);
+  h.get('d-tabs').children.at(-1).children[1].click();
+  submitSshCredentials(h);
+  h.take('/api/task-start').reject(new Error('lost response')); await drain();
+  assert.equal(h.requests.filter(request => request.url === '/api/task-start').length, 2);
+  assert.equal(h.get('ssh-credentials-password').value, '');
+  assert.equal(h.get('ssh-credentials-dialog').open, false);
+  assert.ok(h.get('d-status').textContent.includes('连接可能仍在后台执行，请先查看任务记录'));
+});
+
+test('SSH authentication task history offers a credential retry only for the current connection', async () => {
+  const h = await sshCredentialFixture();
+  const task = {id: 'ssh-history', kind: 'ssh-connect', state: 'failed', actor: 'web', created: 1,
+    error: 'SSH 认证失败', result: {code: 'ssh-authentication-failed', ssh_user: 'ubuntu'},
+    targets: [{serial: 'SN-A', connection_id: 'connection-A'}]};
+  h.take('/api/tasks').resolve({tasks: [task]}); await drain();
+  const retry = h.get('d-tasks').children[0].children.at(-1);
+  assert.equal(retry.textContent, '使用该账号重试');
+  retry.click();
+  assert.equal(h.get('ssh-credentials-dialog').open, true);
+  assert.equal(h.get('ssh-credentials-user').value, 'ubuntu');
+  h.select('B'); retry.click();
+  assert.equal(h.get('ssh-credentials-dialog').open, false);
+  assert.equal(h.requests.filter(request => request.url === '/api/task-start').length, 0);
+});
+
+test('root SSH guidance copies individual steps without sending them to a terminal', async () => {
+  const h = await sshCredentialFixture();
+  h.get('d-tabs').children.at(-1).children[1].click();
+  const requestCount = h.requests.length;
+  const markup = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  for (const step of ['passwd', 'edit', 'config', 'restart', 'check']) {
+    const match = markup.match(new RegExp('id="ssh-root-command-' + step + '"[^>]*>([\\s\\S]*?)</code>'));
+    assert.ok(match, step);
+    const command = match[1].replaceAll('&amp;', '&');
+    h.get('ssh-root-command-' + step).textContent = command;
+    h.get('ssh-root-copy-' + step).click();
+    assert.equal(h.document.body.children.at(-1).value, command);
+  }
+  assert.equal(h.requests.length, requestCount);
+  assert.equal(h.sends().length, 0);
+  assert.ok(h.get('ssh-root-copy-status').textContent.includes('分步执行'));
 });
 
 test('late rename and SSH close responses cannot mutate another device', async () => {

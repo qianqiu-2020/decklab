@@ -31,6 +31,7 @@ from .file_transfer import SerialFileTransfer
 from .profiles import ProfileBook, validate_probe_settings
 from .models import Board, SessionRegistry
 from .transactions import SerialTransactions, TransactionError
+from .session_base import SSHAuthenticationError, valid_ssh_user, valid_ssh_password
 
 
 class Device:
@@ -603,7 +604,7 @@ class Device:
         return self.console.configure_root_ssh()
 
     def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None):
-        """一键 SSH:用识别到的 IP 起一条**独立会话**(默认 root/bianbu)。
+        """Connect an independent SSH session without changing board credentials.
 
         没有 IP 就先识别一次 —— 这正是"识别设备"存在的意义:串口负责拿到
         IP/序列号/sshd 状态,SSH 会话负责后续高效操作。两者并存、各记各的日志。
@@ -650,6 +651,15 @@ class Device:
             sid = 'ssh' + secrets.token_hex(12)
             registry.pending += 1
         session = None
+        attempted_passwords = []
+
+        def safe_error(detail):
+            value = str(detail)
+            for secret in sorted(set(attempted_passwords), key=len, reverse=True):
+                if secret:
+                    value = value.replace(secret, '<redacted>')
+            return value
+
         try:
             if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
                 return None, '设备已重新枚举,请重新识别 IP'
@@ -657,30 +667,36 @@ class Device:
             user = ssh_user if ssh_user is not None else profile.ssh_user
             password = (ssh_password if ssh_password is not None
                         else profile.ssh_password)
-            auto_configure = (profile.auto_configure_ssh and user == 'root'
-                              and profile.ssh_user == 'root' and bool(password)
-                              and password == profile.ssh_password)
-            if auto_configure:
-                authenticated, denied, detail = check_password_login(ip, user, password)
-                if denied:
-                    if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
-                        return None, '设备已更换，取消 SSH 自动配置'
-                    self._say('SSH root 认证失败，尝试通过串口自动配置')
-                    if self.manager and self.serial:
-                        self.manager.store.event(self.serial, actor, 'ssh-auto-config',
-                                                 'root 认证失败；开始串口配置')
-                    configured, error = self.configure_root_ssh()
-                    if self.manager and self.serial:
-                        self.manager.store.event(self.serial, actor, 'ssh-auto-config',
-                                                 '成功' if configured else '失败：' + error)
-                    if not configured:
-                        return None, error
-                    authenticated, _, detail = check_password_login(ip, user, password)
-                if not authenticated:
-                    return None, detail
+            if not valid_ssh_user(user) or not valid_ssh_password(password):
+                return None, 'SSH 用户或密码格式无效'
+            explicit = ssh_user is not None or ssh_password is not None
+            candidates = [password]
+            if not explicit:
+                candidates.extend(candidate for candidate in ('bianbu', 'debian')
+                                  if candidate not in candidates)
+            for candidate in candidates:
+                self.transactions.check_context()
+                if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
+                    return None, '设备已重新枚举,请重新识别 IP'
+                attempted_passwords.append(candidate)
+                authenticated, denied, detail = check_password_login(ip, user, candidate)
+                # A connection/cancellation change must win over a late login
+                # result, including the last rejected candidate in the list.
+                self.transactions.check_context()
+                if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
+                    return None, '设备已重新枚举,请重新识别 IP'
+                if authenticated:
+                    password = candidate
+                    break
+                if not denied:
+                    return None, safe_error(detail)
+            else:
+                # Authentication failure returns control to the user; service
+                # setup is separate. Never write credentials to the console.
+                raise SSHAuthenticationError(user)
             session_args = {'user': user, 'password': password}
             session = SshSession(sid, ip, self.label, self.stable_dir(), **session_args)
-            session.auto_configured = bool(auto_configure and denied)
+            session.auto_configured = False
             session.actor, session.title = actor, title
             control_session(session, actor, self.transactions.client_id)
             session.persistent = persistent
@@ -698,10 +714,16 @@ class Device:
                 with self.sessions_lock:
                     self.ssh_sessions[sid] = session
             return session, ''
+        except TransactionError:
+            if session:
+                session.close()
+            raise
+        except SSHAuthenticationError:
+            raise
         except (OSError, RuntimeError) as e:
             if session:
                 session.close()
-            return None, str(e)
+            return None, safe_error(e)
         finally:
             with registry.lock:
                 registry.pending -= 1

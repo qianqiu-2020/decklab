@@ -205,7 +205,7 @@ class ProfileTests(unittest.TestCase):
                                          'SERIALD_AUTO_CONFIGURE_SSH': '0'}), \
                 mock.patch.object(device, 'stable_dir', return_value='/unused'), \
                 mock.patch('seriald_core.device.SshSession') as session_class, \
-                mock.patch('seriald_core.device.check_password_login') as check, \
+                mock.patch('seriald_core.device.check_password_login', return_value=(True, False, '')) as check, \
                 mock.patch.object(device, 'configure_root_ssh') as provision:
             session_class.return_value.ensure.return_value = True
             session, error = device.ssh_connect()
@@ -214,10 +214,10 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(session_class.call_args.kwargs,
                          {'user': 'ubuntu', 'password': 'private-password'})
         self.assertFalse(session.auto_configured)
-        check.assert_not_called()
+        check.assert_called_once_with('192.0.2.1', 'ubuntu', 'private-password')
         provision.assert_not_called()
 
-    def test_configured_root_password_provisions_but_request_override_does_not(self):
+    def test_configured_password_is_tried_before_defaults_and_override_uses_only_its_password(self):
         with mock.patch.object(Device, 'preload'):
             device = Device('fake', '/fake')
         device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
@@ -233,19 +233,22 @@ class ProfileTests(unittest.TestCase):
             session_class.return_value.ensure.return_value = True
             session, error = device.ssh_connect()
             self.assertEqual(error, '')
-            self.assertTrue(session.auto_configured)
-            provision.assert_called_once_with()
+            self.assertFalse(session.auto_configured)
+            provision.assert_not_called()
             self.assertEqual(check.call_args_list,
-                             [mock.call('192.0.2.1', 'root', 'configured-root')] * 2)
-            self.assertEqual(session_class.call_args.kwargs['password'], 'configured-root')
+                             [mock.call('192.0.2.1', 'root', 'configured-root'),
+                              mock.call('192.0.2.1', 'root', 'bianbu')])
+            self.assertEqual(session_class.call_args.kwargs['password'], 'bianbu')
             provision.reset_mock()
             check.reset_mock()
+            check.side_effect = None
+            check.return_value = True, False, ''
             session, error = device.ssh_connect(ssh_password='request-only')
             self.assertEqual(error, '')
             self.assertFalse(session.auto_configured)
             self.assertEqual(session_class.call_args.kwargs['password'], 'request-only')
             provision.assert_not_called()
-            check.assert_not_called()
+            check.assert_called_once_with('192.0.2.1', 'root', 'request-only')
 
     def test_shipped_profile_example_is_valid(self):
         path = Path(__file__).resolve().parents[1] / 'examples' / 'profiles.json'

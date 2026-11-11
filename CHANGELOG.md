@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.7.2
+
+- Try the configured SSH password, then `bianbu` and `debian`, without duplicate
+  attempts. Stop on network errors and keep explicitly supplied credentials to
+  one authentication attempt.
+- Offer SSH username and password entry after authentication fails, with
+  connection-scoped retries and credential-free task history.
+- Replace automatic root password and sshd changes during SSH connection with
+  manual, individually copyable serial-console instructions.
+- Document Codex, Claude Code and Orca Web MCP configuration and connection checks.
+- This collector update restarts the collector during package upgrade while
+  preserving device configuration and recorded runtime data.
+
 ## 1.7.1
 
 - Include the MCP SDK, Python runtime and dependencies in architecture-specific

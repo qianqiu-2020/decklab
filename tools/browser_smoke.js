@@ -9,7 +9,7 @@ const {launchBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'seriald-browser-'));
 const posts = [], errors = [];
-const probeSettingsPosts = [], grantPosts = [];
+const probeSettingsPosts = [], grantPosts = [], sshConnectPosts = [];
 let probeSettings = {mode: 'linux', command: '', default_command: "printf 'HOST=%s\\n' \"$(hostname)\""};
 let serialPayload = null;
 const serialLiveChunks = [];
@@ -33,12 +33,18 @@ const server = http.createServer((req, res) => {
   const json = data => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); };
   if (req.method === 'POST') {
     posts.push(u.pathname);
-    if (u.pathname === '/api/probe-settings' || u.pathname === '/api/agent-share') {
+    if (u.pathname === '/api/probe-settings' || u.pathname === '/api/agent-share' || u.pathname === '/api/task-start') {
       let body = ''; req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
         const payload = JSON.parse(body);
         if (u.pathname === '/api/probe-settings') {
           probeSettingsPosts.push(payload); probeSettings = {...probeSettings, ...payload}; return json({ok:true, ...probeSettings});
+        }
+        if (u.pathname === '/api/task-start') {
+          if (payload.kind !== 'ssh-connect') return json({ok:false, error:'unsupported fixture task'});
+          sshConnectPosts.push(payload);
+          return json({ok:true, task:{id:'ssh-fixture-' + sshConnectPosts.length, state:'failed',
+            error:'SSH 认证失败', result:{code:'ssh-authentication-failed', ssh_user:payload.ssh_user || 'root'}}});
         }
         grantPosts.push(payload);
         return json({token: 'seriald-ag-simulated-fixture-only', grant: {id: 'fixture', actor: 'shared-agent/fixture',
@@ -86,6 +92,7 @@ const server = http.createServer((req, res) => {
     mcp_enabled: true, mcp_url: '/mcp', mcp_error: '' });
   if (u.pathname === '/api/agent-grants') return json({grants: []});
   if (u.pathname === '/api/probe-settings') return json(probeSettings);
+  if (u.pathname === '/api/tasks') return json({tasks:[]});
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
   if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
@@ -519,8 +526,42 @@ let chrome, ws;
   assert.equal(await evaluate('document.querySelector("#agent-share-mcp-options").hidden'),true);
   const mcpShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-share-mcp.png'),Buffer.from(mcpShot.data,'base64'));
+  await evaluate('document.querySelector("#agent-share-close").click();Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.includes("+ SSH")).click()');
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#ssh-credentials-dialog").open');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-dialog").open'),true);
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-user").value'),'root');
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").type'),'password');
+  assert.equal(sshConnectPosts.length,1);
+  assert.equal(sshConnectPosts[0].connection_id,'test-unprovisioned-demo');
+  await evaluate('document.querySelector("#ssh-credentials-target").textContent += " · 浏览器测试夹具，模拟设备"');
+  const sshShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-ssh-credentials.png'),Buffer.from(sshShot.data,'base64'));
+  const serialWrites=posts.filter(route=>route==='/api/session-send').length;
+  await evaluate('document.querySelector("#ssh-root-guide").open=true;document.querySelector("#ssh-root-copy-passwd").click()');
+  assert.ok(await evaluate('document.querySelector("#ssh-root-copy-status").textContent.includes("分步执行")'));
+  assert.equal(posts.filter(route=>route==='/api/session-send').length,serialWrites,'root guide must only copy');
+  const rootGuideShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-ssh-root-guide.png'),Buffer.from(rootGuideShot.data,'base64'));
+  await evaluate('document.querySelector("#ssh-root-guide").open=false;document.querySelector("#ssh-credentials-user").value="ubuntu";document.querySelector("#ssh-credentials-password").value="simulated-password-only";document.querySelector("#ssh-credentials-form").requestSubmit()');
+  for(let n=0;n<30 && sshConnectPosts.length<2;n++)await delay(50);
+  assert.equal(sshConnectPosts[1].ssh_user,'ubuntu');
+  assert.equal(sshConnectPosts[1].ssh_password,'simulated-password-only');
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#ssh-credentials-dialog").open');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").value'),'');
+  await evaluate('document.querySelector("#ssh-credentials-target").textContent += " · 浏览器测试夹具，模拟设备"');
+  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await delay(100);
+  assert.ok(await evaluate('(()=>{const r=document.querySelector("#ssh-credentials-dialog").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth;})()'));
+  const sshMobileShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-ssh-credentials-mobile.png'),Buffer.from(sshMobileShot.data,'base64'));
+  await evaluate('document.querySelector("#ssh-root-guide").open=true');
+  assert.ok(await evaluate('(()=>{const d=document.querySelector("#ssh-credentials-dialog");const r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&d.scrollWidth<=d.clientWidth+1;})()'), 'expanded mobile guidance must stay within the viewport without horizontal overflow');
+  const rootGuideMobileShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-ssh-root-guide-mobile.png'),Buffer.from(rootGuideMobileShot.data,'base64'));
+  await evaluate('document.querySelector("#ssh-credentials-password").value="must-clear";document.querySelector("#ssh-credentials-cancel").click()');
+  assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").value'),'');
   assert.deepEqual(errors,[]);
-  console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings and MCP sharing (isolated simulated fixtures).');
+  console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing and SSH credential recovery (isolated simulated fixtures).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(ws)ws.close(); if(chrome){chrome.kill('SIGTERM');await delay(500);}server.close();
   fs.rmSync(profile,{recursive:true,force:true});

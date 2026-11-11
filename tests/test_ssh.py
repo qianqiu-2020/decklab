@@ -17,6 +17,73 @@ class MemoryLog(io.StringIO):
         super().close()
 
 
+class SshDiagnosticTests(unittest.TestCase):
+    """Credential privacy using only the state machine, without IO adapters."""
+    def session(self):
+        session = session_base.SessionBase.__new__(session_base.SessionBase)
+        session.password = 'private-session-password'
+        session.transport_error = session.log_error = ''
+        session._lifecycle_lock = threading.Lock()
+        session.write_lock = threading.Lock()
+        session.cv = threading.Condition()
+        session._stop = threading.Event()
+        session.closed, session._started_once, session.fd = False, False, None
+        session.cols, session.rows = 120, 32
+        session._append = mock.Mock()
+        session._finish = mock.Mock()
+        session.terminal = mock.Mock()
+        session.terminal.feed.return_value = []
+        return session
+
+    def assert_private(self, session, diagnostic):
+        self.assertNotIn(session.password, diagnostic)
+        self.assertIn('<redacted>', diagnostic)
+
+    def test_startup_exception_cannot_put_password_in_transcript_or_snapshot_diagnostic(self):
+        session = self.session()
+        session._open_transport = mock.Mock(
+            side_effect=RuntimeError('channel refused ' + session.password))
+        self.assertFalse(session.ensure())
+        self.assert_private(session, session.transport_error)
+        self.assert_private(session, session._append.call_args.args[0])
+        session._finish.assert_called_once_with()
+
+    def test_reader_write_and_resize_exceptions_redact_password(self):
+        for action in ('read', 'write', 'resize'):
+            with self.subTest(action=action):
+                session = self.session()
+                error = RuntimeError('remote exception ' + session.password)
+                if action == 'read':
+                    session._receive = mock.Mock(side_effect=error)
+                    session._reader(101)
+                elif action == 'write':
+                    session.fd = 101
+                    session._send = mock.Mock(side_effect=error)
+                    self.assertFalse(session.write('command'))
+                else:
+                    session.fd = 101
+                    session._resize = mock.Mock(side_effect=error)
+                    self.assertFalse(session.resize(100, 30))
+                    self.assertEqual((session.cols, session.rows), (120, 32))
+                self.assert_private(session, session.transport_error)
+
+    def test_log_open_exception_redacts_password(self):
+        session = self.session()
+        with mock.patch.object(session_base.os, 'makedirs',
+                               side_effect=OSError('failed for ' + session.password)):
+            session._open_log('/unused')
+        self.assert_private(session, session.log_error)
+
+    def test_regular_terminal_data_is_not_rewritten_as_a_diagnostic(self):
+        session = self.session()
+        session._log = mock.Mock()
+        session.buf, session.base = bytearray(), 0
+        data = ('regular terminal ' + session.password).encode()
+        session_base.SessionBase._append(session, data)
+        self.assertEqual(bytes(session.buf), data)
+        session._log.assert_called_once_with(data)
+
+
 class SshSessionTests(unittest.TestCase):
     def setUp(self):
         self.sessions = []

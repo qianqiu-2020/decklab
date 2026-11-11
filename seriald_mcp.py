@@ -227,7 +227,7 @@ def create_server(settings, adapter=None):
     @server.tool(annotations=write, structured_output=True)
     def execute_command(device: str, command: str, ctx: Context, timeout: float = 60,
                         connection_id: str = '') -> dict[str, Any]:
-        """Run a POSIX-shell command over SSH with exit/completion status. Opening SSH follows the device profile and may probe or configure SSH."""
+        """Run a POSIX-shell command over SSH with exit/completion status. Opening SSH may probe device metadata but never changes root passwords or sshd policy."""
         return call(ctx, adapter.command, device=device, command=command, timeout=timeout,
                     connection_id=connection_id)
 

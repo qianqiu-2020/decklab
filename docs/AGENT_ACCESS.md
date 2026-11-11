@@ -40,7 +40,8 @@ serialctl --actor claude-code/diagnosis --device riscv-118 exec --command 'uname
 `SERIALD_URL=http://上位机局域网地址:8898`。全局选项置于子命令之前。
 
 `capabilities` 不探测开发板，返回 API 版本与支持的功能。串口文件传输仍需板端 Linux shell；
-SSH 自动配置是否允许取决于设备 profile，不应根据全局能力查询假定某个板子可执行这些操作。
+显式 `ssh-enable` 会通过串口安装或启动 SSH 服务，需要用户对该板端变更的授权；
+不能根据全局能力查询假定某块板已具备 root shell、包管理器或服务管理器。
 控制台操作卡住时，可在另一个会话查看并取消：
 
 ```sh
@@ -125,9 +126,12 @@ stdin 为 EOF，stdout/stderr 合并，返回文本去除 ANSI；命令限 2048 
 `session_persistent` 表示服务是否保留了这个 actor 的 SSH 会话；持久会话不会返回
 `session_closed: true`，应使用 `ssh-close` 关闭。CLI 成功退出 0，访问/命令失败退出 1，参数错误退出 2。
 非零退出码、输出缺失、超时不能报告为成功。
-设备 profile 允许自动配置且使用 profile 中的 root 密码认证被拒绝时，已登录且可免密码 sudo 的串口 shell 会自动配置该 root 密码
-和 sshd 后重试；该操作留有串口日志与操作历史。自定义账户、网络错误和需输入 sudo 密码的
-情况不会自动修改板子。
+建立 SSH 时先尝试设备 profile 的密码，再依次尝试 `bianbu`、`debian`，重复值只试一次；
+仅明确认证拒绝才继续，网络失败或超时立即返回。显式提供 `ssh_user` 或 `ssh_password`
+时，只尝试该组凭据。仍失败会返回 `ssh-authentication-failed`，网页可填写普通用户或 root
+的 SSH 账号和密码后重试；请求密码只用于该次连接，不写入任务记录，也不修改设备 profile。
+`exec`、`ssh-open` 和普通网页建连均不会因认证失败而自动重设 root 密码或修改 sshd。
+需要 root 密码登录时，由用户按[串口手工指引](CONFIGURATION.md#manual-root-ssh-setup)分步执行。
 
 `--timeout` 默认 60 秒，从会话创建完成后计时，包含登录和执行；创建请求单独受
 `--http-timeout` 控制（默认 180 秒）。缺少 IP 时服务可能先在串口识别；不会自动安装 sshd。

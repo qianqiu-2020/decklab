@@ -54,13 +54,33 @@ for family in ('-4', '-6'):
 assert importlib.util.find_spec('mcp') is None
 assert not os.environ.get('SERIALD_MCP_PYTHON')
 first = ready()
+fingerprint = pathlib.Path('/usr/lib/seriald/.collector-build-id')
+installed_id = fingerprint.read_bytes()
+base = pathlib.Path('/data/seriald-data')
+marker = base / 'vm-preserve.log'
+marker.write_text('preserve runtime across service upgrades')
+config = pathlib.Path('/etc/seriald/seriald.env')
+saved = config.read_bytes() + b'\n# VM conffile preservation\n'
+config.write_bytes(saved)
 if previous:
     with urlopen('http://127.0.0.1:8898/api/access', timeout=3) as response:
         assert not json.load(response)['mcp_enabled']
     upgrade = install('/tmp/seriald.deb')
-    assert 'collector kept running (collector code unchanged)' in upgrade
-    assert ready() == first
-    print('PASS: real systemd upgrade from published 1.7.0 thin package retains collector PID', flush=True)
+    collector_changed = fingerprint.read_bytes() != installed_id
+    upgraded = ready()
+    if collector_changed:
+        assert 'collector restarted (collector code changed)' in upgrade
+        assert upgraded != first
+        print('PASS: real systemd upgrade restarts collector when its fingerprint changes', flush=True)
+    else:
+        assert 'collector kept running (collector code unchanged)' in upgrade
+        assert upgraded == first
+        print('PASS: real systemd upgrade retains collector when its fingerprint is unchanged', flush=True)
+    assert config.read_bytes() == saved
+    assert marker.read_text() == 'preserve runtime across service upgrades'
+    assert not pathlib.Path('/run/seriald-collector-restart-required').exists()
+    first = upgraded
+    print('PASS: published 1.7.0 thin package upgrade preserves configuration and runtime data', flush=True)
 subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:8898'],
                check=True, timeout=30)
 account = pwd.getpwnam('seriald')
@@ -69,12 +89,6 @@ assert pathlib.Path('/proc/' + control_pid).stat().st_uid == account.pw_uid
 for unit in ('seriald.service', 'seriald-collector.service'):
     assert command('systemctl', 'is-active', unit).strip() == 'active'
 subprocess.run(['serialctl', 'devices'], check=True)
-base = pathlib.Path('/data/seriald-data')
-marker = base / 'vm-preserve.log'
-marker.write_text('preserve runtime across service upgrades')
-config = pathlib.Path('/etc/seriald/seriald.env')
-saved = config.read_bytes() + b'\n# VM conffile preservation\n'
-config.write_bytes(saved)
 unchanged = install('/tmp/seriald.deb')
 assert 'collector kept running (collector code unchanged)' in unchanged
 assert ready() == first
@@ -108,6 +122,7 @@ def changed_package(package, root):
     stage = root / 'changed-package'
     subprocess.run(['dpkg-deb', '-R', str(package), str(stage)], check=True)
     code = stage / 'usr/lib/seriald'
+    original_id = (code / '.collector-build-id').read_text().strip()
     with (code / 'seriald_core/device.py').open('a') as target:
         target.write('\n# Isolated VM fixture: exercise a collector-code upgrade.\n')
     policy = code / 'packaging'
@@ -116,12 +131,17 @@ def changed_package(package, root):
     new_id = collector_build_id(code)
     shutil.rmtree(policy)
     (code / '.collector-build-id').write_text(new_id + '\n')
-    original_id = collector_build_id()
     preinst = stage / 'DEBIAN/preinst'
-    preinst.write_text(preinst.read_text().replace(original_id, new_id))
+    preinst_text = preinst.read_text()
+    if original_id not in preinst_text or original_id == new_id:
+        raise ValueError('collector fixture does not match the extracted package fingerprint')
+    preinst.write_text(preinst_text.replace(original_id, new_id))
     control = stage / 'DEBIAN/control'
-    control.write_text(control.read_text().replace('Version: ' + __version__ + '\n',
-                                                'Version: ' + __version__ + '+vmcheck1\n'))
+    control_text = control.read_text()
+    version = next(line.split(': ', 1)[1] for line in control_text.splitlines()
+                   if line.startswith('Version: '))
+    control.write_text(control_text.replace('Version: ' + version + '\n',
+                                           'Version: ' + version + '+vmcheck1\n'))
     result = root / 'seriald-changed.deb'
     subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(result)], check=True)
     return result

@@ -73,6 +73,25 @@
     color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.3)}
   .identity-association-dialog::backdrop{background:rgba(9,23,25,.6)}
   .identity-association-dialog p{color:var(--ink-2);font-size:13px;line-height:1.65}
+  .ssh-credentials-dialog{width:min(620px,calc(100vw - 28px));max-height:calc(100dvh - 28px);overflow:auto;
+    padding:22px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);
+    color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.3)}
+  .ssh-credentials-dialog::backdrop{background:rgba(9,23,25,.6)}
+  .ssh-credentials-dialog p{color:var(--ink-2);font-size:13px;line-height:1.65}
+  .ssh-credentials-target{font-family:var(--font-mono);overflow-wrap:anywhere}
+  .ssh-credentials-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+  .ssh-credentials-fields label{display:grid;gap:6px;color:var(--ink-2);font-size:12px}
+  .ssh-credentials-fields input{width:100%;padding:10px;border:1px solid var(--line-strong);border-radius:8px;
+    background:var(--surface-2);color:var(--ink);font:13px var(--font-mono)}
+  #ssh-credentials-status:empty,#ssh-root-copy-status:empty{display:none}
+  .ssh-root-guide{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+  .ssh-root-guide summary{cursor:pointer;color:var(--ink-2);font-size:13px}
+  .ssh-root-step{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:18px;font-size:12px}
+  .ssh-root-step button{flex:none;font-size:11px;padding:4px 8px}
+  .ssh-root-guide pre{max-width:100%;overflow:auto;padding:10px 12px;border:1px solid var(--line);border-radius:8px;
+    background:var(--surface-2);color:var(--ink);font:11px/1.65 var(--font-mono);white-space:pre}
+  @media(max-width:520px){.ssh-credentials-dialog{padding:18px}.ssh-credentials-fields{grid-template-columns:1fr}
+    .ssh-root-step{flex-wrap:wrap}}
   .ia-details{padding:10px 12px;background:var(--ground);border:1px solid var(--line);border-radius:8px}
   .ia-details>div{display:grid;grid-template-columns:90px minmax(0,1fr);gap:10px;padding:5px 0;font-size:12px}
   .ia-details dt{color:var(--ink-3)}.ia-details dd{margin:0;overflow-wrap:anywhere;font-family:var(--font-mono)}

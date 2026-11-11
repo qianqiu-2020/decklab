@@ -57,21 +57,70 @@ one 64 KiB file and one 64 KiB `.1` backup are retained. See the
 | `SERIALD_CONSOLE_USER` / `SERIALD_CONSOLE_PASSWORD` | SSH credentials | Separate serial login credentials |
 | `SERIALD_PROBE` | linux | linux, custom or manual |
 | `SERIALD_PROBE_COMMAND` | empty | POSIX script when `SERIALD_PROBE=custom`; at most 16 KiB |
-| `SERIALD_AUTO_CONFIGURE_SSH` | 1 for linux; 0 otherwise | 0, 1, false, true |
+| `SERIALD_AUTO_CONFIGURE_SSH` | 1 for linux; 0 otherwise | Legacy serial root-provisioning permission; 0, 1, false, true. Normal SSH opens never change board credentials or policy |
 | `SERIALD_PROFILES` | unset | UTF-8 JSON profile file path; at most 64 KiB |
 
-The existing development workflow retains root/bianbu defaults. After explicit
-root authentication denial using the configured profile password, automatic
-provisioning can change root's password, enable root/password SSH login and
-restart sshd through serial.
-Set `SERIALD_AUTO_CONFIGURE_SSH=0` to preserve board policy. Custom SSH credentials
-for a non-root user are used directly. A configured root password is also used
-for serial provisioning when enabled. A per-request password different from
-the profile password never triggers provisioning. Empty passwords cannot be
-provisioned; explicit root setup requires a root SSH profile.
+The development defaults remain root/bianbu. A normal SSH connection tries the
+profile password, then `bianbu`, then `debian`, without repeating duplicate
+values. Only an explicit authentication rejection advances to another password;
+network failures and timeouts stop the attempt. Requests with an explicit
+`ssh_user` or `ssh_password` use only those overridden credentials.
+
+When authentication still fails, `ssh-authentication-failed` lets the web user
+enter an SSH username and password for that connection. An existing account such
+as `ubuntu` or `debian` can be used directly. Request credentials do not update
+the profile and are not written into task records. Normal SSH opens never reset
+root's password or change sshd policy, regardless of `SERIALD_AUTO_CONFIGURE_SSH`.
+The separately requested `ssh-enable` operation may install/start the SSH service
+from an already-root serial shell; it does not set root's password or enable
+root password login. It requires authorization for that board change.
+
+### Manual root SSH setup
+
+If root password SSH is required, run these steps yourself in the board's serial
+terminal using an account with sudo privileges. Finish each interactive prompt
+before pasting the next command; the UI only provides guidance and never sends
+these commands automatically. With an existing root shell, run `passwd root`,
+edit the file directly with an available editor such as `vi` or `nano`, and omit
+`sudo` from the validation and restart commands.
+
+Set the root password; sudo first asks for the current user's password, then
+passwd asks twice for the new root password:
+
+```sh
+sudo passwd root
+```
+
+Edit the SSH server configuration:
+
+```sh
+sudoedit /etc/ssh/sshd_config
+```
+
+Set these directives at the beginning, before any `Include` line:
+
+```text
+PermitRootLogin yes
+PasswordAuthentication yes
+```
+
+Check syntax before restarting, then inspect the effective global settings:
+
+```sh
+sudo /usr/sbin/sshd -t && sudo systemctl restart ssh
+sudo /usr/sbin/sshd -T | grep -E '^(permitrootlogin|passwordauthentication) '
+```
+
+Both settings should report `yes`. Address-specific `Match` rules may also affect
+the real client connection. Reconnect in the web UI with `root` and the password
+you chose. See Ubuntu's [user management](https://ubuntu.com/server/docs/how-to/security/user-management/)
+and [OpenSSH configuration](https://ubuntu.com/server/docs/how-to/security/openssh-server/)
+for sudo prompts, directive precedence and service configuration.
+
+### Console probe modes
 
 `manual` provides raw terminal input/output and logging without shell login,
-identity probes or automatic SSH configuration. Use it for firmware-only targets
+identity probes or the legacy root SSH provisioning workflow. Use it for firmware-only targets
 and serial protocols that must not receive Linux commands. Such targets remain
 unprovisioned until identified through a supported explicit workflow, but can
 already be shared with an AI using a grant for that live connection.
@@ -87,7 +136,7 @@ Keep credentials out of probe scripts. Non-POSIX firmware uses the raw terminal.
 Web preferences are stored in the registry by physical attachment and override
 the profile's probe selection. Review them after replacing the target at that
 port. They do not change baud, login credentials or hardware identity. Custom and
-manual modes disable automatic SSH provisioning. Profile files can also specify
+manual modes disable the legacy root SSH provisioning permission. Profile files can also specify
 `probe: "custom"` with `probe_command` (at most 16 KiB); explicitly set
 `auto_configure_ssh: false` for that mode.
 
@@ -124,9 +173,10 @@ SSH negotiates dimensions through its own PTY.
 
 Built-in defaults follow the SpacemiT K3/Bianbu development workflow: 115200,
 8N1, no flow control, console/SSH `root` with password `bianbu`, Linux probes
-and automatic SSH configuration enabled. Profiles are generic settings, not
+and the legacy root-provisioning permission enabled. Normal SSH opens still do
+not modify credentials or sshd policy. Profiles are generic settings, not
 automatic board-model detection or proof of support on other boards. The
-example below explicitly disables automatic SSH configuration for its Linux
+example below explicitly disables the legacy root-provisioning permission for its Linux
 profiles. See the [board support list](../README.md#board-support-and-defaults)
 for the physical-board validation scope.
 

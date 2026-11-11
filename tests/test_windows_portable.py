@@ -153,6 +153,42 @@ class WindowsPortableTests(unittest.TestCase):
             self.assertEqual(check_password_login('127.0.0.1', 'root', 'wrong'),
                              (False, True, 'SSH 认证失败'))
 
+    def test_windows_password_fallback_uses_successful_credential_without_serial_setup(self):
+        client = mock.Mock()
+        with tempfile.TemporaryDirectory() as root, \
+                mock.patch.object(device_module.Device, 'preload'), \
+                mock.patch.object(device_module.Device, 'stable_dir', return_value=root), \
+                mock.patch.object(device_module, 'check_password_login', side_effect=check_password_login), \
+                mock.patch('seriald_core.sessions_windows._connect',
+                           side_effect=[__import__('paramiko').AuthenticationException(), client]) as connect, \
+                mock.patch.object(device_module, 'SshSession') as opening:
+            device = device_module.Device('usb-1', 'COM7')
+            device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
+            with mock.patch.object(device, 'configure_root_ssh') as provision, \
+                    mock.patch.object(device, '_write') as write:
+                opening.return_value.ensure.return_value = True
+                session, error = device.ssh_connect()
+            self.assertEqual(error, '')
+            self.assertIs(session, opening.return_value)
+            self.assertEqual(connect.call_args_list,
+                             [mock.call('192.0.2.1', 'root', 'bianbu'),
+                              mock.call('192.0.2.1', 'root', 'debian')])
+            self.assertEqual(opening.call_args.kwargs, {'user': 'root', 'password': 'debian'})
+            client.close.assert_called_once_with()
+            provision.assert_not_called()
+            write.assert_not_called()
+
+    def test_windows_network_failure_never_tries_default_passwords(self):
+        with mock.patch.object(device_module.Device, 'preload'), \
+                mock.patch.object(device_module, 'check_password_login', side_effect=check_password_login), \
+                mock.patch('seriald_core.sessions_windows._connect', side_effect=OSError('refused')) as connect:
+            device = device_module.Device('usb-1', 'COM7')
+            device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
+            session, error = device.ssh_connect()
+        self.assertIsNone(session)
+        self.assertIn('refused', error)
+        connect.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
+
     def test_ssh_session_byte_stream_and_log(self):
         with tempfile.TemporaryDirectory() as root:
             session = SshSession('ssh123', '127.0.0.1', 'board', root)

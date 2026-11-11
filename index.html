@@ -168,6 +168,39 @@
   <p id="ia-status" role="status"></p>
   <div class="ft-actions"><button id="ia-cancel" type="button">取消</button><button id="ia-confirm" class="pri" type="button" disabled>确认关联并重新识别</button></div>
 </dialog>
+<dialog id="ssh-credentials-dialog" class="ssh-credentials-dialog" aria-labelledby="ssh-credentials-title" aria-describedby="ssh-credentials-intro">
+  <div class="agent-share-head"><strong id="ssh-credentials-title">填写 SSH 用户和密码</strong><button id="ssh-credentials-close" type="button" aria-label="关闭">关闭</button></div>
+  <p id="ssh-credentials-target" class="ssh-credentials-target" data-i18n-ignore></p>
+  <p id="ssh-credentials-intro">填写已有 SSH 用户和密码；仅用于本次连接，不修改板端账号。</p>
+  <form id="ssh-credentials-form">
+    <div class="ssh-credentials-fields">
+      <label>SSH 用户<input id="ssh-credentials-user" type="text" autocomplete="username" maxlength="128" required spellcheck="false" data-i18n-ignore></label>
+      <label>SSH 密码<input id="ssh-credentials-password" type="password" autocomplete="off" maxlength="4096" data-i18n-ignore></label>
+    </div>
+    <p id="ssh-credentials-status" role="status"></p>
+    <div class="ft-actions"><button id="ssh-credentials-cancel" type="button">取消</button><button id="ssh-credentials-connect" class="pri" type="submit">使用此账号连接</button></div>
+  </form>
+  <details id="ssh-root-guide" class="ssh-root-guide">
+    <summary>需要 root 密码登录？</summary>
+    <p>已有普通用户可直接通过上方表单连接。以下步骤适用于 Ubuntu / Debian，需要板端 sudo 权限；命令仅复制到剪贴板，由你在串口中自行执行。</p>
+    <p>请分步执行，完成当前命令的密码输入并返回 shell 后，再执行下一步。不要将整份指引一次性粘贴到串口。</p>
+    <div class="ssh-root-step"><strong>1. 设置 root 密码</strong><button id="ssh-root-copy-passwd" type="button">复制改密命令</button></div>
+    <p>sudo 提示时输入当前普通用户密码；随后按提示输入两次你选择的 root 新密码。</p>
+    <pre><code id="ssh-root-command-passwd">sudo passwd root</code></pre>
+    <div class="ssh-root-step"><strong>2. 编辑 SSH 服务配置</strong><button id="ssh-root-copy-edit" type="button">复制编辑命令</button></div>
+    <pre><code id="ssh-root-command-edit">sudoedit /etc/ssh/sshd_config</code></pre>
+    <p>将以下两项放在配置文件开头、Include 之前，然后保存退出。</p>
+    <div class="ssh-root-step"><span>配置片段</span><button id="ssh-root-copy-config" type="button">复制配置片段</button></div>
+    <pre><code id="ssh-root-command-config">PermitRootLogin yes
+PasswordAuthentication yes</code></pre>
+    <div class="ssh-root-step"><strong>3. 检查并重启 SSH</strong><button id="ssh-root-copy-restart" type="button">复制检查和重启命令</button></div>
+    <pre><code id="ssh-root-command-restart">sudo /usr/sbin/sshd -t &amp;&amp; sudo systemctl restart ssh</code></pre>
+    <div class="ssh-root-step"><strong>4. 确认生效配置</strong><button id="ssh-root-copy-check" type="button">复制验证命令</button></div>
+    <pre><code id="ssh-root-command-check">sudo /usr/sbin/sshd -T | grep -E '^(permitrootlogin|passwordauthentication) '</code></pre>
+    <p>确认两项均为 yes 后，在上方填写 root 和刚设置的密码重试。</p>
+    <p id="ssh-root-copy-status" role="status"></p>
+  </details>
+</dialog>
 <dialog id="file-transfer-dialog" class="file-transfer-dialog" aria-labelledby="ft-title">
   <div class="ft-head" title="拖动标题可移动窗口"><div><strong id="ft-title">串口文件传输</strong><small id="ft-board"></small></div><button id="ft-close" type="button">关闭</button></div>
   <p class="ft-intro">经串口传输，无需开发板联网。板子需进入 Linux shell，并具备 base64、sha256sum、dd；有 gzip 时自动压缩适合的分块。传输时暂停涉及串口的其他输入。板间复制在后台执行，关闭面板或刷新后可在“任务”中查看。</p>

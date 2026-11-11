@@ -7,6 +7,7 @@ from unittest import mock
 
 from seriald_core.actions import DeviceActions, capabilities
 from seriald_core.device import Device
+from seriald_core.session_base import SSHAuthenticationError
 from seriald_core.transactions import TransactionError
 from seriald_core import web
 
@@ -103,6 +104,36 @@ class ActionTests(unittest.TestCase):
         manager.all_devices.assert_not_called()
         self.assertEqual(json.loads(handler.wfile.getvalue()), capabilities().payload)
         self.assertTrue(capabilities().payload['file_transfer']['requires_linux_shell'])
+
+    def test_ssh_authentication_failure_exposes_only_safe_manual_retry_metadata(self):
+        with mock.patch.object(self.device, 'ssh_connect', side_effect=SSHAuthenticationError('ubuntu')):
+            result = self.actions.execute('ssh-connect', {'ssh_user': 'ubuntu',
+                                          'ssh_password': 'private-board-password'}, self.device)
+        self.assertEqual(result.status, 502)
+        self.assertEqual(result.payload['code'], 'ssh-authentication-failed')
+        self.assertEqual(result.payload['ssh_user'], 'ubuntu')
+        self.assertNotIn('private-board-password', json.dumps(result.payload))
+
+    def test_ssh_credentials_reject_control_characters_and_option_injection_before_connecting(self):
+        with mock.patch.object(self.device, 'ssh_connect') as connect:
+            for user in ('', '-oProxyCommand=x', 'root@other-host', 'root\n', 'root\t',
+                         'root user', 'a' * 129, 'root\x00', '\x1broot'):
+                with self.subTest(user=repr(user)):
+                    result = self.actions.execute('ssh-connect', {'ssh_user': user}, self.device)
+                    self.assertEqual(result.status, 400)
+            for password in ('x\ny', 'x\ry', 'x\x00y', 'x' * 4097):
+                result = self.actions.execute('ssh-connect', {'ssh_password': password}, self.device)
+                self.assertEqual(result.status, 400)
+        connect.assert_not_called()
+
+    def test_ssh_credentials_preserve_password_spaces_and_shell_characters(self):
+        session = mock.Mock(sid='ssh-safe', ip='192.0.2.1', persistent=False, auto_configured=False)
+        password = '  quote\"$value; with spaces  '
+        with mock.patch.object(self.device, 'ssh_connect', return_value=(session, '')) as connect:
+            result = self.actions.execute('ssh-connect', {'ssh_user': 'ubuntu',
+                                          'ssh_password': password}, self.device)
+        self.assertEqual(result.status, 200)
+        self.assertEqual(connect.call_args.kwargs['ssh_password'], password)
 
 
 if __name__ == '__main__':

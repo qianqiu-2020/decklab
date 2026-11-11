@@ -136,7 +136,7 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | --- | --- |
 | `/api/send` | `data`; literal serial input |
 | `/api/session-send` | `sid`, `data`; serial or SSH input |
-| `/api/ssh-connect` | Optional `title`, `ssh_user`, `ssh_password`; returns sid and persistence policy |
+| `/api/ssh-connect` | Optional `title`, `ssh_user`, `ssh_password`; returns sid and persistence policy; authentication rejection uses `code=ssh-authentication-failed` and nonsecret `ssh_user` |
 | `/api/session-resize` | `sid`, `cols`, `rows`; serial also requires `observed_off`, with optional `automatic` boolean, `presentation` boolean and per-page `client_id` |
 | `/api/session-close` | `sid` |
 | `/api/session-result` | `sid`, `completed`, `exit_code`; records command outcome |
@@ -146,7 +146,7 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | `/api/operation-cancel` | Active operation `id` |
 | `/api/identify` | Optional `init_boot_marker=true` or web-only `association={nonce,serial,reason}`; active shell probe, may log in |
 | `/api/probe` | Sends CR to request a prompt; this writes to the shared console |
-| `/api/ssh-enable` | Explicit SSH provisioning permitted by device profile |
+| `/api/ssh-enable` | Explicitly install/start SSH from an already-root serial shell; requires authorization for board changes |
 | `/api/label` | `label`; rename without moving archives |
 | `/api/switch-mode` | Prepare this physical attachment for another board |
 | `/api/rescue` | Explicit host USB recovery where supported |
@@ -171,9 +171,17 @@ variables. Use one command for dependent steps, or interactive session input.
 SSH output can be read by collaborators. Input, resize and close require both
 session access and the current controlling actor/client. Another page using
 the same web actor still needs explicit takeover. Resize/close/takeover select an SSH
-`sid`; they do not close or resize the physical serial collector. Root SSH
-authentication-denial recovery follows the configured profile password and
-provisioning policy; different per-request credentials do not trigger provisioning.
+`sid`; they do not close or resize the physical serial collector.
+
+Default SSH opens try the profile password, `bianbu`, then `debian`, deduplicated.
+Only authentication denial advances the list; network failures and timeouts stop.
+An explicit `ssh_user` or `ssh_password` override attempts only that credential
+pair. Authentication failure returns HTTP 502 with `code=ssh-authentication-failed`
+and `ssh_user`, without a password. A failed durable SSH task preserves those
+nonsecret fields in its result so the web UI can offer credential entry. Passwords
+are request/session data, not task-record fields or profile updates. Normal SSH
+opens do not reset root's password or edit sshd configuration; manual root setup
+is documented in [configuration](CONFIGURATION.md#manual-root-ssh-setup).
 
 SSH resizes the actual PTY/channel and canonical screen; applications receive
 the normal window-size change. Pure UART has no out-of-band window-size message.
@@ -247,10 +255,10 @@ Web-issued agent grants, including all-board grants, cannot call `/api/label`,
 GET/POST `/api/probe-settings` is restricted to human web access, including when
 using an environment-configured agent credential.
 They cannot start `kind=ssh-enable` tasks or create board identity markers through
-either identify interface. They can create SSH sessions; profile-controlled
-automatic SSH provisioning after authentication denial still applies to that
-connection workflow. Disable it in the profile when board configuration must
-remain unchanged. Configured hardware actions require their explicit agent policy.
+either identify interface. They can create SSH sessions, including default
+password fallback attempts, but authentication rejection does not trigger root
+password or sshd policy changes. Configured hardware actions require their
+explicit agent policy.
 
 A single-board grant additionally cannot copy between boards, read global health
 or diagnostics, or compare another board. Its device-scoped requests require

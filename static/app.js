@@ -13,7 +13,7 @@
     byId: $, fetch: fetch, formatBytes: fmt, age: ago,
     getView: function () { return terminalView.current; },
     isCurrent: function (ctx) { return isCurrent(ctx); },
-    open: select, renderInfo: function (info) { checkIdentityAssociation(); checkProbeSettings(); renderInfo(info); },
+    open: select, renderInfo: function (info) { checkIdentityAssociation(); checkProbeSettings(); checkSshCredentials(); renderInfo(info); },
     loadSessions: loadSessions, loadActivity: loadActivity,
     updateInputOwner: updateInputOwner
   });
@@ -25,7 +25,7 @@
     session: function (sid) { return sessions.find(function (session) { return session.sid === sid; }); },
     takenOver: function (sid) { return !!takenOver[sid]; },
     onSelect: function (key, sid) {
-      closeIdentityAssociation(); closeProbeSettings(); deviceDirectory.selectionChanged(key); curSid = sid;
+      closeIdentityAssociation(); closeProbeSettings(); closeSshCredentials(); deviceDirectory.selectionChanged(key); curSid = sid;
     },
     clearTerminalSearch: function (focus) { clearTerminalSearch(focus); },
     clearCommandDecorations: function (ctx) { clearCommandDecorations(ctx); },
@@ -72,6 +72,9 @@
         sessions.push({ sid: result.sid, kind: 'ssh', ip: result.ip, actor: task.actor });
       }
       switchSession(result.sid);
+    },
+    retrySSH: function (task) {
+      openSshCredentials(terminalView.current, task.result.ssh_user);
     }
   });
   window.SerialdShareSelection = function () {
@@ -292,32 +295,111 @@
     var add = document.createElement('button');
     add.type = 'button'; add.textContent = '+ SSH 会话';
     add.disabled = !!ctx.connecting;
-    add.title = '创建独立 SSH 会话；默认 root 密码认证失败时尝试通过串口自动配置';
+    add.title = '创建独立 SSH 会话；认证失败后可填写账号和密码';
     add.addEventListener('click', function () {
-      if (!isCurrent(ctx) || ctx.connecting) return;
-      ctx.connecting = true; add.disabled = true;
-      $('d-status').textContent = ' 正在建立 SSH 会话…（认证失败时可能通过串口配置 root 登录）';
-      taskUI.run('ssh-connect', ctx)
-        .then(function (d) {
-          if (!isCurrent(ctx)) return;
-          ctx.connecting = false; add.disabled = false;
-          if (!d.ok) { $('d-status').textContent = ' 失败：' + (d.error || ''); return; }
-          if (d.device_key) adoptKey(ctx, d.device_key, d.serial);
-          if (!sessions.some(function (s) { return s.sid === d.sid; })) {
-            sessions.push({ sid: d.sid, kind: 'ssh', ip: d.ip });
-          }
-          switchSession(d.sid);
-          $('d-status').textContent = (d.auto_configured ? ' 已通过串口配置 root SSH；连接 ' : ' 已连接 ') + d.ip;
-          pollDevices();
-        })
-        .catch(function (e) {
-          if (!isCurrent(ctx)) return;
-          ctx.connecting = false; add.disabled = false; $('d-status').textContent = ' 失败：' + e.message;
-        });
+      connectSSH(ctx);
     });
     sp.appendChild(add);
+    var settings = document.createElement('button');
+    settings.type = 'button'; settings.textContent = 'SSH 设置';
+    settings.title = '填写 SSH 用户和密码'; settings.disabled = !!ctx.connecting;
+    settings.addEventListener('click', function () { openSshCredentials(ctx, ctx.sshUserHint); });
+    sp.appendChild(settings);
     bar.appendChild(sp);
   }
+
+  var sshCredentials = null;
+  function sshConnectionCurrent(ctx, connectionId) {
+    if (!isCurrent(ctx) || ctx.connectionId !== connectionId) return false;
+    var board = deviceDirectory.find(ctx.key);
+    return !!board && board.alive && board.connection_id === connectionId;
+  }
+  function closeSshCredentials() {
+    sshCredentials = null;
+    $('ssh-credentials-password').value = '';
+    $('ssh-credentials-user').value = '';
+    $('ssh-credentials-status').textContent = '';
+    if ($('ssh-credentials-dialog').open) $('ssh-credentials-dialog').close();
+  }
+  function checkSshCredentials() {
+    if (sshCredentials && !sshConnectionCurrent(sshCredentials.ctx, sshCredentials.connectionId)) closeSshCredentials();
+  }
+  function openSshCredentials(ctx, user, message) {
+    if (!ctx || ctx.connecting || !sshConnectionCurrent(ctx, ctx.connectionId)) return;
+    closeSshCredentials();
+    sshCredentials = { ctx: ctx, connectionId: ctx.connectionId };
+    var board = deviceDirectory.find(ctx.key);
+    $('ssh-credentials-target').textContent = board.label || board.dev || ctx.key;
+    $('ssh-credentials-user').value = user || 'root';
+    $('ssh-credentials-password').value = '';
+    $('ssh-credentials-status').textContent = message || '';
+    $('ssh-root-copy-status').textContent = '';
+    $('ssh-root-guide').open = false;
+    $('ssh-credentials-dialog').showModal();
+    $('ssh-credentials-user').focus();
+  }
+  function connectSSH(ctx, credentials) {
+    if (!ctx || ctx.connecting || !sshConnectionCurrent(ctx, ctx.connectionId)) return;
+    var connectionId = ctx.connectionId;
+    ctx.connecting = true;
+    renderTabs();
+    $('d-status').textContent = ' 正在建立 SSH 会话…';
+    taskUI.run('ssh-connect', ctx, credentials)
+      .then(function (result) {
+        ctx.connecting = false;
+        if (!sshConnectionCurrent(ctx, connectionId)) return;
+        if (!result.ok) {
+          var failure = new Error(result.error || '建立 SSH 会话失败');
+          failure.result = result; throw failure;
+        }
+        if (result.device_key) adoptKey(ctx, result.device_key, result.serial);
+        if (!sessions.some(function (session) { return session.sid === result.sid; })) {
+          sessions.push({ sid: result.sid, kind: 'ssh', ip: result.ip });
+        }
+        switchSession(result.sid);
+        $('d-status').textContent = ' 已连接 ' + result.ip;
+        pollDevices();
+      })
+      .catch(function (error) {
+        ctx.connecting = false;
+        if (!sshConnectionCurrent(ctx, connectionId)) return;
+        renderTabs();
+        $('d-status').textContent = error.submissionUnknown
+          ? ' 连接可能仍在后台执行，请先查看任务记录' : ' 失败：' + error.message;
+        if (!error.submissionUnknown && error.result && error.result.code === 'ssh-authentication-failed') {
+          ctx.sshUserHint = error.result.ssh_user || ctx.sshUserHint;
+          openSshCredentials(ctx, ctx.sshUserHint, 'SSH 认证失败，请填写账号和密码后重试');
+        }
+      });
+  }
+  $('ssh-credentials-close').addEventListener('click', closeSshCredentials);
+  $('ssh-credentials-cancel').addEventListener('click', closeSshCredentials);
+  $('ssh-credentials-dialog').addEventListener('cancel', closeSshCredentials);
+  $('ssh-credentials-dialog').addEventListener('close', function () {
+    // A queued close event may arrive after a new authentication failure reopened it.
+    if (!$('ssh-credentials-dialog').open) closeSshCredentials();
+  });
+  $('ssh-credentials-form').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var state = sshCredentials;
+    if (!state || !sshConnectionCurrent(state.ctx, state.connectionId) || state.ctx.connecting) {
+      closeSshCredentials(); return;
+    }
+    var user = $('ssh-credentials-user').value.trim();
+    if (!user) { $('ssh-credentials-status').textContent = '请填写 SSH 用户名'; return; }
+    var credentials = { ssh_user: user, ssh_password: $('ssh-credentials-password').value };
+    closeSshCredentials();
+    connectSSH(state.ctx, credentials);
+  });
+  ['passwd', 'edit', 'config', 'restart', 'check'].forEach(function (name) {
+    $('ssh-root-copy-' + name).addEventListener('click', function () {
+      if (!sshCredentials || !sshConnectionCurrent(sshCredentials.ctx, sshCredentials.connectionId)) {
+        closeSshCredentials(); return;
+      }
+      var copied = copyText($('ssh-root-command-' + name).textContent, true);
+      $('ssh-root-copy-status').textContent = copied ? '已复制，请在串口中分步执行' : '复制失败，请手动选择命令';
+    });
+  });
   function loadSessions() {
     var ctx = terminalView.current;
     if (!isCurrent(ctx)) return;
@@ -946,7 +1028,7 @@
   }
   $('d-term').addEventListener('click', function () { if (terminalView.current) terminalView.current.term.focus(); });
   $('b-close').addEventListener('click', function () {
-    closeIdentityAssociation();
+    closeIdentityAssociation(); closeSshCredentials();
     disposeView(); deviceDirectory.selectionChanged(null); $('detail').hidden = true;
     $('workspace').classList.toggle('selected', false);
     document.body.classList.toggle('detail-open', false);

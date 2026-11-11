@@ -113,13 +113,30 @@ try:
             assert not json.load(response)['mcp_enabled'], 'Legacy thin fixture unexpectedly supplies MCP'
     stop(control)
     subprocess.run(['dpkg', '--force-confold', '-i', '/tmp/seriald.deb'], check=True)
-    assert pathlib.Path('/usr/lib/seriald/.collector-build-id').read_bytes() == installed_id
+    collector_changed = pathlib.Path('/usr/lib/seriald/.collector-build-id').read_bytes() != installed_id
+    restart_marker = pathlib.Path('/run/seriald-collector-restart-required')
+    if collector_changed:
+        assert previous, 'same-package reinstall changed its collector fingerprint'
+        assert restart_marker.is_file(), 'changed collector code did not request a restart'
+        # This container has no systemd. Restart only the isolated fixture here;
+        # the VM acceptance checks the real maintainer-script service decision.
+        stop(collector)
+        collector = start('/usr/bin/seriald-collector')
+        restart_marker.unlink()
+    else:
+        assert not restart_marker.exists(), 'unchanged collector code requested a restart'
     assert config.read_bytes() == original + b'\n# installation preservation fixture\n'
     assert sentinel.read_text() == 'runtime data must survive'
     control = start('/usr/bin/seriald-control')
     ready()
     with urlopen('http://127.0.0.1:18898/api/health', timeout=3) as response:
-        assert json.load(response)['pid'] == first_pid
+        installed_pid = json.load(response)['pid']
+    if collector_changed:
+        assert installed_pid != first_pid
+        print('PASS: changed collector fingerprint requests restart; isolated container fixture restarted (not systemd acceptance)', flush=True)
+    else:
+        assert installed_pid == first_pid
+        print('PASS: unchanged collector fingerprint keeps the existing collector PID', flush=True)
     subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:18898'],
                    env=environment, check=True, timeout=30)
     worker_users = []
@@ -137,10 +154,10 @@ try:
     subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:18898'],
                    env=environment, check=True, timeout=30)
     with urlopen('http://127.0.0.1:18898/api/health', timeout=3) as response:
-        assert json.load(response)['pid'] == first_pid
+        assert json.load(response)['pid'] == installed_pid
     assert importlib.util.find_spec('mcp') is None
     if previous:
-        print('PASS: published 1.7.0 thin package upgrades to included MCP without replacing collector', flush=True)
+        print('PASS: published 1.7.0 thin package upgrades to included MCP with configuration and runtime data preserved', flush=True)
     assert collector.poll() is None
     subprocess.run(['/usr/bin/serialctl', '--url', 'http://127.0.0.1:18898', 'devices'], check=True)
     subprocess.run(['/usr/bin/seriald-admin', '--help'], check=True, stdout=subprocess.DEVNULL)
