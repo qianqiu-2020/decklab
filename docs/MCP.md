@@ -15,12 +15,112 @@ MCP 地址就是 `http://decklab-host:8898/mcp`。使用反向代理时采用管
 不要填 AI 客户端自己的 `127.0.0.1`，除非客户端与 DeckLab 确实运行在同一台机器。
 Orca Web 的 MCP 连接由 Orca 服务端运行；应确保 Orca 服务端能访问这个地址。
 
-常见客户端的配置示例：
+### 先添加客户端，再在对话里发任务
+
+MCP 在客户端配置一次，连接成功后，对话里只需描述任务。以前“复制到对话里”的访问说明
+仍可用于让代码 Agent 协助配置，但粘贴文字本身不代表客户端已经注册或连接 MCP；
+要完成下面对应客户端的添加步骤，并检查连接状态。上位机已内置 SDK，也不等于各客户端已经添加服务。
+
+以下示例把 `http://decklab-host:8898/mcp` 换成 DeckLab 网页生成的实际地址。
+在**实际运行 AI 客户端或引擎的主机**执行命令，不是在开发板串口里执行。
+命令以 Bash 为例，先在终端隐藏输入网页生成的 Agent 令牌，不把令牌贴进聊天记录：
+
+```bash
+read -rsp 'DeckLab Agent token: ' DECKLAB_AGENT_TOKEN
+printf '\n'
+export DECKLAB_AGENT_TOKEN
+```
+
+### Codex：添加 HTTP MCP
+
+在使用 Codex 的同一账号与配置目录下执行：
+
+```bash
+codex mcp add decklab --url http://decklab-host:8898/mcp --bearer-token-env-var DECKLAB_AGENT_TOKEN
+codex mcp list
+```
+
+然后从同一环境启动 Codex，在会话中用 `/mcp` 检查工具是否可用，再请求调用 `list_devices`。
+这条命令保存的是环境变量名；Codex 启动进程必须继承 `DECKLAB_AGENT_TOKEN`。
+新开终端需重新设置变量，已运行的客户端不会自动继承另一个终端刚执行的 `export`。
+无需给 Codex 安装 Python 或 DeckLab MCP 适配器。
+
+也可手动在 `~/.codex/config.toml` 添加以下段落；若设置了 `CODEX_HOME`，编辑该目录下的
+`config.toml`。**只追加或合并 `decklab` 段落，不要用示例覆盖整个配置文件。**
+命令行与手工编辑任选一种：
+
+```toml
+[mcp_servers.decklab]
+url = "http://decklab-host:8898/mcp"
+bearer_token_env_var = "DECKLAB_AGENT_TOKEN"
+```
+
+官方说明：[Codex MCP 配置](https://developers.openai.com/codex/mcp)。
+
+### Claude Code：添加到用户配置
+
+完成上面的令牌输入后，在运行 Claude Code 的主机执行：
+
+```bash
+claude mcp add --transport http --scope user decklab http://decklab-host:8898/mcp --header "Authorization: Bearer $DECKLAB_AGENT_TOKEN"
+claude mcp get decklab
+```
+
+`--scope user` 使它在该账号的各项目中可用；不写该参数时默认只属于当前项目。
+这条命令把展开后的请求头保存到用户私有配置 `~/.claude.json`，不要把该文件提交到仓库。
+重新打开 Claude 会话，在 `/mcp` 中确认 `decklab` 已连接，再请求调用 `list_devices`。
+这里使用已有的远程 HTTP 服务，无需启动本地 stdio 程序。
+
+需要按项目配置时，可**改用**项目根目录的 `.mcp.json`；与上面的用户配置任选一种，
+不要重复添加同名服务。已有文件只合并 `mcpServers.decklab`，不要覆盖其他服务：
 
 ```json
 {
   "mcpServers": {
     "decklab": {
+      "type": "http",
+      "url": "http://decklab-host:8898/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DECKLAB_AGENT_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+`type: http` 必须保留；仅写 `url` 会被 Claude Code 当作 stdio 配置。
+项目 JSON 保存的是环境变量引用，每次启动 Claude 时仍须继承 `DECKLAB_AGENT_TOKEN`；
+首次加载项目 MCP 时，按客户端提示确认项目配置。
+官方说明：[Claude Code MCP](https://code.claude.com/docs/en/mcp)。
+
+### Orca Web：按实际使用的引擎配置
+
+如果在 Orca Web 中选择 Codex 或 Claude Code，配置应放在**实际运行该引擎的主机、账号和配置目录**。
+上位机安装 MCP SDK，不会自动替 Orca 中的各个引擎注册服务。
+
+- Claude Code 可在当前 Web 项目的“项目设置 → MCP 配置”中检查或打开项目 `.mcp.json`；
+  没有配置时，通过“添加 MCP 配置”创建后，合并上面的 Claude 项目 JSON，并重新打开 Claude 会话。
+- Codex 使用所选账号对应 `CODEX_HOME` 中的 TOML 配置，按上面的 Codex 方法添加。
+  项目 `.mcp.json` 不会自动转换为 Codex 配置；多账号时应核对实际选中的账号与配置目录。
+
+使用环境变量引用时，变量必须由 Orca 启动引擎的进程继承。浏览器或另一个临时终端中的
+`export` 不会修改已运行的 Orca 服务环境；应由管理员按实际启动方式配置后重新启动相应进程。
+如果不方便设置服务环境，可改用下面的固定请求头写法。在 Codex 所选账号的私有
+`CODEX_HOME/config.toml` 中合并：
+
+```toml
+[mcp_servers.decklab]
+url = "http://decklab-host:8898/mcp"
+http_headers = { Authorization = "Bearer <网页生成的 Agent 令牌>" }
+```
+
+Claude 项目的 MCP 配置界面则使用下面的 JSON：
+
+```json
+{
+  "mcpServers": {
+    "decklab": {
+      "type": "http",
       "url": "http://decklab-host:8898/mcp",
       "headers": {
         "Authorization": "Bearer <网页生成的 Agent 令牌>"
@@ -30,9 +130,35 @@ Orca Web 的 MCP 连接由 Orca 服务端运行；应确保 Orca 服务端能访
 }
 ```
 
-客户端配置格式可能不同；对应填写 Streamable HTTP URL 与自定义 Authorization 头。
-只支持 OAuth 登录、不能配置 Bearer 头的客户端不能直接使用此授权方式。
-令牌保存在客户端设置中，不要粘进对话或写进页面地址。
+用真实令牌替换占位符后，仅保存在自己控制、不共享、不入库的私有配置中。
+如果项目 `.mcp.json` 会随 Git 分享，应使用上面的环境变量版本，并正确配置 Orca 服务环境。
+同一引擎中的 `decklab` 只选择一种配置位置和授权写法；改用 Codex 固定请求头时，删除该服务原有的
+`bearer_token_env_var`，不要重复添加同名段落。保存后重新打开相应引擎会话，在 `/mcp` 检查连接。
+
+### Claude 网页与桌面版的远程连接器
+
+Claude.ai、Claude Desktop 的远程连接器入口是 `Customize → Connectors → Add custom connector`。
+它与 Claude Code 的本地配置不同，连接从 Anthropic 云端发出，不能直接访问 `10.*` 等内网地址；
+应使用管理员提供的、该云端可访问的 HTTPS MCP 地址。
+
+若客户端界面提供 `Request headers`，可选择 `No sign-in`，再添加 `Authorization` 请求头，
+值填写完整的 `Bearer <网页生成的 Agent 令牌>`。这里是不使用 OAuth，DeckLab 仍会校验 Agent 令牌。
+固定请求头目前仍是部分组织开放的 beta；没有该字段、又只支持 OAuth 的客户端，不能直接套用本例。
+OAuth 模式会使用 `Authorization`，不要在该模式下另填同名请求头。
+详见 [自定义连接器与请求头](https://claude.com/docs/connectors/custom/add-unlisted#authenticate-with-request-headers)
+及 [远程连接器网络要求](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)。
+
+### 连接后，在对话中这样开始
+
+完成添加并确认连接后，可以复制下面的任务说明；其中不包含令牌：
+
+```text
+我已配置名为 decklab 的 MCP 服务。请先调用 list_devices，找到标签为“<设备标签>”的设备，
+读取它的最新终端并汇报当前状态。先只读；在我确认前不要发送输入或执行修改命令。
+如果没有可用的 DeckLab 工具，请说明连接问题，不要把这段文字当作已经连通的证明。
+```
+
+令牌保存在客户端设置或客户端可读取的环境中，不要粘进对话或写进页面地址。
 网页分享链接、浏览器 Cookie 和主访问密码不能代替远程 MCP 的独立 Agent 令牌。
 
 已识别设备可以按序列号授权；未识别设备可以按当前连接授权，不要求先成功探测。
