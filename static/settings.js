@@ -44,7 +44,7 @@
     var result = {version: 1, environment: {}, documents: {}};
     snapshot.fields.forEach(function (field) {
       var input = inputs[field.name];
-      result.environment[field.name] = field.secret && !input.dataset.changed && redacted(original.environment[field.name]) ? {$redacted: true} : input.value;
+      result.environment[field.name] = field.secret && !input.value && !input.dataset.clear && redacted(original.environment[field.name]) ? {$redacted: true} : input.value;
     });
     Object.keys(editors).forEach(function (key) {
       if (editors[key].value.trim()) result.documents[key] = JSON.parse(editors[key].value);
@@ -60,6 +60,7 @@
       input.value = redacted(value) ? '' : value;
       input.placeholder = redacted(value) ? '已设置；留空保留，清空请点右侧按钮' : '';
       delete input.dataset.changed;
+      delete input.dataset.clear;
     });
     Object.keys(editors).forEach(function (key) { editors[key].value = data.documents[key] ? JSON.stringify(data.documents[key], null, 2) : ''; });
     invalidate();
@@ -157,9 +158,9 @@
           if (field.choices) { input = el('select', null, label); field.choices.forEach(function (value) { var option = el('option', value, input); option.value = value; }); }
           else { input = el(name === 'PROBE_COMMAND' ? 'textarea' : 'input', null, label); if (name !== 'PROBE_COMMAND') input.type = field.secret ? 'password' : 'text'; }
           input.autocomplete = 'off'; input.spellcheck = false;
-          input.addEventListener('input', function () { input.dataset.changed = '1'; invalidate(); });
+          input.addEventListener('input', function () { input.dataset.changed = '1'; delete input.dataset.clear; invalidate(); });
           inputs[name] = input;
-          if (field.secret) button(label, '清空', function () { input.value = ''; input.dataset.changed = '1'; invalidate(); message('该字段将被清空，请预览后保存。'); });
+          if (field.secret) button(label, '清空', function () { input.value = ''; input.dataset.clear = '1'; invalidate(); message('该字段将被清空，请预览后保存。'); });
         });
       });
       var bindings = el('details', null, body); el('summary', '板卡、硬件动作与 Agent 令牌（JSON）', bindings);
