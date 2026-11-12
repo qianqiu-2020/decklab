@@ -1,4 +1,5 @@
 """Attachment names never establish a board identity or select an archive."""
+from contextlib import closing
 from pathlib import Path
 import os
 import sqlite3
@@ -143,7 +144,7 @@ class PendingLabelMigrationTests(unittest.TestCase):
                 backup = Path(store.schema_backup)
                 if os.name != 'nt':
                     self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
-                with sqlite3.connect(backup) as prior:
+                with closing(sqlite3.connect(backup)) as prior:
                     self.assertEqual(prior.execute('PRAGMA user_version').fetchone()[0], 8)
                     self.assertIsNone(prior.execute("SELECT name FROM sqlite_master WHERE name='attachment_labels'").fetchone())
             finally:

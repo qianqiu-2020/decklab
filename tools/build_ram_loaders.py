@@ -41,7 +41,8 @@ def main():
     (args.output / 'BUILD-INPUT.json').write_text(json.dumps({
         'uboot_commit': commit, 'patch_sha256': digest(patch),
         'fsbl_sha256': args.fsbl_sha256, 'cross_compile': args.cross_compile,
-        'configuration': 'k3_defconfig', 'target': 'u-boot.bin', 'jobs': args.jobs
+        'configuration': 'k3_defconfig', 'ram_only': True,
+        'ddr_training_persistence': False, 'target': 'u-boot.bin', 'jobs': args.jobs
     }, indent=2) + '\n')
     try:
         with tempfile.TemporaryDirectory(prefix='decklab-k3-ram-') as directory:
@@ -56,7 +57,22 @@ def main():
             with (args.output / 'build.log.txt').open('w') as log:
                 command = ['make', 'O=' + str(build), 'CROSS_COMPILE=' + args.cross_compile]
                 subprocess.run(command + ['k3_defconfig'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
+                subprocess.run([str(source / 'scripts/config'), '--file', str(build / '.config'),
+                    '-e', 'DECKLAB_RAM_ONLY_LOADER', '-d', 'DDR_TRAINING_SAVE_RESTORE'], check=True)
+                subprocess.run(command + ['olddefconfig'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
+                configuration = (build / '.config').read_text()
+                if ('CONFIG_DECKLAB_RAM_ONLY_LOADER=y\n' not in configuration
+                        or 'CONFIG_DDR_TRAINING_SAVE_RESTORE=y\n' in configuration):
+                    raise RuntimeError('RAM-only configuration was not applied')
+                (args.output / 'CONFIGURATION.txt').write_text(configuration)
                 subprocess.run(command + ['-j%d' % args.jobs, 'u-boot.bin'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
+                disassembly = subprocess.check_output([args.cross_compile + 'objdump', '-d',
+                    '--disassemble=board_late_init', str(build / 'u-boot')], text=True)
+                if 'run_command' not in disassembly or any(name in disassembly for name in (
+                        'set_dev_serial_no', 'set_env_ethaddr', 'save_ddr_training_info',
+                        'try_flash_image_from_card', 'try_boot_from_udisk', 'flush_tlvinfo')):
+                    raise RuntimeError('compiled late initialization is not download-only')
+                (args.output / 'SAFETY-CHECK.txt').write_text(disassembly)
                 (fit / 'configs').mkdir(parents=True)
                 (fit / 'dtb').mkdir()
                 shutil.copyfile(source / 'board/spacemit/k3/configs/uboot_fdt.its', fit / 'configs/uboot_fdt.its')
@@ -79,7 +95,7 @@ def main():
             (args.output / 'BUILD-INFO.txt').write_text('DeckLab K3 RAM-only download environment\n' +
                 'U-Boot source commit: ' + commit + '\nPatch SHA-256: ' + digest(patch) + '\n' +
                 'FSBL SHA-256: ' + args.fsbl_sha256 + '\nToolchain prefix: ' + args.cross_compile + '\n' +
-                'Build: k3_defconfig, u-boot.bin, compressed multi-DTB FIT\n' +
+                'Build: k3_defconfig + DECKLAB_RAM_ONLY_LOADER=y + DDR_TRAINING_SAVE_RESTORE=n, u-boot.bin, compressed multi-DTB FIT\n' +
                 'Loaders are RAM-only, never partition payloads. NOR map selection does not save env or write storage.\n' +
                 'Compiled/offline checked; no physical-board acceptance implied.\n')
         print(args.output)

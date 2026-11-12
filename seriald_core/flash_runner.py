@@ -508,13 +508,13 @@ class LocalFlashExecutor:
             request['target_storage'] = target_storage
         stage = 'image-plan'
         try:
-            if (input_mode == 'partitions'
-                    and binding.profile_data.get('id') == 'auto-spacemit-gpt-v1'
+            if (binding.profile_data.get('id') == 'auto-spacemit-gpt-v1'
                     and binding.profile_data.get('bootrom_identity')
-                    and not binding.profile_data.get('prepare')
-                    and not artifact.get('name', '').lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip'))):
-                from .flash_loaders import prepare_materials
-                request['boot_materials'] = prepare_materials(binding, workspace, check)
+                    and not binding.profile_data.get('prepare')):
+                from .flash_loaders import manifest_path, prepare_materials
+                package = artifact.get('name', '').lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip'))
+                if manifest_path().is_file() or input_mode == 'partitions' and not package:
+                    request['boot_materials'] = prepare_materials(binding, workspace, check)
             image = self._run(binding, 'image-plan', request, check=check)
             if (not isinstance(image.get('plan'), dict)
                     or not isinstance(image.get('payload_candidates', []), list)):

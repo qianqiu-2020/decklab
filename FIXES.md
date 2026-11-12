@@ -21,6 +21,10 @@ the standard map and selected-partition erase risk; this adapter does not make
 the old stock full-recovery namespace operation safe for single partitions.
 The K3 loader patch/build recipe and simulated execution tests are source and
 build evidence, not physical-board acceptance.
+The dedicated RAM build must enter fastboot before normal board provisioning,
+DDR-training persistence or SD/USB auto-flash. Its build recipe checks the
+configuration and late-init disassembly. When installed, the same RAM environment
+also prepares full firmware packages without changing their write catalogue.
 
 Web/backend split deployments use one authenticated HTTPS hardware owner on
 Windows or Ubuntu. All serial readers, durable hardware tasks, image downloads

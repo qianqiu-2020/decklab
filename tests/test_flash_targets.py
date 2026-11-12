@@ -1,4 +1,5 @@
 """USB download targets are not invented boards or UART connections."""
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -207,7 +208,7 @@ class FlashTargetFoundationTests(unittest.TestCase):
 
     def test_schema_nine_upgrade_keeps_old_plans_labels_and_private_credentials(self):
         path = Path(self.temporary.name) / 'registry-nine.sqlite3'
-        with sqlite3.connect(path) as old:
+        with closing(sqlite3.connect(path)) as old, old:
             for migrate in schema.REGISTRY_MIGRATIONS[:9]:
                 migrate(old)
             old.execute('INSERT INTO boards VALUES(?,?,?,?,?,?,?)', ('OLD', 'old', '{}', 1, 2, '', ''))
@@ -223,7 +224,7 @@ class FlashTargetFoundationTests(unittest.TestCase):
             self.assertEqual(upgraded.db.execute('SELECT label FROM attachment_labels').fetchone()[0], 'pending-label')
             self.assertEqual(upgraded.get_ssh_credentials('OLD')['revision'], 3)
             self.assertEqual(upgraded.db.execute('PRAGMA foreign_key_check').fetchall(), [])
-            with sqlite3.connect(upgraded.schema_backup) as backup:
+            with closing(sqlite3.connect(upgraded.schema_backup)) as backup:
                 self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 9)
                 self.assertEqual(backup.execute('SELECT COUNT(*) FROM flash_plans').fetchone()[0], 1)
         finally:

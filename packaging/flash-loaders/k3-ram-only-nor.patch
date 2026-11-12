@@ -1,3 +1,38 @@
+diff --git a/board/spacemit/k3/Kconfig b/board/spacemit/k3/Kconfig
+index c8bc73439c..68666d2ea0 100644
+--- a/board/spacemit/k3/Kconfig
++++ b/board/spacemit/k3/Kconfig
+@@ -84,0 +85,9 @@ endif
++
++config DECKLAB_RAM_ONLY_LOADER
++    bool "DeckLab RAM-only download environment"
++    depends on TARGET_SPACEMIT_K3
++    default n
++    help
++      Enter the USB fastboot loop before normal late board initialization.
++      Skip identity provisioning, DDR-training persistence and automatic
++      SD/USB image flashing. This image is only for RAM staging by DeckLab.
+diff --git a/board/spacemit/k3/k3.c b/board/spacemit/k3/k3.c
+index 42bc51f012..e2f36e761f 100644
+--- a/board/spacemit/k3/k3.c
++++ b/board/spacemit/k3/k3.c
+@@ -739,0 +740,7 @@ int board_init(void)
++#if CONFIG_IS_ENABLED(DECKLAB_RAM_ONLY_LOADER)
++    /* Keep boot regulators, but do not initialize optional EC/retimer devices
++     * or run their provisioning paths in a temporary download environment.
++     */
++    return ret;
++#endif
++
+@@ -954,0 +962,8 @@ int board_late_init(void)
++#if CONFIG_IS_ENABLED(DECKLAB_RAM_ONLY_LOADER)
++    /* RAM-stage service only. Do not provision EEPROM identities, persist
++     * DDR training data, import board scripts or auto-flash attached media.
++     * A host-confirmed fastboot flash is the only storage-writing path here.
++     */
++    for (;;)
++        run_command("fastboot 0", 0);
++#endif
 diff --git a/drivers/fastboot/fb_command.c b/drivers/fastboot/fb_command.c
 index 537459c018..d47529738a 100644
 --- a/drivers/fastboot/fb_command.c
