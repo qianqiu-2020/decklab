@@ -472,6 +472,27 @@ test('awaiting-selection upload carries the original task id and does not create
   assert.equal(h.requests.some(entry => entry.url === '/api/task-start' || entry.url === '/api/flash-target'), false);
 });
 
+
+test('unavailable USB connection shows its diagnostic and unknown readback without enabling writes', async () => {
+  const h = harness(), target = {target_id:'io-target', target_generation:'one', mode:'unknown'};
+  h.api.open(target);
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-target').resolve({target, capabilities:{supported:false, mode:'unknown',
+    reason:'target-unavailable', diagnostic:'flush read error: -1', can_upload:true,
+    storages:[], modes:['partitions'], readback_supported:false, artifacts:[artifact]}}); await drain();
+  assert.match(h.get('fl-status').textContent, /无法打开 USB 下载连接/);
+  assert.match(h.get('fl-connections').textContent, /flush read error: -1/);
+  assert.match(h.get('fl-connections').textContent, /回读支持待确认/);
+  assert.doesNotMatch(h.get('fl-connections').textContent, /已进入下载模式|不支持写后回读/);
+  assert.match(h.get('fl-partitions').textContent, /USB 连接尚未就绪/);
+  h.get('fl-artifact').value=artifact.id; h.get('fl-artifact').emit('change');
+  assert.equal(h.get('fl-plan').disabled,true);
+  assert.equal(h.get('fl-start').disabled,true);
+  assert.equal(h.get('fl-upload').disabled,false);
+  const raw=h.get('fl-connections').children.find(node=>node.textContent==='flush read error: -1');
+  assert.equal(Object.hasOwn(raw.dataset,'i18nIgnore'),true);
+});
+
 (async () => {
   for (const [name, fn] of tests) { await fn(); console.log('ok - ' + name); }
   console.log(tests.length + ' flash frontend isolation tests passed');

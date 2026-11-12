@@ -502,3 +502,9 @@ The route-name inventory check catches missing names; it does not prove payload,
 authorization, cancellation or platform semantics. Those require source review
 and the relevant contract tests above. Installer and real COM behavior remain
 native Windows acceptance requirements.
+
+Automatic flash-target responses can include a bounded, printable `diagnostic`
+string alongside their stable `reason` code, including `target-unavailable` or
+`probe-protocol-failed`. The string explains the opening/read-only probe error;
+it never changes `supported`, grants preparation/writes or triggers retries.
+Absent layout/readback information during a failed connection remains unknown.

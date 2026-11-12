@@ -31,6 +31,14 @@ def _encoded(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
+def _diagnostic(value):
+    if value is None:
+        return ''
+    if not isinstance(value, str):
+        raise TaskError('flashing discovery returned an invalid diagnostic', 502)
+    return ''.join(char if char.isprintable() else ' ' for char in value).strip()[:512]
+
+
 def _selector(value):
     if not isinstance(value, dict):
         raise TaskError('flashing discovery returned an invalid USB selector', 502)
@@ -154,6 +162,7 @@ class FlashDiscovery:
                 'label': data.get('label', 'USB ' + '.'.join(map(str, data['device']['port_path']))),
                 'usb': data['device'], 'mode': data.get('mode', 'unknown'),
                 'supported': bool(data.get('supported')), 'reason': data.get('reason', ''),
+                'diagnostic': data.get('diagnostic', ''),
                 'present': bool(row['present']), 'identity': data.get('identity', {}),
                 'chip': data.get('chip', '')}
 
@@ -298,7 +307,8 @@ class FlashDiscovery:
                         chip=candidate.get('chip', ''), profile=profile,
                         inspection=candidate.get('inspection'), modes=candidate.get('modes') or [],
                         supported=candidate.get('supported') is True and profile is not None,
-                        reason=str(candidate.get('reason') or '')[:512])
+                        reason=str(candidate.get('reason') or '')[:512],
+                        diagnostic=_diagnostic(candidate.get('diagnostic')))
             data['preparable'] = bool(candidate.get('preparable') or candidate.get('can_prepare_from_image'))
             if 'usb_address' not in data['device']:
                 data.update(supported=False, reason='USB connection generation is unavailable; reconnect and detect again')

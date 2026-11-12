@@ -367,6 +367,16 @@
     '检测到多个下载设备，请按 USB 位置选择本次刷写目标。': 'Multiple download devices detected. Choose the target by its USB location.'
   });
   Object.assign(dictionary, {
+    '模式待确认': 'Mode not confirmed', '尚未识别': 'Not identified', '本次不执行复位': 'No reset in this operation',
+    '连接诊断': 'Connection diagnostic', '尚未取得设备能力，回读支持待确认。': 'Device capabilities have not been read; readback support is unknown.',
+    '无法打开 USB 下载连接。请查看连接诊断，检查数据线、权限或其他刷机程序占用后重新检测。': 'Cannot open the USB download connection. Check the diagnostic, cable, permissions and competing flash programs, then detect again.',
+    'USB 通信失败，尚未完成设备识别。请检查数据线或 Hub，重新进入下载模式后检测。': 'USB communication failed before identification completed. Check the cable or hub, enter download mode again, then detect.',
+    '设备尚未提供下载能力，无法确认下载模式。请重新进入下载模式后检测。': 'Download capabilities are unavailable and download mode is unconfirmed. Enter download mode again, then detect.',
+    '无法确认当前 USB 连接，请重新检测。': 'The current USB connection cannot be confirmed. Detect again.',
+    '当前下载环境没有提供可识别的存储布局。': 'The download environment did not provide a recognized storage layout.',
+    '现场存储布局校验失败，不能生成写入计划。': 'Live storage layout validation failed; a write plan cannot be generated.',
+    '尚未读取到有效的现场 GPT，不能指定分区刷写。': 'No valid live GPT has been read; partition flashing is unavailable.',
+    'USB 连接尚未就绪，尚未读取存储和分区；请先恢复连接并重新检测。': 'USB is not ready and storage/partitions have not been read. Restore the connection and detect again.',
     '设备标签与端口探测覆盖（JSON）': 'Device labels and port probe overrides (JSON)',
     '预览设备偏好': 'Preview device preferences', '保存设备偏好': 'Save device preferences',
     '导出包含设备标签与端口探测覆盖': 'Include labels and port probes in export',

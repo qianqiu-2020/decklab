@@ -220,6 +220,30 @@ def automatic_flashing(known=None):
 
 
 class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
+    def test_unavailable_target_keeps_diagnostic_without_granting_a_write_plan(self):
+        with automatic_flashing() as fixture:
+            fixture.executor.candidates[0].update(mode='unknown', identity={}, supported=False,
+                reason='target-unavailable', diagnostic='flush read error: -1\n\x1b' + 'x' * 1024,
+                profile=None, inspection=None, modes=[])
+            target = self.discover(fixture)[0]
+            result = self.probe(fixture, target)
+            diagnostic = result['target']['diagnostic']
+            self.assertEqual(result['capabilities']['diagnostic'], diagnostic)
+            self.assertTrue(diagnostic.startswith('flush read error: -1'))
+            self.assertEqual(len(diagnostic), 512)
+            self.assertNotIn('\n', diagnostic)
+            self.assertNotIn('\x1b', diagnostic)
+            self.assertFalse(result['capabilities']['supported'])
+            self.assertFalse(result['capabilities']['can_prepare_from_image'])
+            self.assertEqual(fixture.store.boards(), [])
+            image = self.image(fixture, target)
+            code, error = self.request(fixture, '/api/flash-plan', dict(self.scope(target),
+                artifact_id=image['id'], mode='partitions', selections=[], verify='if-supported'))
+            self.assertEqual(code, 409, error)
+            self.assertFalse(fixture.executor.plans)
+            self.assertFalse(fixture.executor.executions)
+            self.assertFalse(fixture.executor.preparations)
+
     def request(self, fixture, route, payload=None, query=None, token=None):
         return api_request(fixture.url, route, token or fixture.token, payload, query)
 

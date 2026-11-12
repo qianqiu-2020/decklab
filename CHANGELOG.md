@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve bounded USB opening/protocol diagnostics and show actionable messages
+  when a download connection is unavailable; keep layout and readback unknown
+  until probing succeeds instead of presenting them as unsupported.
+
 - Import/export registry-managed labels and port probe overrides through the Web,
   with connection-aware revisions, identity checks, atomic updates and audit.
 

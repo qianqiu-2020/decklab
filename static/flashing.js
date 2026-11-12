@@ -142,6 +142,8 @@
       });
       if (!box.children.length) text('p', preparationPending()
         ? '准备阶段将读取现场布局，完成后在同一任务选择实际分区和载荷。'
+        : capabilities && ['target-unavailable', 'probe-protocol-failed', 'download-capability-unavailable'].indexOf(capabilities.reason) >= 0
+        ? 'USB 连接尚未就绪，尚未读取存储和分区；请先恢复连接并重新检测。'
         : '执行器尚未提供可靠的现场分区布局，不能指定分区刷写。', box);
     }
     function renderStorages() {
@@ -169,15 +171,31 @@
       if (typeof value === 'string') return value;
       return [value.provider || value.adapter || value.name, value.node, value.endpoint].filter(Boolean).join(' · ') || '未配置';
     }
+    function capabilityReason() {
+      var messages = {
+        'target-unavailable': '无法打开 USB 下载连接。请查看连接诊断，检查数据线、权限或其他刷机程序占用后重新检测。',
+        'probe-protocol-failed': 'USB 通信失败，尚未完成设备识别。请检查数据线或 Hub，重新进入下载模式后检测。',
+        'download-capability-unavailable': '设备尚未提供下载能力，无法确认下载模式。请重新进入下载模式后检测。',
+        'connection-generation-unavailable': '无法确认当前 USB 连接，请重新检测。',
+        'layout-discovery-unavailable': '当前下载环境没有提供可识别的存储布局。',
+        'live-layout-invalid': '现场存储布局校验失败，不能生成写入计划。',
+        'live-gpt-unavailable': '尚未读取到有效的现场 GPT，不能指定分区刷写。'
+      };
+      return messages[capabilities && capabilities.reason] || capabilities && capabilities.reason || '此设备尚未配置刷机执行器。';
+    }
     function renderCapabilities() {
       $('fl-intro').textContent = preparationPending()
         ? '准备阶段仅加载临时环境并读取现场布局，不写入存储。'
         : '请先让开发板进入下载模式。本次仅执行刷写，不控制复位；串口可继续被动观察。';
       var box = $('fl-connections'); box.textContent = '';
-      [['板型', capabilities.profile || '未配置'], ['复位控制', '已进入下载模式；本次不执行复位'],
+      [['板型', capabilities.profile || (capabilities.mode === 'unknown' ? '尚未识别' : '未配置')], ['复位控制', '本次不执行复位'],
        ['串口观察', location(capabilities.console)], ['刷写位置', location(capabilities.executor)]].forEach(function (item) {
         text('dt', item[0], box); text('dd', item[1], box);
       });
+      if (capabilities.diagnostic) {
+        text('dt', '连接诊断', box);
+        text('dd', capabilities.diagnostic, box).dataset.i18nIgnore = '';
+      }
       var storages = capabilities.storages || [];
       var unverifiedCapacity = storages.some(function (storage) {
         return storage.capacity_verified === false && ['gpt-header', 'primary-gpt-header'].indexOf(storage.capacity_source) >= 0;
@@ -192,7 +210,8 @@
         if (option.value === 'required') option.disabled = !requiredSupported;
       });
       if (!requiredSupported) {
-        text('dt', '回读能力', box); text('dd', '当前下载环境不支持写后回读校验。', box);
+        text('dt', '回读能力', box); text('dd', capabilities.supported === false
+          ? '尚未取得设备能力，回读支持待确认。' : '当前下载环境不支持写后回读校验。', box);
         $('fl-verify').value = 'if-supported';
       }
       artifacts = (capabilities.artifacts || []).slice(); artifactOptions($('fl-artifact'));
@@ -201,7 +220,7 @@
       Array.from($('fl-mode').children).forEach(function (option) { option.disabled = modes.indexOf(option.value) < 0; });
       $('fl-mode').value = modes.indexOf('full') >= 0 ? 'full' : modes[0] || 'full';
       status(preparationPending() ? '已检测到 BootROM；上传刷机包后可准备临时环境并读取布局，此阶段不写存储。'
-        : capabilities.supported === false ? capabilities.reason || '此设备尚未配置刷机执行器。'
+        : capabilities.supported === false ? capabilityReason()
         : '选择镜像并预览写入范围；预览不会复位或写入存储。');
       updateControls();
     }
@@ -209,7 +228,8 @@
       var ports = target.usb && target.usb.port_path || target.device && target.device.port_path;
       var attachment = target.usb_location || (Array.isArray(ports) ? 'USB ' + ports.join('.') : '');
       return [target.label || target.product || translate('下载模式设备'), target.serial ? 'SN ' + target.serial : translate('序列号待识别'),
-        target.mode, attachment, target.present === false ? translate('设备未连接，原任务待处理') : ''].filter(Boolean).join(' · ');
+        target.mode === 'unknown' ? translate('模式待确认') : target.mode,
+        attachment, target.present === false ? translate('设备未连接，原任务待处理') : ''].filter(Boolean).join(' · ');
     }
     function renderDiscovered() {
       var select = $('fl-device'); select.textContent = '';
@@ -562,7 +582,7 @@
             : preparationPending()
             ? '刷机包已准备；请预览仅加载临时环境和读取布局的准备步骤。'
             : capabilities && capabilities.supported === false
-            ? '镜像已准备；设备尚未提供刷机所需能力：' + (capabilities.reason || '')
+            ? '镜像已准备；设备尚未提供刷机所需能力：' + capabilityReason()
             : '镜像已准备，服务端已计算 SHA-256；请生成写入预览。');
         }
       } catch (error) { if (same(selected, seq)) status(error.message); }
