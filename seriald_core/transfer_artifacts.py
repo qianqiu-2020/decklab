@@ -91,7 +91,7 @@ class TransferArtifacts:
     live_states = ('receiving', 'sealing', 'ready', 'claimed', 'writing', 'available')
 
     def __init__(self, store, directory, policy=None):
-        self.store, self.root = store, Path(directory).absolute()
+        self.store, self.root = store, Path(directory).resolve()
         self.policy = policy or ArtifactPolicy.from_env()
         self._guard, self._locks = threading.Lock(), weakref.WeakValueDictionary()
         self._readers = {}

@@ -310,7 +310,10 @@ def public_plan(value):
 
 class LocalFlashExecutor:
     def __init__(self, work_dir):
-        self.root = Path(work_dir).absolute()
+        # Canonicalize the administrator-selected root once. On Windows, TEMP
+        # may use an 8.3 alias; comparing it with GetFinalPathName output would
+        # otherwise reject genuine managed files as escaped loader paths.
+        self.root = Path(work_dir).resolve()
         self._cache_lock = threading.Lock()
         self._cache_reserved = 0
         self._active_workspaces = set()
@@ -362,7 +365,7 @@ class LocalFlashExecutor:
             raise FlashRunnerError('flashing workspace is not a regular directory', 503)
         if os.name == 'posix':
             os.chmod(path, 0o700)
-        return path
+        return path.resolve()
 
     def _request(self, binding):
         request = {'version': 1, 'board_serial': binding.serial, 'profile': binding.profile_data,

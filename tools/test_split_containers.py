@@ -93,6 +93,9 @@ def main():
             assert list((base / 'backend/transfers').glob('*.bin'))
             started = docker('inspect', '--format', '{{.State.StartedAt}}', backend)
             docker('restart', web)
+            # Docker may allocate a new published host port for an ephemeral
+            # mapping when restarting the container. The service still binds 8898.
+            address = 'http://' + docker('port', web, '8898/tcp')
             after = next(row for row in ready() if row['serial'] == board['serial'])
             assert after['connection_id'] == board['connection_id']
             assert docker('inspect', '--format', '{{.State.StartedAt}}', backend) == started

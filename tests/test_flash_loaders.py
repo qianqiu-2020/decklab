@@ -18,6 +18,27 @@ from seriald_core.flash_runner import FlashBook
 
 
 class FlashLoaderTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows short-path normalization')
+    def test_windows_short_runtime_paths_are_canonical_before_go_loader_validation(self):
+        import ctypes
+        from seriald_core.transfer_artifacts import TransferArtifacts
+        from seriald_core.storage import Store
+        with tempfile.TemporaryDirectory(prefix='decklab loader path ') as directory:
+            buffer = ctypes.create_unicode_buffer(32768)
+            count = ctypes.windll.kernel32.GetShortPathNameW(directory, buffer, len(buffer))
+            self.assertTrue(count, 'cannot obtain Windows runtime path')
+            short = Path(buffer.value)
+            executor = LocalFlashExecutor(short / 'flashing')
+            cache = executor._directory(short / 'flashing/cache')
+            self.assertEqual(cache, cache.resolve())
+            self.assertEqual(executor.root, (short / 'flashing').resolve())
+            store = Store(short / 'registry.sqlite3')
+            try:
+                artifacts = TransferArtifacts(store, short / 'artifacts')
+                self.assertEqual(artifacts.root, artifacts.root.resolve())
+            finally:
+                store.close()
+
     def bundle(self, root):
         root.mkdir()
         family = {'protocol': 'decklab-nor-v1'}

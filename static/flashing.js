@@ -67,6 +67,10 @@
       });
       select.value = selected || '';
     }
+    function selectPayloadMode(artifact) {
+      if (artifact && /\.(itb|ext[234]|f2fs|squashfs|ubifs|dtb)$/i.test(artifact.name || '')
+          && !(task && ['queued', 'running'].includes(task.state))) $('fl-mode').value = 'partitions';
+    }
     function invalidatePlan() {
       dismissDelete();
       plan = null; requestId = ''; submissionUnknown = false;
@@ -624,6 +628,7 @@
         var artifact = (downloadTask.result || {}).artifact;
         if (!artifact || artifact.state !== 'ready') throw new Error('镜像尚未准备好');
         artifacts = artifacts.filter(function (item) { return item.id !== artifact.id; }).concat([artifact]);
+        selectPayloadMode(artifact);
         artifactOptions($('fl-artifact'), artifact.id); renderPartitions(); invalidatePlan();
         downloadRequest = null;
         status('镜像已下载并校验 SHA-256；请选择写入范围并预览。');
@@ -688,11 +693,12 @@
           }
         }
         if (same(selected, seq)) {
+          if (files.length === 1) selectPayloadMode(artifacts[artifacts.length - 1]);
           invalidatePlan(); artifactOptions($('fl-artifact'), artifacts[artifacts.length - 1].id); renderPartitions();
           status(task && ['queued', 'running'].indexOf(task.state) >= 0 && awaitingSelection(task)
             ? '载荷已准备，请在原任务选择实际分区并预览。'
             : preparationPending()
-            ? '刷机包已准备；请预览仅加载临时环境和读取布局的准备步骤。'
+            ? '镜像已准备；请预览仅加载临时环境和读取布局的准备步骤。'
             : capabilities && capabilities.supported === false
             ? '镜像已准备；设备尚未提供刷机所需能力：' + capabilityReason()
             : '镜像已准备，服务端已计算 SHA-256；请生成写入预览。');

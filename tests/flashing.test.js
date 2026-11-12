@@ -608,6 +608,7 @@ test('URL import runs on backend and only a completed sealed image becomes selec
   h.take('/api/task?id=download-1').resolve({task:{id:'download-1', state:'completed', result:{artifact:downloaded}}});
   await drain();
   assert.equal(h.get('fl-artifact').value, 'url-image');
+  assert.equal(h.get('fl-mode').value, 'partitions');
   assert.equal(h.get('fl-start').disabled, true);
   assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
 });
