@@ -367,6 +367,12 @@
     }
     function renderPlan(value) {
       var box = $('fl-preview'); box.textContent = '';
+      if ((value.ram_loaders || []).length) {
+        text('strong', '临时刷机环境（仅内存）', box);
+        (value.ram_loaders || []).forEach(function (loader) {
+          text('p', loader.name + ' · ' + format(loader.size) + ' · SHA-256 ' + loader.sha256, box).dataset.i18nIgnore = '';
+        });
+      }
       text('strong', '待写入清单', box);
       if (prepareOnly(value)) text('p', '准备阶段仅加载临时环境并读取现场布局，不写入存储。', box);
       else if (value.confirm_after_prepare && value.ready === false) text('p', '先加载临时环境并核对现场容量；完成后还需确认固件写入与擦除范围，才会写入存储。', box);

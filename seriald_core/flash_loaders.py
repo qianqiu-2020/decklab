@@ -56,5 +56,5 @@ def prepare_materials(binding, workspace, check):
                 outgoing.write(chunk)
         if not size or digest.hexdigest() != entry['sha256']:
             raise TaskError('RAM loader checksum changed', 409)
-        output[key] = dict(path=str(target), sha256=digest.hexdigest(), size=size, name=key, id=key)
+        output[key] = dict(path=str(target), sha256=digest.hexdigest(), size=size, name=target.name, id=key)
     return output

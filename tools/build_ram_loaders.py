@@ -38,6 +38,11 @@ def main():
     commit = subprocess.check_output(['git', '-C', str(args.source), 'rev-parse', args.commit], text=True).strip()
     patch = ROOT / 'packaging/flash-loaders/k3-ram-only-nor.patch'
     args.output.mkdir(parents=True)
+    (args.output / 'BUILD-INPUT.json').write_text(json.dumps({
+        'uboot_commit': commit, 'patch_sha256': digest(patch),
+        'fsbl_sha256': args.fsbl_sha256, 'cross_compile': args.cross_compile,
+        'configuration': 'k3_defconfig', 'target': 'u-boot.bin', 'jobs': args.jobs
+    }, indent=2) + '\n')
     try:
         with tempfile.TemporaryDirectory(prefix='decklab-k3-ram-') as directory:
             work = Path(directory)
@@ -79,7 +84,7 @@ def main():
                 'Compiled/offline checked; no physical-board acceptance implied.\n')
         print(args.output)
     except BaseException:
-        print('Build inputs/logs retained in: ' + str(args.output))
+        print('Build log and input fingerprints retained in: ' + str(args.output))
         raise
 
 

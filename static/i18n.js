@@ -42,7 +42,7 @@
     '后端 CA 证书文件': 'Backend CA certificate file', '后端监听地址': 'Backend bind address', '后端监听端口': 'Backend port',
     '后端 TLS 证书文件': 'Backend TLS certificate file', '后端 TLS 私钥文件': 'Backend TLS private key file',
     '后端节点配置': 'Backend settings', '配置所属节点': 'Settings node', 'Web 节点': 'Web node', '后端节点': 'Backend node',
-    '预备刷机环境清单': 'Prepared RAM loader manifest',
+    '预备刷机环境清单': 'Prepared RAM loader manifest', '临时刷机环境（仅内存）': 'Temporary flashing environment (RAM only)',
     '刷写方式': 'Flash mode', '完整镜像': 'Full image', '指定分区': 'Selected partitions',
     '回读校验': 'Readback verification', '能力支持时校验': 'Verify when supported', '必须回读校验': 'Require readback verification',
     '选择存储、分区和载荷': 'Select storage, partitions and payloads', '分区载荷': 'Partition payload',

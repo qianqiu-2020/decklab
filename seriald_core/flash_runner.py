@@ -506,6 +506,7 @@ class LocalFlashExecutor:
         stage = 'image-plan'
         try:
             if (input_mode == 'partitions'
+                    and binding.profile_data.get('id') == 'auto-spacemit-gpt-v1'
                     and binding.profile_data.get('bootrom_identity')
                     and not binding.profile_data.get('prepare')
                     and not artifact.get('name', '').lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip'))):
