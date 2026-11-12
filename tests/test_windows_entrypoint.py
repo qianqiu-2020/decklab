@@ -74,5 +74,45 @@ class WindowsEntrypointTests(unittest.TestCase):
         self.assertIn('streamable-http', output.getvalue())
 
 
+
+class WindowsSplitRoleTests(unittest.TestCase):
+    def test_web_and_backend_dispatch_preserve_role_arguments_without_starting_com_host(self):
+        from seriald_core import control_server, backend_server
+        original_import = builtins.__import__
+        def without_com(name, *args, **kwargs):
+            if name == 'seriald_core.windows_manager' or name == 'serial':
+                raise AssertionError('role dispatcher loaded the COM host')
+            return original_import(name, *args, **kwargs)
+        for role, module in [('web', control_server), ('backend', backend_server)]:
+            arguments = ['--bind', '127.0.0.1', '--port', '18899']
+            received = []
+            with tempfile.TemporaryDirectory() as directory, \
+                    mock.patch.object(sys, 'platform', 'win32'), \
+                    mock.patch.object(sys, 'argv', ['seriald.exe', role] + arguments), \
+                    mock.patch.dict(os.environ, {'SERIALD_BASE': directory + '/unused', 'SERIALD_BACKEND_URL': 'https://backend.test:8899'}), \
+                    mock.patch('builtins.__import__', side_effect=without_com), \
+                    mock.patch.object(module, 'main', side_effect=lambda: received.extend(sys.argv[1:])), \
+                    self.assertRaises(SystemExit):
+                runpy.run_path(str(ROOT / 'seriald_windows.py'), run_name='__main__')
+            self.assertEqual(received, arguments)
+
+    def test_network_backend_selects_the_existing_windows_manager(self):
+        from seriald_core import backend_server
+        from types import SimpleNamespace
+        manager = object()
+        with mock.patch.dict(sys.modules, {'seriald_core.windows_manager': SimpleNamespace(WindowsManager=manager)}), \
+                mock.patch.object(backend_server.os, 'name', 'nt'):
+            self.assertIs(backend_server.manager_type(), manager)
+
+    def test_frozen_restart_preserves_web_or_backend_role(self):
+        from seriald_core.settings_restart import reexecute
+        for role in ('web', 'backend'):
+            with self.subTest(role=role), mock.patch.object(sys, 'frozen', True, create=True), \
+                    mock.patch.object(sys, 'argv', ['seriald.exe', '--port', '8899']), \
+                    mock.patch('os.execve') as execute:
+                reexecute({'fixture': 'environment'}, role=role)
+            self.assertEqual(execute.call_args.args[1], [sys.executable, role, '--port', '8899'])
+
+
 if __name__ == '__main__':
     unittest.main()

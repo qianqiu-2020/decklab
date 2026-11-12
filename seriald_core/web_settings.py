@@ -20,6 +20,8 @@ class SettingsError(ValueError):
 
 
 DEFAULTS = {
+    'BACKEND_URL': '', 'BACKEND_TOKEN': '', 'BACKEND_CA': '',
+    'BACKEND_BIND': '127.0.0.1', 'BACKEND_PORT': '8899', 'BACKEND_CERT': '', 'BACKEND_KEY': '',
     'BASE': '', 'STATIC': '', 'SOCKET': '', 'HANDOFF': '', 'BY_PATH': '',
     'RESCUE_BIN': '/usr/local/sbin/seriald-rescue.sh', 'PORT': '8898',
     'BIND': '127.0.0.1', 'AUTH_TOKEN': '', 'AGENT_TOKENS_FILE': '',
@@ -29,7 +31,7 @@ DEFAULTS = {
     'SSH_USER': 'root', 'SSH_PASSWORD': 'bianbu', 'CONSOLE_USER': '',
     'CONSOLE_PASSWORD': '', 'PROBE': 'linux', 'PROBE_COMMAND': '',
     'AUTO_CONFIGURE_SSH': '1', 'PROFILES': '', 'HARDWARE': '', 'FLASH': '',
-    'FLASH_EXECUTOR': '', 'LOG_RETENTION_DAYS': '0', 'DISK_MIN_FREE_MB': '1024',
+    'FLASH_EXECUTOR': '', 'FLASH_LOADERS': '', 'LOG_RETENTION_DAYS': '0', 'DISK_MIN_FREE_MB': '1024',
     'DISK_MIN_FREE_PERCENT': '5', 'TRANSFER_MAX_FILES': '128',
     'TRANSFER_MAX_FILE_BYTES': str(8 * 1024 ** 3),
     'TRANSFER_MAX_TOTAL_BYTES': str(32 * 1024 ** 3),
@@ -48,12 +50,12 @@ CHOICES = {'PARITY': ['N', 'E', 'O'], 'DATA_BITS': ['5', '6', '7', '8'],
            'MCP_ENABLED': ['0', '1'], 'TRUST_LOOPBACK': ['0', '1'],
            'AUTO_CONFIGURE_SSH': ['0', '1', 'false', 'true']}
 CHOICES['UI_LANGUAGE'] = ['auto', 'en', 'zh-CN']
-SENSITIVE = {'AUTH_TOKEN', 'SSH_PASSWORD', 'CONSOLE_PASSWORD'}
-CONTROL = {'PORT', 'BIND', 'AUTH_TOKEN', 'AGENT_TOKENS_FILE', 'TRUST_LOOPBACK',
+SENSITIVE = {'BACKEND_TOKEN', 'AUTH_TOKEN', 'SSH_PASSWORD', 'CONSOLE_PASSWORD'}
+CONTROL = {'BACKEND_URL', 'BACKEND_TOKEN', 'BACKEND_CA', 'PORT', 'BIND', 'AUTH_TOKEN', 'AGENT_TOKENS_FILE', 'TRUST_LOOPBACK',
            'MCP_ENABLED', 'MCP_PYTHON', 'MCP_ALLOWED_HOSTS', 'STATIC', 'UI_LANGUAGE', 'SHARE_SECONDS'}
 SHARED = {'BASE', 'SOCKET'}
-PATHS = {'BASE', 'STATIC', 'SOCKET', 'HANDOFF', 'BY_PATH', 'RESCUE_BIN',
-         'AGENT_TOKENS_FILE', 'MCP_PYTHON', 'PROFILES', 'HARDWARE', 'FLASH', 'FLASH_EXECUTOR'}
+PATHS = {'BACKEND_CA', 'BACKEND_CERT', 'BACKEND_KEY', 'BASE', 'STATIC', 'SOCKET', 'HANDOFF', 'BY_PATH', 'RESCUE_BIN',
+         'AGENT_TOKENS_FILE', 'MCP_PYTHON', 'PROFILES', 'HARDWARE', 'FLASH', 'FLASH_EXECUTOR', 'FLASH_LOADERS'}
 REDACTED = {'$redacted': True}
 _LOCK = threading.RLock()
 
@@ -228,7 +230,7 @@ class WebSettings:
         combined = {'version': 1, 'environment': dict(current['environment'], **env),
                     'documents': dict(current['documents'], **docs)}
         merged, docs = combined['environment'], combined['documents']
-        integer_limits = {'PORT': (1, 65535), 'LOG_RETENTION_DAYS': (0, 36500),
+        integer_limits = {'BACKEND_PORT': (1, 65535), 'PORT': (1, 65535), 'LOG_RETENTION_DAYS': (0, 36500),
                           'DISK_MIN_FREE_MB': (0, 1048576), 'DISK_MIN_FREE_PERCENT': (0, 100),
                           'SCROLLBACK': (4096, 16 * 1024 ** 2), 'SSH_LIMIT': (1, 128),
                           'SSH_IDLE': (60, 86400), 'SHARE_SECONDS': (60, 30 * 86400)}
@@ -241,6 +243,12 @@ class WebSettings:
                 raise SettingsError('路径必须为服务端绝对路径：' + name)
         if any(not merged[name] for name in ('BASE', 'STATIC', 'SOCKET', 'HANDOFF', 'BIND', 'BY_PATH')):
             raise SettingsError('服务路径和监听地址不能为空')
+        if merged['BACKEND_URL']:
+            from .backend_link import BackendLink
+            try:
+                BackendLink(merged['BACKEND_URL'], merged['BACKEND_TOKEN'], merged['BACKEND_CA'])
+            except ValueError as error:
+                raise SettingsError('后端 HTTPS 连接配置无效') from error
         from .profiles import BoardProfile, ProfileBook
         from .hardware import HardwareBook
         from .flash_runner import FlashBook

@@ -245,6 +245,22 @@ class TransferArtifacts:
             self._update(artifact_id, state='claimed', task_id=task_id, updated=time.time())
             return self.get(artifact_id, actor, serial)
 
+    def finish_import(self, artifact_id, task_id, expected_sha256=None, check=None):
+        """Publish a bounded URL stream whose exact length was not known up front.
+
+        The runner reserves its upper bound before receiving bytes. Only that
+        runner may shrink the reservation and publish a reusable sealed upload.
+        """
+        with self._lock(artifact_id):
+            row = self.get(artifact_id)
+            if (row['direction'] != 'upload' or row['state'] != 'writing'
+                    or row['task_id'] != task_id or row['received'] <= 0):
+                raise TaskError('image download is incomplete or changed', 409)
+            self._update(artifact_id, size=row['received'])
+            self.seal(artifact_id, task_id=task_id, expected_sha256=expected_sha256, check=check)
+            self._update(artifact_id, task_id=None, updated=time.time())
+            return self.get(artifact_id)
+
     def open(self, artifact_id, actor='web', serial=None, task_id=None):
         with self._lock(artifact_id):
             row = self.get(artifact_id, actor, serial)

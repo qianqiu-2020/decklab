@@ -37,7 +37,7 @@ class TaskStore:
     def __init__(self, store):
         self.store = store
 
-    def create(self, kind, actor, client_id, targets):
+    def create(self, kind, actor, client_id, targets, request_id=None, input_digest=None):
         if not all(isinstance(value, str) and value and len(value) <= 80 for value in (kind, actor)):
             raise TaskError('invalid task kind or actor')
         if not isinstance(client_id, str) or len(client_id) > 80:
@@ -55,11 +55,17 @@ class TaskStore:
             normalized.add((serial, connection))
         task_id, now = secrets.token_hex(12), time.time()
         with self.store.lock, self.store.db:
+            if request_id is not None:
+                from .flash_store import validate_request
+                validate_request(request_id, input_digest)
             self.store.db.execute('INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                                   (task_id, kind, actor, client_id if actor == 'web' else '',
                                    'queued', '{}', None, '', now, now, 0))
             self.store.db.executemany('INSERT INTO task_targets VALUES (?,?,?)',
                                      [(task_id, serial, connection) for serial, connection in normalized])
+            if request_id is not None:
+                self.store.db.execute('INSERT INTO flash_requests VALUES (?,?,?,?)',
+                                      (actor, request_id, input_digest, task_id))
         return task_id
 
     def create_board(self, kind, actor, client_id, serial, request_id, input_digest,
@@ -303,15 +309,20 @@ class TaskManager:
         self._closing = False
         self.store.recover()
 
-    def start(self, kind, actor, client_id, targets, run):
+    def start(self, kind, actor, client_id, targets, run, *, request_id=None, input_digest=None):
         if not callable(run):
             raise TaskError('task runner must be callable')
         with self._lock:
+            if request_id is not None:
+                from .flash_store import FlashStore
+                previous = FlashStore(self.store.store).find_request(actor, request_id, input_digest)
+                if previous is not None:
+                    return self.store.get(previous)
             if self._closing:
                 raise TaskError('collector is stopping', 503)
             if len(self._active) >= self.max_active:
                 raise TaskError('too many active tasks', 429)
-            task_id = self.store.create(kind, actor, client_id, targets)
+            task_id = self.store.create(kind, actor, client_id, targets, request_id, input_digest)
             context = TaskContext(task_id, self.store)
             worker = threading.Thread(target=self._run, args=(context, run), daemon=True)
             self._active[task_id] = (context, worker)

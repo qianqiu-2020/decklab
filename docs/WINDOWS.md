@@ -141,3 +141,7 @@ includes build tools and is deliberately broader than the frozen runtime.
 `tools/collect_windows_notices.py --verify <bundle>/third-party` verifies copied
 notices using the build Python; installer compilation performs this check too.
 Native-library and frozen-output attribution still require release review.
+
+## Separate Web and hardware roles
+
+See [distributed deployment](DISTRIBUTED.md) for Windows/Ubuntu role launchers, TLS certificates, node credentials and data ownership. The default local role remains available.

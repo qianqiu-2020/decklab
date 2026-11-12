@@ -542,3 +542,7 @@ USB 速度切换可能改变端口路径，使用经过配置／验证的转换�
 [libusb 错误码](https://libusb.sourceforge.io/api-1.0/group__libusb__misc.html) 中的 `-1` 为一般 I/O 错误，不能单凭这个值认定某根线已坏；如底层同时记录
 `-EPROTO`（常见编号 -71），可能涉及设备/固件、连接或主控通信故障，需对照
 [Linux USB 错误码说明](https://docs.kernel.org/driver-api/usb/error-codes.html) 做现场核对。
+
+## Web 与硬件节点分开部署
+
+现已实现 Web 节点通过认证 HTTPS 连接一个 Windows / Ubuntu 硬件后端；串口、USB 刷机和复位仍在同一后端，`node: local` 均指该后端。参见 [部署说明](DISTRIBUTED.md)。把这三种硬件能力进一步拆成独立节点、或聚合多个后端，仍属于后续扩展。单文件刷分区使用预备 RAM 下载环境，URL 镜像由后端后台下载，不增加新的串口读者或任务队列。

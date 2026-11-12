@@ -1,5 +1,7 @@
 # 架构与数据模型
 
+支持本机双进程部署，也支持 Web 和硬件后端分别运行在 Windows 或 Ubuntu。分布式角色使用经过证书与节点密钥校验的 HTTPS；Web 不创建采集器、设备数据库或硬件任务队列，原任务、镜像、日志、SSH 与串口均留在唯一后端。详见 [分开部署](DISTRIBUTED.md)。
+
 ## Web 系统配置
 
 `web_settings.py` 在原启动数据目录的 `web-settings.json` 中保存版本化主机配置，

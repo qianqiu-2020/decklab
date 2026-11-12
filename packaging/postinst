@@ -33,28 +33,40 @@ case "$1" in
     if [ -d /run/systemd/system ]; then
       restart_marker=/run/seriald-collector-restart-required
       systemctl daemon-reload
-      deb-systemd-helper enable seriald-collector.service >/dev/null
-      deb-systemd-helper enable seriald.service >/dev/null
-      if systemctl is-active --quiet seriald-collector.service; then
-        # preinst compares the previous and incoming collector fingerprints before
-        # dpkg overwrites either copy. UI/control-only upgrades preserve tty and SSH.
-        if [ -n "${2:-}" ] && [ -e "$restart_marker" ]; then
-          if deb-systemd-invoke restart seriald-collector.service; then
-            echo "seriald: collector restarted (collector code changed)"
-          else
-            echo "seriald: collector restart failed" >&2
-          fi
+      # Keep the administrator-selected node role during upgrades. Remote Web
+      # upgrades must never enable a local hardware collector.
+      if systemctl is-enabled --quiet seriald-web.service; then
+        deb-systemd-invoke restart seriald-web.service || true
+      elif systemctl is-enabled --quiet seriald-backend.service; then
+        if systemctl is-active --quiet seriald-backend.service && [ ! -e "$restart_marker" ]; then
+          echo "seriald: hardware backend kept running (code unchanged)"
         else
-          echo "seriald: collector kept running (collector code unchanged)"
+          deb-systemd-invoke restart seriald-backend.service || true
         fi
       else
-        if deb-systemd-invoke start seriald-collector.service; then
-          echo "seriald: collector started (was not running)"
+        deb-systemd-helper enable seriald-collector.service >/dev/null
+        deb-systemd-helper enable seriald.service >/dev/null
+        if systemctl is-active --quiet seriald-collector.service; then
+          # preinst compares the previous and incoming collector fingerprints before
+          # dpkg overwrites either copy. UI/control-only upgrades preserve tty and SSH.
+          if [ -n "${2:-}" ] && [ -e "$restart_marker" ]; then
+            if deb-systemd-invoke restart seriald-collector.service; then
+              echo "seriald: collector restarted (collector code changed)"
+            else
+              echo "seriald: collector restart failed" >&2
+            fi
+          else
+            echo "seriald: collector kept running (collector code unchanged)"
+          fi
         else
-          echo "seriald: collector start failed" >&2
+          if deb-systemd-invoke start seriald-collector.service; then
+            echo "seriald: collector started (was not running)"
+          else
+            echo "seriald: collector start failed" >&2
+          fi
         fi
+        deb-systemd-invoke restart seriald.service || true
       fi
-      deb-systemd-invoke restart seriald.service || true
       rm -f "$restart_marker"
     fi
     PYTHONPATH=/usr/lib/seriald /usr/bin/python3 - <<'PY' || echo "seriald: could not determine access addresses" >&2

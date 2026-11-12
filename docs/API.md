@@ -508,3 +508,19 @@ string alongside their stable `reason` code, including `target-unavailable` or
 `probe-protocol-failed`. The string explains the opening/read-only probe error;
 it never changes `supported`, grants preparation/writes or triggers retries.
 Absent layout/readback information during a failed connection remains unknown.
+
+## Split Web/backend and image imports
+
+`GET/POST /api/settings?target=backend` manages hardware-node settings using the
+primary Web credential; `/api/settings` manages the Web node. The private
+`GET/POST /api/backend-settings` exists only on the authenticated TLS backend
+and is not exposed directly by Web. See [deployment](DISTRIBUTED.md).
+
+`POST /api/image-download` accepts a Web-operated device/USB target scope,
+`url`, required stable `request_id`, optional `name` and `sha256`. It returns
+HTTP 202 and the existing durable task. Poll `/api/task?id=...`, cancel with
+`/api/task-cancel`. Completion returns `result.artifact` (`id`, `name`, `size`,
+`sha256`, `serial`, `state: ready`), usable by `/api/flash-plan`. Reusing an ID
+with identical input retrieves its original task; different input returns 409.
+No client token/cookie is forwarded to image servers. URL imports are denied
+to Agent tokens. Downloading never prepares or writes a board.

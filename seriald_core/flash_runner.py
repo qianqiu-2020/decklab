@@ -403,6 +403,9 @@ class LocalFlashExecutor:
             raise FlashRunnerError('invalid prepared execution profile') from error
         baseline = json.loads(json.dumps(binding.profile_data))
         candidate = json.loads(json.dumps(profile))
+        protocol = candidate.pop('ram_loader_protocol', None)
+        if protocol is not None and protocol not in ('stock', 'decklab-nor-v1'):
+            raise FlashRunnerError('unsupported RAM loader protocol')
         # Go serializes an absent identity map as null. Both mean no extra
         # checks; the detected chip and BootROM checks must still match below.
         baseline.setdefault('identity', None)
@@ -502,6 +505,12 @@ class LocalFlashExecutor:
             request['target_storage'] = target_storage
         stage = 'image-plan'
         try:
+            if (input_mode == 'partitions'
+                    and binding.profile_data.get('bootrom_identity')
+                    and not binding.profile_data.get('prepare')
+                    and not artifact.get('name', '').lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip'))):
+                from .flash_loaders import prepare_materials
+                request['boot_materials'] = prepare_materials(binding, workspace, check)
             image = self._run(binding, 'image-plan', request, check=check)
             if (not isinstance(image.get('plan'), dict)
                     or not isinstance(image.get('payload_candidates', []), list)):

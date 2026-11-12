@@ -228,6 +228,10 @@ PasswordAuthentication yes</code></pre>
   <div class="fl-inputs">
     <label class="ft-field">镜像文件<input id="fl-files" type="file" multiple></label>
     <button id="fl-upload" type="button">上传镜像</button>
+    <label class="ft-field">镜像 URL<input id="fl-url" type="url" placeholder="https://…/bootfs.ext4" spellcheck="false"><small>由后端节点下载，也支持完整固件包。</small></label>
+    <label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label>
+    <button id="fl-download" type="button">从 URL 下载</button>
+    <button id="fl-download-cancel" type="button" hidden>取消镜像下载</button>
     <label class="ft-field">已准备镜像<select id="fl-artifact"></select></label>
     <button id="fl-delete" type="button" disabled>删除所选镜像</button>
     <label class="ft-field">刷写方式<select id="fl-mode"><option value="full">完整镜像</option><option value="partitions">指定分区</option></select></label>

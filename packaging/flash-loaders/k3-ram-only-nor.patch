@@ -1,0 +1,116 @@
+diff --git a/drivers/fastboot/fb_command.c b/drivers/fastboot/fb_command.c
+index 537459c018..d47529738a 100644
+--- a/drivers/fastboot/fb_command.c
++++ b/drivers/fastboot/fb_command.c
+@@ -255 +255,7 @@ int fastboot_handle_command(char *cmd_string, char *response)
+-	cmd_parameter = cmd_string;
++	#if !defined(CONFIG_SPL_BUILD) && (CONFIG_IS_ENABLED(FASTBOOT_FLASH_MTD) || CONFIG_IS_ENABLED(FASTBOOT_MULTI_FLASH_OPTION_MTD))
++    if (!strcmp(cmd_string, "oem decklab-nor")) {
++        fastboot_decklab_nor_select(response);
++        return FASTBOOT_COMMAND_GETVAR;
++    }
++#endif
++    cmd_parameter = cmd_string;
+@@ -533 +539,5 @@ static void flash(char *cmd_parameter, char *response)
+-	if (!strcmp(cmd_parameter, "env")) {
++	if (!strcmp(cmd_parameter, "env")
++#if CONFIG_IS_ENABLED(FASTBOOT_FLASH_MTD) || CONFIG_IS_ENABLED(FASTBOOT_MULTI_FLASH_OPTION_MTD)
++        && !fastboot_decklab_nor_active()
++#endif
++    ) {
+@@ -561 +571 @@ static void flash(char *cmd_parameter, char *response)
+-		if (mtd_flash){
++		if (mtd_flash || fastboot_decklab_nor_active()){
+diff --git a/drivers/fastboot/fb_getvar.c b/drivers/fastboot/fb_getvar.c
+index 72c974c7c7..110ee90ba1 100644
+--- a/drivers/fastboot/fb_getvar.c
++++ b/drivers/fastboot/fb_getvar.c
+@@ -462,0 +463,4 @@ void fastboot_getvar(char *cmd_parameter, char *response)
++#if !defined(CONFIG_SPL_BUILD) && (CONFIG_IS_ENABLED(FASTBOOT_FLASH_MTD) || CONFIG_IS_ENABLED(FASTBOOT_MULTI_FLASH_OPTION_MTD))
++    if (cmd_parameter && fastboot_decklab_getvar(cmd_parameter, response))
++        return;
++#endif
+diff --git a/drivers/fastboot/fb_mtd.c b/drivers/fastboot/fb_mtd.c
+index 9c3d68a0e2..b74cae4186 100644
+--- a/drivers/fastboot/fb_mtd.c
++++ b/drivers/fastboot/fb_mtd.c
+@@ -609,0 +610,70 @@ u32 fastboot_mtd_flash_read(const char *part_name, u64 offset,
++
++/* DeckLab RAM-only adapter. The declared standard NOR map is never saved.
++ * No flash:mtd, env save, erase or storage write is issued by selection/getvar.
++ */
++static bool decklab_nor_selected;
++
++bool fastboot_decklab_nor_active(void)
++{
++    return decklab_nor_selected;
++}
++
++void fastboot_decklab_nor_select(char *response)
++{
++    struct mtd_info *mtd, *selected = NULL;
++    char ids[128], parts[512];
++    unsigned int roots = 0;
++
++    decklab_nor_selected = false;
++    if (get_boot_pin_select() != BOOT_MODE_NOR) {
++        fastboot_fail("NOR boot medium required", response);
++        return;
++    }
++    mtd_probe_devices();
++    mtd_for_each_device(mtd) {
++        if (!mtd_is_partition(mtd)) {
++            roots++;
++            selected = mtd;
++        }
++    }
++    if (roots != 1 || !selected || selected->type != MTD_NORFLASH ||
++        selected->size < (8 << 20) || strlen(selected->name) > 80) {
++        fastboot_fail("single supported NOR required", response);
++        return;
++    }
++    snprintf(ids, sizeof(ids), "%s=decklab-nor", selected->name);
++    snprintf(parts, sizeof(parts), "decklab-nor:128k@0(bootinfo),512k@128k(fsbl),64k@640k(env),1024k@704k(esos),384k@1728k(opensbi),4096k@2112k(uboot)");
++    if (env_set("mtdids", ids) || env_set("mtdparts", parts) || mtdparts_init()) {
++        fastboot_fail("cannot select RAM NOR map", response);
++        return;
++    }
++    mtd_probe_devices();
++    decklab_nor_selected = true;
++    fastboot_okay("decklab-nor-v1", response);
++}
++
++bool fastboot_decklab_getvar(char *name, char *response)
++{
++    struct mtd_info *mtd;
++    struct part_info *part;
++    const char *prefix = "decklab-nor-offset:";
++
++    if (!strcmp(name, "decklab-medium")) {
++        fastboot_okay(get_boot_pin_select() == BOOT_MODE_NOR ? "nor" : "block", response);
++        return true;
++    }
++    if (!strcmp(name, "decklab-nor-v1")) {
++        fastboot_okay("1", response);
++        return true;
++    }
++    if (!strncmp(name, prefix, strlen(prefix))) {
++        if (!decklab_nor_selected || fb_mtd_lookup(name + strlen(prefix), &mtd, &part)) {
++            fastboot_fail("NOR namespace unavailable", response);
++        } else {
++            fastboot_response("OKAY", response, "0x%llx", part->offset);
++            put_mtd_device(mtd);
++        }
++        return true;
++    }
++    return false;
++}
+diff --git a/include/fb_mtd.h b/include/fb_mtd.h
+index bcb8dc7fae..ae8b73ebae 100644
+--- a/include/fb_mtd.h
++++ b/include/fb_mtd.h
+@@ -8,0 +9,4 @@
++bool fastboot_decklab_nor_active(void);
++void fastboot_decklab_nor_select(char *response);
++bool fastboot_decklab_getvar(char *name, char *response);
++

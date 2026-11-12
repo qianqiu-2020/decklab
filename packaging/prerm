@@ -2,5 +2,7 @@
 set -e
 if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
   deb-systemd-invoke stop seriald.service || true
+  deb-systemd-invoke stop seriald-web.service || true
+  deb-systemd-invoke stop seriald-backend.service || true
   deb-systemd-invoke stop seriald-collector.service || true
 fi

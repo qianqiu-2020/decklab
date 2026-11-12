@@ -418,3 +418,14 @@ values before starting the host.
 The configuration inventory checker verifies name coverage only. Platform
 behavior requires its adapter tests and installation checks; Linux fixtures and
 PowerShell parsing do not establish native Windows installation or COM behavior.
+
+## Distributed node settings
+
+See [Web/backend deployment](DISTRIBUTED.md). `SERIALD_BACKEND_URL` selects the
+backend HTTPS origin on a Web node; `SERIALD_BACKEND_TOKEN` is a separate node
+credential; `SERIALD_BACKEND_CA` supplies the trusted PEM CA. Backend-only fields
+are `SERIALD_BACKEND_BIND`, `SERIALD_BACKEND_PORT`, `SERIALD_BACKEND_CERT` and
+`SERIALD_BACKEND_KEY`. Select the matching service/Windows launcher explicitly.
+`SERIALD_FLASH_LOADERS` optionally names a backend-local manifest for prebuilt
+RAM-only FSBL/U-Boot files; the package default is `flash-loaders/manifest.json`.
+The backend verifies the chip family and SHA-256 before staging either file.

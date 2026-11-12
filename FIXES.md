@@ -12,6 +12,21 @@ Loader completion must stop for a new human scope review before storage writes;
 whole-MTD erase risk, unknown NOR/NAND type and excluded optional EC operation in
 the preview. Never mark missing readback as verification success or replay writes.
 
+Single-file partition flashing uses preinstalled RAM-only FSBL/U-Boot rather
+than requiring another firmware package. The separate `decklab-nor-v1` RAM
+adapter selects a declared standard NOR map without `flash:mtd` or env save,
+then checks target-reported offsets/sizes before binding a selected payload.
+It never adds layout or other-partition writes to that plan. Show the source of
+the standard map and selected-partition erase risk; this adapter does not make
+the old stock full-recovery namespace operation safe for single partitions.
+The K3 loader patch/build recipe and simulated execution tests are source and
+build evidence, not physical-board acceptance.
+
+Web/backend split deployments use one authenticated HTTPS hardware owner on
+Windows or Ubuntu. All serial readers, durable hardware tasks, image downloads
+and cache stay on that backend. A Web restart must not restart the backend or
+replay task submissions. Each node keeps private storage; do not share SQLite.
+
 Current behavior and module ownership: [architecture](docs/ARCHITECTURE.md).
 Release changes: [CHANGELOG.md](CHANGELOG.md).
 Contributor checks and conventions: [CONTRIBUTING.md](CONTRIBUTING.md).

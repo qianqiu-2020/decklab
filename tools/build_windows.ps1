@@ -1,5 +1,6 @@
 #Requires -Version 5.1
-param([switch]$UseCurrentPython, [switch]$PortableOnly, [string]$ParamikoSource)
+param([switch]$UseCurrentPython, [switch]$PortableOnly, [string]$ParamikoSource,
+      [string]$FlashExecutor, [string]$FlashNotices, [string]$FlashLoaders)
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') {
@@ -80,6 +81,7 @@ try {
                          'test_flash_targets.py', 'test_flash_discovery_review.py',
                          'test_flash_discovery_integration.py', 'test_pending_labels.py',
                          'test_web_settings.py', 'test_settings_restart.py', 'test_device_preferences.py',
+                         'test_backend_link.py', 'test_collector_lock.py', 'test_windows_entrypoint.py',
                          'test_transfer_artifacts.py', 'test_file_tasks.py',
                          'test_transfer_tasks.py', 'test_input_ownership.py',
                          'test_models.py', 'test_maintenance.py', 'test_agent_grants.py',
@@ -115,6 +117,7 @@ try {
     & $pyinstaller --noconfirm --clean --onedir --name seriald `
         --hidden-import serialctl `
         --hidden-import seriald_mcp `
+        --hidden-import seriald_core.backend_server `
         --collect-submodules mcp.server `
         --collect-submodules mcp.shared `
         --collect-submodules mcp.client `
@@ -142,11 +145,20 @@ try {
     if ($ParamikoSource) { $noticeArguments += @('--paramiko-source', $ParamikoSource) }
     & $python @noticeArguments
     if ($LASTEXITCODE -ne 0) { throw 'Third-party notice collection failed; refusing to publish incomplete packages.' }
+    if ($FlashExecutor) {
+        if (-not $FlashNotices) { throw 'FlashExecutor requires FlashNotices.' }
+        Copy-Item -LiteralPath $FlashExecutor -Destination (Join-Path $bundle '_internal\decklab-flash.exe')
+        Copy-Item -LiteralPath $FlashNotices -Destination (Join-Path $bundle 'flash-third-party') -Recurse
+    }
+    if ($FlashLoaders) {
+        & $python tools/package_flash_loaders.py $FlashLoaders (Join-Path $bundle '_internal\flash-loaders')
+        if ($LASTEXITCODE -ne 0) { throw 'RAM loader validation failed.' }
+    }
 
     $launchers = Join-Path $root 'tools\windows-launchers'
     foreach ($name in @('Start-seriald.cmd', 'Start-seriald-LAN.cmd', 'Start-seriald-LAN.ps1',
                        'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN-Open.ps1',
-                       'serialctl.cmd', 'seriald-admin.cmd')) {
+                       'serialctl.cmd', 'seriald-admin.cmd', 'Start-seriald-Web.cmd', 'Start-seriald-Backend.cmd')) {
         Copy-Item -LiteralPath (Join-Path $launchers $name) -Destination $bundle
     }
     & $python tools/package_docs.py $bundle --platform windows

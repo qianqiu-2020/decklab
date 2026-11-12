@@ -592,6 +592,38 @@ test('unavailable USB connection shows its diagnostic and unknown readback witho
   assert.equal(Object.hasOwn(raw.dataset,'i18nIgnore'),true);
 });
 
+test('URL import runs on backend and only a completed sealed image becomes selectable', async () => {
+  const h = harness(); await open(h);
+  h.get('fl-url').value = 'https://images.example/bootfs.ext4?signature=private';
+  h.get('fl-url-sha256').value = 'A'.repeat(64);
+  h.get('fl-download').click();
+  const submitted = h.take('/api/image-download');
+  assert.equal(submitted.payload.sha256, 'a'.repeat(64));
+  assert.equal(submitted.payload.serial, board.serial);
+  assert.ok(submitted.payload.request_id);
+  assert.equal(h.get('fl-plan').disabled, true);
+  submitted.resolve({task: {id:'download-1', state:'running'}}); await drain();
+  assert.equal(h.get('fl-download-cancel').hidden, false);
+  const downloaded = {id:'url-image', name:'bootfs.ext4', size:32, sha256:'a'.repeat(64), state:'ready'};
+  h.take('/api/task?id=download-1').resolve({task:{id:'download-1', state:'completed', result:{artifact:downloaded}}});
+  await drain();
+  assert.equal(h.get('fl-artifact').value, 'url-image');
+  assert.equal(h.get('fl-start').disabled, true);
+  assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
+});
+
+test('lost URL submission reuses its original request and cancellation does not cancel flashing', async () => {
+  const h = harness(); await open(h);
+  h.get('fl-url').value = 'https://images.example/opensbi.itb';
+  h.get('fl-download').click(); const first = h.take('/api/image-download');
+  first.reject(new Error('network lost')); await drain();
+  h.get('fl-download').click(); const again = h.take('/api/image-download');
+  assert.equal(again.payload.request_id, first.payload.request_id);
+  again.resolve({task:{id:'download-original', state:'running'}}); await drain();
+  h.get('fl-download-cancel').click();
+  assert.equal(h.take('/api/task-cancel').payload.id, 'download-original');
+});
+
 (async () => {
   for (const [name, fn] of tests) { await fn(); console.log('ok - ' + name); }
   console.log(tests.length + ' flash frontend isolation tests passed');

@@ -26,6 +26,7 @@ venv/
 data/
 *.sqlite3*
 collector-handoff.json
+.collector-owner.lock
 lan-token.dpapi
 agent-tokens.json
 .env

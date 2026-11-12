@@ -1,0 +1,25 @@
+[Unit]
+Description=DeckLab Web/API/MCP node for a remote hardware backend
+After=network-online.target
+Wants=network-online.target
+Conflicts=seriald.service seriald-collector.service seriald-backend.service
+
+[Service]
+Type=simple
+User=seriald
+Group=seriald
+EnvironmentFile=/etc/seriald/seriald.env
+Environment=HOME=/data/seriald-data
+WorkingDirectory=/usr/lib/seriald
+ExecStart=/usr/bin/seriald-control --require-backend
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

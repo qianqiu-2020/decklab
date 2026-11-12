@@ -31,15 +31,35 @@ if len(sys.argv) > 1 and sys.argv[1] == 'mcp':
     sys.argv.pop(1)
     raise SystemExit(seriald_mcp.main())
 
+# Split-node roles dispatch before importing or constructing WindowsManager.
+if len(sys.argv) > 1 and sys.argv[1] in ('web', 'backend'):
+    role = sys.argv.pop(1)
+    if role == 'web':
+        if not os.environ.get('SERIALD_BACKEND_URL') and not any(arg in ('-h', '--help') for arg in sys.argv[1:]):
+            # Saved Web settings are loaded by the common control entry point.
+            from seriald_core.config import SETTINGS
+            if not SETTINGS.effective()['environment'].get('BACKEND_URL'):
+                raise SystemExit('Web role requires SERIALD_BACKEND_URL')
+        from seriald_core.control_server import main as role_main
+    else:
+        from seriald_core.backend_server import main as role_main
+    raise SystemExit(role_main())
+
 import argparse
 import threading
 import webbrowser
 
 from seriald_core import web
 from seriald_core.config import AUTH_TOKEN, BASE, HANDOFF, LOG_ROOT, STATIC, read_ui_language, SETTINGS, LAUNCH_ENVIRONMENT
+if SETTINGS.effective()['environment'].get('BACKEND_URL'):
+    # A saved remote topology must never silently open a local COM collector
+    # when an operator uses the ordinary desktop shortcut.
+    from seriald_core.control_server import main as remote_main
+    raise SystemExit(remote_main())
 from seriald_core.settings_restart import configure_collector, preflight_listener, preflight_storage, reexecute
 from seriald_core.control_server import ControlHandler, configured_agent_tokens
 from seriald_core.agent_grants import AgentGrantStore
+from seriald_core.collector_lock import CollectorLock
 from seriald_core.handoff import consume as consume_handoff, write as write_handoff
 from seriald_core.httpd import BoundedThreadingTCPServer
 from seriald_core.storage import Store
@@ -67,7 +87,7 @@ def main():
     profiles = ProfileBook.from_env()
     # Bind the public port first, so a second copy never takes ownership of COM ports.
     with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as control, \
-            MCPHost(local_control_url(control)) as mcp:
+            MCPHost(local_control_url(control)) as mcp, CollectorLock(BASE):
         control.mcp_host = mcp
         os.makedirs(LOG_ROOT, exist_ok=True)
         store = Store(os.path.join(BASE, 'registry.sqlite3'))
@@ -98,6 +118,7 @@ def main():
                     threading.Thread(target=shutdown, daemon=True).start()
                     return result
                 control.activate_settings = activate_settings
+                ControlHandler.collector_link = None
                 ControlHandler.collector_socket = ('127.0.0.1', collector.server_address[1])
                 ControlHandler.static_root = STATIC
                 ControlHandler.auth_token = AUTH_TOKEN

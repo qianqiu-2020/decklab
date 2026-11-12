@@ -2,13 +2,17 @@
   'use strict';
   var UI = global.SerialdUI, document = global.document;
   var groups = [
+    ['节点间连接', ['BACKEND_URL', 'BACKEND_TOKEN', 'BACKEND_CA', 'BACKEND_BIND', 'BACKEND_PORT', 'BACKEND_CERT', 'BACKEND_KEY']],
     ['访问与 MCP', ['PORT', 'BIND', 'AUTH_TOKEN', 'TRUST_LOOPBACK', 'MCP_ENABLED', 'MCP_PYTHON', 'MCP_ALLOWED_HOSTS', 'SHARE_SECONDS', 'UI_LANGUAGE']],
     ['串口与探测', ['BAUD', 'DATA_BITS', 'PARITY', 'STOP_BITS', 'FLOW_CONTROL', 'NEWLINE', 'PROBE', 'PROBE_COMMAND', 'AUTO_CONFIGURE_SSH']],
     ['登录默认值', ['SSH_USER', 'SSH_PASSWORD', 'CONSOLE_USER', 'CONSOLE_PASSWORD']],
     ['日志与传输', ['LOG_RETENTION_DAYS', 'DISK_MIN_FREE_MB', 'DISK_MIN_FREE_PERCENT', 'TRANSFER_MAX_FILES', 'TRANSFER_MAX_FILE_BYTES', 'TRANSFER_MAX_TOTAL_BYTES', 'TRANSFER_MIN_FREE_BYTES', 'TRANSFER_IDLE_SECONDS', 'TRANSFER_RETENTION_SECONDS', 'SCROLLBACK', 'SSH_LIMIT', 'SSH_IDLE']],
-    ['服务路径', ['BASE', 'STATIC', 'SOCKET', 'HANDOFF', 'BY_PATH', 'RESCUE_BIN', 'AGENT_TOKENS_FILE', 'PROFILES', 'HARDWARE', 'FLASH', 'FLASH_EXECUTOR']]
+    ['服务路径', ['BASE', 'STATIC', 'SOCKET', 'HANDOFF', 'BY_PATH', 'RESCUE_BIN', 'AGENT_TOKENS_FILE', 'PROFILES', 'HARDWARE', 'FLASH', 'FLASH_EXECUTOR', 'FLASH_LOADERS']]
   ];
   var labels = {
+    BACKEND_URL: '后端 HTTPS 地址', BACKEND_TOKEN: '节点间访问密钥', BACKEND_CA: '后端 CA 证书文件',
+    BACKEND_BIND: '后端监听地址', BACKEND_PORT: '后端监听端口', BACKEND_CERT: '后端 TLS 证书文件', BACKEND_KEY: '后端 TLS 私钥文件',
+    FLASH_LOADERS: '预备刷机环境清单',
     UI_LANGUAGE: '默认界面语言', SCROLLBACK: '实时输出缓存（字节）', SSH_LIMIT: '每设备 SSH 会话上限', SSH_IDLE: 'SSH 空闲超时（秒）', SHARE_SECONDS: '网页分享有效期（秒）',
     PORT: '监听端口', BIND: '监听地址', AUTH_TOKEN: '主访问密码', TRUST_LOOPBACK: '信任本机访问（Windows）',
     MCP_ENABLED: '启用服务端 MCP', MCP_PYTHON: 'MCP Python（留空使用内置运行时）', MCP_ALLOWED_HOSTS: 'MCP 代理域名（逗号分隔）',
@@ -25,7 +29,7 @@
   var docs = {profiles: '板卡配置与分配', hardware: '硬件动作', flash: '刷机绑定', agent_tokens: '固定 Agent 令牌'};
   var snapshot, inputs = {}, editors = {}, original, previewText = '', pendingBrowser = null;
   var dialog, status, preview, save, activate, browserBox;
-  var openGeneration = 0;
+  var openGeneration = 0, settingsTarget = 'web', remoteBackendAvailable = false;
   var devicePreferences = null, preferenceEditor, preferenceSave, preferencePreview = '', preferenceStatus, includePreferences;
   function el(tag, text, parent) {
     var node = document.createElement(tag);
@@ -35,8 +39,8 @@
   }
   function message(text) { status.textContent = text; }
   function redacted(value) { return value && typeof value === 'object' && value.$redacted === true; }
-  async function request(payload) {
-    var response = await UI.fetch('/api/settings', payload ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)} : undefined);
+  async function request(payload, target) {
+    var response = await UI.fetch('/api/settings' + ((target || settingsTarget) === 'backend' ? '?target=backend' : ''), payload ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)} : undefined);
     var data = await response.json();
     if (!response.ok) throw new Error(data.error || '配置请求失败');
     return data;
@@ -134,23 +138,27 @@
     message('配置已保存，尚未重启生效。浏览器偏好如有导入，刷新页面后生效。' + browserError);
   }
   async function download(includeSecrets) {
+    var view = dialog, browserSelected = browserBox.checked, preferencesSelected = includePreferences.checked;
     var result = await request({action: 'export', include_secrets: includeSecrets});
+    if (view !== dialog) return;
     var pack = {format: 'decklab-settings', version: 1, configuration: result.configuration};
-    if (browserBox.checked) pack.browser = browserPreferences();
-    if (includePreferences.checked) pack.preferences = (await preferenceRequest()).configuration;
+    if (browserSelected) pack.browser = browserPreferences();
+    if (preferencesSelected) pack.preferences = (await preferenceRequest()).configuration;
+    if (view !== dialog) return;
     var url = global.URL.createObjectURL(new Blob([JSON.stringify(pack) + '\n'], {type: 'application/json'}));
     var anchor = el('a'); anchor.href = url; anchor.download = includeSecrets ? 'decklab-private-backup.json' : 'decklab-settings.json'; anchor.click();
     global.setTimeout(function () { global.URL.revokeObjectURL(url); }, 1000);
     message(includeSecrets ? '完整备份含密码和令牌，请私密保存。' : '已导出分享配置；密码字段与令牌已隐藏，自定义命令请自行检查。导入时隐藏字段保留目标服务现有值。');
   }
   async function importFile(file) {
-    var view = dialog, target = snapshot, preferenceTarget = devicePreferences;
+    var view = dialog, target = snapshot, preferenceTarget = devicePreferences, nodeTarget = settingsTarget;
     if (!file || file.size > 16 * 1024 * 1024) throw new Error('配置包须小于 16 MiB');
     var pack = JSON.parse(await file.text());
+    if (view !== dialog) return;
     if (pack.format !== 'decklab-settings' || pack.version !== 1) throw new Error('不支持的配置包格式');
     var config = pack.configuration;
     var proposedBrowser = pack.browser == null ? null : validateBrowser(pack.browser);
-    await request({action: 'preview', revision: target.revision, configuration: config});
+    await request({action: 'preview', revision: target.revision, configuration: config}, nodeTarget);
     if (view !== dialog) return;
     var preferenceError = '';
     if (pack.preferences != null) {
@@ -171,12 +179,15 @@
   }
   function run(action) { return function () { var view = dialog; Promise.resolve().then(action).catch(function (error) { if (view === dialog) message(error.message); }); }; }
   function button(parent, title, action) { var node = el('button', title, parent); node.type = 'button'; node.addEventListener('click', run(action)); return node; }
-  async function open() {
+  async function open(target) {
     var generation = ++openGeneration;
+    settingsTarget = target === 'backend' ? 'backend' : 'web';
+    if (dialog) { dialog.remove(); dialog = null; }
     try {
       var result = await request();
       if (generation !== openGeneration) return;
       snapshot = result;
+      if (settingsTarget === 'web') remoteBackendAvailable = result.remote_backend === true;
       var preferences = null;
       try { preferences = await preferenceRequest(); } catch (_) { /* Host settings remain usable without a collector. */ }
       if (generation !== openGeneration) return;
@@ -185,7 +196,12 @@
       inputs = {}; editors = {}; pendingBrowser = null;
       dialog = el('dialog', null, document.body); dialog.className = 'settings-dialog';
       var header = el('div', null, dialog); header.className = 'settings-header';
-      el('h2', '系统配置', header);
+      el('h2', settingsTarget === 'backend' ? '后端节点配置' : '系统配置', header);
+      if (remoteBackendAvailable) {
+        var node = el('select', null, header); node.setAttribute('aria-label', '配置所属节点');
+        [['web', 'Web 节点'], ['backend', '后端节点']].forEach(function (item) { var option = el('option', item[1], node); option.value = item[0]; });
+        node.value = settingsTarget; node.addEventListener('change', function () { open(node.value); });
+      }
       button(header, '关闭', function () { dialog.close(); });
       el('p', '服务端设置由管理员共享。设备标签、探测覆盖和已验证 SSH 密码仍在各设备页面管理。左侧排序与语言只影响当前浏览器。', dialog);
       el('p', '内嵌 JSON 文档优先于文件路径；修改不会执行硬件命令。数据目录切换不会搬迁已有档案。', dialog);
@@ -209,7 +225,7 @@
       });
       var bindings = el('details', null, body); el('summary', '板卡、硬件动作与 Agent 令牌（JSON）', bindings);
       el('p', '按现有配置格式编辑；profiles / hardware 最大 64 KiB，flash 最大 1 MiB。$redacted 标记表示保留已有密钥。清空对象 {} 表示移除该文档的全部分配。', bindings);
-      Object.keys(docs).forEach(function (name) { var label = el('label', docs[name], bindings); var editor = el('textarea', null, label); editor.rows = 10; editor.spellcheck = false; editor.addEventListener('input', invalidate); editors[name] = editor; });
+      Object.keys(docs).filter(function (name) { return !snapshot.document_names || snapshot.document_names.indexOf(name) >= 0; }).forEach(function (name) { var label = el('label', docs[name], bindings); var editor = el('textarea', null, label); editor.rows = 10; editor.spellcheck = false; editor.addEventListener('input', invalidate); editors[name] = editor; });
       var deviceSection = el('details', null, body); el('summary', '设备标签与端口探测覆盖（JSON）', deviceSection);
       el('p', '服务设置与设备偏好分别保存。设备偏好即时生效，不修改身份或日志归属；未知板卡须先识别。端口 label / probe 为 null 时清除该项，省略则保留。', deviceSection);
       preferenceEditor = el('textarea', null, deviceSection); preferenceEditor.rows = 12; preferenceEditor.spellcheck = false;
@@ -233,9 +249,10 @@
       preview = button(actions, '预览修改', doPreview);
       save = button(actions, '保存配置', doSave);
       activate = button(actions, '重启并应用', async function () {
+        var view = dialog;
         activate.disabled = true;
-        try { await request({action: 'activate', revision: snapshot.revision}); message('已请求重启。终端会暂时断开；请稍后刷新，端口或密码修改后需使用新地址与凭证。'); }
-        catch (error) { activate.disabled = false; throw error; }
+        try { await request({action: 'activate', revision: snapshot.revision}); if (view !== dialog) return; message('已请求重启。终端会暂时断开；请稍后刷新，端口或密码修改后需使用新地址与凭证。'); }
+        catch (error) { if (view === dialog) activate.disabled = false; throw error; }
       });
       activate.disabled = !snapshot.restart_available || snapshot.active_revision === snapshot.revision;
       status = el('p', null, footer); status.setAttribute('role', 'status'); status.className = 'settings-status';

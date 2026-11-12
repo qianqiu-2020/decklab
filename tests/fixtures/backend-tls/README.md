@@ -1,0 +1,1 @@
+Public, intentionally shared TLS test fixture. The private key is public test data, never a deployment credential. Valid 2020-2100; SAN localhost and 127.0.0.1. This allows the same standard-library TLS tests to run on Windows and Ubuntu without OpenSSL tooling.

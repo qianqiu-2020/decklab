@@ -194,3 +194,7 @@ sudo systemctl start seriald
 导入复制日志，不删除源文件；相同内容可重复执行，目标文件内容不一致则拒绝覆盖。
 **同一旧目录混入多块板的日志时，不要将整个目录指定给某一序列号。**保留原始归档，人工确认后再导入。
 历史设备导入后可在线查看记录，连接设备需点击“识别设备”核对当前序列号，再使用用户标签访问。
+
+## Separate Web and hardware roles
+
+See [distributed deployment](DISTRIBUTED.md) for Windows/Ubuntu role launchers, TLS certificates, node credentials and data ownership. The default local role remains available.

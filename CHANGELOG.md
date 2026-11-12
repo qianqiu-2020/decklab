@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — split nodes and standalone partition images
+
+- Web and hardware backend can run separately on Windows or Ubuntu over authenticated TLS; Web restarts preserve backend tasks and connections.
+- Import image URLs as durable backend tasks with bounded storage and optional SHA-256.
+- Preinstalled RAM-only FSBL/U-Boot allows standalone partition payloads; the dedicated K3 NOR adapter selects its standard map without writing a partition table or erasing env.
+- Add node-scoped settings, role launchers, collector exclusion, deployment documentation and hardware-free cross-platform acceptance.
+
 ## Unreleased
 
 - Add selected-image deletion with a filename/size/SHA-256 confirmation,

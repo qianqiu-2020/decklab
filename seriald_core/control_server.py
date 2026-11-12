@@ -26,6 +26,7 @@ from . import __version__
 from .results import response as api_response
 from .request_json import load_object
 from .mcp_host import MCPHost, local_control_url
+from .backend_link import BackendLink
 
 
 def configured_agent_tokens(path, primary_token):
@@ -144,6 +145,7 @@ def public_mcp_host_allowed(server, authority):
 class ControlHandler(http.server.SimpleHTTPRequestHandler):
     server_version = 'seriald-control/' + __version__
     collector_socket = SOCKET
+    collector_link = None
     static_root = STATIC
     auth_token = AUTH_TOKEN
     agent_tokens = {}
@@ -314,6 +316,10 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     def _settings_request(self, write=False):
         if not self._owner_authorized():
             return self._json(403, {'error': '只有主访问凭证可以管理系统配置'})
+        if dict(parse_qsl(urlparse(self.path).query)).get('target') == 'backend':
+            if self.collector_link is None:
+                return self._json(409, {'error': '当前没有配置远程后端'})
+            return self._proxy('/api/backend-settings')
         if self.settings is None:
             return self._json(503, {'error': '当前运行方式未启用系统配置'})
         with self.settings.guard:
@@ -322,7 +328,12 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     def _settings_request_locked(self, write=False):
         try:
             if not write:
-                result = self.settings.snapshot()
+                if self.collector_link:
+                    from .remote_settings import node_snapshot
+                    result = node_snapshot(self.settings, 'web')
+                    result['remote_backend'] = True
+                else:
+                    result = self.settings.snapshot()
                 result['active_revision'] = getattr(self.server, 'settings_revision', None)
                 result['restart_available'] = callable(getattr(self.server, 'activate_settings', None))
                 result['activation'] = getattr(self.server, 'settings_activation', {'state': 'idle'})
@@ -337,6 +348,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             if action == 'export':
                 if type(payload.get('include_secrets', False)) is not bool:
                     raise SettingsError('include_secrets 必须为布尔值')
+                if self.collector_link:
+                    from .remote_settings import node_snapshot
+                    return self._json(200, node_snapshot(self.settings, 'web', payload.get('include_secrets', False)))
                 return self._json(200, self.settings.snapshot(payload.get('include_secrets', False)))
             if action == 'activate':
                 if payload.get('revision') != self.settings.snapshot()['revision']:
@@ -355,6 +369,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 return
             if action not in ('preview', 'save'):
                 raise SettingsError('未知配置操作')
+            if self.collector_link:
+                from .remote_settings import validate_scope
+                validate_scope(self.settings, 'web', payload.get('configuration'))
             return self._json(200, self.settings.save(payload.get('configuration'),
                               payload.get('revision'), preview=action == 'preview'))
         except (ValueError, OSError, UnicodeError) as error:
@@ -363,12 +380,17 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             message = str(error) if isinstance(error, SettingsError) else '配置校验或读写失败，请检查字段和配置文档'
             return self._json(getattr(error, 'status', 400), {'error': message})
 
+    def _collector_connection(self, timeout=30):
+        if self.collector_link is not None:
+            return self.collector_link.connection(timeout)
+        return (http.client.HTTPConnection(*self.collector_socket, timeout=timeout)
+                if isinstance(self.collector_socket, tuple)
+                else UnixHTTPConnection(self.collector_socket, timeout=timeout))
+
     def _close_revoked_sessions(self, actor):
         body = json.dumps({'actor': actor}).encode()
         try:
-            connection = (http.client.HTTPConnection(*self.collector_socket, timeout=5)
-                          if isinstance(self.collector_socket, tuple)
-                          else UnixHTTPConnection(self.collector_socket, timeout=5))
+            connection = self._collector_connection(5)
             try:
                 connection.request('POST', '/api/agent-revoke', body=body,
                                    headers={'Content-Type': 'application/json'})
@@ -383,9 +405,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
 
     def _live_connection(self, key, connection_id):
         """Validate the human-selected attachment without opening a serial device."""
-        connection = (http.client.HTTPConnection(*self.collector_socket, timeout=5)
-                      if isinstance(self.collector_socket, tuple)
-                      else UnixHTTPConnection(self.collector_socket, timeout=5))
+        connection = self._collector_connection(5)
         try:
             connection.request('GET', '/api/devices')
             result = connection.getresponse()
@@ -493,15 +513,19 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             if slots is not None:
                 slots.release()
 
-    def _proxy(self):
+    def _proxy(self, target_override=None):
         connection = None
         headers_sent = False
         try:
             route = urlparse(self.path).path
+            if route in ('/api/backend-settings', '/api/settings-health', '/api/settings-activate'):
+                return self._json(404, {'error': 'not found'})
             grant = self._agent_grant()
             if self.headers.get('Authorization', '').startswith('Bearer seriald-ag-') and grant is None:
                 return self._json(401, {'error': 'Agent 授权已撤销或过期', 'code': 'unauthorized'})
             agent_actor = grant['actor'] if grant else self._agent_actor()
+            if agent_actor and route == '/api/image-download':
+                return self._json(403, {'error': '镜像 URL 下载需要网页操作者发起'})
             if agent_actor and route in ('/api/flash-discover', '/api/flash-target'):
                 return self._json(403, {'error': '只有网页操作者可以发现和选择新的刷机设备'})
             if agent_actor and route == '/api/probe-settings':
@@ -521,7 +545,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             body = self.rfile.read(length) if length else None
             if length and len(body) != length:
                 return self._json(400, {'error': 'incomplete body'})
-            target_path = self.path
+            target_path = target_override or self.path
             if self.command == 'POST' and agent_actor:
                 try:
                     payload = load_object(body or b'')
@@ -599,11 +623,11 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 '/api/file-transfer/finish', '/api/file-transfer/abort', '/api/artifact-seal', '/api/flash-plan',
                 '/api/flash-selection', '/api/flash-target')
             timeout = 300 if slow else 30
-            connection = (http.client.HTTPConnection(*self.collector_socket, timeout=timeout)
-                          if isinstance(self.collector_socket, tuple)
-                          else UnixHTTPConnection(self.collector_socket, timeout=timeout))
+            connection = self._collector_connection(timeout)
             connection.request(self.command, target_path, body=body, headers=headers)
             response = connection.getresponse()
+            if self.collector_link and response.status == 401:
+                return self._json(503, {'error': '后端节点认证失败，请检查节点间访问密钥', 'code': 'backend-unavailable'})
             if grant and grant['scope'] != 'all' and route == '/api/devices' and response.status == 200:
                 data = response.read(4 * 1024 * 1024 + 1)
                 if len(data) > 4 * 1024 * 1024:
@@ -658,7 +682,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 self._json(400, {'error': 'bad content length'})
         except (OSError, http.client.HTTPException, TimeoutError) as error:
             if not headers_sent:
-                self._json(503, {'error': 'collector unavailable', 'detail': str(error)})
+                self._json(503, {'error': 'collector unavailable', 'detail': 'backend connection failed' if self.collector_link else str(error)})
         finally:
             if connection is not None:
                 connection.close()
@@ -696,7 +720,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         if route == '/healthz':
             return self._json(200, {'ok': True, 'role': 'control', 'pid': os.getpid(),
                                     'version': __version__,
-                                    'collector_socket': self.collector_socket})
+                                    'collector_socket': self.collector_socket if self.collector_link is None else None,
+                                    'backend_transport': 'https' if self.collector_link else 'local'})
         if route.startswith('/api/'):
             return self._proxy()
         if route in ('/', '/index.html'):
@@ -795,12 +820,23 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('port', nargs='?', type=int, default=int(os.environ.get('SERIALD_PORT', '8898')))
     parser.add_argument('bind', nargs='?', default=os.environ.get('SERIALD_BIND', '127.0.0.1'))
+    parser.add_argument('--port', dest='named_port', type=int)
+    parser.add_argument('--bind', dest='named_bind')
+    parser.add_argument('--no-browser', action='store_true')
+    parser.add_argument('--require-backend', action='store_true', help='require a remote HTTPS backend; never use a local collector')
     args = parser.parse_args()
+    args.port = args.named_port or args.port
+    args.bind = args.named_bind or args.bind
     saved_environment = SETTINGS.read().get('environment', {})
     args.port = int(saved_environment.get('PORT', args.port))
     args.bind = saved_environment.get('BIND', args.bind)
     SETTINGS.environment.update({'SERIALD_PORT': str(args.port), 'SERIALD_BIND': args.bind})
     ControlHandler.collector_socket = SOCKET
+    backend_url = os.environ.get('SERIALD_BACKEND_URL', '')
+    if args.require_backend and not backend_url:
+        parser.error('Web node requires SERIALD_BACKEND_URL')
+    ControlHandler.collector_link = BackendLink(backend_url, os.environ.get('SERIALD_BACKEND_TOKEN', ''),
+        os.environ.get('SERIALD_BACKEND_CA', '')) if backend_url else None
     ControlHandler.static_root = STATIC
     ControlHandler.auth_token = AUTH_TOKEN
     ControlHandler.settings = SETTINGS
@@ -813,8 +849,12 @@ def main():
         parser.error('invalid SERIALD_AGENT_TOKENS_FILE or missing SERIALD_AUTH_TOKEN')
     try:
         with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as server:
-            configure_control(server, SETTINGS, SOCKET,
-                              lambda target: UnixHTTPConnection(target, timeout=5))
+            if ControlHandler.collector_link is None:
+                configure_control(server, SETTINGS, SOCKET,
+                                  lambda target: UnixHTTPConnection(target, timeout=5))
+            else:
+                from .remote_settings import configure_remote_control
+                configure_remote_control(server, SETTINGS)
             with MCPHost(local_control_url(server)) as mcp:
                 server.mcp_host = mcp
                 print('seriald control on http://%s:%d/' % (args.bind, server.server_address[1]), flush=True)
@@ -825,7 +865,7 @@ def main():
     finally:
         ControlHandler.grant_store.close()
     if server.restart_requested:
-        reexecute(LAUNCH_ENVIRONMENT)
+        reexecute(LAUNCH_ENVIRONMENT, role='web' if ControlHandler.collector_link else None)
 
 
 if __name__ == '__main__':

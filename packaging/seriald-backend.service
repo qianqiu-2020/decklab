@@ -1,0 +1,26 @@
+[Unit]
+Description=DeckLab authenticated TLS hardware backend (serial, USB and reset)
+After=network-online.target local-fs.target
+Wants=network-online.target
+Conflicts=seriald.service seriald-collector.service seriald-web.service
+
+[Service]
+Type=simple
+User=seriald
+Group=seriald
+SupplementaryGroups=dialout
+EnvironmentFile=/etc/seriald/seriald.env
+Environment=HOME=/data/seriald-data
+WorkingDirectory=/usr/lib/seriald
+ExecStart=/usr/bin/seriald-backend
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

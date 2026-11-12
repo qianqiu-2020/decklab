@@ -33,10 +33,12 @@ def preflight_storage(environment):
             raise SettingsError('新数据或通信目录不可写')
 
 
-def reexecute(environment):
+def reexecute(environment, role=None):
     """Called only after servers, workers, registry and serial descriptors close."""
     arguments = ([sys.executable] + sys.argv[1:] if getattr(sys, 'frozen', False)
                  else list(sys.orig_argv))
+    if role and getattr(sys, 'frozen', False):
+        arguments.insert(1, role)
     os.execve(sys.executable, arguments, environment)
 
 
@@ -50,6 +52,9 @@ def configure_collector(server, settings):
     def activate(revision):
         if revision != settings.snapshot()['revision']:
             raise SettingsError('配置已改变，请重新加载', 409)
+        preflight = getattr(server, 'preflight_settings', None)
+        if preflight:
+            preflight(settings.validate(settings.effective())['environment'])
         manager = server.manager
         tasks = manager.tasks
         # Count in-flight writes without serializing unrelated device commands.

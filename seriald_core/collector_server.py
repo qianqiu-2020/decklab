@@ -13,6 +13,7 @@ from .httpd import BoundedThreadingUnixServer
 from .storage import Store
 from . import web
 from .profiles import ProfileBook
+from .collector_lock import CollectorLock
 
 
 def main():
@@ -38,7 +39,7 @@ def main():
         finally:
             probe.close()
     # Never unlink an existing socket here: a second launch must fail before touching tty state.
-    with BoundedThreadingUnixServer(args.socket, web.Handler) as httpd:
+    with CollectorLock(BASE), BoundedThreadingUnixServer(args.socket, web.Handler) as httpd:
         store = Store(os.path.join(BASE, 'registry.sqlite3'))
         store.recover_sessions()
         manager = Manager(store, consume_handoff(HANDOFF), profiles=profiles)

@@ -8,6 +8,7 @@
     var selectionRequestId = '', selectionPlan = null, payloadCandidates = [], inspection = null;
     var eventSequence = 0, eventLines = [], pollTimer = null, submissionUnknown = false;
     var pendingDelete = null;
+    var downloadTask = null, downloadTimer = null, downloadRequest = null;
     function status(message) { $('fl-status').textContent = message; }
     function translate(value) { return global.SerialdI18n ? global.SerialdI18n.translate(value) : value; }
     function scope(selected) {
@@ -102,6 +103,10 @@
       $('fl-mode').disabled = busy || !!active || !!preparable && !(capabilities.modes || []).includes('full');
       $('fl-files').disabled = busy || !!active && !selecting;
       $('fl-upload').disabled = busy || !!active && !selecting || !uploadAvailable;
+      $('fl-download').disabled = busy || uploading || !!active || !uploadAvailable;
+      $('fl-url').disabled = busy || uploading || !!active;
+      $('fl-url-sha256').disabled = busy || uploading || !!active;
+      $('fl-download-cancel').hidden = !downloadTask || !['queued', 'running'].includes(downloadTask.state);
       $('fl-plan').disabled = busy || !!active || !!(board && board.observingTask)
         || !(available || preparable) || !$('fl-artifact').value;
       $('fl-plan').textContent = preparable ? '预览刷机准备步骤' : '预览写入范围';
@@ -369,7 +374,7 @@
       text('p', value.write_layout ? '本计划将修改分区布局。' : '本计划保留现有分区布局。', box);
       var table = document.createElement('table');
       var heading = document.createElement('tr');
-      var showRanges = value.confirm_after_prepare === true;
+      var showRanges = value.confirm_after_prepare === true || !!(value.erase_ranges || []).length;
       var columns = ['存储', '分区或范围', '写入字节'];
       if (showRanges) columns.push('偏移 / 分区容量');
       columns.push('写入范围 SHA-256');
@@ -595,6 +600,52 @@
       } catch (error) { if (same(selected, seq)) status(error.message); }
       finally { if (same(selected, seq)) { busy = false; updateControls(); } }
     }
+    async function watchDownload(selected, seq, current) {
+      try {
+        var result = await client.request('/api/task?id=' + encodeURIComponent(current.id));
+        if (!same(selected, seq) || !downloadTask || downloadTask.id !== current.id) return;
+        downloadTask = result.task;
+        var progress = downloadTask.progress || {};
+        $('fl-progress').max = progress.total || Math.max(1, progress.done || 0);
+        $('fl-progress').value = progress.done || 0;
+        status('后端下载镜像：' + format(progress.done || 0) + (progress.total ? ' / ' + format(progress.total) : ''));
+        if (['queued', 'running'].includes(downloadTask.state)) {
+          downloadTimer = setTimeout(function () { watchDownload(selected, seq, downloadTask); }, 700);
+          return;
+        }
+        uploading = false; busy = false; updateControls();
+        if (downloadTask.state !== 'completed') throw new Error(downloadTask.error || '镜像下载未完成');
+        var artifact = (downloadTask.result || {}).artifact;
+        if (!artifact || artifact.state !== 'ready') throw new Error('镜像尚未准备好');
+        artifacts = artifacts.filter(function (item) { return item.id !== artifact.id; }).concat([artifact]);
+        artifactOptions($('fl-artifact'), artifact.id); renderPartitions(); invalidatePlan();
+        downloadRequest = null;
+        status('镜像已下载并校验 SHA-256；请选择写入范围并预览。');
+      } catch (error) {
+        if (!same(selected, seq)) return;
+        if (downloadTask && ['queued', 'running'].includes(downloadTask.state)) {
+          status('下载任务仍在后端运行，正在重新查询原任务…');
+          downloadTimer = setTimeout(function () { watchDownload(selected, seq, downloadTask); }, 1500);
+        } else { busy = false; uploading = false; updateControls(); status(error.message); }
+      }
+    }
+    async function downloadImage() {
+      if (!board || busy || uploading) return;
+      var selected = board, seq = sequence, url = $('fl-url').value.trim(), sha = $('fl-url-sha256').value.trim().toLowerCase();
+      if (!url) { status('请输入镜像 URL。'); return; }
+      var identity = url + '\n' + sha + '\n' + JSON.stringify(scope(selected));
+      if (!downloadRequest || downloadRequest.identity !== identity) downloadRequest = { identity: identity, id: id() };
+      busy = true; uploading = true; invalidatePlan(); updateControls(); status('正在提交后端下载任务…');
+      try {
+        var result = await client.request('/api/image-download', Object.assign(scope(selected), {
+          url: url, sha256: sha, request_id: downloadRequest.id, client_id: options.clientId || '' }));
+        if (!same(selected, seq)) return;
+        downloadTask = result.task; updateControls();
+        watchDownload(selected, seq, downloadTask);
+      } catch (error) {
+        if (same(selected, seq)) { busy = false; uploading = false; updateControls(); status(error.message + '；重试将查询原请求。'); }
+      }
+    }
     async function upload() {
       if (busy || !board) return;
       var files = Array.from($('fl-files').files || []);
@@ -698,6 +749,12 @@
     $('fl-verify').addEventListener('change', invalidatePlan);
     $('fl-target-storage').addEventListener('change', invalidatePlan);
     $('fl-upload').addEventListener('click', upload); $('fl-plan').addEventListener('click', makePlan);
+    $('fl-download').addEventListener('click', downloadImage);
+    $('fl-download-cancel').addEventListener('click', async function () {
+      if (!downloadTask) return;
+      try { await client.request('/api/task-cancel', { id: downloadTask.id }); }
+      catch (error) { status(error.message); }
+    });
     $('fl-start').addEventListener('click', start); $('fl-recover').addEventListener('click', recover);
     $('fl-select').addEventListener('click', submitSelection);
     $('fl-recovery-reason').addEventListener('input', updateControls);

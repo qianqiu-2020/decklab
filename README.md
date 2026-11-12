@@ -124,3 +124,5 @@ devices.
 
 Application code and original branding: [Apache-2.0](LICENSE).
 Bundled and build dependencies retain their licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
+
+[Web 与硬件后端分开部署](docs/DISTRIBUTED.md)：Windows / Ubuntu 双角色、HTTPS 节点链路、后端镜像缓存与预备刷机环境。

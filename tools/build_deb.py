@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from seriald_core import __version__
 from tools.package_docs import publish as publish_docs
+from tools.package_flash_loaders import publish as publish_flash_loaders
 from tools.build_linux_mcp import MACHINES, validate_runtime
 
 
@@ -81,7 +82,7 @@ def flash_notice_files(directory):
     return files
 
 
-def build(output, version, runtime=None, flash_executor=None, flash_notices=None):
+def build(output, version, runtime=None, flash_executor=None, flash_notices=None, flash_loaders=None):
     if runtime is None:
         architecture = {'x86_64': 'amd64', 'aarch64': 'arm64',
                         'riscv64': 'riscv64'}.get(platform.machine())
@@ -130,11 +131,14 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
         for command, invocation in [('serialctl', '/usr/lib/seriald/serialctl.py'),
                                     ('seriald-admin', '-m seriald_core.admin'),
                                     ('seriald-collector', '-m seriald_core.collector_server'),
-                                    ('seriald-control', '-m seriald_core.control_server')]:
+                                    ('seriald-control', '-m seriald_core.control_server'),
+                                    ('seriald-backend', '-m seriald_core.backend_server')]:
             write('usr/bin/' + command, '#!/bin/sh\nexport PYTHONPATH=/usr/lib/seriald\nexec /usr/bin/python3 ' + invocation + ' "$@"\n', 0o755)
         put('rescue.sh', 'usr/libexec/seriald/rescue.sh', 0o755)
         put('packaging/seriald.service', 'lib/systemd/system/seriald.service')
         put('packaging/seriald-collector.service', 'lib/systemd/system/seriald-collector.service')
+        put('packaging/seriald-web.service', 'lib/systemd/system/seriald-web.service')
+        put('packaging/seriald-backend.service', 'lib/systemd/system/seriald-backend.service')
         put('packaging/seriald.env', 'etc/seriald/seriald.env', 0o640)
         write('etc/sudoers.d/seriald-rescue', 'seriald ALL=(root) NOPASSWD: /usr/libexec/seriald/rescue.sh\n', 0o440)
         for path in (ROOT / 'skills/seriald-board').rglob('*'):
@@ -142,6 +146,8 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
                 text = path.read_text().replace('/data/seriald/serialctl.py', '/usr/lib/seriald/serialctl.py').replace('/data/seriald/docs/AGENT_ACCESS.md', '/usr/share/doc/seriald/AGENT_ACCESS.md')
                 write('usr/share/seriald/skills/seriald-board/' + str(path.relative_to(ROOT / 'skills/seriald-board')), text)
         publish_docs(stage / 'usr/share/doc/seriald', 'linux')
+        if flash_loaders is not None:
+            publish_flash_loaders(flash_loaders, stage / 'usr/lib/seriald/flash-loaders')
         if executor_metadata is not None:
             put('packaging/70-seriald-fastboot.rules', 'lib/udev/rules.d/70-seriald-fastboot.rules')
             target = stage / executor_metadata['installed_path'].lstrip('/')
@@ -185,6 +191,7 @@ if __name__ == '__main__':
                         help='optional local decklab-flash ELF to include for private testing')
     parser.add_argument('--flash-notices', type=Path,
                         help='license/build notices accompanying the optional local executor')
+    parser.add_argument('--flash-loaders', type=Path, help='prebuilt RAM-only FSBL/U-Boot bundle')
     args = parser.parse_args()
     print(build(args.output, args.version, runtime=args.runtime, flash_executor=args.flash_executor,
-                flash_notices=args.flash_notices))
+                flash_notices=args.flash_notices, flash_loaders=args.flash_loaders))

@@ -471,6 +471,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                  payload.get('actor') or 'web')
             return self._json(result.status, result.payload)
         actor = str(payload.get('actor') or 'web')[:80]
+        if route == '/api/image-download':
+            from .image_download import ImageDownloads
+            device = None if payload.get('target_id') else self._dev({'key': [str(payload.get('key') or '')],
+                'serial': [str(payload.get('serial') or '')]})
+            result = ImageDownloads(self.manager).start(payload, device, actor)
+            return self._json(result.status, result.payload)
         if route == '/api/flash-target':
             result = FlashActions(self.manager).probe(payload, actor)
             return self._json(result.status, result.payload)

@@ -55,7 +55,7 @@ let control, collector, chrome, ws;
   await evaluate('document.querySelector("#b-settings").click()');
   await wait('!!document.querySelector(".settings-dialog[open]")');
   console.log('Settings browser: checking form');
-  assert.equal(await evaluate('document.querySelectorAll(".settings-grid label").length'),45);
+  assert.equal(await evaluate('document.querySelectorAll(".settings-grid label").length'),53);
   assert.equal(await evaluate('Array.from(document.querySelectorAll(".settings-body input[type=password]")).every(input => !input.value && input.placeholder.includes("已设置"))'), false); // Empty primary credential has no saved secret.
   assert.equal(await evaluate('Array.from(document.querySelectorAll(".settings-grid label")).find(label => label.querySelector("small").textContent === "SERIALD_SSH_PASSWORD").querySelector("input").value'), '');
   await evaluate(`(() => {const password=Array.from(document.querySelectorAll('.settings-grid label')).find(label=>label.querySelector('small').textContent==='SERIALD_SSH_PASSWORD').querySelector('input');password.value='temporary';password.dispatchEvent(new Event('input'));password.value='';password.dispatchEvent(new Event('input'));const label=Array.from(document.querySelectorAll('.settings-grid label')).find(label=>label.querySelector('small').textContent==='SERIALD_BAUD');const input=label.querySelector('input');input.value='9600';input.dispatchEvent(new Event('input'));Array.from(document.querySelectorAll('.settings-actions button')).find(b=>b.textContent==='预览修改').click();})()`);
