@@ -14,7 +14,7 @@ import unittest
 from unittest import mock
 from types import SimpleNamespace
 
-from seriald_core.settings_restart import configure_collector
+from seriald_core.settings_restart import configure_collector, configure_control
 from seriald_core.web_settings import WebSettings, SettingsError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,6 +66,31 @@ class RestartAdmissionTests(unittest.TestCase):
             self.server.activate_settings('stale')
         self.assertFalse(self.server.restart_requested)
 
+    def test_readiness_retries_reads_but_never_replays_a_lost_restart_request(self):
+        calls, attempts = [], []
+        def connection_factory(target):
+            attempts.append(target)
+            if len(attempts) < 3:
+                raise ConnectionRefusedError()
+            connection = SimpleNamespace(close=lambda: None)
+            def request(method, path, **kwargs):
+                calls.append((method, path))
+                connection.method = method
+            def response():
+                if connection.method == 'POST':
+                    raise ConnectionResetError()
+                return SimpleNamespace(status=200, read=lambda size: b'{"restarting":false}')
+            connection.request, connection.getresponse = request, response
+            return connection
+        configure_control(self.server, self.settings, str(self.settings.path.parent / 'seriald.sock'), connection_factory)
+        saved = self.settings.save({'version': 1, 'environment': {'BAUD': '9600'}}, self.revision)
+        with self.assertRaises(SettingsError) as context:
+            self.server.activate_settings(saved['revision'])
+        self.assertEqual(context.exception.status, 503)
+        self.assertEqual(calls, [('GET', '/api/settings-health'), ('POST', '/api/settings-activate')])
+        self.assertEqual(len(attempts), 4)
+        self.assertFalse(self.server.restart_requested)
+
 
 @unittest.skipUnless(os.name == 'posix', 'private Unix socket activation')
 class RestartProcessTests(unittest.TestCase):
@@ -84,7 +109,11 @@ class RestartProcessTests(unittest.TestCase):
                 for name, arguments in [('collector_server', []), ('control_server', [str(port)])]:
                     log = (base / (name + '.log')).open('w+')
                     logs.append(log)
-                    process = subprocess.Popen([sys.executable, '-m', 'seriald_core.' + name] + arguments,
+                    command = ([sys.executable, '-c', 'import time; time.sleep(0.4); '
+                                'from seriald_core.collector_server import main; main()']
+                               if name == 'collector_server' else
+                               [sys.executable, '-m', 'seriald_core.' + name] + arguments)
+                    process = subprocess.Popen(command,
                                                cwd=ROOT, env=environment, stdout=log, stderr=log)
                     processes.append(process)
 

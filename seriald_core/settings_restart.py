@@ -132,8 +132,24 @@ def configure_control(server, settings, collector_socket, connection_factory):
                         pass
                     else:
                         raise SettingsError('新通信路径已有采集器，当前服务保留', 409)
-                exchange(collector_socket, 'POST', '/api/settings-activate',
-                         json.dumps({'revision': revision}).encode())
+                # Control can start slightly earlier than its collector. Only
+                # retry the read-only readiness check, never a restart request.
+                deadline = time.monotonic() + 5
+                while True:
+                    try:
+                        health = exchange(collector_socket, 'GET', '/api/settings-health')
+                        if not health.get('restarting'):
+                            break
+                    except (OSError, http.client.HTTPException):
+                        pass
+                    if time.monotonic() >= deadline:
+                        raise SettingsError('采集器尚未就绪，请检查服务状态后重试', 503)
+                    time.sleep(0.05)
+                try:
+                    exchange(collector_socket, 'POST', '/api/settings-activate',
+                             json.dumps({'revision': revision}).encode())
+                except (OSError, http.client.HTTPException) as error:
+                    raise SettingsError('采集器连接中断，可能已开始应用；请先检查状态', 503) from error
             server.settings_activation = {'state': 'applying', 'revision': revision}
             server.activation_reply = threading.Event()
 
