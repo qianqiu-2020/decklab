@@ -44,7 +44,7 @@ glibc 2.35 为基线，包含私有 Python、MCP SDK 与全部 Python 依赖；�
 python3 tools/build_deb.py --version '1.7.5~flash1' \
   --runtime build/linux-mcp/amd64/runtime \
   --flash-executor /path/to/decklab-flash \
-  --flash-notices /path/to/executor-license-notices --output dist/local-flash
+  --flash-notices /path/to/executor-license-notices --output dists
 ```
 
 运行时仍须按本次源码重新生成并通过校验。构建器不执行刷机程序；它核对 ELF 架构，

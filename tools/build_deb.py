@@ -177,7 +177,8 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'dist')
+    parser.add_argument('--output', type=Path, default=ROOT / 'dists',
+                        help='package output directory (default: dists/)')
     parser.add_argument('--version', default=__version__)
     parser.add_argument('--runtime', type=Path, help='prepared architecture-specific MCP runtime')
     parser.add_argument('--flash-executor', type=Path,

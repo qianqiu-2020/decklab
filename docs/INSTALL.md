@@ -37,7 +37,7 @@ serialctl devices
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dist/seriald_1.7.4_amd64.deb
+sudo apt install ./dists/seriald_1.7.4_amd64.deb
 ```
 
 arm64 构建将上述 `amd64` 改为 `arm64`，在对应原生构建机执行。

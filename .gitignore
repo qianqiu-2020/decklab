@@ -17,6 +17,7 @@ __pycache__/
 # Persistent registry and local build output
 registry.sqlite3*
 dist/
+dists/
 seriald-installed/
 
 # Development environments and runtime credentials

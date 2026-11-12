@@ -15,6 +15,10 @@ There is no build step or package manager configuration. The backend uses Python
 - `bash -n rescue.sh` — check shell syntax without executing recovery.
 - `git diff --check` — catch whitespace errors before submitting.
 
+Local Debian packages go directly in `dists/`, using versioned filenames such as
+`seriald_1.7.5~web8_amd64.deb`; do not create a per-build delivery subdirectory.
+Keep build inputs and diagnostic records separate from the delivered packages.
+
 ## Coding Style & Naming Conventions
 
 Use four-space indentation in Python, `snake_case` functions and variables, `PascalCase` classes, and uppercase constants. Follow existing two-space indentation and `camelCase` functions in JavaScript. Preserve nearby formatting and explanatory comments; no formatter or linter is configured. Avoid editing bundled `vendor/` files for application changes.
