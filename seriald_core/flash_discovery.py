@@ -79,8 +79,12 @@ def _profile(value):
     inspect(value)
     if value.get('id') not in ('auto-live-layout-v1', 'auto-spacemit-gpt-v1'):
         raise TaskError('automatic board profile is not a supported executor template', 502)
-    if set(value) - {'id', 'identity', 'storages', 'chip_family', 'bootrom_identity'}:
+    if set(value) - {'id', 'identity', 'storages', 'chip_family', 'bootrom_identity', 'ram_loader_protocol'}:
         raise TaskError('automatic board profile contains unsupported capabilities', 502)
+    if value.get('ram_loader_protocol') and (value['ram_loader_protocol'] != 'decklab-nor-v1'
+            or value['id'] != 'auto-spacemit-gpt-v1' or value.get('chip_family') != 'k3'
+            or value.get('bootrom_identity')):
+        raise TaskError('unsupported live RAM loader capability', 502)
     if value.get('chip_family') not in (None, '', 'k1', 'k3'):
         raise TaskError('automatic board profile contains an unsupported chip family', 502)
     storages = value.get('storages')

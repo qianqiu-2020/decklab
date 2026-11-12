@@ -205,7 +205,7 @@ class ArtifactTests(unittest.TestCase):
         from seriald_core.devices import Manager
         manager = Manager(self.store)
         self.addCleanup(manager.close)
-        self.assertEqual(manager.artifacts.root, self.path / 'transfers')
+        self.assertEqual(manager.artifacts.root, (self.path / 'transfers').resolve())
         self.assertFalse(manager.artifacts.root.exists())
         row = manager.artifacts.create('upload', 'one', 1)
         manager.artifacts.append(row['id'], 0, b'a')
