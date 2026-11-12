@@ -60,7 +60,14 @@ def main():
             web = start('web', 1, {'SERIALD_BACKEND_URL': 'https://backend:8899', 'SERIALD_BACKEND_CA': '/tls/cert.pem'},
                 ['-m', 'seriald_core.control_server', '--bind', '0.0.0.0', '--no-browser', '--require-backend'],
                 ['-p', '127.0.0.1::8898'])
-            start('images', 2, {}, ['-m', 'http.server', '8080', '--directory', '/state'])
+            images = start('images', 2, {}, ['-m', 'http.server', '8080', '--directory', '/state'])
+            docker('exec', images, '/usr/bin/python3.10', '-c',
+                'import time,urllib.request\n'
+                'for attempt in range(100):\n'
+                ' try:\n'
+                '  urllib.request.urlopen("http://127.0.0.1:8080/bootfs.ext4",timeout=1).close();break\n'
+                ' except OSError:time.sleep(.05)\n'
+                'else:raise RuntimeError("image repository fixture not ready")')
             address = 'http://' + docker('port', web, '8898/tcp')
             def request(route, body=None):
                 data = json.dumps(body).encode() if body is not None else None
@@ -69,7 +76,8 @@ def main():
                 with urlopen(req, timeout=3) as incoming:
                     return json.load(incoming)
             def ready():
-                for _ in range(10):
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
                     try:
                         return request('/api/devices')['devices']
                     except OSError:

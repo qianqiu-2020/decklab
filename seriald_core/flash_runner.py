@@ -348,7 +348,7 @@ class LocalFlashExecutor:
         if target.parent.resolve() != cache or not re.fullmatch(r'plan-[A-Za-z0-9_-]{8}', target.name):
             raise TaskError('flash workspace is outside managed cache', 409)
         with self._cache_lock:
-            if str(target) in self._active_workspaces:
+            if str(target.resolve()) in self._active_workspaces:
                 raise TaskError('flash workspace is still being prepared', 409)
             try:
                 mode = os.lstat(target).st_mode

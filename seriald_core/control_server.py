@@ -9,6 +9,7 @@ import http.server
 import ipaddress
 import json
 import os
+import signal
 import re
 import secrets
 import socket
@@ -857,6 +858,8 @@ def main():
                 configure_remote_control(server, SETTINGS)
             with MCPHost(local_control_url(server)) as mcp:
                 server.mcp_host = mcp
+                signal.signal(signal.SIGTERM,
+                    lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
                 print('seriald control on http://%s:%d/' % (args.bind, server.server_address[1]), flush=True)
                 try:
                     server.serve_forever()
