@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add owner-managed Web settings for all host options and board/hardware/flash
+  configuration documents, with validated preview, revision-checked saving,
+  redacted sharing and explicit private backups.
+- Activate settings from the Web by re-executing existing processes after
+  shutdown; preserve the collector for control-only changes and reject collector
+  activation during tasks, flash holds, transactions or input reservations.
+- Optionally import/export this browser's language and personal device order.
+
 - Discover local download USB devices through the installed flashing executor,
   with explicit target selection, live layout checks and persistent tasks that
   also work without an identified UART connection.

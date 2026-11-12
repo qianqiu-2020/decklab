@@ -16,7 +16,9 @@ import time
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from .config import AUTH_TOKEN, BASE, SOCKET, STATIC
+from .config import AUTH_TOKEN, BASE, SOCKET, STATIC, SETTINGS, LAUNCH_ENVIRONMENT, SHARE_SECONDS, read_ui_language
+from .web_settings import SettingsError
+from .settings_restart import configure_control, reexecute
 from .agent_grants import AgentGrantStore
 from .artifact_actions import body_limit
 from .httpd import BoundedThreadingTCPServer
@@ -24,6 +26,22 @@ from . import __version__
 from .results import response as api_response
 from .request_json import load_object
 from .mcp_host import MCPHost, local_control_url
+
+
+def configured_agent_tokens(path, primary_token):
+    if not path:
+        return {}
+    with open(path, 'rb') as source:
+        raw = source.read(65537)
+    if len(raw) > 65536:
+        raise ValueError('agent token configuration exceeds 64 KiB')
+    tokens = load_object(raw)
+    if (tokens and not primary_token or any(
+            not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,79}', actor) or actor == 'web'
+            or not isinstance(token, str) or len(token) < 32 or token == primary_token
+            for actor, token in tokens.items()) or len(set(tokens.values())) != len(tokens)):
+        raise ValueError('invalid agent token configuration')
+    return tokens
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -131,9 +149,10 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     agent_tokens = {}
     grant_store = None
     trust_loopback = False
-    share_seconds = 24 * 60 * 60
+    share_seconds = SHARE_SECONDS
     default_language = ''
-    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js',
+    settings = None
+    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
     public_agent_files = frozenset(('/serialctl.py', '/seriald_mcp.py', '/requirements-mcp.txt',
@@ -184,7 +203,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     supplied = ''
             except (binascii.Error, UnicodeDecodeError, ValueError):
                 supplied = ''
-        return hmac.compare_digest(supplied, self.auth_token)
+        return hmac.compare_digest(supplied.encode('utf-8'), self.auth_token.encode('utf-8'))
 
     def _authorized(self):
         if self.headers.get('Authorization', '').startswith('Bearer seriald-ag-'):
@@ -229,7 +248,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return ''
         token = value[7:]
         for actor, expected in self.agent_tokens.items():
-            if hmac.compare_digest(token, expected):
+            if hmac.compare_digest(token.encode('utf-8'), expected.encode('utf-8')):
                 return actor
         return ''
 
@@ -281,16 +300,68 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
         return True
 
-    def _small_json_body(self):
+    def _small_json_body(self, limit=4096):
         if self.headers.get('Transfer-Encoding'):
             raise ValueError('transfer encoding unsupported')
         length = int(self.headers.get('Content-Length') or 0)
-        if length < 0 or length > 4096:
-            raise ValueError('body must be at most 4096 bytes')
+        if length < 0 or length > limit:
+            raise ValueError('request body exceeds limit')
         body = self.rfile.read(length)
         if len(body) != length:
             raise ValueError('incomplete body')
         return load_object(body)
+
+    def _settings_request(self, write=False):
+        if not self._owner_authorized():
+            return self._json(403, {'error': '只有主访问凭证可以管理系统配置'})
+        if self.settings is None:
+            return self._json(503, {'error': '当前运行方式未启用系统配置'})
+        with self.settings.guard:
+            return self._settings_request_locked(write)
+
+    def _settings_request_locked(self, write=False):
+        try:
+            if not write:
+                result = self.settings.snapshot()
+                result['active_revision'] = getattr(self.server, 'settings_revision', None)
+                result['restart_available'] = callable(getattr(self.server, 'activate_settings', None))
+                result['activation'] = getattr(self.server, 'settings_activation', {'state': 'idle'})
+                return self._json(200, result)
+            if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
+                raise SettingsError('需要 application/json 请求')
+            payload = self._small_json_body(2 * 1024 ** 2)
+            action = payload.get('action', 'preview')
+            if (getattr(self.server, 'settings_activation', {}).get('state') == 'applying'
+                    and action != 'export'):
+                raise SettingsError('正在应用配置，请稍候', 409)
+            if action == 'export':
+                if type(payload.get('include_secrets', False)) is not bool:
+                    raise SettingsError('include_secrets 必须为布尔值')
+                return self._json(200, self.settings.snapshot(payload.get('include_secrets', False)))
+            if action == 'activate':
+                if payload.get('revision') != self.settings.snapshot()['revision']:
+                    raise SettingsError('配置已改变，请重新加载', 409)
+                activate = getattr(self.server, 'activate_settings', None)
+                if not callable(activate):
+                    raise SettingsError('当前运行方式需要重启服务后生效', 409)
+                result = activate(payload['revision'])
+                try:
+                    self._json(202, result)
+                    self.wfile.flush()
+                finally:
+                    reply = getattr(self.server, 'activation_reply', None)
+                    if reply is not None:
+                        reply.set()
+                return
+            if action not in ('preview', 'save'):
+                raise SettingsError('未知配置操作')
+            return self._json(200, self.settings.save(payload.get('configuration'),
+                              payload.get('revision'), preview=action == 'preview'))
+        except (ValueError, OSError, UnicodeError) as error:
+            # Validators may contain user-supplied strings. Keep passwords and
+            # helper arguments out of diagnostics at this owner API boundary.
+            message = str(error) if isinstance(error, SettingsError) else '配置校验或读写失败，请检查字段和配置文档'
+            return self._json(getattr(error, 'status', 400), {'error': message})
 
     def _close_revoked_sessions(self, actor):
         body = json.dumps({'actor': actor}).encode()
@@ -602,8 +673,13 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return super().do_GET()
         if self._require_auth():
             return
+        if route == '/api/settings':
+            return self._settings_request()
+        if route == '/api/settings-health':
+            return self._json(404, {'error': 'not found'})
         if route == '/api/access':
             return self._json(200, {'share_enabled': bool(self.auth_token and self._owner_authorized()),
+                                    'settings_enabled': bool(self.settings and self._owner_authorized()),
                                     'agent_share_enabled': bool(self._agent_share_authorized() and self.grant_store),
                                     'open_access': not bool(self.auth_token),
                                     'loopback_open': bool(self.trust_loopback),
@@ -632,6 +708,10 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         if self._require_auth():
             return
         route = urlparse(self.path).path
+        if route == '/api/settings':
+            return self._settings_request(write=True)
+        if route == '/api/settings-activate':
+            return self._json(404, {'error': 'not found'})
         if route in ('/api/agent-share', '/api/agent-revoke'):
             if not self._agent_share_authorized() or not self.grant_store:
                 return self._json(403, {'error': '需要有效的网页访问凭证才能管理 Agent 授权'})
@@ -690,7 +770,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         return os.path.join(self.static_root, *route.split('/'))
 
     def end_headers(self):
-        if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
+        if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
                                         '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()
@@ -700,28 +780,31 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
+    if SETTINGS.path.exists():
+        SETTINGS.validate(SETTINGS.effective())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('port', nargs='?', type=int, default=int(os.environ.get('SERIALD_PORT', '8898')))
     parser.add_argument('bind', nargs='?', default=os.environ.get('SERIALD_BIND', '127.0.0.1'))
     args = parser.parse_args()
+    saved_environment = SETTINGS.read().get('environment', {})
+    args.port = int(saved_environment.get('PORT', args.port))
+    args.bind = saved_environment.get('BIND', args.bind)
+    SETTINGS.environment.update({'SERIALD_PORT': str(args.port), 'SERIALD_BIND': args.bind})
     ControlHandler.collector_socket = SOCKET
     ControlHandler.static_root = STATIC
     ControlHandler.auth_token = AUTH_TOKEN
+    ControlHandler.settings = SETTINGS
+    ControlHandler.default_language = read_ui_language(BASE)
     ControlHandler.grant_store = AgentGrantStore(os.path.join(BASE, 'agent-grants.sqlite3'))
     tokens_path = os.environ.get('SERIALD_AGENT_TOKENS_FILE', '')
-    if tokens_path:
-        with open(tokens_path, encoding='utf-8') as source:
-            tokens = json.load(source)
-        if (not AUTH_TOKEN or not isinstance(tokens, dict)
-                or any(not isinstance(actor, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,79}', actor)
-                       or actor == 'web'
-                       or not isinstance(token, str) or len(token) < 32 or token == AUTH_TOKEN
-                       for actor, token in tokens.items())
-                or len(set(tokens.values())) != len(tokens)):
-            parser.error('invalid SERIALD_AGENT_TOKENS_FILE or missing SERIALD_AUTH_TOKEN')
-        ControlHandler.agent_tokens = tokens
+    try:
+        ControlHandler.agent_tokens = configured_agent_tokens(tokens_path, AUTH_TOKEN)
+    except ValueError:
+        parser.error('invalid SERIALD_AGENT_TOKENS_FILE or missing SERIALD_AUTH_TOKEN')
     try:
         with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as server:
+            configure_control(server, SETTINGS, SOCKET,
+                              lambda target: UnixHTTPConnection(target, timeout=5))
             with MCPHost(local_control_url(server)) as mcp:
                 server.mcp_host = mcp
                 print('seriald control on http://%s:%d/' % (args.bind, server.server_address[1]), flush=True)
@@ -731,6 +814,8 @@ def main():
                     pass
     finally:
         ControlHandler.grant_store.close()
+    if server.restart_requested:
+        reexecute(LAUNCH_ENVIRONMENT)
 
 
 if __name__ == '__main__':

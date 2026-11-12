@@ -2,9 +2,23 @@ import os
 import re
 import sys
 
+from .web_settings import WebSettings, load_environment
+
+# Keep the launch environment and configuration anchor stable across restarts,
+# even when the Web configuration selects a different runtime data directory.
+LAUNCH_ENVIRONMENT = dict(os.environ)
+_launch_base = os.environ.get('SERIALD_BASE', os.path.join(os.path.dirname(sys.executable), 'data')
+                              if sys.platform == 'win32' else os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SETTINGS_PATH = os.path.join(_launch_base, 'web-settings.json')
+SETTINGS = WebSettings(SETTINGS_PATH, LAUNCH_ENVIRONMENT)
+load_environment(SETTINGS_PATH)
+
 
 def read_ui_language(base):
     """Installer default; browser preferences override this host-wide hint."""
+    preferred = os.environ.get('SERIALD_UI_LANGUAGE', 'auto')
+    if preferred in ('en', 'zh-CN'):
+        return preferred
     try:
         with open(os.path.join(base, 'ui-language.txt'), encoding='utf-8-sig') as source:
             value = source.read(32).strip()
@@ -28,9 +42,17 @@ BY_PATH = os.environ.get('SERIALD_BY_PATH', 'Windows COM' if sys.platform == 'wi
 # 打包后由 dpkg 装到 /usr/libexec/seriald/rescue.sh(天然满足这个前提)。
 RESCUE_BIN = os.environ.get('SERIALD_RESCUE_BIN', '/usr/local/sbin/seriald-rescue.sh')
 
-SCROLLBACK = 256 * 1024          # 每设备内存缓冲上限(页面实时视图用)
-SSH_LIMIT = 8                   # 防止遗留标签页无限创建 ssh 子进程
-SSH_IDLE = 30 * 60
+def _integer_setting(name, default, minimum, maximum):
+    value = os.environ.get(name, str(default))
+    if not re.fullmatch(r'[0-9]+', value) or not minimum <= int(value) <= maximum:
+        raise ValueError('invalid setting: ' + name)
+    return int(value)
+
+
+SCROLLBACK = _integer_setting('SERIALD_SCROLLBACK', 256 * 1024, 4096, 16 * 1024 ** 2)
+SSH_LIMIT = _integer_setting('SERIALD_SSH_LIMIT', 8, 1, 128)
+SSH_IDLE = _integer_setting('SERIALD_SSH_IDLE', 1800, 60, 86400)
+SHARE_SECONDS = _integer_setting('SERIALD_SHARE_SECONDS', 86400, 60, 30 * 86400)
 DATE_FMT = '%Y%m%d'
 
 # 从控制台流里嗅探 hostname 的几种常见形态

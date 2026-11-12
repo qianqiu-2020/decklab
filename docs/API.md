@@ -6,6 +6,37 @@ private loopback collector. Both expose the following operations through control
 The standalone `serialctl.py` is the reference client; run its `--help` for CLI
 options. API version and optional features come from `GET /api/capabilities`.
 
+## Owner configuration API
+
+`GET /api/settings` returns `configuration` (version 1, unprefixed host keys in
+`environment`, optional `profiles`, `hardware`, `flash`, `agent_tokens` objects
+in `documents`), `revision`, `active_revision`, field metadata, restart
+availability and activation state. Secrets are hidden. Only the primary
+credential can access it; Agent tokens and webpage-share credentials cannot.
+An open-access installation retains its existing open-owner semantics.
+Responses use `Cache-Control: no-store`.
+
+`POST /api/settings` requires `application/json`, UTF-8, `Content-Length`, and a
+body of at most 2 MiB. Supported actions:
+
+- `preview` / `save`: `{action, revision, configuration}`. Existing loaders
+  validate the complete result. Imports are patches; omitted keys retain existing
+  values and `{"$redacted":true}` preserves a same-field secret. Both return
+  changed field names; only save persists. Stale revisions return 409. Saving
+  does not activate settings.
+- `export`: `{action:"export", include_secrets:false}`. Explicit `true` includes
+  private host configuration values for an owner-requested backup. Registry
+  identity/history and verified per-device SSH credentials are not included.
+- `activate`: `{action:"activate", revision}`. Returns 202 after admission,
+  409/423 for stale/busy settings. GET reports `activation` status. Control-only
+  changes preserve the collector. Other changes refuse active tasks, recovery
+  holds, transactions and input reservations before restarting the collector.
+  Successful activation may change the address/password and disconnect HTTP.
+
+`GET /api/settings-health` and `POST /api/settings-activate` are private
+collector coordination routes. Public control returns 404 for them. They check
+revisions and stop the existing collector before that same process re-executes.
+
 ## Requests, identity and errors
 
 GET parameters go in the query string. POST bodies are UTF-8 JSON objects with

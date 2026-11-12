@@ -192,6 +192,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         u = urlparse(self.path)
         route, q = u.path, parse_qs(u.query)
 
+        if route == '/api/settings-health':
+            return self._json(200, {'revision': getattr(self.server, 'settings_revision', None),
+                                    'restarting': getattr(self.server, 'restart_requested', False)})
+
         if route == '/api/capabilities':
             result = capabilities()
             return self._json(result.status, result.payload)
@@ -351,6 +355,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self._json(404, {'error': 'not found'})
 
     def do_POST(self):
+        server = getattr(self, 'server', None)
+        gate = getattr(server, 'configuration_gate', None)
+        if gate is None:
+            return self._do_POST()
+        with gate:
+            if getattr(server, 'restart_requested', False):
+                return self._json(503, {'error': '采集器正在重启'})
+            server.configuration_posts += 1
+        try:
+            return self._do_POST()
+        finally:
+            with gate:
+                server.configuration_posts -= 1
+
+    def _do_POST(self):
+        if urlparse(self.path).path == '/api/settings-activate':
+            try:
+                from .web_settings import SettingsError
+                activate = getattr(self.server, 'activate_settings', None)
+                if not callable(activate):
+                    raise SettingsError('当前运行方式不支持重启', 409)
+                if self.headers.get('Transfer-Encoding'):
+                    raise SettingsError('transfer encoding unsupported')
+                length = int(self.headers.get('Content-Length') or 0)
+                if not 0 < length <= 4096:
+                    raise SettingsError('invalid body length')
+                payload = load_object(self.rfile.read(length))
+                result = activate(payload.get('revision'))
+                try:
+                    self._json(202, result)
+                    self.wfile.flush()
+                finally:
+                    self.server.activation_reply.set()
+                return
+            except (ValueError, OSError) as error:
+                return self._json(getattr(error, 'status', 400), {'error': str(error)})
         self.response_key = None
         self._reading, self._read_guard = False, None
         route = urlparse(self.path).path

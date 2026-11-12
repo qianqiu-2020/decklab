@@ -26,12 +26,13 @@ class SerialSettings:
             raise ValueError('serial flow_control must be none, rtscts or xonxoff')
 
     @classmethod
-    def from_env(cls):
-        return cls(baud=int(os.environ.get('SERIALD_BAUD', '115200')),
-                   data_bits=int(os.environ.get('SERIALD_DATA_BITS', '8')),
-                   parity=os.environ.get('SERIALD_PARITY', 'N'),
-                   stop_bits=int(os.environ.get('SERIALD_STOP_BITS', '1')),
-                   flow_control=os.environ.get('SERIALD_FLOW_CONTROL', 'none'))
+    def from_env(cls, environment=None):
+        environment = os.environ if environment is None else environment
+        return cls(baud=int(environment.get('SERIALD_BAUD', '115200')),
+                   data_bits=int(environment.get('SERIALD_DATA_BITS', '8')),
+                   parity=environment.get('SERIALD_PARITY', 'N'),
+                   stop_bits=int(environment.get('SERIALD_STOP_BITS', '1')),
+                   flow_control=environment.get('SERIALD_FLOW_CONTROL', 'none'))
 
     def pyserial_options(self):
         return {'baudrate': self.baud, 'bytesize': self.data_bits,
@@ -101,18 +102,19 @@ class BoardProfile:
         return {'auto': None, 'cr': '\r', 'lf': '\n', 'crlf': '\r\n'}[self.newline]
 
     @classmethod
-    def from_env(cls):
-        user = os.environ.get('SERIALD_SSH_USER', 'root')
-        password = os.environ.get('SERIALD_SSH_PASSWORD', 'bianbu')
-        probe = os.environ.get('SERIALD_PROBE', 'linux')
-        automatic = _boolean(os.environ.get('SERIALD_AUTO_CONFIGURE_SSH',
+    def from_env(cls, environment=None):
+        environment = os.environ if environment is None else environment
+        user = environment.get('SERIALD_SSH_USER', 'root')
+        password = environment.get('SERIALD_SSH_PASSWORD', 'bianbu')
+        probe = environment.get('SERIALD_PROBE', 'linux')
+        automatic = _boolean(environment.get('SERIALD_AUTO_CONFIGURE_SSH',
                                             '0' if probe != 'linux' else '1'),
                              'SERIALD_AUTO_CONFIGURE_SSH')
-        return cls(serial=SerialSettings.from_env(), ssh_user=user, ssh_password=password,
-                   console_user=os.environ.get('SERIALD_CONSOLE_USER', user),
-                   console_password=os.environ.get('SERIALD_CONSOLE_PASSWORD', password),
-                   newline=os.environ.get('SERIALD_NEWLINE', 'auto'), probe=probe,
-                   probe_command=os.environ.get('SERIALD_PROBE_COMMAND', ''),
+        return cls(serial=SerialSettings.from_env(environment), ssh_user=user, ssh_password=password,
+                   console_user=environment.get('SERIALD_CONSOLE_USER', user),
+                   console_password=environment.get('SERIALD_CONSOLE_PASSWORD', password),
+                   newline=environment.get('SERIALD_NEWLINE', 'auto'), probe=probe,
+                   probe_command=environment.get('SERIALD_PROBE_COMMAND', ''),
                    auto_configure_ssh=automatic)
 
 
@@ -127,11 +129,11 @@ def _unique_object(pairs):
 
 class ProfileBook:
     """Explicit assignments by stable serial or attachment; no hardware guessing."""
-    def __init__(self, document=None):
+    def __init__(self, document=None, base=None):
         document = {} if document is None else deepcopy(document)
         if not isinstance(document, dict) or set(document) - {'default', 'profiles', 'boards', 'ports'}:
             raise ValueError('invalid profile configuration structure')
-        self._base = BoardProfile.from_env()
+        self._base = BoardProfile.from_env() if base is None else base
         self.default = document.get('default', 'default')
         self.profiles = document.get('profiles', {})
         self.boards = document.get('boards', {})

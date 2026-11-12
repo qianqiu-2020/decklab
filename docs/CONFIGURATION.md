@@ -1,5 +1,54 @@
 # Host and board configuration
 
+## Web settings, export and import
+
+Open **系统配置 / System settings** using the primary Web credential. The form
+covers all host settings below, with JSON editors for `profiles`, `hardware`,
+`flash` and the fixed Agent-token map. Embedded documents take precedence over
+their file paths. Saving/importing configuration never executes hardware
+commands, identifies a board, or changes a board's password.
+
+1. Edit fields or import a version-1 `decklab-settings` JSON package. Import
+   validates and stages a patch; omitted keys retain existing values. Explicit
+   `{}` clears a document's assignments. Review paths, board assignments and
+   helper commands before saving.
+2. Choose **预览修改**, then **保存配置**. Revision checks reject concurrent edits.
+   Invalid imports and previews do not modify the saved file.
+3. Choose **重启并应用**. The page distinguishes saved and active revisions.
+   Control-only changes preserve the collector. Collector changes close SSH
+   sessions and briefly interrupt terminals; the existing process re-executes
+   only after closing its serial readers. Active tasks, flash/recovery holds,
+   concurrent writes, console operations and input reservations block activation.
+   Release them and retry. Changed addresses/passwords require reopening with
+   the new address/credential. Activation failures remain visible on GET.
+
+Settings are stored privately in `<launch SERIALD_BASE>/web-settings.json`
+(mode 0600 on Unix). They override the launch environment and listener arguments
+after restart. The original configuration anchor remains fixed even if Web
+settings change `BASE`. Changing data directories does **not** migrate archives,
+registry credentials or grants; retain the original launch directory for future
+launches. Corrupt settings fail startup rather than silently dropping access
+controls. Offline recovery: stop the service, preserve and repair the file or
+move it aside, then restart with the original launch environment. Embedded JSON
+is materialized privately under `<launch SERIALD_BASE>/web-settings/<revision>/`
+for existing loaders. Source configuration files and `/etc/seriald/seriald.env`
+are not overwritten.
+
+**导出分享配置** hides password fields and actor tokens as `{"$redacted":true}`.
+Import preserves the target's existing value at that field; a hidden new field
+without an existing value must be supplied. Review custom command strings and
+positional helper arguments for credentials before sharing. **导出含密钥备份**
+explicitly includes private values. Exports do not include board identity/history,
+verified per-device SSH credentials or issued access grants; those remain in
+existing registry/grant stores. This export is not a full service-data backup.
+
+The browser-preferences checkbox includes only language and personal device
+order. They remain in the current browser's local storage; other browsers keep
+their own preferences. No passwords/tokens are stored there. Existing device
+pages remain the Web entry for labels, port-specific probes and verified SSH
+settings.
+
+
 Configuration is read when the relevant control or collector process starts. Linux packages use
 `/etc/seriald/seriald.env`; Windows launchers inherit environment variables.
 `SERIALD_BASE` selects runtime storage (the checkout root for source runs).
@@ -15,18 +64,23 @@ from two collectors.
 | --- | --- |
 | `SERIALD_BASE` | Source Linux checkout root; Windows entry point uses adjacent `data/`; installed Ubuntu uses `/data/seriald-data` |
 | `SERIALD_STATIC` | Source assets or frozen executable assets; normally leave unchanged |
-| `SERIALD_PORT` | 8898; explicit launcher arguments override it |
+| `SERIALD_PORT` | 8898; launch arguments apply until overridden by saved Web settings |
 | `SERIALD_BIND` | Source/control default `127.0.0.1`; Ubuntu package and Windows LAN launchers select `0.0.0.0` |
 | `SERIALD_SOCKET` | Linux source `<base>/seriald.sock`; Ubuntu `/run/seriald/collector.sock`; ignored by Windows loopback collector |
 | `SERIALD_HANDOFF` | `<base>/collector-handoff.json`; short-lived same-host connection handoff |
 | `SERIALD_BY_PATH` | Linux `/dev/serial/by-path`; Windows `Windows COM` display value, discovery uses pySerial |
 | `SERIALD_RESCUE_BIN` | Linux source `/usr/local/sbin/seriald-rescue.sh`; Ubuntu `/usr/libexec/seriald/rescue.sh`; no Windows USB helper |
 | `SERIALD_AUTH_TOKEN` | Empty: open access. Nonempty: primary Basic/Bearer credential; browser Basic username is `seriald` |
-| `SERIALD_AGENT_TOKENS_FILE` | Linux control-only optional JSON actor/token map; requires primary authentication; not loaded by Windows entry point |
+| `SERIALD_AGENT_TOKENS_FILE` | Optional JSON actor/token map; requires primary authentication; Linux and Windows |
 | `SERIALD_TRUST_LOOPBACK` | Windows-only, exact value `1` allows credential-free loopback access; LAN authenticated launcher enables it. Linux control does not read it |
 | `SERIALD_MCP_ENABLED` | Enabled by default; Debian 1.7.1+ and Windows packages include the server runtime. `0` disables the integrated `/mcp` endpoint |
 | `SERIALD_MCP_PYTHON` | Advanced/source setting: absolute Python executable containing the MCP SDK. An explicit value overrides the Debian bundled worker; normally leave unset. Windows frozen packages use their own MCP entry point. No client installation is required |
 | `SERIALD_MCP_ALLOWED_HOSTS` | Optional comma-separated public `hostname:port` authorities for MCP behind a proxy; local hostnames, loopback and local LAN addresses are discovered automatically. A port wildcard such as `decklab.example:*` is allowed; a wildcard hostname is not |
+| `SERIALD_UI_LANGUAGE` | auto, en or zh-CN; auto follows the installer; browser choice takes precedence |
+| `SERIALD_SHARE_SECONDS` | 86400; new webpage share-link lifetime, 60–2592000 seconds |
+| `SERIALD_SCROLLBACK` | 262144; real-time per-stream cache bytes, 4096–16777216; byte cursors stay absolute |
+| `SERIALD_SSH_LIMIT` | 8; per-device SSH session limit, 1–128 |
+| `SERIALD_SSH_IDLE` | 1800; idle SSH expiry, 60–86400 seconds |
 
 Set host/auth variables before starting the entry point. Restart control to apply
 Linux listener/auth/MCP changes; restart collector for collector configuration.

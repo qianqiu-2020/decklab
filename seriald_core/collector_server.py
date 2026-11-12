@@ -5,7 +5,8 @@ import signal
 import socket
 import threading
 
-from .config import BASE, HANDOFF, LOG_ROOT, SOCKET
+from .config import BASE, HANDOFF, LOG_ROOT, SOCKET, SETTINGS, LAUNCH_ENVIRONMENT
+from .settings_restart import configure_collector, reexecute
 from .devices import Manager
 from .handoff import consume as consume_handoff, write as write_handoff
 from .httpd import BoundedThreadingUnixServer
@@ -15,9 +16,12 @@ from .profiles import ProfileBook
 
 
 def main():
+    if SETTINGS.path.exists():
+        SETTINGS.validate(SETTINGS.effective())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--socket', default=SOCKET)
     args = parser.parse_args()
+    args.socket = SETTINGS.read().get('environment', {}).get('SOCKET', args.socket)
     profiles = ProfileBook.from_env()
     os.makedirs(BASE, exist_ok=True)
     os.makedirs(LOG_ROOT, exist_ok=True)
@@ -39,6 +43,7 @@ def main():
         store.recover_sessions()
         manager = Manager(store, consume_handoff(HANDOFF), profiles=profiles)
         httpd.manager = manager
+        configure_collector(httpd, SETTINGS)
         scanner = threading.Thread(target=manager.loop, daemon=True)
         scanner.start()
         signal.signal(signal.SIGTERM,
@@ -60,6 +65,8 @@ def main():
         os.unlink(args.socket)
     except FileNotFoundError:
         pass
+    if httpd.restart_requested:
+        reexecute(LAUNCH_ENVIRONMENT)
 
 
 if __name__ == '__main__':

@@ -366,6 +366,44 @@
     '未检测到下载模式设备，请检查 USB 数据线和下载模式。': 'No download-mode device detected. Check the USB data cable and download mode.',
     '检测到多个下载设备，请按 USB 位置选择本次刷写目标。': 'Multiple download devices detected. Choose the target by its USB location.'
   });
+  Object.assign(dictionary, {
+    '系统配置': 'System settings', '访问与 MCP': 'Access and MCP',
+    '串口与探测': 'Serial and probing', '登录默认值': 'Login defaults',
+    '日志与传输': 'Logs and transfers', '服务路径': 'Service paths',
+    '默认界面语言': 'Default language', '实时输出缓存（字节）': 'Live output cache (bytes)',
+    '每设备 SSH 会话上限': 'SSH sessions per device', 'SSH 空闲超时（秒）': 'SSH idle timeout (seconds)',
+    '网页分享有效期（秒）': 'Web share lifetime (seconds)', '监听端口': 'Listening port',
+    '监听地址': 'Listening address', '主访问密码': 'Primary access password',
+    '信任本机访问（Windows）': 'Trust loopback access (Windows)', '启用服务端 MCP': 'Enable server MCP',
+    'MCP Python（留空使用内置运行时）': 'MCP Python (empty uses bundled runtime)',
+    'MCP 代理域名（逗号分隔）': 'MCP proxy authorities (comma separated)',
+    '波特率': 'Baud rate', '数据位': 'Data bits', '校验位': 'Parity', '停止位': 'Stop bits',
+    '流控': 'Flow control', '换行方式': 'Line ending', '默认探测模式': 'Default probe mode',
+    '自定义探测命令': 'Custom probe command', '允许显式配置 SSH': 'Allow explicit SSH setup',
+    'SSH 用户': 'SSH user', 'SSH 密码': 'SSH password', '串口用户': 'Console user',
+    '串口密码': 'Console password', '日志保留天数（0 为不清理）': 'Log retention days (0 keeps all)',
+    '磁盘最低剩余 MB': 'Minimum free disk MB', '磁盘最低剩余百分比': 'Minimum free disk percent',
+    '暂存文件数上限': 'Maximum staged files', '单文件上限（字节）': 'Maximum file size (bytes)',
+    '暂存总量上限（字节）': 'Total staging quota (bytes)', '暂存保留空闲（字节）': 'Staging free-space reserve (bytes)',
+    '未完成上传超时（秒）': 'Unfinished upload expiry (seconds)', '暂存保留时间（秒）': 'Staging retention (seconds)',
+    '运行数据目录': 'Runtime data directory', '页面资源目录': 'Static assets directory',
+    '采集器通信路径（Linux）': 'Collector socket (Linux)', '重启接续文件': 'Restart handoff file',
+    '串口发现目录（Linux）': 'Serial discovery directory (Linux)', 'USB 恢复工具': 'USB recovery helper',
+    'Agent 令牌文件': 'Agent token file', '板卡配置文件': 'Board profile file',
+    '硬件动作文件': 'Hardware actions file', '刷机配置文件': 'Flash bindings file',
+    '自动刷机执行器': 'Automatic flash executor', '板卡、硬件动作与 Agent 令牌（JSON）': 'Boards, hardware actions and Agent tokens (JSON)',
+    '板卡配置与分配': 'Board profiles and assignments', '硬件动作': 'Hardware actions',
+    '刷机绑定': 'Flash bindings', '固定 Agent 令牌': 'Fixed Agent tokens',
+    '导出分享配置': 'Export shareable settings', '导出含密钥备份': 'Export private backup',
+    '导入配置…': 'Import settings…', '预览修改': 'Preview changes', '保存配置': 'Save settings',
+    '重启并应用': 'Restart and apply', '清空': 'Clear',
+    '导入 / 导出包含本浏览器语言与排序': 'Include this browser’s language and order',
+    '已设置；留空保留，清空请点右侧按钮': 'Saved; leave unchanged to keep, use Clear to remove',
+    '配置已加载。': 'Settings loaded.', '正在校验配置…': 'Validating settings…',
+    '配置已保存，尚未重启生效。浏览器偏好如有导入，刷新页面后生效。': 'Settings saved; restart to apply. Refresh to apply imported browser preferences.',
+    '服务端设置由管理员共享。设备标签、探测覆盖和已验证 SSH 密码仍在各设备页面管理。左侧排序与语言只影响当前浏览器。': 'Server settings are shared by administrators. Manage labels, probe overrides and verified SSH credentials on each device page. Order and language belong to this browser.',
+    '内嵌 JSON 文档优先于文件路径；修改不会执行硬件命令。数据目录切换不会搬迁已有档案。': 'Embedded JSON overrides file paths. Editing does not run hardware commands. Changing the data directory does not migrate archives.'
+  });
   var keys = Object.keys(dictionary).sort(function (a, b) { return b.length - a.length; });
   var pattern = new RegExp(keys.map(function (key) { return key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|'), 'g');
   var ignored = '#d-term,.xterm,#d-name,#d-dev,#log-location,#ft-board,#bc-left-device,#bc-right-device,#ft-target-device,.nm:not(.pending-name),.sniff,.last:not(.empty-output),.actor,.command-chip,.bc-content,.bc-clue-text,#d-command-nav,#boot-search-matches,code,script,style,[data-i18n-ignore]';
