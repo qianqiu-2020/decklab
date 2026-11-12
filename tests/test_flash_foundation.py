@@ -1,4 +1,5 @@
 """Board-scoped durable flashing uses fake UARTs and temporary SQLite only."""
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -227,7 +228,7 @@ class FlashFoundationTests(unittest.TestCase):
         try:
             self.assertEqual(upgraded.get_ssh_credentials('LEGACY')['revision'], 3)
             self.assertEqual(upgraded.db.execute('SELECT COUNT(*) FROM flash_resource_holds').fetchone()[0], 0)
-            with sqlite3.connect(upgraded.schema_backup) as backup:
+            with closing(sqlite3.connect(upgraded.schema_backup)) as backup:
                 self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0], 7)
                 self.assertIsNone(backup.execute("SELECT name FROM sqlite_master WHERE name='flash_plans'").fetchone())
         finally:
