@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Import/export registry-managed labels and port probe overrides through the Web,
+  with connection-aware revisions, identity checks, atomic updates and audit.
+
 - Add owner-managed Web settings for all host options and board/hardware/flash
   configuration documents, with validated preview, revision-checked saving,
   redacted sharing and explicit private backups.

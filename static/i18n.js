@@ -367,6 +367,9 @@
     '检测到多个下载设备，请按 USB 位置选择本次刷写目标。': 'Multiple download devices detected. Choose the target by its USB location.'
   });
   Object.assign(dictionary, {
+    '设备标签与端口探测覆盖（JSON）': 'Device labels and port probe overrides (JSON)',
+    '预览设备偏好': 'Preview device preferences', '保存设备偏好': 'Save device preferences',
+    '导出包含设备标签与端口探测覆盖': 'Include labels and port probes in export',
     '系统配置': 'System settings', '访问与 MCP': 'Access and MCP',
     '串口与探测': 'Serial and probing', '登录默认值': 'Login defaults',
     '日志与传输': 'Logs and transfers', '服务路径': 'Service paths',

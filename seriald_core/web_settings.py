@@ -153,6 +153,8 @@ def default_environment(environment):
     env['HANDOFF'] = environment.get('SERIALD_HANDOFF', str(Path(env['BASE']) / 'collector-handoff.json'))
     env['BY_PATH'] = environment.get('SERIALD_BY_PATH', 'Windows COM' if sys.platform == 'win32'
                                      else '/dev/serial/by-path')
+    env['RESCUE_BIN'] = environment.get('SERIALD_RESCUE_BIN', '' if sys.platform == 'win32'
+                                       else DEFAULTS['RESCUE_BIN'])
     env['CONSOLE_USER'] = environment.get('SERIALD_CONSOLE_USER', env['SSH_USER'])
     env['CONSOLE_PASSWORD'] = environment.get('SERIALD_CONSOLE_PASSWORD', env['SSH_PASSWORD'])
     env['AUTO_CONFIGURE_SSH'] = environment.get('SERIALD_AUTO_CONFIGURE_SSH', '1' if env['PROBE'] == 'linux' else '0')

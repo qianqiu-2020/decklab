@@ -42,11 +42,29 @@ explicitly includes private values. Exports do not include board identity/histor
 verified per-device SSH credentials or issued access grants; those remain in
 existing registry/grant stores. This export is not a full service-data backup.
 
+Device labels and port probe overrides have their own JSON section in the same
+Web dialog. They remain in the existing registry. Choose **预览设备偏好**, then
+**保存设备偏好** to apply them immediately, separately from restart-based host
+settings. Export can optionally include them in the same package. Import stages
+each section without saving it; an invalid device section stays editable and
+does not prevent reviewing the host section. The complete package is at most
+16 MiB; host and device API requests retain their separate 2 MiB / 1 MiB limits.
+
+Device preference patches address registered boards by immutable serial and
+ports by attachment path. Unknown boards must be identified first; import never
+creates identities or links archives. Port `label` / `probe` set to `null` clears
+that override; omission preserves it. Concurrent label changes, reconnections
+or identity conflicts invalidate the preview. Busy or reserved devices and
+flash recovery holds prevent applying affected settings. Changes and audit
+entries commit in one SQLite transaction; label swaps do not move logs. Custom
+probe commands are saved only and are never executed by import. Existing
+verified SSH records retain their authentication-and-revision checks and are
+managed through the device's SSH form; templates do not restore passwords as
+already verified credentials.
+
 The browser-preferences checkbox includes only language and personal device
 order. They remain in the current browser's local storage; other browsers keep
-their own preferences. No passwords/tokens are stored there. Existing device
-pages remain the Web entry for labels, port-specific probes and verified SSH
-settings.
+their own preferences. No passwords/tokens are stored there. Device pages also retain their individual label, probe and verified SSH forms.
 
 
 Configuration is read when the relevant control or collector process starts. Linux packages use

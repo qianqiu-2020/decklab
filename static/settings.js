@@ -26,6 +26,7 @@
   var snapshot, inputs = {}, editors = {}, original, previewText = '', pendingBrowser = null;
   var dialog, status, preview, save, activate, browserBox;
   var openGeneration = 0;
+  var devicePreferences = null, preferenceEditor, preferenceSave, preferencePreview = '', preferenceStatus, includePreferences;
   function el(tag, text, parent) {
     var node = document.createElement(tag);
     if (text != null) node.textContent = text;
@@ -39,6 +40,29 @@
     var data = await response.json();
     if (!response.ok) throw new Error(data.error || '配置请求失败');
     return data;
+  }
+  async function preferenceRequest(payload) {
+    var response = await UI.fetch('/api/device-preferences', payload ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)} : undefined);
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '设备偏好请求失败');
+    return data;
+  }
+  async function previewPreferences() {
+    var config = JSON.parse(preferenceEditor.value), view = dialog;
+    var result = await preferenceRequest({action: 'preview', revision: devicePreferences.revision, configuration: config});
+    if (view !== dialog) return;
+    preferencePreview = JSON.stringify(config); preferenceSave.disabled = false;
+    preferenceStatus.textContent = '设备偏好校验通过：' + (result.changes.join('、') || '无变化') + '；保存后即时生效，不执行探测或硬件命令。';
+  }
+  async function savePreferences() {
+    var config = JSON.parse(preferenceEditor.value), view = dialog;
+    if (JSON.stringify(config) !== preferencePreview) throw new Error('设备偏好已变化，请重新预览');
+    preferenceSave.disabled = true;
+    await preferenceRequest({action: 'save', revision: devicePreferences.revision, configuration: config});
+    var fresh = await preferenceRequest();
+    if (view !== dialog) return;
+    devicePreferences = fresh; preferenceEditor.value = JSON.stringify(fresh.configuration, null, 2);
+    preferencePreview = ''; preferenceStatus.textContent = '设备偏好已保存并生效。身份、日志和已验证 SSH 凭据保持原有归属。';
   }
   function configuration() {
     var result = {version: 1, environment: {}, documents: {}};
@@ -113,23 +137,39 @@
     var result = await request({action: 'export', include_secrets: includeSecrets});
     var pack = {format: 'decklab-settings', version: 1, configuration: result.configuration};
     if (browserBox.checked) pack.browser = browserPreferences();
-    var url = global.URL.createObjectURL(new Blob([JSON.stringify(pack, null, 2) + '\n'], {type: 'application/json'}));
+    if (includePreferences.checked) pack.preferences = (await preferenceRequest()).configuration;
+    var url = global.URL.createObjectURL(new Blob([JSON.stringify(pack) + '\n'], {type: 'application/json'}));
     var anchor = el('a'); anchor.href = url; anchor.download = includeSecrets ? 'decklab-private-backup.json' : 'decklab-settings.json'; anchor.click();
     global.setTimeout(function () { global.URL.revokeObjectURL(url); }, 1000);
     message(includeSecrets ? '完整备份含密码和令牌，请私密保存。' : '已导出分享配置；密码字段与令牌已隐藏，自定义命令请自行检查。导入时隐藏字段保留目标服务现有值。');
   }
   async function importFile(file) {
-    if (!file || file.size > 2 * 1024 * 1024) throw new Error('配置文件须小于 2 MiB');
+    var view = dialog, target = snapshot, preferenceTarget = devicePreferences;
+    if (!file || file.size > 16 * 1024 * 1024) throw new Error('配置包须小于 16 MiB');
     var pack = JSON.parse(await file.text());
     if (pack.format !== 'decklab-settings' || pack.version !== 1) throw new Error('不支持的配置包格式');
     var config = pack.configuration;
-    pendingBrowser = pack.browser == null ? null : validateBrowser(pack.browser);
-    await request({action: 'preview', revision: snapshot.revision, configuration: config});
+    var proposedBrowser = pack.browser == null ? null : validateBrowser(pack.browser);
+    await request({action: 'preview', revision: target.revision, configuration: config});
+    if (view !== dialog) return;
+    var preferenceError = '';
+    if (pack.preferences != null) {
+      preferenceEditor.value = JSON.stringify(pack.preferences, null, 2); preferencePreview = ''; preferenceSave.disabled = true;
+      try {
+        if (!preferenceTarget) throw new Error('采集器尚未就绪，请稍后重新打开配置');
+        await preferenceRequest({action: 'preview', revision: preferenceTarget.revision, configuration: pack.preferences});
+      } catch (error) { preferenceError = error.message; }
+    }
+    if (view !== dialog) return;
+    pendingBrowser = proposedBrowser;
+    if (pack.preferences != null) preferenceStatus.textContent = preferenceError
+      ? preferenceError + '；设备偏好尚未保存，请编辑后重新预览。'
+      : '已导入设备偏好，尚未保存。请单独预览并保存设备偏好。';
     // Patch imports preserve omitted fields and documents, matching the server.
-    fill({version: 1, environment: Object.assign({}, snapshot.configuration.environment, config.environment), documents: Object.assign({}, snapshot.configuration.documents, config.documents)});
-    message('导入校验通过，尚未保存。请检查路径、板卡分配与硬件动作，再点“预览修改”。');
+    fill({version: 1, environment: Object.assign({}, target.configuration.environment, config.environment), documents: Object.assign({}, target.configuration.documents, config.documents)});
+    message('导入校验通过，尚未保存。请检查路径、板卡分配与硬件动作，再点“预览修改”。' + (preferenceError ? ' 设备偏好需另行修正。' : ''));
   }
-  function run(action) { return function () { Promise.resolve().then(action).catch(function (error) { message(error.message); }); }; }
+  function run(action) { return function () { var view = dialog; Promise.resolve().then(action).catch(function (error) { if (view === dialog) message(error.message); }); }; }
   function button(parent, title, action) { var node = el('button', title, parent); node.type = 'button'; node.addEventListener('click', run(action)); return node; }
   async function open() {
     var generation = ++openGeneration;
@@ -137,6 +177,10 @@
       var result = await request();
       if (generation !== openGeneration) return;
       snapshot = result;
+      var preferences = null;
+      try { preferences = await preferenceRequest(); } catch (_) { /* Host settings remain usable without a collector. */ }
+      if (generation !== openGeneration) return;
+      devicePreferences = preferences;
       if (dialog) dialog.remove();
       inputs = {}; editors = {}; pendingBrowser = null;
       dialog = el('dialog', null, document.body); dialog.className = 'settings-dialog';
@@ -166,9 +210,20 @@
       var bindings = el('details', null, body); el('summary', '板卡、硬件动作与 Agent 令牌（JSON）', bindings);
       el('p', '按现有配置格式编辑；profiles / hardware 最大 64 KiB，flash 最大 1 MiB。$redacted 标记表示保留已有密钥。清空对象 {} 表示移除该文档的全部分配。', bindings);
       Object.keys(docs).forEach(function (name) { var label = el('label', docs[name], bindings); var editor = el('textarea', null, label); editor.rows = 10; editor.spellcheck = false; editor.addEventListener('input', invalidate); editors[name] = editor; });
+      var deviceSection = el('details', null, body); el('summary', '设备标签与端口探测覆盖（JSON）', deviceSection);
+      el('p', '服务设置与设备偏好分别保存。设备偏好即时生效，不修改身份或日志归属；未知板卡须先识别。端口 label / probe 为 null 时清除该项，省略则保留。', deviceSection);
+      preferenceEditor = el('textarea', null, deviceSection); preferenceEditor.rows = 12; preferenceEditor.spellcheck = false;
+      preferenceEditor.value = preferences ? JSON.stringify(preferences.configuration, null, 2) : '';
+      preferenceEditor.disabled = !preferences;
+      preferenceEditor.addEventListener('input', function () { preferencePreview = ''; preferenceSave.disabled = true; });
+      var preferenceActions = el('div', null, deviceSection); preferenceActions.className = 'settings-actions';
+      var preferenceCheck = button(preferenceActions, '预览设备偏好', previewPreferences); preferenceCheck.disabled = !preferences;
+      preferenceSave = button(preferenceActions, '保存设备偏好', savePreferences); preferenceSave.disabled = true;
+      preferenceStatus = el('p', preferences ? '按序列号更新已登记板卡，按串口位置更新端口偏好。' : '采集器未就绪，设备偏好暂不可用。', deviceSection); preferenceStatus.setAttribute('role', 'status');
       var footer = el('div', null, dialog); footer.className = 'settings-footer';
       var browserLabel = el('label', null, footer); browserBox = el('input', null, browserLabel); browserBox.type = 'checkbox'; browserLabel.appendChild(document.createTextNode('导入 / 导出包含本浏览器语言与排序'));
       browserBox.addEventListener('change', invalidate);
+      var preferenceLabel = el('label', null, footer); includePreferences = el('input', null, preferenceLabel); includePreferences.type = 'checkbox'; includePreferences.disabled = !preferences; preferenceLabel.appendChild(document.createTextNode('导出包含设备标签与端口探测覆盖'));
       var actions = el('div', null, footer); actions.className = 'settings-actions';
       button(actions, '导出分享配置', function () { return download(false); });
       button(actions, '导出含密钥备份', function () { return download(true); });

@@ -45,7 +45,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(private['documents']['agent_tokens']['codex'], 'x' * 32)
         self.assertEqual(private['documents']['profiles']['profiles']['test']['ssh_password'], 'private')
         self.assertEqual(private['environment']['PORT'], '9000')
-        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
+        if os.name == 'posix':
+            self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
 
     def test_patch_and_explicit_empty_clear_are_distinct(self):
         self.save({'version': 1, 'environment': {'PORT': '9000'}, 'documents': {'profiles': {'profiles': {'one': {}}}}})
@@ -139,7 +140,8 @@ except SettingsError as error:
             load_environment(self.path)
             target = Path(os.environ['SERIALD_PROFILES'])
             self.assertEqual(json.loads(target.read_bytes())['profiles']['demo']['ssh_password'], 'keep-private')
-            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+            if os.name == 'posix':
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
 
     def test_duplicate_keys_and_corrupt_record_fail_closed(self):
         for value in ('{"version":1,"version":1}', '{"version":2}', '{"version":true}', '{"version":1,"environment":{"UNKNOWN":"x"}}', '{"version":1,"environment":{"AUTH_TOKEN":null}}'):
@@ -202,12 +204,14 @@ class SettingsHTTPTests(unittest.TestCase):
         token, _ = handler.grant_store.issue('all')
         share = handler._new_share()
         for credential in ('Bearer ' + token, 'Bearer ' + share):
-            for write in (False, True):
-                candidate = self.handler({'action': 'export', 'include_secrets': True}, authorization=credential)
-                candidate.grant_store = handler.grant_store
-                candidate.do_POST() if write else candidate.do_GET()
-                self.assertIn(self.result(candidate)[0], (401, 403))
-                self.assertNotIn(b'bianbu', candidate.wfile.getvalue())
+            for route in ('/api/settings', '/api/device-preferences'):
+                for write in (False, True):
+                    candidate = self.handler({'action': 'export', 'include_secrets': True}, authorization=credential)
+                    candidate.path = route
+                    candidate.grant_store = handler.grant_store
+                    candidate.do_POST() if write else candidate.do_GET()
+                    self.assertIn(self.result(candidate)[0], (401, 403))
+                    self.assertNotIn(b'bianbu', candidate.wfile.getvalue())
 
     def test_non_json_write_and_oversized_body_are_rejected(self):
         handler = self.handler({'action': 'export'}, content_type='text/plain')

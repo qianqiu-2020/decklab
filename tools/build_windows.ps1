@@ -79,6 +79,7 @@ try {
                          'test_flash_runner.py', 'test_flash_integration.py', 'test_flash_recovery.py',
                          'test_flash_targets.py', 'test_flash_discovery_review.py',
                          'test_flash_discovery_integration.py', 'test_pending_labels.py',
+                         'test_web_settings.py', 'test_settings_restart.py', 'test_device_preferences.py',
                          'test_transfer_artifacts.py', 'test_file_tasks.py',
                          'test_transfer_tasks.py', 'test_input_ownership.py',
                          'test_models.py', 'test_maintenance.py', 'test_agent_grants.py',

@@ -37,6 +37,23 @@ body of at most 2 MiB. Supported actions:
 collector coordination routes. Public control returns 404 for them. They check
 revisions and stop the existing collector before that same process re-executes.
 
+`GET /api/device-preferences` is owner-only and returns `configuration`,
+`revision` and current connection proofs. Its version-1 configuration contains
+`boards: {serial: {label}}` and `ports: {attachment: {label, probe}}`; it never
+contains SSH passwords, identity/archive data or grants. `probe` uses the
+existing `{mode, command}` schema.
+
+`POST /api/device-preferences` requires JSON of at most 1 MiB and
+`{action:"preview"|"save", revision, configuration}`. Patches preserve omitted
+entries; a port's explicit `label:null` or `probe:null` removes that override.
+Unknown board serials, duplicate final board labels and invalid probes are
+rejected. Changed configuration or connection proofs return 409; affected input
+reservations/operations or maintenance holds block writes. Preview is read-only;
+save applies immediately in the existing registry, with audit, without running
+commands, binding identities or migrating logs. Host and device sections are
+saved independently and have independent revisions. Control denies Agent and
+web-share credentials before proxying this API.
+
 ## Requests, identity and errors
 
 GET parameters go in the query string. POST bodies are UTF-8 JSON objects with

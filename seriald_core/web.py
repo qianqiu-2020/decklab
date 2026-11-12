@@ -4,6 +4,7 @@ import http.server
 import json
 import os
 import shutil
+import sqlite3
 import threading
 import time
 from urllib.parse import urlparse, parse_qs, quote
@@ -202,6 +203,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if self.manager is None:
             return self._json(503, {'error': 'collector manager unavailable'})
+
+        if route == '/api/device-preferences':
+            try:
+                from .device_preferences import snapshot
+                return self._json(200, snapshot(self.manager))
+            except (ValueError, sqlite3.Error, OSError):
+                return self._json(503, {'error': '设备偏好读取失败'})
 
         if route == '/api/diagnostics':
             return self._json(200, diagnostic_summary(self.manager, LOG_ROOT, STARTED))
@@ -415,6 +423,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(408, {'error': 'request body timed out'})
         if self.manager is None:
             return self._json(503, {'error': 'collector manager unavailable'})
+        if route == '/api/device-preferences':
+            try:
+                from .device_preferences import apply
+                from .web_settings import SettingsError
+                if payload.get('action') not in ('preview', 'save'):
+                    raise SettingsError('未知设备偏好操作')
+                result = apply(self.manager, payload.get('configuration'), payload.get('revision'),
+                               preview=payload['action'] == 'preview', client_id=payload.get('client_id', ''))
+                return self._json(200, result)
+            except (ValueError, TransactionError) as error:
+                return self._json(getattr(error, 'status', 400), {'error': str(error)})
+            except (sqlite3.Error, OSError):
+                return self._json(503, {'error': '设备偏好保存失败，事务已回滚'})
         if route == '/api/agent-revoke':
             actor = payload.get('actor')
             if not isinstance(actor, str) or not actor.startswith('shared-agent/'):

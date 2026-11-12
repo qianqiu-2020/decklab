@@ -675,6 +675,10 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return
         if route == '/api/settings':
             return self._settings_request()
+        if route == '/api/device-preferences':
+            if not self._owner_authorized():
+                return self._json(403, {'error': '只有主访问凭证可以管理设备偏好'})
+            return self._proxy()
         if route == '/api/settings-health':
             return self._json(404, {'error': 'not found'})
         if route == '/api/access':
@@ -710,6 +714,12 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         route = urlparse(self.path).path
         if route == '/api/settings':
             return self._settings_request(write=True)
+        if route == '/api/device-preferences':
+            if not self._owner_authorized():
+                return self._json(403, {'error': '只有主访问凭证可以管理设备偏好'})
+            if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
+                return self._json(400, {'error': '需要 application/json 请求'})
+            return self._proxy()
         if route == '/api/settings-activate':
             return self._json(404, {'error': 'not found'})
         if route in ('/api/agent-share', '/api/agent-revoke'):
