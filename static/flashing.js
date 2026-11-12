@@ -7,6 +7,7 @@
     var sequence = 0, busy = false, uploading = false, requestId = '', cursor = 0;
     var selectionRequestId = '', selectionPlan = null, payloadCandidates = [], inspection = null;
     var eventSequence = 0, eventLines = [], pollTimer = null, submissionUnknown = false;
+    var pendingDelete = null;
     function status(message) { $('fl-status').textContent = message; }
     function translate(value) { return global.SerialdI18n ? global.SerialdI18n.translate(value) : value; }
     function scope(selected) {
@@ -66,6 +67,7 @@
       select.value = selected || '';
     }
     function invalidatePlan() {
+      dismissDelete();
       plan = null; requestId = ''; submissionUnknown = false;
       selectionPlan = null; selectionRequestId = '';
       $('fl-preview').textContent = '';
@@ -88,6 +90,9 @@
       var uploadAvailable = !(board && board.observingTask) && (available || preparable || capabilities && capabilities.can_upload === true);
       var active = task && ['queued', 'running'].indexOf(task.state) !== -1;
       var selecting = active && awaitingSelection(task);
+      if (active || busy || uploading) dismissDelete();
+      $('fl-delete').disabled = busy || uploading || submissionUnknown || !!active || !!(board && board.observingTask)
+        || !board || !artifacts.some(function (item) { return item.id === $('fl-artifact').value; });
       if (selecting) uploadAvailable = true;
       $('fl-device').disabled = busy || !!active || uploading;
       $('fl-discover').disabled = busy || !!active || uploading;
@@ -159,6 +164,41 @@
         option.value = storage.id; option.dataset.i18nIgnore = '';
       });
       select.value = Array.from(select.children).some(function (option) { return option.value === previous; }) ? previous : '';
+    }
+    function dismissDelete() {
+      pendingDelete = null; $('fl-delete-field').hidden = true;
+      $('fl-delete-name').textContent = '';
+    }
+    function beginDelete() {
+      if (!board || busy || uploading || submissionUnknown || board.observingTask
+          || task && ['queued', 'running'].indexOf(task.state) >= 0) return;
+      var artifact = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
+      if (!artifact) return;
+      pendingDelete = { selected: board, sequence: sequence, artifact: artifact };
+      $('fl-delete-name').textContent = artifact.name + ' · ' + format(artifact.size)
+        + ' · SHA-256 ' + artifact.sha256;
+      $('fl-delete-field').hidden = false;
+    }
+    async function confirmDelete() {
+      if (!pendingDelete || busy || uploading || submissionUnknown || !same(pendingDelete.selected, pendingDelete.sequence)
+          || task && ['queued', 'running'].indexOf(task.state) >= 0) return;
+      var chosen = pendingDelete, selected = chosen.selected, seq = chosen.sequence;
+      invalidatePlan(); busy = true; updateControls(); status('正在删除镜像…');
+      try {
+        var result = await client.request('/api/artifact-delete', Object.assign(scope(selected), { id: chosen.artifact.id }));
+        if (!same(selected, seq)) return;
+        if (!result.artifact || result.artifact.id !== chosen.artifact.id || result.artifact.state !== 'deleted')
+          throw new Error('删除结果未确认，请重新检测镜像列表。');
+        artifacts = artifacts.filter(function (item) { return item.id !== chosen.artifact.id; });
+        payloadCandidates = payloadCandidates.filter(function (item) { return (item.artifact_id || item.id) !== chosen.artifact.id; });
+        if (capabilities) capabilities.artifacts = artifacts.slice();
+        artifactOptions($('fl-artifact')); renderPartitions();
+        status('镜像已删除：' + chosen.artifact.name);
+      } catch (error) {
+        if (same(selected, seq)) status(!error.result ? '删除结果未确认，请重新检测镜像列表。'
+          : error.message === 'artifact is owned by an active task'
+          ? '镜像正在被任务使用，任务结束后才能删除。' : error.message);
+      } finally { if (same(selected, seq)) { busy = false; updateControls(); } }
     }
     function selections() {
       return Array.from($('fl-partitions').children).filter(function (row) {
@@ -652,6 +692,9 @@
     });
     $('fl-mode').addEventListener('change', invalidatePlan);
     $('fl-artifact').addEventListener('change', invalidatePlan);
+    $('fl-delete').addEventListener('click', beginDelete);
+    $('fl-delete-confirm').addEventListener('click', confirmDelete);
+    $('fl-delete-cancel').addEventListener('click', dismissDelete);
     $('fl-verify').addEventListener('change', invalidatePlan);
     $('fl-target-storage').addEventListener('change', invalidatePlan);
     $('fl-upload').addEventListener('click', upload); $('fl-plan').addEventListener('click', makePlan);

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add selected-image deletion with a filename/size/SHA-256 confirmation,
+  active-task protection and stale-response isolation. Reuse artifact cleanup
+  without altering board contents or replaying requests after a lost response.
+
 - Add explicit standard NOR firmware package recovery with fixed loader steps,
   live MTD capacity checks, a mandatory second scope review after preparation,
   and bounded non-retrying writes. Show env erasure, conservative erase scope,

@@ -367,6 +367,14 @@
     '检测到多个下载设备，请按 USB 位置选择本次刷写目标。': 'Multiple download devices detected. Choose the target by its USB location.'
   });
   Object.assign(dictionary, {
+    "删除所选镜像": "Delete selected image",
+    "确认删除镜像": "Confirm image deletion",
+    "确认删除": "Confirm deletion",
+    "保留镜像": "Keep image",
+    "仅删除服务端保存的这份镜像，不影响开发板内容；任务占用中的镜像不能删除。": "Delete only this server-stored image. Board contents are unaffected. Images in use by a task cannot be deleted.",
+    "正在删除镜像…": "Deleting image…",
+    "删除结果未确认，请重新检测镜像列表。": "Deletion result is unknown. Detect again to refresh the image list.",
+    "镜像正在被任务使用，任务结束后才能删除。": "The image is in use by a task and cannot be deleted until it finishes.",
     '偏移 / 分区容量': 'Offset / partition capacity', 'MTD 映射 / env 擦除': 'MTD mapping / env erase',
     "准备环境并核对固件范围": "Prepare environment and check firmware scope",
     "预览固件写入与擦除范围": "Preview firmware write and erase scope",

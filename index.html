@@ -229,10 +229,17 @@ PasswordAuthentication yes</code></pre>
     <label class="ft-field">镜像文件<input id="fl-files" type="file" multiple></label>
     <button id="fl-upload" type="button">上传镜像</button>
     <label class="ft-field">已准备镜像<select id="fl-artifact"></select></label>
+    <button id="fl-delete" type="button" disabled>删除所选镜像</button>
     <label class="ft-field">刷写方式<select id="fl-mode"><option value="full">完整镜像</option><option value="partitions">指定分区</option></select></label>
     <label class="ft-field" id="fl-target-storage-field">原始整盘目标存储<select id="fl-target-storage"></select><small>仅用于原始磁盘镜像；刷机包始终按包内映射列出全部写入范围。</small></label>
     <label class="ft-field">回读校验<select id="fl-verify"><option value="if-supported">能力支持时校验</option><option value="required">必须回读校验</option></select></label>
   </div>
+  <fieldset id="fl-delete-field" hidden><legend>确认删除镜像</legend>
+    <p id="fl-delete-name" data-i18n-ignore style="overflow-wrap:anywhere"></p>
+    <p>仅删除服务端保存的这份镜像，不影响开发板内容；任务占用中的镜像不能删除。</p>
+    <button id="fl-delete-confirm" type="button">确认删除</button>
+    <button id="fl-delete-cancel" type="button">保留镜像</button>
+  </fieldset>
   <fieldset id="fl-partitions-field" hidden><legend>选择存储、分区和载荷</legend><div id="fl-partitions"></div></fieldset>
   <button id="fl-plan" type="button">预览写入范围</button>
   <div id="fl-preview" class="fl-preview"></div>

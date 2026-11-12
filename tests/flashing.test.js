@@ -71,6 +71,66 @@ test('flash preview pins exact storage/partition and upload reference, never a h
   assert.equal(h.get('fl-start').disabled, true, 'changing intent invalidates preview');
 });
 
+test('mirror deletion confirms the exact artifact, preserves cancelled previews and removes only its id', async () => {
+  const h = harness(); h.api.open(board);
+  h.take('/api/flash-capabilities').resolve({...capabilities,
+    artifacts: [artifact, {...artifact, id:'same-name-other-image'}]}); await drain();
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change');
+  h.get('fl-plan').click();
+  h.take('/api/flash-plan').resolve({plan:{id:'before-delete',writes:[{storage:'disk-a',partition:'rootfs',size:32}]}}); await drain();
+  h.get('fl-delete').click();
+  assert.equal(h.get('fl-delete-field').hidden, false);
+  assert.match(h.get('fl-delete-name').textContent, /image.bin.*32 B.*SHA-256/);
+  assert.ok(h.get('fl-delete-name').textContent.includes(artifact.sha256));
+  assert.equal(h.requests.some(r=>r.url==='/api/artifact-delete'), false);
+  h.get('fl-delete-cancel').click();
+  assert.equal(h.get('fl-delete-field').hidden, true);
+  assert.equal(h.get('fl-start').disabled, false, 'cancel keeps the reviewed plan');
+  h.get('fl-delete').click(); h.get('fl-delete-confirm').click();
+  assert.equal(h.get('fl-start').disabled, true, 'a deletion invalidates all cached client previews');
+  assert.equal(h.get('fl-delete').disabled, true);
+  const request=h.take('/api/artifact-delete');
+  assert.equal(request.payload.id, artifact.id); assert.equal(request.payload.serial, board.serial);
+  assert.equal('path' in request.payload, false);
+  h.get('fl-delete-confirm').click(); assert.equal(h.requests.some(r=>r.url==='/api/artifact-delete'),false);
+  request.resolve({ok:true,artifact:{...artifact,state:'deleted'}}); await drain();
+  assert.match(h.get('fl-status').textContent,/镜像已删除/);
+  assert.equal(h.get('fl-artifact').children.some(option=>option.value===artifact.id),false);
+  assert.equal(h.get('fl-artifact').children.some(option=>option.value==='same-name-other-image'),true);
+  assert.equal(h.get('fl-delete').disabled,true);
+});
+
+test('artifact deletion handles active-task races and lost responses without retrying', async () => {
+  const h=harness(); await open(h);
+  h.get('fl-delete').click();h.get('fl-delete-confirm').click();
+  h.take('/api/artifact-delete').resolve({ok:false,error:'artifact is owned by an active task'},409); await drain();
+  assert.match(h.get('fl-status').textContent,/任务结束后才能删除/);
+  assert.equal(h.get('fl-artifact').children.some(option=>option.value===artifact.id),true);
+  h.get('fl-delete').click();h.get('fl-delete-confirm').click();
+  h.take('/api/artifact-delete').reject(new Error('response lost')); await drain();
+  assert.match(h.get('fl-status').textContent,/删除结果未确认/);
+  assert.equal(h.requests.some(r=>r.url==='/api/artifact-delete'),false);
+  assert.equal(h.get('fl-start').disabled,true);
+  h.api.open(board,{id:'busy-flash',kind:'flash',state:'running',progress:{phase:'writing'},flash:{}});await drain();
+  assert.equal(h.get('fl-delete').disabled,true);
+  h.get('fl-delete').click(); assert.equal(h.get('fl-delete-field').hidden,true);
+});
+
+test('a changed artifact or device cancels delete confirmation and stale deletion cannot update the new panel', async () => {
+  const h=harness();await open(h);
+  h.get('fl-delete').click();h.get('fl-mode').emit('change');
+  assert.equal(h.get('fl-delete-field').hidden,true);
+  h.get('fl-delete-confirm').click();assert.equal(h.requests.some(r=>r.url==='/api/artifact-delete'),false);
+  h.get('fl-delete').click();h.get('fl-delete-confirm').click();const request=h.take('/api/artifact-delete');
+  h.api.open({key:'other-board',serial:'OTHER'});
+  h.take('/api/flash-capabilities').resolve({...capabilities,artifacts:[{...artifact,id:'other-artifact'}]});await drain();
+  h.take('/api/tasks').resolve({tasks:[]});await drain();
+  request.resolve({ok:true,artifact:{...artifact,state:'deleted'}});await drain();
+  assert.equal(h.get('fl-artifact').children.some(option=>option.value==='other-artifact'),true);
+  assert.doesNotMatch(h.get('fl-status').textContent,/镜像已删除/);
+});
+
 test('flash task survives panel close and refresh restores observation without replay', async () => {
   const h = harness(); await open(h); h.get('fl-plan').click();
   h.take('/api/flash-plan').resolve({plan: {id: 'plan-1', digest: 'fixed', binding_revision: 7,

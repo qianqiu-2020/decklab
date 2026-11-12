@@ -16,6 +16,7 @@ const savedSshCredentials = new Map(), sshAuthentications = [], fixtureSshSessio
 // Flash fixtures exercise the real UI only. No executor or physical board runs.
 const flashPlans = [], flashSubmissions = [], flashRecords = [], flashRecoveryPosts = [];
 const flashTargetReads = [];
+const flashDeletedArtifacts = new Set(), flashDeletePosts = [];
 const flashUsbTargets = [2, 3].map(port => ({target_id:'fixture-usb-' + port,
   target_generation:'fixture-generation-' + port, label:'模拟 USB 下载设备 ' + port,
   serial:'', mode:'loader', usb:{port_path:[1, port]}}));
@@ -65,9 +66,16 @@ const server = http.createServer((req, res) => {
           target_generation:target.target_generation,binding_revision:1,
           profile:'自动识别 · 模拟 K3 下载环境',console:null,
           executor:{provider:'goflash',node:'local',endpoint:target.target_id},
-          artifacts:[flashArtifact],storages:preparable?[]:flashStorages,
+          artifacts:[flashArtifact].filter(item=>!flashDeletedArtifacts.has(item.id)),storages:preparable?[]:flashStorages,
           modes:preparable&&!target.nor?['partitions']:['full','partitions']}});
       }); return;
+    }
+    if (u.pathname === '/api/artifact-delete') {
+      let body='';req.on('data',chunk=>{body+=chunk;});
+      req.on('end',()=>{const payload=JSON.parse(body);flashDeletePosts.push(payload);
+        if(payload.id!==flashArtifact.id){res.statusCode=404;return json({error:'fixture artifact missing'});}
+        flashDeletedArtifacts.add(payload.id);json({ok:true,artifact:{...flashArtifact,state:'deleted'}});
+      });return;
     }
     if (u.pathname === '/api/flash-selection') {
       let body = ''; req.on('data', chunk => {body += chunk;});
@@ -948,6 +956,33 @@ let chrome, ws;
   for(let n=0;n<40 && flashRecords[0].flash.write_result!=='writing';n++)await delay(50);
   assert.equal(flashRecords[0].flash.write_result,'writing');
   assert.equal(flashSubmissions.length,norSubmissions,'final confirmation continues the same task');
+  // Deletion touches this fixture's in-memory artifact list only.
+  await evaluate('document.querySelector("#fl-close").click()');flashRecords.splice(0);
+  await evaluate('document.querySelector("#b-flash-discover").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length===3');n++)await delay(50);
+  await evaluate('document.querySelector("#fl-device").value="fixture-usb-3";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-artifact").options.length===2');n++)await delay(50);
+  await evaluate('document.querySelector("#fl-artifact").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-artifact").dispatchEvent(new Event("change"));document.querySelector("#fl-delete").click()');
+  assert.equal(await evaluate('document.querySelector("#fl-delete-field").hidden'),false);
+  assert.ok(await evaluate('document.querySelector("#fl-delete-name").textContent.includes("模拟镜像")'));
+  assert.ok(await evaluate('document.querySelector("#fl-delete-name").textContent.includes("SHA-256")'));
+  assert.equal(flashDeletePosts.length,0);
+  await evaluate('document.querySelector("#fl-delete-field").scrollIntoView({block:"center"})');
+  const deleteMobileShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-image-delete-mobile-fixture.png'),Buffer.from(deleteMobileShot.data,'base64'));
+  assert.ok(await evaluate('(()=>{const d=document.querySelector("#flash-dialog"),r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&d.scrollWidth<=d.clientWidth+1;})()'),'image delete confirmation must fit mobile');
+  await evaluate('document.querySelector("#fl-delete-cancel").click()');
+  assert.equal(flashDeletePosts.length,0,'cancel never removes an image');
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  await evaluate('document.querySelector("#fl-delete").click();document.querySelector("#fl-delete-field").scrollIntoView({block:"center"})');
+  const deleteShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-image-delete-fixture.png'),Buffer.from(deleteShot.data,'base64'));
+  await evaluate('document.querySelector("#fl-delete-confirm").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-status").textContent.includes("镜像已删除")');n++)await delay(50);
+  assert.equal(flashDeletePosts.length,1);assert.equal(flashDeletePosts[0].id,flashArtifact.id);
+  assert.equal(await evaluate('document.querySelector("#fl-artifact").options.length'),1);
+  assert.equal(await evaluate('document.querySelector("#fl-delete").disabled'),true);
+  assert.equal(await evaluate('document.querySelector("#fl-plan").disabled'),true);
   assert.deepEqual(errors,[]);
   console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing, server-remembered SSH credentials and offline-board flash preview/task recovery (isolated simulated fixtures).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
