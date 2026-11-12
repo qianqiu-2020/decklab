@@ -40,6 +40,30 @@
       selected.observingTask = true;
     }
     function same(selected, seq) { return board === selected && sequence === seq; }
+    function downloadReference(selected, value) {
+      try {
+        if (!global.sessionStorage) return null;
+        var key = 'decklab-image-download:' + (selected.target_id || selected.serial || selected.key);
+        if (value === undefined) return global.sessionStorage.getItem(key);
+        if (value) global.sessionStorage.setItem(key, value);
+        else global.sessionStorage.removeItem(key);
+      } catch (_) { /* A private browser may disable storage; backend tasks still persist. */ }
+      return null;
+    }
+    async function resumeDownload(selected, seq) {
+      var current = downloadReference(selected);
+      if (!current || task && ['queued', 'running'].includes(task.state)) return;
+      try {
+        var result = await client.request('/api/task?id=' + encodeURIComponent(current));
+        if (!same(selected, seq) || task && ['queued', 'running'].includes(task.state)) return;
+        if (!result.task || result.task.id !== current || result.task.kind !== 'image-download') {
+          downloadReference(selected, null); return;
+        }
+        downloadTask = result.task;
+        busy = true; uploading = true; updateControls();
+        watchDownload(selected, seq, downloadTask);
+      } catch (_) { if (same(selected, seq)) downloadReference(selected, null); }
+    }
     function format(size) { return options.formatBytes(size); }
     function id() {
       if (global.crypto && global.crypto.getRandomValues) {
@@ -111,10 +135,10 @@
       $('fl-url').disabled = busy || uploading || !!active;
       $('fl-url-sha256').disabled = busy || uploading || !!active;
       $('fl-download-cancel').hidden = !downloadTask || !['queued', 'running'].includes(downloadTask.state);
-      $('fl-plan').disabled = busy || !!active || !!(board && board.observingTask)
+      $('fl-plan').disabled = busy || uploading || !!active || !!(board && board.observingTask)
         || !(available || preparable) || !$('fl-artifact').value;
       $('fl-plan').textContent = preparable ? '预览刷机准备步骤' : '预览写入范围';
-      $('fl-start').disabled = busy || !!active || !plan || submissionUnknown;
+      $('fl-start').disabled = busy || uploading || !!active || !plan || submissionUnknown;
       $('fl-start').textContent = plan && plan.confirm_after_prepare && plan.ready === false ? '准备环境并核对固件范围' : prepareOnly(plan) ? '准备刷机环境并读取布局' : '开始刷写';
       $('fl-cancel').disabled = !active || task.cancel_requested;
       $('fl-partitions-field').hidden = $('fl-mode').value !== 'partitions' && (!selecting || fullConfirmation());
@@ -267,6 +291,7 @@
         $('fl-verify').value = 'if-supported';
       }
       artifacts = (capabilities.artifacts || []).slice(); artifactOptions($('fl-artifact'));
+      resumeDownload(board, sequence);
       renderPartitions(); renderStorages();
       var modes = preparationPending() ? capabilities.modes || ['partitions'] : capabilities.modes || ['full', 'partitions'];
       Array.from($('fl-mode').children).forEach(function (option) { option.disabled = modes.indexOf(option.value) < 0; });
@@ -614,6 +639,7 @@
       try {
         var result = await client.request('/api/task?id=' + encodeURIComponent(current.id));
         if (!same(selected, seq) || !downloadTask || downloadTask.id !== current.id) return;
+        if (!result.task || result.task.id !== current.id) throw new Error('下载任务响应与请求不匹配');
         downloadTask = result.task;
         var progress = downloadTask.progress || {};
         $('fl-progress').max = progress.total || Math.max(1, progress.done || 0);
@@ -624,6 +650,7 @@
           return;
         }
         uploading = false; busy = false; updateControls();
+        downloadReference(selected, null); downloadRequest = null;
         if (downloadTask.state !== 'completed') throw new Error(downloadTask.error || '镜像下载未完成');
         var artifact = (downloadTask.result || {}).artifact;
         if (!artifact || artifact.state !== 'ready') throw new Error('镜像尚未准备好');
@@ -651,7 +678,7 @@
         var result = await client.request('/api/image-download', Object.assign(scope(selected), {
           url: url, sha256: sha, request_id: downloadRequest.id, client_id: options.clientId || '' }));
         if (!same(selected, seq)) return;
-        downloadTask = result.task; updateControls();
+        downloadTask = result.task; downloadReference(selected, downloadTask.id); updateControls();
         watchDownload(selected, seq, downloadTask);
       } catch (error) {
         if (same(selected, seq)) { busy = false; uploading = false; updateControls(); status(error.message + '；重试将查询原请求。'); }

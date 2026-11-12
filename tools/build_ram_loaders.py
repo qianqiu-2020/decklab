@@ -58,13 +58,12 @@ def main():
                 command = ['make', 'O=' + str(build), 'CROSS_COMPILE=' + args.cross_compile]
                 subprocess.run(command + ['k3_defconfig'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
                 subprocess.run([str(source / 'scripts/config'), '--file', str(build / '.config'),
-                    '-e', 'DECKLAB_RAM_ONLY_LOADER', '-d', 'DDR_TRAINING_SAVE_RESTORE'], check=True)
+                    '-e', 'DECKLAB_RAM_ONLY_LOADER'], check=True)
                 subprocess.run(command + ['olddefconfig'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
                 configuration = (build / '.config').read_text()
-                if ('CONFIG_DECKLAB_RAM_ONLY_LOADER=y\n' not in configuration
-                        or 'CONFIG_DDR_TRAINING_SAVE_RESTORE=y\n' in configuration):
-                    raise RuntimeError('RAM-only configuration was not applied')
                 (args.output / 'CONFIGURATION.txt').write_text(configuration)
+                if 'CONFIG_DECKLAB_RAM_ONLY_LOADER=y\n' not in configuration:
+                    raise RuntimeError('RAM-only configuration was not applied')
                 subprocess.run(command + ['-j%d' % args.jobs, 'u-boot.bin'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
                 disassembly = subprocess.check_output([args.cross_compile + 'objdump', '-d',
                     '--disassemble=board_late_init', str(build / 'u-boot')], text=True)
@@ -95,7 +94,8 @@ def main():
             (args.output / 'BUILD-INFO.txt').write_text('DeckLab K3 RAM-only download environment\n' +
                 'U-Boot source commit: ' + commit + '\nPatch SHA-256: ' + digest(patch) + '\n' +
                 'FSBL SHA-256: ' + args.fsbl_sha256 + '\nToolchain prefix: ' + args.cross_compile + '\n' +
-                'Build: k3_defconfig + DECKLAB_RAM_ONLY_LOADER=y + DDR_TRAINING_SAVE_RESTORE=n, u-boot.bin, compressed multi-DTB FIT\n' +
+                'Build: k3_defconfig + DECKLAB_RAM_ONLY_LOADER=y, u-boot.bin, compressed multi-DTB FIT\n' +
+                'DDR training policy: normal choice retained; persistence excluded by the RAM-only late-init loop.\n' +
                 'Loaders are RAM-only, never partition payloads. NOR map selection does not save env or write storage.\n' +
                 'Compiled/offline checked; no physical-board acceptance implied.\n')
         print(args.output)

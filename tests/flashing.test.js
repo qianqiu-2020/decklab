@@ -18,7 +18,7 @@ class Element {
   show() { this.open = true; }
   close() { this.open = false; }
 }
-function harness() {
+function harness(storage) {
   const elements = new Map(), requests = [], timers = new Map(); let timer = 0;
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('fl-mode').value = 'full'; get('fl-verify').value = 'if-supported';
@@ -26,6 +26,8 @@ function harness() {
     btoa: value => Buffer.from(value, 'binary').toString('base64'),
     setTimeout: fn => { timers.set(++timer, fn); return timer; }, clearTimeout: id => timers.delete(id),
     crypto: {getRandomValues: values => values.fill(++timer)}};
+  if (storage) sandbox.sessionStorage = {getItem:key => storage.get(key) || null,
+    setItem:(key,value) => storage.set(key,value), removeItem:key => storage.delete(key)};
   sandbox.window = sandbox;
   vm.runInNewContext(source, sandbox);
   const api = sandbox.SerialdFlashing.create({byId: get, formatBytes: value => value + ' B',
@@ -623,6 +625,29 @@ test('lost URL submission reuses its original request and cancellation does not 
   again.resolve({task:{id:'download-original', state:'running'}}); await drain();
   h.get('fl-download-cancel').click();
   assert.equal(h.take('/api/task-cancel').payload.id, 'download-original');
+});
+
+test('refresh resumes the same backend image download without submitting another import', async () => {
+  const storage = new Map(), first = harness(storage); await open(first);
+  first.get('fl-url').value = 'https://images.example/opensbi.itb'; first.get('fl-download').click();
+  first.take('/api/image-download').resolve({task:{id:'persistent-image-task', kind:'image-download', state:'running'}}); await drain();
+  const refreshed = harness(storage); await open(refreshed);
+  const resumed = refreshed.take('/api/task?id=persistent-image-task');
+  resumed.resolve({task:{id:'persistent-image-task', kind:'image-download', state:'running'}}); await drain();
+  assert.equal(refreshed.requests.some(entry => entry.url === '/api/image-download'), false);
+  refreshed.take('/api/task?id=persistent-image-task').resolve({task:{id:'persistent-image-task', kind:'image-download', state:'completed',
+    result:{artifact:{id:'restored-image',name:'opensbi.itb',size:16,sha256:'b'.repeat(64),state:'ready'}}}}); await drain();
+  assert.equal(refreshed.get('fl-artifact').value,'restored-image');
+  assert.equal(storage.size,0);
+});
+
+test('a confirmed failed import permits an explicit new download request', async () => {
+  const h = harness(); await open(h); h.get('fl-url').value = 'https://images.example/opensbi.itb';
+  h.get('fl-download').click(); const first = h.take('/api/image-download');
+  first.resolve({task:{id:'failed-image',state:'running'}}); await drain();
+  h.take('/api/task?id=failed-image').resolve({task:{id:'failed-image',state:'failed',error:'fixture download failure'}}); await drain();
+  h.get('fl-download').click(); const next = h.take('/api/image-download');
+  assert.notEqual(next.payload.request_id, first.payload.request_id);
 });
 
 (async () => {

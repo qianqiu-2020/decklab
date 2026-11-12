@@ -66,7 +66,7 @@
     var $ = options.byId, client = createClient(options.fetch), request = client.request;
     var selection = '', offset = 0, sequence = 0;
     var names = { identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH', 'file-copy': '板间复制',
-                  'file-upload': '上传文件', 'file-download': '下载文件',
+                  'file-upload': '上传文件', 'file-download': '下载文件', 'image-download': '下载刷机镜像',
                   'hardware-power-on': '硬件上电', 'hardware-power-off': '硬件断电',
                   'hardware-reset': '硬件复位', 'hardware-flash': '外部刷机', flash: '刷机', 'flash-inspect': '刷机预检' };
     function scope(ctx) { return ctx ? ctx.serial ? 'serial:' + ctx.serial
@@ -103,7 +103,8 @@
           progress.setAttribute('aria-label', '任务进度'); main.appendChild(progress);
         }
         var output = document.createElement('code');
-        output.textContent = task.error || task.result && (task.result.sid ? '会话 ' + task.result.sid
+        output.textContent = task.error || task.result && (task.result.artifact ? task.result.artifact.name + ' · ' + task.result.artifact.size + ' B'
+          : task.result.sid ? '会话 ' + task.result.sid
           : task.result.serial ? 'SN ' + task.result.serial
           : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || task.progress.phase || '';
         main.appendChild(output); row.appendChild(main);
