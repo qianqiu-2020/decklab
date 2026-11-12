@@ -36,6 +36,28 @@ glibc 2.35 为基线，包含私有 Python、MCP SDK 与全部 Python 依赖；�
 与目标架构一致。未传 `--runtime` 时仅查找本机架构的默认目录；缺失或校验失败
 会停止构建，不允许发布缺少 MCP 的薄包。
 
+### 本地刷机测试包
+
+仅供本机安装测试时，可显式包含已经构建的同架构 `decklab-flash` 执行器：
+
+```sh
+python3 tools/build_deb.py --version '1.7.5~flash1' \
+  --runtime build/linux-mcp/amd64/runtime \
+  --flash-executor /path/to/decklab-flash --output dist/local-flash
+```
+
+运行时仍须按本次源码重新生成并通过校验。构建器不执行刷机程序；它核对 ELF 架构，
+将程序安装到 `/usr/libexec/seriald/decklab-flash`，并记录文件摘要、大小和架构于
+`/usr/share/doc/seriald/flash-executor.json`。该测试包增加系统 `libusb-1.0-0` 依赖。
+不传 `--flash-executor` 的默认构建保持原行为，不包含刷机执行器。
+
+安装测试包不会自动登记板卡或启用刷机。须复制包内
+`/usr/share/doc/seriald/examples/flash.json` 到管理员配置目录，按
+[硬件扩展说明](HARDWARE_EXTENSIONS.md#本机刷机流程)核实并填写板卡序列号、USB 接线及板型能力；
+示例中的执行器路径已指向包内文件。然后在 `/etc/seriald/seriald.env` 显式设置
+`SERIALD_FLASH=/etc/seriald/flash.json`，再重启 collector 使配置生效。
+本地测试包不打发布标签、不上传 GitHub，也不修改 Latest；要公开分发执行器时另行确认其来源与许可。
+
 CI 先复用 runner 已有的 BusyBox/Vim，缺失时才安装；真实 ash/PTY 和 Vim 检查仍执行。
 Ubuntu 包任务通过 `tools/ci_ubuntu_network.py --repair` 检查软件源解析。该工具默认只诊断；
 修复模式只允许在 GitHub-hosted 临时 runner 中运行，先核对普通用户与 `_apt` 的解析，

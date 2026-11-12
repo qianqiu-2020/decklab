@@ -1,6 +1,7 @@
 """Extract the deb and run it against an empty fake serial directory, never install it."""
 from contextlib import redirect_stdout
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,7 @@ from urllib.request import Request, urlopen
 
 from seriald_core.storage import Store
 from seriald_core import __version__
-from tools.build_deb import build, collector_build_id
+from tools.build_deb import build, collector_build_id, flash_executor_metadata
 from tools import build_linux_mcp as mcp_builder
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,48 @@ class PackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(ValueError, 'Prepared MCP runtime is required'):
                 build(Path(temporary) / 'dist', __version__, runtime=Path(temporary) / 'missing')
+
+    def test_optional_flash_executor_is_packaged_with_dependency_digest_and_inert_example(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = self.prepare_runtime_fixture(root)
+            executor = root / 'decklab-flash'
+            executor.write_bytes(b'\x7fELF\x02\x01' + bytes(12) + struct.pack('<H', 62) + b'not-executed-fixture')
+            with mock.patch.object(mcp_builder, 'notice_module'):
+                package = build(root / 'dist', '1.7.5~local1', runtime=runtime, flash_executor=executor)
+            extracted, control = root / 'extract', root / 'control'
+            subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True)
+            subprocess.run(['dpkg-deb', '--control', str(package), str(control)], check=True)
+            binary = extracted / 'usr/libexec/seriald/decklab-flash'
+            self.assertEqual(binary.read_bytes(), executor.read_bytes())
+            self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
+            self.assertIn(', libusb-1.0-0\n', (control / 'control').read_text())
+            metadata = json.loads((extracted / 'usr/share/doc/seriald/flash-executor.json').read_text())
+            self.assertEqual(metadata['sha256'], hashlib.sha256(executor.read_bytes()).hexdigest())
+            self.assertEqual(metadata['size'], executor.stat().st_size)
+            self.assertEqual(metadata['architecture'], 'amd64')
+            self.assertNotIn(str(root), json.dumps(metadata))
+            example = json.loads((extracted / 'usr/share/doc/seriald/examples/flash.json').read_text())
+            self.assertEqual(list(example['boards']), ['YOUR-REGISTERED-BOARD-SERIAL'])
+            self.assertEqual(example['boards']['YOUR-REGISTERED-BOARD-SERIAL']['flash']['argv'],
+                             ['/usr/libexec/seriald/decklab-flash'])
+            environment = (extracted / 'etc/seriald/seriald.env').read_text()
+            self.assertFalse(any(line.startswith('SERIALD_FLASH=') for line in environment.splitlines()))
+
+    def test_optional_flash_executor_rejects_wrong_architecture_links_and_non_elf(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executor = root / 'wrong-machine'
+            executor.write_bytes(b'\x7fELF\x02\x01' + bytes(12) + struct.pack('<H', 183))
+            with self.assertRaisesRegex(ValueError, 'architecture differs'):
+                flash_executor_metadata(executor, 'amd64')
+            alias = root / 'alias'
+            alias.symlink_to(executor)
+            with self.assertRaisesRegex(ValueError, 'non-symlink'):
+                flash_executor_metadata(alias, 'arm64')
+            executor.write_bytes(b'#!/bin/sh\necho unsafe\n')
+            with self.assertRaisesRegex(ValueError, 'architecture differs'):
+                flash_executor_metadata(executor, 'amd64')
 
     def test_collector_build_id_ignores_control_but_tracks_collector(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -90,6 +133,8 @@ class PackageTests(unittest.TestCase):
             worker = packaged_runtime / mcp_builder.EXECUTABLE
             self.assertEqual(worker.read_bytes(), (runtime / mcp_builder.EXECUTABLE).read_bytes())
             self.assertEqual(worker.stat().st_mode & 0o777, 0o755)
+            self.assertFalse((extracted / 'usr/libexec/seriald/decklab-flash').exists())
+            self.assertNotIn('libusb-1.0-0', (root / 'control/control').read_text())
             for script in ('preinst', 'postinst', 'prerm', 'postrm'):
                 subprocess.run(['sh', '-n', str(root / 'control' / script)], check=True)
             preinst = (root / 'control/preinst').read_text()

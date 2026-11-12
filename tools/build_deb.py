@@ -2,9 +2,12 @@
 """Build a native Ubuntu package from a prepared MCP runtime, entirely offline."""
 import argparse
 import hashlib
+import json
 import platform
 from pathlib import Path
 import shutil
+import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -13,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from seriald_core import __version__
 from tools.package_docs import publish as publish_docs
-from tools.build_linux_mcp import validate_runtime
+from tools.build_linux_mcp import MACHINES, validate_runtime
 
 
 def collector_build_id(root=ROOT):
@@ -34,7 +37,32 @@ def collector_build_id(root=ROOT):
     return digest.hexdigest()
 
 
-def build(output, version, runtime=None):
+def flash_executor_metadata(path, architecture):
+    """Check an explicit local binary without running it or selecting hardware."""
+    path = Path(path)
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError('flash executor must be a regular non-symlink file')
+    with path.open('rb') as source:
+        header = source.read(20)
+        if (len(header) != 20 or header[:4] != b'\x7fELF' or header[4:6] != b'\x02\x01'
+                or struct.unpack('<H', header[18:20])[0] != MACHINES[architecture][1]):
+            raise ValueError('flash executor ELF architecture differs from the package runtime')
+        digest = hashlib.sha256(header)
+        size = len(header)
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+    return {'schema': 1, 'architecture': architecture,
+            'installed_path': '/usr/libexec/seriald/decklab-flash',
+            'sha256': digest.hexdigest(), 'size': size,
+            'origin': 'explicit-local-build-input'}
+
+
+def build(output, version, runtime=None, flash_executor=None):
     if runtime is None:
         architecture = {'x86_64': 'amd64', 'aarch64': 'arm64',
                         'riscv64': 'riscv64'}.get(platform.machine())
@@ -45,6 +73,7 @@ def build(output, version, runtime=None):
                          '--arch <amd64|arm64> first, then pass --runtime PATH.')
     descriptor = validate_runtime(runtime)
     architecture = descriptor['architecture']
+    executor_metadata = flash_executor_metadata(flash_executor, architecture) if flash_executor is not None else None
     output.mkdir(parents=True, exist_ok=True)
     artifact = output.resolve() / ('seriald_%s_%s.deb' % (version, architecture))
     with tempfile.TemporaryDirectory(prefix='seriald-deb-') as folder:
@@ -91,12 +120,27 @@ def build(output, version, runtime=None):
                 text = path.read_text().replace('/data/seriald/serialctl.py', '/usr/lib/seriald/serialctl.py').replace('/data/seriald/docs/AGENT_ACCESS.md', '/usr/share/doc/seriald/AGENT_ACCESS.md')
                 write('usr/share/seriald/skills/seriald-board/' + str(path.relative_to(ROOT / 'skills/seriald-board')), text)
         publish_docs(stage / 'usr/share/doc/seriald', 'linux')
+        if executor_metadata is not None:
+            target = stage / executor_metadata['installed_path'].lstrip('/')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(flash_executor, target)
+            target.chmod(0o755)
+            if flash_executor_metadata(target, architecture) != executor_metadata:
+                raise ValueError('flash executor changed while preparing the package')
+            write('usr/share/doc/seriald/flash-executor.json',
+                  json.dumps(executor_metadata, sort_keys=True, indent=2) + '\n')
+            example = stage / 'usr/share/doc/seriald/examples/flash.json'
+            configuration = json.loads(example.read_text())
+            for board in configuration['boards'].values():
+                board['flash']['argv'] = [executor_metadata['installed_path']]
+            example.write_text(json.dumps(configuration, indent=2) + '\n')
         preinst = (ROOT / 'packaging/preinst').read_text().replace('@COLLECTOR_BUILD_ID@', build_id)
         write('DEBIAN/preinst', preinst, 0o755)
         for name in ('postinst', 'prerm', 'postrm'):
             put('packaging/' + name, 'DEBIAN/' + name, 0o755)
         write('DEBIAN/conffiles', '/etc/seriald/seriald.env\n/etc/sudoers.d/seriald-rescue\n')
-        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture))
+        flash_dependency = ', libusb-1.0-0' if executor_metadata is not None else ''
+        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency))
         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)
     return artifact
 
@@ -106,5 +150,7 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, default=ROOT / 'dist')
     parser.add_argument('--version', default=__version__)
     parser.add_argument('--runtime', type=Path, help='prepared architecture-specific MCP runtime')
+    parser.add_argument('--flash-executor', type=Path,
+                        help='optional local decklab-flash ELF to include for private testing')
     args = parser.parse_args()
-    print(build(args.output, args.version, runtime=args.runtime))
+    print(build(args.output, args.version, runtime=args.runtime, flash_executor=args.flash_executor))
