@@ -2,6 +2,10 @@
 (function (global) {
   'use strict';
   var dictionary = {
+    '设备顺序（仅当前浏览器）': 'Device order (this browser only)',
+    '顺序保存在当前浏览器，拖动或使用上下移动按钮调整': 'Order is saved in this browser. Drag or use the move buttons to rearrange devices.',
+    '拖动调整设备顺序': 'Drag to rearrange devices',
+    '上移设备（Alt+↑）': 'Move device up (Alt+↑)', '下移设备（Alt+↓）': 'Move device down (Alt+↓)',
     '刷机': 'Flash board', '查看刷机': 'View flash task', '刷机预检': 'Flash preflight',
     '载荷 ': 'Payload ', ' 字节，扇区尾部补零 ': ' bytes; sector tail zero padding: ', ' 字节': ' bytes',
     '写入范围 SHA-256': 'Written-range SHA-256', '载荷 SHA-256: ': 'Payload SHA-256: ',
@@ -141,6 +145,7 @@
     '分享访问': 'Share access', 'Agent 接入': 'Agent access',
     '分享设备（可访问全部设备）': 'Share board (all-board access)',
     '修改设备标签（日志目录仍为设备序列号）': 'Rename board (archives remain under its serial number)',
+    '修改串口标签（1–64 位字母、数字、点、下划线或连字符，不改变设备身份）': 'Rename serial attachment (1–64 letters, digits, dots, underscores or hyphens; device identity is unchanged)',
     '生成可撤销的 Agent 接入令牌与指引': 'Generate a revocable agent token and instructions',
     '分享当前设备或全部设备给 Claude Code、Codex 等 Agent': 'Share this board or all boards with Claude Code, Codex or other agents',
     '连接中…': 'Connecting…', '在线设备': 'Online boards', '历史设备': 'Historical boards',
@@ -211,6 +216,8 @@
     '正在比较…': 'Comparing…', '比较失败': 'Comparison failed',
     '对比完成。只显示变化处及前后两行。': 'Comparison complete. Changes are shown with two context lines.',
     'USB 临时身份': 'Temporary USB identity', '尚未绑定开发板序列号': 'No board serial number bound yet',
+    'USB 下载模式': 'USB download mode', '串口离线，刷机 USB 已连接': 'Serial offline; flashing USB connected',
+    '上次检测刷机 USB：': 'Flashing USB last detected: ',
     '（暂无输出）': '(No output yet)', '没有匹配的设备。新串口连接后将显示在待识别列表。': 'No matching boards. New ports appear as unidentified.',
     'EEPROM 尚未写入序列号；当前身份仅作过渡，请写入 ONIE TLV 0x23': 'EEPROM serial number is missing; write ONIE TLV 0x23 for a stable identity',
     '该身份来源尚未正式确认；确认后迁入正式序列号档案': 'Identity is provisional; confirmation moves its archives to the stable serial directory',
@@ -331,6 +338,34 @@
     '身份更正': 'Correct identity', '身份升级': 'Promote identity', '自动配置 SSH': 'Provision SSH', '人工介入 SSH': 'SSH takeover',
     '串口自愈': 'Serial recovery', '准备更换设备': 'Prepare board change', '初始化 /boot 标记': 'Initialize /boot marker', '识别请求': 'Identification request'
   };
+  Object.assign(dictionary, {
+    '发现刷机设备': 'Discover flash devices',
+    '下载模式设备': 'Download-mode device',
+    '选择下载模式设备': 'Choose a download-mode device',
+    '重新检测': 'Detect again',
+    '序列号待识别': 'Serial not identified',
+    '自动检测本机 USB 下载设备': 'Automatically detect local USB download devices',
+    '正在读取下载设备身份和刷机能力…': 'Reading download-device identity and flash capabilities…',
+    '正在检测下载模式设备…': 'Detecting download-mode devices…',
+    '下载设备列表格式无效。': 'Invalid download-device list.',
+    '镜像已准备；设备尚未提供刷机所需能力：': 'Image prepared; the device is missing required flashing capabilities: ',
+    '（GPT 声明，容量待核验）': '(GPT-declared; capacity unverified)',
+    '存储核对': 'Storage checks',
+    '已读取现场主 GPT；存储容量尚未独立核验。': 'Live primary GPT read; storage capacity has not been independently verified.',
+    '回读能力': 'Readback capability',
+    '当前下载环境不支持写后回读校验。': 'The current download environment does not support post-write readback verification.',
+    '预览刷机准备步骤': 'Preview flash preparation',
+    '准备阶段将读取现场布局，完成后在同一任务选择实际分区和载荷。': 'Preparation reads the live layout; select actual partitions and payloads in the same task afterwards.',
+    '已检测到 BootROM；上传刷机包后可准备临时环境并读取布局，此阶段不写存储。': 'BootROM detected. Upload a flash package to prepare the temporary environment and read the layout; this stage does not write storage.',
+    '刷机准备计划包含存储写入，不能执行。': 'The preparation plan includes storage writes and cannot run.',
+    '刷机包已准备；请预览仅加载临时环境和读取布局的准备步骤。': 'Flash package prepared. Preview the steps that only load the temporary environment and read the layout.',
+    '临时刷机环境已准备；请先预览实际分区范围，再继续写入。': 'Temporary flashing environment ready. Preview the actual partition scope before continuing with writes.',
+    '设备未连接，原任务待处理': 'Device disconnected; original task needs attention',
+    ' · 新刷写请先重新检测设备。': ' · Detect the device again before starting a new flash.',
+    '载荷已准备，请在原任务选择实际分区并预览。': 'Payload prepared. Select the actual partition and preview it in the original task.',
+    '未检测到下载模式设备，请检查 USB 数据线和下载模式。': 'No download-mode device detected. Check the USB data cable and download mode.',
+    '检测到多个下载设备，请按 USB 位置选择本次刷写目标。': 'Multiple download devices detected. Choose the target by its USB location.'
+  });
   var keys = Object.keys(dictionary).sort(function (a, b) { return b.length - a.length; });
   var pattern = new RegExp(keys.map(function (key) { return key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|'), 'g');
   var ignored = '#d-term,.xterm,#d-name,#d-dev,#log-location,#ft-board,#bc-left-device,#bc-right-device,#ft-target-device,.nm:not(.pending-name),.sniff,.last:not(.empty-output),.actor,.command-chip,.bc-content,.bc-clue-text,#d-command-nav,#boot-search-matches,code,script,style,[data-i18n-ignore]';

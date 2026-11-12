@@ -5,35 +5,124 @@
     var $ = options.byId, fetch = options.fetch, fmt = options.formatBytes, ago = options.age;
     var selKey = null, lastDevices = [], lastInfoIdentity = '';
     var ownershipRevision = 0, pollSeq = 0, requestedDevice = '';
+    var orderStorageKey = 'decklab.device-order.v1', deviceOrder = [], visibleOrder = [];
+    var orderElements = {}, draggedId = '', renderAfterDrag = false;
+    try {
+      var savedOrder = JSON.parse(global.localStorage && global.localStorage.getItem(orderStorageKey) || 'null');
+      if (savedOrder && savedOrder.version === 1 && Array.isArray(savedOrder.ids)) {
+        deviceOrder = savedOrder.ids.filter(function (id, index, ids) {
+          return typeof id === 'string' && id.length <= 2048 && /^(board|port|connection|key):/.test(id)
+            && ids.indexOf(id) === index;
+        }).slice(0, 4096);
+      }
+    } catch (_) { /* Private browsing and damaged preferences do not block devices. */ }
     try {
       var sharedMatch = /^#device=(.*)$/.exec(global.location && global.location.hash || '');
       if (sharedMatch) requestedDevice = decodeURIComponent(sharedMatch[1]);
     } catch (_) { /* A malformed bookmark must not break device discovery. */ }
+    function orderId(device) {
+      return device.serial ? 'board:' + device.serial : device.by_path ? 'port:' + device.by_path
+        : device.connection_id ? 'connection:' + device.connection_id : 'key:' + device.key;
+    }
+    function saveOrder() {
+      try {
+        if (global.localStorage) global.localStorage.setItem(orderStorageKey,
+          JSON.stringify({ version: 1, ids: deviceOrder }));
+      } catch (_) { /* The current page still keeps its layout when storage is unavailable. */ }
+    }
+    function reconcileOrder(devices) {
+      var previous = JSON.stringify(deviceOrder);
+      // Only a proven live board may adopt its pending attachment's position.
+      // An offline archive's last_path is not evidence about the current board.
+      devices.forEach(function (device) {
+        if (!device.serial || !device.alive || !device.by_path) return;
+        var pendingId = 'port:' + device.by_path, position = deviceOrder.indexOf(pendingId);
+        if (position < 0) return;
+        var identifiedId = orderId(device);
+        if (deviceOrder.indexOf(identifiedId) < 0) deviceOrder[position] = identifiedId;
+        else deviceOrder.splice(position, 1);
+      });
+      devices.slice().sort(function (a, b) {
+        function rank(device) { return device.alive ? (device.state === 'pending' ? 1 : 0) : 2; }
+        return rank(a) - rank(b);
+      }).forEach(function (device) {
+        var id = orderId(device);
+        if (deviceOrder.indexOf(id) < 0) deviceOrder.push(id);
+      });
+      if (deviceOrder.length > 4096) {
+        var currentIds = devices.map(orderId);
+        deviceOrder = deviceOrder.filter(function (id) { return currentIds.indexOf(id) >= 0; });
+      }
+      if (JSON.stringify(deviceOrder) !== previous) saveOrder();
+    }
+    function focusOrder(id, control, preventScroll) {
+      var elements = orderElements[id];
+      if (!elements) return;
+      var target = elements[control] || elements.card;
+      if (target.disabled) target = elements.card;
+      target.focus(preventScroll ? { preventScroll: true } : undefined);
+    }
+    function applyVisibleOrder(next, id, control) {
+      var previous = visibleOrder.slice(), cursor = 0;
+      deviceOrder = deviceOrder.map(function (item) {
+        return previous.indexOf(item) >= 0 ? next[cursor++] : item;
+      });
+      saveOrder(); renderDevices(lastDevices); focusOrder(id, control);
+    }
+    function moveDevice(id, direction, control) {
+      var index = visibleOrder.indexOf(id), target = index + direction;
+      if (index < 0 || target < 0 || target >= visibleOrder.length) return;
+      var next = visibleOrder.slice(), swapped = next[target];
+      next[target] = id; next[index] = swapped;
+      applyVisibleOrder(next, id, control);
+    }
+    function finishDrag() {
+      var id = draggedId;
+      draggedId = '';
+      if (renderAfterDrag || id) {
+        renderAfterDrag = false; renderDevices(lastDevices); focusOrder(id, 'drag');
+      }
+    }
+    function orderKeys(event, id, control) {
+      if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault(); event.stopPropagation();
+        moveDevice(id, event.key === 'ArrowUp' ? -1 : 1, control);
+        return true;
+      }
+      return false;
+    }
     function renderDevices(list) {
       $('count-online').textContent = list.filter(function (d) { return d.serial && d.alive; }).length;
       $('count-history').textContent = list.filter(function (d) { return d.serial && !d.alive; }).length;
       $('count-pending').textContent = list.filter(function (d) { return d.state === 'pending'; }).length;
+      if (draggedId) { renderAfterDrag = true; return; }
+      reconcileOrder(list);
       var query = $('device-search').value.toLowerCase();
       var filter = $('device-filter').value || 'all';
       list = list.filter(function (d) {
         return (filter === 'all' || d.state === filter) &&
           [d.label, d.serial, d.hostname, d.by_path, d.last_path, d.dev].join(' ').toLowerCase().includes(query);
       });
-      list = list.slice().sort(function (a, b) {
-        var rank = function (device) {
-          return device.alive ? (device.state === 'pending' ? 1 : 0) : 2;
-        };
-        return rank(a) - rank(b);
+      list = list.slice().sort(function (a, b) { return deviceOrder.indexOf(orderId(a)) - deviceOrder.indexOf(orderId(b)); });
+      var focusBefore = null;
+      Object.keys(orderElements).some(function (id) {
+        return Object.keys(orderElements[id]).some(function (control) {
+          if (orderElements[id][control] !== document.activeElement) return false;
+          focusBefore = { id: id, control: control }; return true;
+        });
       });
+      visibleOrder = list.map(orderId); orderElements = {};
       var g = $('grid');
       if (!list.length) { g.innerHTML = '<p class="empty">没有匹配的设备。新串口连接后将显示在待识别列表。</p>'; return; }
       g.textContent = '';
-      list.forEach(function (d) {
+      list.forEach(function (d, index) {
         var health = d.serial_health || {};
         var healthFailed = d.alive && health.status === 'error';
+        var flashOnly = !!(d.serial && d.flash_connected && !d.alive);
         var card = document.createElement('div');
         card.className = 'dev' + (!d.alive ? ' offline' : '') + (d.key === selKey ? ' sel' : '');
         card.dataset.key = d.key;          // 供 markSelected() 就地改高亮用
+        var id = orderId(d); card.dataset.orderId = id;
         card.title = (d.by_path || d.last_path || '')
           + (d.alive ? '\n采集检查：' + ago(d.last_health_check)
             + '\n串口收发验证：' + ago(health.last_success)
@@ -41,21 +130,40 @@
         card.tabIndex = 0;
         card.addEventListener('click', function () { options.open(d.key); });
         card.addEventListener('keydown', function (e) {
+          if (e.target && e.target !== card) return;
+          if (orderKeys(e, id, 'card')) return;
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); options.open(d.key); }
+        });
+        card.addEventListener('dragover', function (e) {
+          if (!draggedId || draggedId === id) return;
+          e.preventDefault(); card.classList.toggle('order-drop-target', true);
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        });
+        card.addEventListener('dragleave', function () { card.classList.remove('order-drop-target'); });
+        card.addEventListener('drop', function (e) {
+          if (!draggedId || draggedId === id) return;
+          e.preventDefault(); e.stopPropagation();
+          var moving = draggedId, next = visibleOrder.filter(function (item) { return item !== moving; });
+          var target = next.indexOf(id);
+          if (target < 0 || visibleOrder.indexOf(moving) < 0) { finishDrag(); return; }
+          var rect = card.getBoundingClientRect();
+          if (typeof e.clientY === 'number' && e.clientY > rect.top + rect.height / 2) target++;
+          next.splice(target, 0, moving); draggedId = ''; renderAfterDrag = false;
+          applyVisibleOrder(next, moving, 'drag');
         });
 
         var r1 = document.createElement('div'); r1.className = 'r1';
         var nm = document.createElement('span'); nm.className = 'nm';
-        if (d.state === 'pending') {
+        if (d.state === 'pending' && !d.attachment_label) {
           nm.className += ' pending-name';
           var pendingLabel = document.createElement('span'); pendingLabel.textContent = '待识别 · ';
           var portLabel = document.createElement('span'); portLabel.dataset.i18nIgnore = '';
           portLabel.textContent = d.hostname || (d.dev || '').split('/').pop();
           nm.appendChild(pendingLabel); nm.appendChild(portLabel);
-        } else nm.textContent = d.label;
+        } else { nm.textContent = d.attachment_label || d.label; nm.dataset.i18nIgnore = ''; }
         var st = document.createElement('span');
-        st.className = 'pill ' + (healthFailed ? 'dead' : (d.state === 'pending' ? 'pending' : (d.alive ? 'live' : 'dead')));
-        st.textContent = healthFailed ? '探测异常' : (d.state === 'pending' ? 'USB 临时身份' : (d.alive ? '在线' : '历史设备'));
+        st.className = 'pill ' + (healthFailed ? 'dead' : (flashOnly ? 'flash' : (d.state === 'pending' ? 'pending' : (d.alive ? 'live' : 'dead'))));
+        st.textContent = healthFailed ? '探测异常' : (flashOnly ? 'USB 下载模式' : (d.state === 'pending' ? 'USB 临时身份' : (d.alive ? '在线' : '历史设备')));
         r1.appendChild(nm); r1.appendChild(st);
         if (d.hostname && d.hostname !== d.label) {
           var sn = document.createElement('span'); sn.className = 'pill sniff';
@@ -64,9 +172,15 @@
         card.appendChild(r1);
 
         var meta = document.createElement('div'); meta.className = 'meta';
-        var a = document.createElement('span'); a.textContent = d.dev || ('上次连接 ' + (d.last_dev || '—'));
+        var a = document.createElement('span');
+        a.textContent = flashOnly ? '串口离线，刷机 USB 已连接' : d.dev || ('上次连接 ' + (d.last_dev || '—'));
         var b = document.createElement('span'); b.textContent = d.serial ? 'SN ' + d.serial : (d.by_path || '尚未绑定开发板序列号');
         meta.appendChild(a); meta.appendChild(b);
+        if (d.serial && !d.alive && !flashOnly && d.flash_last_seen) {
+          var flashSeen = document.createElement('span');
+          flashSeen.textContent = '上次检测刷机 USB：' + ago(d.flash_last_seen);
+          meta.appendChild(flashSeen);
+        }
         card.appendChild(meta);
 
         var last = document.createElement('div'); last.className = 'last' + (d.last_line ? '' : ' empty-output');
@@ -124,8 +238,41 @@
           card.appendChild(idl);
         }
 
+        var controls = document.createElement('div'); controls.className = 'dev-order-controls';
+        controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', '设备顺序（仅当前浏览器）');
+        controls.title = '顺序保存在当前浏览器，拖动或使用上下移动按钮调整';
+        var elements = { card: card }; orderElements[id] = elements;
+        function orderButton(control, glyph, label, action) {
+          var button = document.createElement('button'); button.type = 'button';
+          button.className = 'dev-order-button'; button.textContent = glyph;
+          button.dataset.orderControl = control;
+          button.setAttribute('aria-label', label); button.title = label;
+          button.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (action) action();
+          });
+          button.addEventListener('keydown', function (e) {
+            orderKeys(e, id, control); e.stopPropagation();
+          });
+          elements[control] = button; controls.appendChild(button); return button;
+        }
+        var drag = orderButton('drag', '↕', '拖动调整设备顺序'); drag.draggable = true;
+        drag.addEventListener('dragstart', function (e) {
+          draggedId = id; card.classList.toggle('order-dragging', true);
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id);
+          }
+          e.stopPropagation();
+        });
+        drag.addEventListener('dragend', finishDrag);
+        var up = orderButton('up', '↑', '上移设备（Alt+↑）', function () { moveDevice(id, -1, 'up'); });
+        var down = orderButton('down', '↓', '下移设备（Alt+↓）', function () { moveDevice(id, 1, 'down'); });
+        up.disabled = index === 0; down.disabled = index === list.length - 1;
+        card.appendChild(controls);
+
         g.appendChild(card);
       });
+      if (focusBefore) focusOrder(focusBefore.id, focusBefore.control, true);
     }
 
     function pollDevices() {
@@ -170,6 +317,7 @@
             if (cur && cur.key !== selKey) adoptKey(ctx, cur.key, cur.serial);
             ctx = options.getView(); // Identity adoption can replace the terminal.
             if (cur && options.isCurrent(ctx)) {
+              if (cur.state === 'pending') $('d-name').textContent = cur.label || cur.key;
               if (ownerRevision === ownershipRevision && !ctx.ownerPending) options.updateInputOwner(ctx, cur.input_owner);
               else cur.input_owner = ctx.inputOwner;
             }

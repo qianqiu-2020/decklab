@@ -1,6 +1,8 @@
 """No USB or UART: configured flashing runs only temporary local fixtures."""
 import json
 from contextlib import contextmanager
+from dataclasses import replace
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -120,6 +122,98 @@ class FlashRunnerTests(unittest.TestCase):
         config = configuration([sys.executable, str(self.helper)])
         config['boards']['board-a']['flash']['timeout'] = timeout
         return FlashBook(config).binding('board-a')
+
+    def automatic_binding(self):
+        profile = {'id': 'auto-spacemit-gpt-v1', 'chip_family': 'k3', 'identity': {},
+                   'bootrom_identity': {'version-IC': 'K3', 'version-brom': '1.0'},
+                   'storages': [{'id': 'active', 'layout_source': 'spacemit-gpt',
+                                 'size_getvar': '__decklab_gpt_capacity', 'sector_size': 512,
+                                 'partitions': [], 'sparse': True}]}
+        return replace(self.binding('pass'), profile='auto-spacemit-gpt-v1', profile_data=profile,
+                       target_id='a' * 24, target_generation='b' * 24,
+                       device={'port_path': [1, 4], 'usb_address': 3})
+
+    def prepared_profile(self, binding, workspace):
+        package = Path(workspace) / 'payloads' / 'image'
+        (package / 'factory').mkdir(parents=True)
+        fsbl, loader = package / 'factory' / 'FSBL.bin', package / 'u-boot.itb'
+        fsbl.write_bytes(b'fixed-fsbl')
+        loader.write_bytes(b'fixed-u-boot')
+        profile = json.loads(json.dumps(binding.profile_data))
+        profile['storages'][0]['package_tables'] = ['partition_universal.json']
+        profile['prepare'] = [
+            {'kind': 'stage', 'path': str(fsbl), 'sha256': hashlib.sha256(fsbl.read_bytes()).hexdigest()},
+            {'kind': 'continue'},
+            {'kind': 'stage', 'path': str(loader), 'sha256': hashlib.sha256(loader.read_bytes()).hexdigest()},
+            {'kind': 'continue'}]
+        return profile
+
+    def test_imported_loader_profile_is_private_and_used_for_target_check(self):
+        binding = self.automatic_binding()
+        artifact = {'id': 'image', 'sha256': 'a' * 64, 'size': 1, 'path': '/managed/image', 'name': 'image.zip'}
+        derived = {}
+        def run(current, operation, request, **options):
+            if operation == 'image-plan':
+                derived.update(self.prepared_profile(binding, request['workspace']))
+                return {'plan': {'ready': False}, 'execution_profile': derived}
+            self.assertEqual(operation, 'check-plan')
+            self.assertEqual(current.profile_data, derived)
+            self.assertEqual(request['profile'], derived)
+            return {'plan': {'ready': False}, 'requires_prepare': True}
+        with mock.patch.object(self.runner, '_run', side_effect=run):
+            result = self.runner.plan(binding, artifact, 'partitions')
+        self.assertEqual(result['execution_profile'], derived)
+        self.assertNotIn('prepare', binding.profile_data, 'the source binding must remain fixed')
+        self.assertNotIn('execution_profile', public_plan(result))
+        self.assertNotIn(str(self.root), json.dumps(public_plan(result)))
+
+    def test_imported_loaders_cannot_escape_cache_change_identity_or_expand_steps(self):
+        binding = self.automatic_binding()
+        workspace = self.runner._directory(self.root / 'workspace' / 'cache') / 'plan-abcdefgh'
+        workspace.mkdir()
+        original = self.prepared_profile(binding, workspace)
+        accepted = self.runner.execution_binding(binding, original, workspace)
+        self.assertEqual(accepted.profile_data, original)
+        mutations = [
+            lambda p: p['identity'].update(product='different-board'),
+            lambda p: p['storages'][0].update(select_oem='erase all'),
+            lambda p: p['storages'][0].update(package_tables=['different.json']),
+            lambda p: p['prepare'][0].update(sha256='0' * 64),
+            lambda p: p['prepare'][0].update(path='/private/factory/FSBL.bin'),
+            lambda p: p['prepare'][1].update(port_path=[9, 9]),
+            lambda p: p['prepare'].append({'kind': 'continue'}),
+        ]
+        for mutation in mutations:
+            profile = json.loads(json.dumps(original))
+            mutation(profile)
+            with self.subTest(profile=profile), self.assertRaises(FlashRunnerError):
+                self.runner.execution_binding(binding, profile, workspace)
+        if os.name == 'posix':
+            fsbl = Path(original['prepare'][0]['path'])
+            target = fsbl.with_name('original.bin')
+            fsbl.rename(target)
+            fsbl.symlink_to(target)
+            with self.assertRaisesRegex(FlashRunnerError, 'symbolic link'):
+                self.runner.execution_binding(binding, original, workspace)
+
+    def test_prepared_connection_transition_is_explicit_and_only_for_unready_plan(self):
+        initial = self.automatic_binding()
+        workspace = self.runner._directory(self.root / 'workspace' / 'cache') / 'plan-abcdefgh'
+        workspace.mkdir()
+        prepared = self.runner.execution_binding(initial, self.prepared_profile(initial, workspace), workspace)
+        final = replace(prepared, device=dict(initial.device, usb_address=4))
+        plan = {'artifact': {'id': 'image'}, 'mode': 'partitions', 'ready': False, 'selections': []}
+        with mock.patch.object(self.runner, '_run', return_value={'plan': dict(plan, ready=True)}) as run:
+            self.runner.check_plan(final, plan, previous_device=initial.device)
+        self.assertEqual(run.call_args.args[2]['previous_device'], initial.device)
+        self.assertEqual(run.call_args.args[2]['device']['usb_address'], 4)
+        for invalid in (dict(plan, ready=True), dict(plan, ready=None)):
+            with self.subTest(plan=invalid), self.assertRaises(TaskError):
+                self.runner.check_plan(final, invalid, previous_device=initial.device)
+        with self.assertRaises(TaskError):
+            self.runner.check_plan(final, plan, previous_device={'port_path': [9, 9], 'usb_address': 3})
+        with self.assertRaises(TaskError):
+            self.runner.check_plan(initial, plan, previous_device=initial.device)
 
     def test_progress_and_result_with_private_request_and_no_stderr_exposure(self):
         binding = self.binding("print('password=host-secret',file=sys.stderr)\n"

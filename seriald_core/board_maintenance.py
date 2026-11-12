@@ -112,6 +112,115 @@ class BoardMaintenance:
             self._check_attachment(serial, actor, client_id)
             yield selected
 
+    def target_resources(self, target_id, serial='', resources=()):
+        if (not isinstance(target_id, str) or not target_id or len(target_id) > 80
+                or not isinstance(serial, str) or len(serial.encode()) > 100):
+            raise TaskError('invalid flash USB target')
+        if (not isinstance(resources, (list, tuple)) or len(resources) > 32
+                or any(not isinstance(value, str) or not value or len(value) > 200 for value in resources)):
+            raise TaskError('invalid maintenance resources')
+        return sorted(set(['flash-target:' + target_id] + list(resources)
+                          + (['board:' + serial] if serial else [])))
+
+    def target_holds(self, target_id):
+        with self.store.lock:
+            rows = self.store.db.execute('SELECT * FROM flash_resource_holds WHERE resource=?',
+                                         ('flash-target:' + target_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    @contextmanager
+    def target_admission(self, target_id, generation, serial='', resources=(), actor='web', client_id=''):
+        """Reserve a download attachment without inventing a board or UART."""
+        if actor != 'web':
+            raise TaskError('automatic flash targets require a human operator', 403)
+        selected = self.target_resources(target_id, serial, resources)
+        with self._lock:
+            self._check_resources(selected)
+            with self.store.lock:
+                row = self.store.db.execute('SELECT generation,serial,present FROM flash_targets WHERE id=?',
+                                             (target_id,)).fetchone()
+            if (row is None or not row['present'] or row['generation'] != generation
+                    or (row['serial'] or '') != serial):
+                raise TaskError('flash USB target generation or identity changed', 409)
+            if serial:
+                self._check_attachment(serial, actor, client_id)
+            yield selected
+
+    @contextmanager
+    def inspect_target_scope(self, target_id, generation, serial='', resources=(), actor='web', client_id=''):
+        selected = self.target_resources(target_id, serial, resources)
+        with self.target_admission(target_id, generation, serial, resources, actor, client_id):
+            inspections = getattr(self._local, 'inspections', None)
+            if inspections is None:
+                inspections = self._local.inspections = {}
+            for resource in selected:
+                self._active[resource] = self._active.get(resource, 0) + 1
+                inspections[resource] = inspections.get(resource, 0) + 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                for resource in selected:
+                    for counts in (inspections, self._active):
+                        count = counts[resource] - 1
+                        if count:
+                            counts[resource] = count
+                        else:
+                            del counts[resource]
+
+    def retain_target_inspection_failure(self, target_id, generation, serial='', resources=(),
+                                         actor='web', client_id='', *, attempt_id, details=None):
+        from .flash_store import encode_document
+        from .tasks import TaskStore
+        if actor != 'web' or not isinstance(attempt_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', attempt_id):
+            raise TaskError('invalid flash target inspection recovery')
+        selected = self.target_resources(target_id, serial, resources)
+        document = dict(details or {}, target_id=target_id, target_generation=generation,
+                        attempt_id=attempt_id, recovery_required=True, cleanup_confirmed=False,
+                        write_result='not-started', verify_result='not-started',
+                        boot_result='not-requested', phase='inspection-recovery')
+        encoded = encode_document(document)
+        with self._lock:
+            inspections = getattr(self._local, 'inspections', {})
+            if any(inspections.get(resource, 0) != self._active.get(resource, 0)
+                   or not inspections.get(resource) for resource in selected):
+                raise TaskError('inspection recovery must retain the current inspection reservation', 409)
+            with self.store.lock:
+                placeholders = ','.join('?' for _ in selected)
+                if self.store.db.execute('SELECT 1 FROM flash_resource_holds WHERE resource IN ('
+                                         + placeholders + ') LIMIT 1', selected).fetchone():
+                    raise TaskError('inspection resource recovery was already registered', 409)
+            tasks = TaskStore(self.store)
+            task_id = tasks.create_board('flash-inspect', actor, client_id, serial,
+                'inspect-' + secrets.token_hex(12), hashlib.sha256(encoded.encode()).hexdigest(),
+                document, selected, initial_state='failed', resource_state='recovery',
+                error='inspection process cleanup could not be confirmed; recovery required',
+                target_id=target_id, target_generation=generation)
+            return tasks.get(task_id)
+
+    def retain_target_preparation_failure(self, target_id, generation, serial='', actor='web',
+                                          client_id='', *, attempt_id, details=None):
+        from .flash_store import encode_document
+        from .tasks import TaskStore
+        if actor != 'web' or not isinstance(attempt_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', attempt_id):
+            raise TaskError('invalid flash target preparation recovery')
+        self.target_resources(target_id, serial)
+        document = dict(details or {}, target_id=target_id, target_generation=generation,
+                        attempt_id=attempt_id, recovery_required=True, cleanup_confirmed=False,
+                        write_result='not-started', verify_result='not-started',
+                        boot_result='not-requested', phase='preparation-recovery')
+        encoded = encode_document(document)
+        tasks = TaskStore(self.store)
+        with self._lock, self.store.lock, self.store.db:
+            self.store.db.execute('BEGIN IMMEDIATE')
+            self.check_preparation()
+            task_id = tasks.create_board('flash-inspect', actor, client_id, serial,
+                'prepare-' + secrets.token_hex(12), hashlib.sha256(encoded.encode()).hexdigest(),
+                document, [CACHE_POOL_RESOURCE], initial_state='failed', resource_state='recovery',
+                error='image preparation process cleanup could not be confirmed; recovery required',
+                target_id=target_id, target_generation=generation)
+        return tasks.get(task_id)
+
     @contextmanager
     def inspect_scope(self, serial, resources=(), actor='web', client_id=''):
         selected = self.resources(serial, resources)

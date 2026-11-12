@@ -69,7 +69,12 @@ class PackageTests(unittest.TestCase):
             binary = extracted / 'usr/libexec/seriald/decklab-flash'
             self.assertEqual(binary.read_bytes(), executor.read_bytes())
             self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
-            self.assertIn(', libusb-1.0-0\n', (control / 'control').read_text())
+            self.assertIn(', libusb-1.0-0, udev\n', (control / 'control').read_text())
+            rule = (extracted / 'lib/udev/rules.d/70-seriald-fastboot.rules').read_text()
+            self.assertIn('ATTR{idVendor}=="361c"', rule)
+            self.assertIn('ENV{ID_USB_INTERFACES}=="*:ff4203:*"', rule)
+            self.assertIn('GROUP="dialout", MODE="0660"', rule)
+            self.assertNotIn('0666', rule)
             metadata = json.loads((extracted / 'usr/share/doc/seriald/flash-executor.json').read_text())
             self.assertEqual(metadata['sha256'], hashlib.sha256(executor.read_bytes()).hexdigest())
             self.assertEqual(metadata['size'], executor.stat().st_size)
@@ -149,6 +154,7 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(worker.read_bytes(), (runtime / mcp_builder.EXECUTABLE).read_bytes())
             self.assertEqual(worker.stat().st_mode & 0o777, 0o755)
             self.assertFalse((extracted / 'usr/libexec/seriald/decklab-flash').exists())
+            self.assertFalse((extracted / 'lib/udev/rules.d/70-seriald-fastboot.rules').exists())
             self.assertNotIn('libusb-1.0-0', (root / 'control/control').read_text())
             for script in ('preinst', 'postinst', 'prerm', 'postrm'):
                 subprocess.run(['sh', '-n', str(root / 'control' / script)], check=True)

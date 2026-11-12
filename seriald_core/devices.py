@@ -53,6 +53,7 @@ class Manager:
         self.stopping = threading.Event()
         self.handoff = {}
         self.armed_paths = {}
+        self._flash_presence = {}
         if store:
             for record in store.boards():
                 self.boards[record['serial']] = Board(record)
@@ -68,8 +69,32 @@ class Manager:
     def all_devices(self):
         with self.lock:
             known = [self._board_view(board) for board in self.boards.values()]
+            for device in known:
+                presence = self._flash_presence.get(device.serial, {})
+                device.flash_connected = bool(presence.get('connected'))
+                device.flash_mode = presence.get('mode', '')
+                device.flash_last_seen = presence.get('seen', 0)
             pending = [d for d in self.devices.values() if not d.serial and d.present]
             return known + pending
+
+    def refresh_flash_presence(self):
+        """Cache recent USB observations without changing UART connection state."""
+        if self.store is None:
+            return
+        with self.store.lock:
+            rows = self.store.db.execute('SELECT serial,document,seen,present FROM flash_targets t '
+                'WHERE serial IS NOT NULL AND NOT EXISTS '
+                '(SELECT 1 FROM identity_conflicts c WHERE c.serial=t.serial)').fetchall()
+        presence = {}
+        now = time.time()
+        for row in rows:
+            old = presence.get(row['serial'])
+            if old is None or old['seen'] < row['seen']:
+                document = json.loads(row['document'])
+                presence[row['serial']] = {'connected': bool(row['present'] and now - row['seen'] <= 15),
+                    'mode': document.get('mode', 'unknown'), 'seen': row['seen']}
+        with self.lock:
+            self._flash_presence = presence
 
     def _board_view(self, board):
         if board.connection is not None:
@@ -295,10 +320,17 @@ class Manager:
                     finish_staged(staged, sources)
                 return board
 
-    def rename(self, device, label):
-        if not device.serial:
-            raise IdentityError('先识别开发板序列号，再设置标签')
+    def rename(self, device, label, connection_id=None, expected_serial=None):
         with self.lock:
+            if expected_serial is not None and device.serial != expected_serial:
+                raise IdentityError('设备身份已变化，请刷新后修改标签')
+            if not device.serial:
+                if (expected_serial != '' or connection_id != device.connection_id
+                        or not device.present or device.stop.is_set()
+                        or self.devices.get(device.by_path) is not device):
+                    raise IdentityError('串口连接已变化，请刷新后修改标签')
+                device.attachment_label = self.store.rename_attachment(device.by_path, label)
+                return device.key
             device.record = self.store.rename(device.serial, label)
             return device.key
 
@@ -619,6 +651,7 @@ class Manager:
         while not self.stopping.is_set():
             try:
                 self.scan()
+                self.refresh_flash_presence()
                 for d in self.all_devices():
                     d.reap_sessions()
                     d.health.tick()

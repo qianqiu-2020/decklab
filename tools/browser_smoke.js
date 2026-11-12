@@ -15,6 +15,10 @@ const probeSettingsPosts = [], grantPosts = [], sshConnectPosts = [];
 const savedSshCredentials = new Map(), sshAuthentications = [], fixtureSshSessions = [];
 // Flash fixtures exercise the real UI only. No executor or physical board runs.
 const flashPlans = [], flashSubmissions = [], flashRecords = [], flashRecoveryPosts = [];
+const flashTargetReads = [];
+const flashUsbTargets = [2, 3].map(port => ({target_id:'fixture-usb-' + port,
+  target_generation:'fixture-generation-' + port, label:'模拟 USB 下载设备 ' + port,
+  serial:'', mode:'loader', usb:{port_path:[1, port]}}));
 const flashArtifact = {id:'aaaaaaaaaaaaaaaaaaaaaaaa', name:'模拟镜像 · fixture.img', size:1048576, sha256:'a'.repeat(64)};
 const flashStorages = ['emmc', 'nvme'].map(id => ({id, name:id.toUpperCase(), size:8589934592,
   partitions:[{id:'rootfs', name:'rootfs', size:4294967296}]}));
@@ -42,6 +46,34 @@ const server = http.createServer((req, res) => {
   const json = data => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); };
   if (req.method === 'POST') {
     posts.push(u.pathname);
+    if (u.pathname === '/api/flash-target') {
+      let body = ''; req.on('data', chunk => {body += chunk;});
+      req.on('end', () => {
+        const payload = JSON.parse(body); flashTargetReads.push(payload);
+        const target = flashUsbTargets.find(item => item.target_id === payload.target_id
+          && item.target_generation === payload.target_generation);
+        if (!target) {res.statusCode=409; return json({error:'simulated target changed'});}
+        const preparable = target.mode === 'bootrom';
+        json({target,capabilities:{supported:!preparable,can_prepare_from_image:preparable,
+          can_upload:true,target_id:target.target_id,
+          target_generation:target.target_generation,binding_revision:1,
+          profile:'自动识别 · 模拟 K3 下载环境',console:null,
+          executor:{provider:'goflash',node:'local',endpoint:target.target_id},
+          artifacts:[flashArtifact],storages:preparable?[]:flashStorages,
+          modes:preparable?['partitions']:['full','partitions']}});
+      }); return;
+    }
+    if (u.pathname === '/api/flash-selection') {
+      let body = ''; req.on('data', chunk => {body += chunk;});
+      req.on('end', () => {
+        const payload = JSON.parse(body), current = flashRecords.find(item => item.id === payload.id);
+        if (!current || payload.target_generation !== current.flash_targets[0].generation) {
+          res.statusCode=409; return json({error:'simulated task generation changed'});
+        }
+        json({plan:{id:'same-task-selection-plan',write_layout:false,writes:payload.selections.map(item=>({
+          storage:item.storage,partition:item.partition,size:1048576,sha256:flashArtifact.sha256}))}});
+      }); return;
+    }
     if (u.pathname === '/api/flash-recovery') {
       let body = ''; req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
@@ -58,6 +90,9 @@ const server = http.createServer((req, res) => {
       let body = ''; req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
         const payload = JSON.parse(body); flashPlans.push(payload);
+        const target = flashUsbTargets.find(item => item.target_id === payload.target_id);
+        if (target && target.mode === 'bootrom') return json({ok:true,requires_prepare:true,
+          plan:{id:'brom-preparation-plan',binding_revision:1,ready:false,write_layout:false,writes:[],digest:'d'.repeat(64)}});
         const writes = payload.mode === 'partitions'
           ? payload.selections.map(item => ({storage:item.storage, partition:item.partition, size:1048576, sha256:'a'.repeat(64)}))
           : flashStorages.map(item => ({storage:item.id, partition:'rootfs', size:1048576, sha256:'a'.repeat(64)}));
@@ -77,9 +112,16 @@ const server = http.createServer((req, res) => {
             flashSubmissions.push(payload);
             let task = flashRecords.find(item => item.flash.request_id === payload.request_id);
             if (!task) {
+              const target = flashUsbTargets.find(item => item.target_id === payload.target_id);
+              const preparing = target && target.mode === 'bootrom';
               task = {id:'cccccccccccccccccccccccc', kind:'flash', state:'running', actor:'web', created:Date.now()/1000,
-                targets:[], board_targets:[{serial:payload.serial}], progress:{done:524288,total:1048576,phase:'writing'},
+                targets:[], board_targets:payload.serial?[{serial:payload.serial}]:[],
+                flash_targets:target?[{target_id:target.target_id,generation:target.target_generation}]:[],
+                progress:preparing?{done:0,total:0,phase:'awaiting-selection'}:{done:524288,total:1048576,phase:'writing'},
                 flash:{request_id:payload.request_id,write_result:'writing',verify_result:'pending',boot_result:'not-requested'}};
+              if (preparing) Object.assign(task.flash,{target_id:target.target_id,
+                target_generation:target.target_generation,write_result:'not-started',
+                inspection:{layout_digest:'post-loader-layout',storages:flashStorages},payload_candidates:[flashArtifact]});
               flashRecords.push(task);
             }
             return json({ok:true,task});
@@ -153,6 +195,7 @@ const server = http.createServer((req, res) => {
     mcp_enabled: true, mcp_url: '/mcp', mcp_error: '' });
   if (u.pathname === '/api/agent-grants') return json({grants: []});
   if (u.pathname === '/api/probe-settings') return json(probeSettings);
+  if (u.pathname === '/api/flash-discover') return json({available:true,targets:flashUsbTargets});
   if (u.pathname === '/api/flash-capabilities') return json({supported:true,board_serial:fixtures[1].serial,
     binding_revision:7,profile:'模拟 K3 · 浏览器测试夹具',control:{provider:'manual'},
     console:null,executor:{provider:'goflash',node:'local',endpoint:'fixture-usb-4'},
@@ -752,6 +795,116 @@ let chrome, ws;
   assert.equal(flashRecords[0].state,'failed','releasing recovery must preserve the original failed state');
   assert.equal(flashRecords[0].flash.write_result,'unknown-or-partial');
   assert.equal(flashSubmissions.length,1,'recovery must not repeat the flash operation');
+  // Personal device positions survive connection state changes and page reload.
+  // These are browser fixtures, never a board or registry mutation.
+  await evaluate('document.querySelector("#fl-close").click()');
+  const directoryOrder = () => evaluate('Array.from(document.querySelectorAll("#grid>.dev")).map(card=>card.dataset.key)');
+  const originalOrder = await directoryOrder(), selectedBeforeOrder = await evaluate('document.querySelector("#d-name").textContent');
+  await evaluate('document.querySelectorAll("#grid>.dev")[1].querySelector(\'[data-order-control="up"]\').click()');
+  const movedOrder = [originalOrder[1],originalOrder[0],...originalOrder.slice(2)];
+  assert.deepEqual(await directoryOrder(),movedOrder);
+  assert.equal(await evaluate('document.querySelector("#d-name").textContent'),selectedBeforeOrder,'moving a card must not select it');
+  const dragOrder = await evaluate(`(() => {
+    const cards=Array.from(document.querySelectorAll('#grid>.dev')), source=cards[2],target=cards[0],transfer=new DataTransfer();
+    source.querySelector('[data-order-control="drag"]').dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer}));
+    const r=target.getBoundingClientRect();
+    target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer,clientY:r.top+1}));
+    return Array.from(document.querySelectorAll('#grid>.dev')).map(card=>card.dataset.key);
+  })()`);
+  assert.deepEqual(dragOrder,[movedOrder[2],movedOrder[0],movedOrder[1],...movedOrder.slice(3)]);
+  const reorderedFixture=fixtures.find(item=>item.key===dragOrder[0]), previousAlive=reorderedFixture.alive;
+  reorderedFixture.alive=!previousAlive;
+  for(let n=0;n<40 && await evaluate('document.querySelector("#grid>.dev").classList.contains("offline")') !== previousAlive;n++)await delay(100);
+  assert.equal(await evaluate('document.querySelector("#grid>.dev").classList.contains("offline")'),previousAlive);
+  assert.deepEqual(await directoryOrder(),dragOrder,'online state changes must preserve chosen positions');
+  reorderedFixture.alive=previousAlive;
+  await rpc('Page.reload',{ignoreCache:true});
+  for(let n=0;n<50 && !await evaluate('document.querySelectorAll("#grid>.dev").length === 5');n++)await delay(100);
+  assert.deepEqual(await directoryOrder(),dragOrder,'a new page must restore personal device positions');
+  await evaluate('SerialdI18n.setLocale("zh-CN")');
+  const deviceOrderShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-device-order.png'),Buffer.from(deviceOrderShot.data,'base64'));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await delay(100);
+  assert.ok(await evaluate(`(() => {
+    const card=document.querySelector('#grid>.dev'),button=card.querySelector('[data-order-control="down"]');
+    const c=card.getBoundingClientRect(),b=button.getBoundingClientRect();
+    return b.width>=24&&b.height>=24&&b.top>=c.top&&b.bottom<=c.bottom&&document.documentElement.scrollWidth<=innerWidth+1;
+  })()`),'touch move controls must remain inside compact mobile device cards');
+  await evaluate('document.querySelector("#grid>.dev").querySelector(\'[data-order-control="down"]\').click()');
+  assert.deepEqual(await directoryOrder(),[dragOrder[1],dragOrder[0],...dragOrder.slice(2)]);
+  const deviceMobileShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-device-order-mobile.png'),Buffer.from(deviceMobileShot.data,'base64'));
+  // USB recovery targets do not require a UART or a previously registered serial.
+  // Detection/probing is data-only in this fixture; no hardware tool is executed.
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  flashRecords.splice(0);
+  await evaluate('document.querySelector("#b-flash-discover").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length === 3');n++)await delay(50);
+  assert.equal(flashTargetReads.length,0,'multiple USB targets must not choose the first device');
+  assert.ok(await evaluate('document.querySelector("#fl-status").textContent.includes("多个下载设备")'));
+  await evaluate('document.querySelector("#fl-device").value="fixture-usb-3";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-artifact").options.length === 2');n++)await delay(50);
+  assert.equal(flashTargetReads.length,1);
+  assert.equal(flashTargetReads[0].target_id,'fixture-usb-3');
+  assert.equal(flashTargetReads[0].target_generation,'fixture-generation-3');
+  assert.equal(Object.hasOwn(flashTargetReads[0],'serial'),false,'USB-only target must not invent a serial');
+  assert.equal(flashSubmissions.length,1,'automatic detection and probing must not flash storage');
+  await evaluate('document.querySelector("#fl-artifact").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-artifact").dispatchEvent(new Event("change"))');
+  for(let n=0;n<40 && await evaluate('document.querySelector("#fl-plan").disabled');n++)await delay(50);
+  await evaluate('document.querySelector("#fl-plan").click()');
+  for(let n=0;n<40 && await evaluate('document.querySelector("#fl-start").disabled');n++)await delay(50);
+  assert.equal(flashPlans[flashPlans.length-1].target_id,'fixture-usb-3');
+  assert.equal(flashPlans[flashPlans.length-1].target_generation,'fixture-generation-3');
+  assert.equal(Object.hasOwn(flashPlans[flashPlans.length-1],'key'),false);
+  await evaluate(`(() => {const banner=document.createElement('p');banner.textContent='浏览器模拟夹具：自动发现 USB，无真实硬件';banner.style.cssText='color:#713f12;font-weight:bold';document.querySelector('#flash-dialog').prepend(banner);})()`);
+  const flashDiscoveryShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-discovery.png'),Buffer.from(flashDiscoveryShot.data,'base64'));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await delay(100);
+  assert.ok(await evaluate('(()=>{const d=document.querySelector("#flash-dialog"),r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&d.scrollWidth<=d.clientWidth+1;})()'), 'USB target chooser must fit mobile viewport');
+  const flashDiscoveryMobileShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-discovery-mobile.png'),Buffer.from(flashDiscoveryMobileShot.data,'base64'));
+  // A detected BootROM can prepare from a selected package. The preview has no
+  // storage writes, and actual partition selection stays in the same task.
+  await evaluate('document.querySelector("#fl-close").click()');
+  flashUsbTargets[1].mode='bootrom'; flashUsbTargets[1].target_generation='fixture-brom-generation';
+  await evaluate('document.querySelector("#b-flash-discover").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length === 3');n++)await delay(50);
+  await evaluate('document.querySelector("#fl-device").value="fixture-usb-3";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-mode").value === "partitions"');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelector("#fl-mode").disabled'),true);
+  assert.ok(await evaluate('document.querySelector("#fl-status").textContent.includes("BootROM")'));
+  await evaluate('document.querySelector("#fl-artifact").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-artifact").dispatchEvent(new Event("change"))');
+  for(let n=0;n<40 && await evaluate('document.querySelector("#fl-plan").disabled');n++)await delay(50);
+  await evaluate('document.querySelector("#fl-plan").click()');
+  for(let n=0;n<40 && await evaluate('document.querySelector("#fl-start").disabled');n++)await delay(50);
+  assert.equal(flashPlans[flashPlans.length-1].mode,'partitions');
+  assert.deepEqual(flashPlans[flashPlans.length-1].selections,[]);
+  assert.ok(await evaluate('document.querySelector("#fl-preview").textContent.includes("不写入存储")'));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  await delay(100);
+  await evaluate('document.querySelector("#fl-preview").scrollIntoView({block:"center"})');
+  const flashBootromShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-bootrom-preparation.png'),Buffer.from(flashBootromShot.data,'base64'));
+  await evaluate('document.querySelector("#fl-start").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-task-id").textContent.includes("awaiting-selection")');n++)await delay(50);
+  assert.equal(flashSubmissions.length,2,'one original flash task and one explicit preparation task');
+  assert.equal(flashSubmissions[1].target_generation,'fixture-brom-generation');
+  assert.equal(await evaluate('document.querySelector("#fl-partitions").children.length'),2);
+  assert.equal(await evaluate('document.querySelector("#fl-select").hidden'),false);
+  assert.equal(flashRecords[0].flash.write_result,'not-started');
+  const readsBeforeTaskRefresh=flashTargetReads.length;
+  flashUsbTargets[1].mode='loader'; flashUsbTargets[1].target_generation='fixture-new-loader-generation';
+  await evaluate('document.querySelector("#fl-close").click();document.querySelector("#b-flash-discover").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length === 3');n++)await delay(50);
+  await evaluate('document.querySelector("#fl-device").value="fixture-usb-3";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-task-id").textContent.includes("awaiting-selection")');n++)await delay(50);
+  assert.equal(flashTargetReads.length,readsBeforeTaskRefresh,'a refreshed active task must not probe its owned endpoint');
+  await evaluate('document.querySelector("#fl-partitions input").checked=true;document.querySelector("#fl-partitions select").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-select").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-select").textContent.includes("确认分区并继续")');n++)await delay(50);
+  assert.equal(flashSubmissions.length,2,'refresh must recover the original preparation rather than start again');
+  assert.ok(await evaluate('document.querySelector("#fl-preview").textContent.includes("保留现有分区布局")'));
   assert.deepEqual(errors,[]);
   console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing, server-remembered SSH credentials and offline-board flash preview/task recovery (isolated simulated fixtures).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{

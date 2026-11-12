@@ -239,7 +239,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             result = TaskActions(self.manager).query(task_id, self.headers.get('X-Seriald-Actor', 'web'),
                                            (q.get('serial') or [None])[0], limit, offset,
                                            (q.get('connection_id') or [None])[0],
-                                           (q.get('target_serial') or [None])[0])
+                                           (q.get('target_serial') or [None])[0],
+                                           (q.get('target_id') or [None])[0])
             return self._json(result.status, result.payload)
 
         if route == '/api/health':
@@ -283,13 +284,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             actor = self.headers.get('X-Seriald-Actor') or 'web'
             return self._json(200, self.manager.hardware.available(device.serial or '', actor))
 
+        if route == '/api/flash-discover':
+            result = FlashActions(self.manager).discover(self.headers.get('X-Seriald-Actor') or 'web')
+            return self._json(result.status, result.payload)
+
         if route == '/api/flash-capabilities':
-            device = self._dev(q)
+            target_id = (q.get('target_id') or [None])[0]
+            device = self._dev(q) if not target_id else None
             # Flashing belongs to the registered board across UART generations.
             # Connection-scoped grants still fail _dev's explicit generation check.
             self._read_guard = None
             result = FlashActions(self.manager).capabilities(
-                device, self.headers.get('X-Seriald-Actor') or 'web')
+                device, self.headers.get('X-Seriald-Actor') or 'web', target_id,
+                (q.get('target_generation') or [None])[0])
             return self._json(result.status, result.payload)
 
         if route == '/api/flash-events':
@@ -297,7 +304,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 (q.get('id') or [''])[0], (q.get('after') or ['0'])[0],
                 self.headers.get('X-Seriald-Actor') or 'web',
                 (q.get('serial') or [None])[0],
-                self.headers.get('X-Seriald-Connection'))
+                self.headers.get('X-Seriald-Connection'), (q.get('target_id') or [None])[0])
             return self._json(result.status, result.payload)
 
         if route == '/api/operation':
@@ -401,6 +408,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if route in ('/api/artifact-append', '/api/artifact-seal', '/api/artifact-delete'):
             result = ArtifactActions(self.manager).execute(route.removeprefix('/api/artifact-'), payload,
                                                  payload.get('actor') or 'web')
+            return self._json(result.status, result.payload)
+        actor = str(payload.get('actor') or 'web')[:80]
+        if route == '/api/flash-target':
+            result = FlashActions(self.manager).probe(payload, actor)
+            return self._json(result.status, result.payload)
+        if payload.get('target_id'):
+            flash = FlashActions(self.manager)
+            if route == '/api/artifact-create':
+                result = flash.artifact_create(payload, actor)
+            elif route == '/api/flash-plan':
+                result = flash.plan(payload, None, actor)
+            elif route == '/api/flash-selection':
+                result = flash.selection(payload, None, actor)
+            elif route == '/api/flash-recovery':
+                result = flash.recovery(payload, None, actor)
+            elif route == '/api/task-start' and payload.get('kind') == 'flash':
+                result = flash.start(payload, None, actor)
+            else:
+                return self._json(400, {'error': 'USB flash targets are not serial connections'})
             return self._json(result.status, result.payload)
         q = {'key': [str(payload.get('key') or '')]}
         if payload.get('serial'):

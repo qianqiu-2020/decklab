@@ -1,0 +1,4 @@
+# SpacemiT fastboot/download interfaces only. Match the interface signature as
+# well as the vendor; unrelated USB and serial devices keep their permissions.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="361c", IMPORT{builtin}="usb_id"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="361c", ENV{ID_USB_INTERFACES}=="*:ff4203:*", GROUP="dialout", MODE="0660"

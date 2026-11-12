@@ -4,7 +4,8 @@ No browser input selects a host executable, USB attachment or loader path.  The
 executor owns no UART; the existing collector remains its only reader.
 """
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 
 from .hardware import PosixProcess
 from .profiles import _unique_object
@@ -109,6 +111,8 @@ class FlashBinding:
     allow_agent: bool = False
     max_expanded_bytes: int = 32 * 1024 ** 3
     max_cache_bytes: int = 64 * 1024 ** 3
+    target_id: str = ''
+    target_generation: str = ''
 
     @property
     def resources(self):
@@ -192,8 +196,10 @@ class FlashBook:
                     or any(not isinstance(arg, str) or '\x00' in arg or len(arg.encode()) > 4096 for arg in argv)
                     or not os.path.isabs(argv[0])):
                 raise ValueError('flash executor requires a local endpoint and absolute executable')
-            if not isinstance(device, dict) or set(device) - {'port_path', 'usb_serial', 'vendor_id', 'product_id'}:
+            if not isinstance(device, dict) or set(device) - {'port_path', 'usb_serial', 'vendor_id', 'product_id', 'usb_address'}:
                 raise ValueError('invalid flash USB selector')
+            if 'usb_address' in device and (type(device['usb_address']) is not int or not 1 <= device['usb_address'] <= 127):
+                raise ValueError('invalid USB connection address')
             ports = device.get('port_path')
             if (not isinstance(ports, list) or not 2 <= len(ports) <= 16
                     or any(type(port) is not int or not 1 <= port <= (65535 if index == 0 else 255)
@@ -291,7 +297,9 @@ def safe_event(event):
 def public_plan(value):
     """Strip implementation paths and device selectors from the domain preview."""
     hidden = {'path', 'workspace', 'argv', 'device', 'profile', 'profile_data', 'prepare',
-              'cache_path', 'source_path', 'image_path', 'request_path', 'files'}
+              'cache_path', 'source_path', 'image_path', 'request_path', 'files',
+              'execution_profile', 'execution_device', 'initial_device', 'previous_device', 'final_device',
+              'allowed_final_generation', 'source_workspaces'}
     if isinstance(value, dict):
         return {key: public_plan(item) for key, item in value.items()
                 if key not in hidden and not key.endswith('_path')}
@@ -357,9 +365,19 @@ class LocalFlashExecutor:
         return path
 
     def _request(self, binding):
-        return {'version': 1, 'board_serial': binding.serial, 'profile': binding.profile_data,
+        request = {'version': 1, 'board_serial': binding.serial, 'profile': binding.profile_data,
                 'endpoint': binding.endpoint, 'device': binding.device,
                 'max_expanded_bytes': binding.max_expanded_bytes, 'max_cache_bytes': binding.max_cache_bytes}
+        if binding.target_id:
+            request.update(target_id=binding.target_id, target_generation=binding.target_generation)
+        return request
+
+    def discover(self, argv, probe=False, device=None, check=lambda: None):
+        request = {'version': 1, 'probe': probe}
+        if device is not None:
+            request['device'] = device
+        return self._run(SimpleNamespace(argv=tuple(argv), timeout=20 if probe else 10),
+                         'discover', request, check=check)
 
     def inspect(self, binding, check=lambda: None):
         return self._run(binding, 'inspect', self._request(binding), check=check, timeout=min(binding.timeout, 60))
@@ -367,6 +385,83 @@ class LocalFlashExecutor:
     def prepare(self, binding, on_event=None, check=lambda: None, task_id='', attempt_id=''):
         request = dict(self._request(binding), task_id=task_id, attempt_id=attempt_id)
         return self._run(binding, 'prepare', request, on_event, check)
+
+    def execution_binding(self, binding, profile, workspace, check=lambda: None):
+        """Accept loader paths produced by this host's bounded package import.
+
+        Device-returned profiles cannot use this entry point: only the fixed
+        automatic SpacemiT template may gain the four loader preparation steps.
+        The coordinator keeps the original binding digest for attachment checks.
+        """
+        if (not binding.target_id or not isinstance(profile, dict)
+                or binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
+                or binding.profile_data.get('chip_family') not in ('k1', 'k3')):
+            raise FlashRunnerError('loader preparation requires a detected SpacemiT target')
+        try:
+            _bounded_json(profile, 512 * 1024)
+        except (TypeError, ValueError) as error:
+            raise FlashRunnerError('invalid prepared execution profile') from error
+        baseline = json.loads(json.dumps(binding.profile_data))
+        candidate = json.loads(json.dumps(profile))
+        steps = candidate.pop('prepare', None)
+        baseline.pop('prepare', None)
+        if (not isinstance(steps, list) or len(steps) != 4
+                or [step.get('kind') if isinstance(step, dict) else None for step in steps]
+                    != ['stage', 'continue', 'stage', 'continue']):
+            raise FlashRunnerError('prepared loader steps differ from the fixed execution sequence')
+        # The importer's one package table is fixed, never a user-supplied path.
+        storages, original_storages = candidate.get('storages'), baseline.get('storages')
+        if (isinstance(storages, list) and len(storages) == 1 and isinstance(storages[0], dict)
+                and isinstance(original_storages, list) and len(original_storages) == 1
+                and isinstance(original_storages[0], dict)
+                and storages[0].get('package_tables') == ['partition_universal.json']
+                and not original_storages[0].get('package_tables')):
+            storages[0].pop('package_tables')
+            original_storages[0].pop('package_tables', None)
+        if candidate != baseline:
+            raise FlashRunnerError('prepared execution profile changed device capabilities or identity')
+        if not isinstance(workspace, (str, os.PathLike)):
+            raise FlashRunnerError('prepared loaders require a managed image workspace')
+        target = Path(workspace).absolute()
+        cache = (self.root / 'cache').absolute()
+        if (target.parent != cache or not re.fullmatch(r'plan-[A-Za-z0-9_-]{8}', target.name)
+                or target.is_symlink() or not target.is_dir() or cache.is_symlink()
+                or target.resolve() != target):
+            raise FlashRunnerError('prepared loader workspace is outside the managed image cache')
+        for index, step in enumerate(steps):
+            check()
+            if index in (1, 3):
+                if set(step) != {'kind'}:
+                    raise FlashRunnerError('prepared continue step contains unsupported fields')
+                continue
+            if (set(step) != {'kind', 'path', 'sha256'} or not isinstance(step['path'], str)
+                    or not isinstance(step['sha256'], str)
+                    or not re.fullmatch(r'[0-9a-f]{64}', step['sha256'])):
+                raise FlashRunnerError('invalid prepared loader reference')
+            path = Path(step['path'])
+            if not path.is_absolute() or not path.is_relative_to(target):
+                raise FlashRunnerError('prepared loader is outside the managed image workspace')
+            expected = 'FSBL.bin' if index == 0 else 'u-boot.itb'
+            if path.name != expected or index == 0 and path.parent.name != 'factory':
+                raise FlashRunnerError('prepared loader does not match the fixed image member')
+            for component in (path, *path.parents):
+                if component == target:
+                    break
+                if component.is_symlink():
+                    raise FlashRunnerError('prepared loader path contains a symbolic link')
+            if not path.is_file() or path.resolve() != path:
+                raise FlashRunnerError('prepared loader is not a regular managed file')
+            digest = hashlib.sha256()
+            with path.open('rb') as source:
+                while True:
+                    check()
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+            if digest.hexdigest() != step['sha256']:
+                raise FlashRunnerError('prepared loader checksum changed')
+        return replace(binding, profile_data=json.loads(json.dumps(profile)))
 
     def plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
              target_storage=None, inspection_scope=None):
@@ -399,12 +494,17 @@ class LocalFlashExecutor:
             if (not isinstance(image.get('plan'), dict)
                     or not isinstance(image.get('payload_candidates', []), list)):
                 raise FlashRunnerError('flashing executor returned an invalid image plan')
+            execution = (self.execution_binding(binding, image['execution_profile'], workspace, check)
+                         if image.get('execution_profile') is not None else binding)
             inspection_request = dict(request, plan=image['plan'], payload_candidates=image.get('payload_candidates', []))
+            inspection_request['profile'] = execution.profile_data
             stage = 'check-plan'
             scope = inspection_scope() if inspection_scope is not None else nullcontext()
             with scope:
-                result = self._run(binding, 'check-plan', inspection_request, check=check)
+                result = self._run(execution, 'check-plan', inspection_request, check=check)
             result['workspace'] = str(workspace)
+            if image.get('execution_profile') is not None:
+                result['execution_profile'] = execution.profile_data
             return result
         except BaseException as error:
             if not getattr(error, 'stage', ''):
@@ -427,7 +527,8 @@ class LocalFlashExecutor:
         request = dict(self._request(binding), plan=plan, task_id=task_id, attempt_id=attempt_id)
         return self._run(binding, 'execute', request, on_event, check)
 
-    def check_plan(self, binding, plan, payload_candidates=None, check=lambda: None, selections=None):
+    def check_plan(self, binding, plan, payload_candidates=None, check=lambda: None, selections=None,
+                   previous_device=None):
         """Bind cached payloads to the live layout without importing them again.
 
         The coordinator already owns the board maintenance lease at this point.
@@ -447,6 +548,12 @@ class LocalFlashExecutor:
             request['target_storage'] = plan['target_storage']
         if selections is not None and selections != plan.get('selections', []):
             request['selection_update'] = True
+        if previous_device is not None:
+            if (not isinstance(previous_device, dict) or plan.get('ready') is not False
+                    or not binding.profile_data.get('prepare')
+                    or previous_device.get('port_path') != binding.device.get('port_path')):
+                raise TaskError('USB connection transition requires this plan\'s loader preparation', 409)
+            request['previous_device'] = previous_device
         return self._run(binding, 'check-plan', request, check=check)
 
     def _run(self, binding, operation, request, on_event=None, check=lambda: None, timeout=None):

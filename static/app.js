@@ -77,6 +77,12 @@
       openSshCredentials(terminalView.current, task.result.ssh_user);
     },
     openFlash: function (task) {
+      var target = task.flash_targets && task.flash_targets[0];
+      if (target && flashing) {
+        flashing.open({ target_id: target.target_id, target_generation: target.generation || target.target_generation,
+          label: '刷机任务 · ' + task.id }, task);
+        return;
+      }
       var selected = deviceDirectory.find(deviceDirectory.selected);
       if (selected) flashing.open(selected, task);
     }
@@ -699,6 +705,9 @@
     var selected = deviceDirectory.find(deviceDirectory.selected);
     if (selected && flashing) flashing.open(selected);
   });
+  $('b-flash-discover').addEventListener('click', function () {
+    if (flashing) flashing.discover();
+  });
   $('b-boot-compare').addEventListener('click', function () {
     if (!deviceDirectory.selected) return;
     var selected = deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0];
@@ -760,14 +769,23 @@
     var ctx = terminalView.current;
     if (!isCurrent(ctx)) return;
     var cur = $('d-name').textContent;
-    var v = window.prompt(window.SerialdI18n ? window.SerialdI18n.translate('修改设备标签（日志目录仍为设备序列号）') : '修改设备标签（日志目录仍为设备序列号）', cur);
+    var prompt = ctx.serial ? '修改设备标签（日志目录仍为设备序列号）'
+      : '修改串口标签（1–64 位字母、数字、点、下划线或连字符，不改变设备身份）';
+    var v = window.prompt(window.SerialdI18n ? window.SerialdI18n.translate(prompt) : prompt, cur);
     if (!v || !isCurrent(ctx)) return;
     fetch('/api/label', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: ctx.key, serial: ctx.serial, label: v }) })
+      body: JSON.stringify({ key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId, label: v }) })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!isCurrent(ctx)) return;
-        if (d.ok) { adoptKey(ctx, d.device_key || d.label, d.serial); pollDevices(); }
+        if (d.ok) {
+          if (!ctx.serial && !d.serial) {
+            $('d-name').textContent = d.label;
+            var pending = deviceDirectory.find(ctx.key);
+            if (pending) { pending.label = d.label; pending.attachment_label = d.attachment_label || d.label; }
+          } else adoptKey(ctx, d.device_key || d.label, d.serial);
+          pollDevices();
+        }
         else $('d-status').textContent = ' 改名失败：' + (d.error || '');
       }).catch(function (e) {
         if (isCurrent(ctx)) $('d-status').textContent = ' 改名失败：' + e.message;

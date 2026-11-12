@@ -155,9 +155,17 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | `/api/identify` | Optional `init_boot_marker=true` or web-only `association={nonce,serial,reason}`; active shell probe, may log in |
 | `/api/probe` | Sends CR to request a prompt; this writes to the shared console |
 | `/api/ssh-enable` | Explicitly install/start SSH from an already-root serial shell; requires authorization for board changes |
-| `/api/label` | `label`; rename without moving archives |
+| `/api/label` | `label`; rename without moving archives. Pending serial attachments also require expected `serial=""` and `connection_id`; their display label does not change the API key or create a board identity. |
 | `/api/switch-mode` | Prepare this physical attachment for another board |
 | `/api/rescue` | Explicit host USB recovery where supported |
+
+Pending attachment labels use the existing label format (1–64 ASCII letters,
+digits, dots, underscores or hyphens). They persist by the serial attachment's
+stable location and return as `attachment_label` and `label`, with `serial=""` and
+the existing pending `device_key`. Reconnecting the same attachment restores the
+name. First identification may inherit an unused attachment label; reconnecting
+an existing board preserves that board's stored label and archive. Labels never
+match or merge board identities.
 
 If identification finds an existing offline archive with a previously conflicted
 serial, a web caller can receive `code=identity-confirmation-required` and
@@ -245,19 +253,54 @@ exclusive UART ownership are documented in [HARDWARE_EXTENSIONS.md](HARDWARE_EXT
 ### Board-level flashing
 
 The dedicated `flash` task is separate from the legacy `hardware-flash` fixed
-command. It uses an administrator-configured local executor and an already
-registered board serial. Enter download mode before submitting; this flow does
-not operate reset pins. UART is optional and its connection generation is not
-the flash target. Other connection-bound operations keep their existing guards.
+command. It supports an automatically discovered USB download target, or an
+administrator-configured binding for a registered board. Automatic discovery
+does not require prior UART identification or a configuration JSON file when the
+local executor is installed. Enter download mode before submitting; this flow
+does not operate reset pins. UART is optional and its connection generation is
+not the flash target. Other connection-bound operations keep their existing guards.
 
 | Method and route | Parameters / behavior |
 | --- | --- |
+| GET `/api/flash-discover` | Human-only USB download-device discovery; returns candidate target IDs and observed target generations, without resetting or writing storage |
+| POST `/api/flash-target` | Human-only target selection with `target_id` and expected `target_generation`; reads supported device identity/layout information and rejects a changed or ambiguous target |
 | GET `/api/flash-capabilities` | `key`, expected `serial`; configured execution location, supported modes and ready artifacts; no reset or storage write |
 | POST `/api/flash-plan` | `key`, `serial`, `artifact_id`, `mode` (`full` or `partitions`), `binding_revision`, `verify` (`if-supported` or `required`), optional `selections` and optional full-disk `target_storage`; returns an immutable plan preview |
 | GET `/api/flash-events` | `key`, `serial`, task `id` and nonnegative `after` event cursor; bounded events and flash details |
 | POST `/api/flash-selection` | For the same task in `awaiting-selection`, `id`, `layout_digest` and `selections` with `preview=true` return a preview; submit its `plan_id` and unique `request_id` to continue |
 | POST `/api/flash-recovery` | Human-only recovery receipt: `key`, `serial`, task `id`, expected `attempt_id`, nonempty `reason` and `confirm_stopped=true`; releases recovery resources after the operator verifies the original executor stopped |
 | POST `/api/task-start`, `kind=flash` | `key`, `serial`, `plan_id`, `binding_revision` and unique `request_id`; creates or retrieves the same durable task |
+
+For automatically discovered devices, `target_id` and `target_generation`
+replace the configured board's `key`/`serial` scope in capability, artifact
+creation, plan and task requests. The caller cannot supply a USB path or turn a
+target ID into an arbitrary board identity. A reliable, unconflicted serial can
+associate the target with its existing board; otherwise task history retains a
+USB target and no invented serial or UART connection. Target-specific task/event
+queries use `target_id` and the original task ID. Human callers may use automatic
+targets; agent grants do not gain access by guessing their target IDs.
+
+Automatic partition capabilities require reliable live GPT/layout and target
+partition-size checks. Raw full-disk capability additionally requires an
+independently verified storage capacity and supported whole-disk target; a GPT
+backup location or the sum of partition sizes is not evidence of device capacity.
+
+A detected SpacemiT K1/K3 BootROM may report `preparable=true` and
+`can_prepare_from_image=true` before a live layout is available. The caller can
+upload a standard flashing package and preview its fixed loader preparation;
+only the submitted task loads the verified package members. Loader paths and the
+derived execution profile remain private. The task retains its original USB
+target/generation snapshot while accepting its bounded, verified loader-mode
+transition on the same physical socket. Selection and continuation submit that
+original task snapshot; clients do not start another flash task or switch to an
+unrelated newly enumerated device. Storage writes require the final live layout
+and a separately previewed partition selection.
+
+While that original task is `awaiting-selection`, `/api/artifact-create` may
+include its `task_id` together with the original `target_id` and
+`target_generation`. This stages an additional payload under the task's approved
+USB transition; it does not create another task or load the temporary environment
+again. Normal uploads keep their current-generation checks.
 
 Partition selections contain `storage`, `partition` and `artifact_id`. Storage
 and partition together identify a destination; two disks may have the same

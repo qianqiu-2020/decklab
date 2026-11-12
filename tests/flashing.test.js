@@ -260,6 +260,218 @@ test('partition candidate artifact references are deduplicated across sector var
   assert.equal(choices[1].value, artifact.id); assert.match(choices[1].textContent, /image.bin/);
 });
 
+test('automatic discovery probes one USB target and flashes without a UART or invented serial', async () => {
+  const h = harness();
+  h.api.discover();
+  assert.equal(h.get('flash-dialog').open, true);
+  const target = {target_id: 'usb-target-a', target_generation: 'generation-a', serial: '',
+    label: 'SpacemiT loader', mode: 'loader', usb: {port_path: [1, 4]}};
+  h.take('/api/flash-discover').resolve({available: true, targets: [target]}); await drain();
+  const history = h.take('/api/tasks');
+  assert.match(history.url, /target_id=usb-target-a/);
+  assert.doesNotMatch(history.url, /target_serial=|connection_id=|key=/);
+  history.resolve({tasks: []}); await drain();
+  const probe = h.take('/api/flash-target');
+  assert.deepEqual(probe.payload, {actor: 'web', target_id: 'usb-target-a', target_generation: 'generation-a'});
+  assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
+  probe.resolve({target, capabilities}); await drain();
+  h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change'); h.get('fl-plan').click();
+  const preview = h.take('/api/flash-plan');
+  assert.equal(preview.payload.target_id, target.target_id);
+  assert.equal(preview.payload.target_generation, target.target_generation);
+  assert.equal('serial' in preview.payload, false);
+  assert.equal('key' in preview.payload, false);
+  preview.resolve({plan: {id: 'auto-plan', writes: [{storage: 'disk-a', partition: 'rootfs', size: 32}]}}); await drain();
+  h.get('fl-start').click();
+  const start = h.take('/api/task-start');
+  assert.equal(start.payload.target_id, target.target_id);
+  assert.equal(start.payload.target_generation, target.target_generation);
+  assert.equal('connection_id' in start.payload, false);
+});
+
+test('multiple USB candidates require an explicit target and pin its generation', async () => {
+  const h = harness(); h.api.discover();
+  const first = {target_id: 'usb-a', target_generation: 'first', label: 'One', usb: {port_path: [1, 2]}};
+  const second = {target_id: 'usb-b', target_generation: 'second', label: 'Two', usb: {port_path: [1, 3]}};
+  h.take('/api/flash-discover').resolve({targets: [first, second]}); await drain();
+  assert.equal(h.requests.length, 0, 'do not open an arbitrary USB interface');
+  assert.match(h.get('fl-status').textContent, /多个下载设备/);
+  assert.match(h.get('fl-device').textContent, /USB 1\.2.*USB 1\.3/);
+  assert.equal(h.get('fl-plan').disabled, true);
+  h.get('fl-device').value = second.target_id; h.get('fl-device').emit('change');
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  const selected = h.take('/api/flash-target');
+  assert.equal(selected.payload.target_id, second.target_id);
+  assert.equal(selected.payload.target_generation, second.target_generation);
+  selected.resolve({target: second, capabilities: {...capabilities, supported: false, reason: 'layout-unavailable'}}); await drain();
+  assert.match(h.get('fl-status').textContent, /layout-unavailable/);
+  assert.equal(h.get('fl-start').disabled, true);
+});
+
+test('late USB discovery does not replace another board and absent devices keep an actionable explanation', async () => {
+  const h = harness(); h.api.discover(); const old = h.take('/api/flash-discover');
+  h.api.open(board); h.take('/api/flash-capabilities').resolve(capabilities); await drain();
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  old.resolve({targets: [{target_id: 'stale', target_generation: 'old'}]}); await drain();
+  assert.equal(h.requests.some(entry => entry.url === '/api/flash-target'), false);
+  assert.match(h.get('fl-board').textContent, /Pico/);
+  const empty = harness(); empty.api.discover();
+  empty.take('/api/flash-discover').resolve({available: true, targets: []}); await drain();
+  assert.match(empty.get('fl-status').textContent, /USB 数据线和下载模式/);
+  assert.equal(empty.get('fl-upload').disabled, true);
+});
+
+test('a retained USB task can be observed without probing or reselecting a disconnected device', async () => {
+  const h = harness();
+  const target = {target_id: 'usb-task-target', target_generation: 'original', label: 'Disconnected target'};
+  const current = {id: 'retained-usb-task', kind: 'flash', state: 'running', progress: {phase: 'writing'}};
+  h.api.open(target, current); await drain();
+  assert.equal(h.requests.some(entry => entry.url === '/api/flash-target' || entry.url === '/api/flash-discover'), false);
+  assert.match(h.take('/api/flash-events').url, /target_id=usb-task-target/);
+  assert.match(h.get('fl-task-id').textContent, /retained-usb-task/);
+  assert.equal(h.get('fl-discover').disabled, true, 'cannot switch target under an active operation');
+});
+
+test('clearing or refreshing a USB target invalidates a previously reviewed write plan', async () => {
+  const h = harness();
+  const target = {target_id: 'usb-planned', target_generation: 'old', label: 'USB target'};
+  h.api.open(target);
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  h.take('/api/flash-target').resolve({target, capabilities}); await drain();
+  h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change'); h.get('fl-plan').click();
+  h.take('/api/flash-plan').resolve({plan: {id: 'old-plan', writes: [{storage: 'disk-a', size: 32}]}}); await drain();
+  assert.equal(h.get('fl-start').disabled, false);
+  h.get('fl-device').value = ''; h.get('fl-device').emit('change');
+  assert.equal(h.get('fl-start').disabled, true);
+  h.get('fl-start').click(); assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
+  h.get('fl-discover').click(); h.take('/api/flash-discover').resolve({targets: []}); await drain();
+  assert.equal(h.get('fl-plan').disabled, true);
+  assert.equal(h.get('fl-start').disabled, true);
+});
+
+test('automatic primary-GPT capacity and missing readback remain explicit capabilities', async () => {
+  const h = harness();
+  const required = new Element(); required.value = 'required'; h.get('fl-verify').appendChild(required);
+  const target = {target_id: 'gpt-target', target_generation: 'one'};
+  h.api.open(target);
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  h.take('/api/flash-target').resolve({target, capabilities: {...capabilities, storages: [{id: 'active', size: 4096,
+    capacity_source: 'primary-gpt-header', capacity_verified: false, verify: false, partitions: []}]}}); await drain();
+  assert.match(h.get('fl-connections').textContent, /现场主 GPT.*容量尚未独立核验/);
+  assert.match(h.get('fl-connections').textContent, /不支持写后回读校验/);
+  assert.match(h.get('fl-target-storage').textContent, /GPT 声明，容量待核验/);
+  assert.equal(required.disabled, true);
+  assert.equal(h.get('fl-verify').value, 'if-supported');
+});
+
+test('BootROM image preparation is explicit, storage-free and continues partition selection in one task', async () => {
+  const h = harness(), target = {target_id: 'brom-target', target_generation: 'brom-one', mode: 'bootrom'};
+  h.api.open(target);
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  h.take('/api/flash-target').resolve({target, capabilities: {...capabilities, supported: false,
+    can_prepare_from_image: true, can_upload: true, modes: ['partitions'], storages: [], readback_supported: false}}); await drain();
+  assert.equal(h.get('fl-mode').value, 'partitions');
+  assert.equal(h.get('fl-mode').disabled, true);
+  assert.equal(h.get('fl-upload').disabled, false);
+  assert.match(h.get('fl-status').textContent, /BootROM.*不写存储/);
+  assert.match(h.get('fl-intro').textContent, /准备阶段.*不写入存储/);
+  h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change');
+  assert.equal(h.get('fl-plan').disabled, false);
+  assert.match(h.get('fl-plan').textContent, /准备步骤/);
+  h.get('fl-plan').click(); const preview = h.take('/api/flash-plan');
+  assert.equal(preview.payload.mode, 'partitions'); assert.deepEqual(preview.payload.selections, []);
+  assert.equal(preview.payload.target_generation, target.target_generation);
+  preview.resolve({requires_prepare: true, plan: {id: 'brom-prep', ready: false, write_layout: false, writes: []}}); await drain();
+  assert.equal(h.get('fl-start').disabled, false);
+  assert.match(h.get('fl-start').textContent, /准备刷机环境并读取布局/);
+  assert.match(h.get('fl-preview').textContent, /不写入存储/);
+  h.get('fl-start').click(); const submit = h.take('/api/task-start');
+  const current = {id: 'same-brom-task', kind: 'flash', state: 'running', progress: {phase: 'awaiting-selection'},
+    flash: {inspection: {layout_digest: 'actual-layout', storages: capabilities.storages}, payload_candidates: [artifact]}};
+  submit.resolve({task: current}); await drain();
+  assert.match(h.get('fl-task-id').textContent, /same-brom-task/);
+  const row = h.get('fl-partitions').children[0]; row.checkbox.checked = true; row.artifactSelect.value = artifact.id;
+  h.get('fl-select').click(); const selected = h.take('/api/flash-selection');
+  assert.equal(selected.payload.id, current.id); assert.equal(selected.payload.preview, true);
+  assert.equal(selected.payload.layout_digest, 'actual-layout');
+  assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false, 'never create another preparation task');
+});
+
+test('BootROM preparation cannot acquire a hidden storage-write scope', async () => {
+  const h = harness(), target = {target_id: 'brom-invalid', target_generation: 'brom-one'};
+  h.api.open(target);
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  h.take('/api/flash-target').resolve({target, capabilities: {...capabilities, supported: false,
+    preparable: true, modes: ['partitions'], storages: []}}); await drain();
+  h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change'); h.get('fl-plan').click();
+  h.take('/api/flash-plan').resolve({requires_prepare: true, plan: {id: 'unsafe', ready: false,
+    write_layout: false, writes: [{storage: 'disk-a', partition: 'rootfs', size: 32}]}}); await drain();
+  assert.equal(h.get('fl-start').disabled, true);
+  assert.match(h.get('fl-status').textContent, /准备计划包含存储写入/);
+  assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
+});
+
+test('refresh finds a prepared task before USB probing and preserves its original generation for selection', async () => {
+  const h = harness(), target = {target_id: 're-enumerated', target_generation: 'loader-new', label: 'New loader'};
+  const original = {id: 'original-preparation', kind: 'flash', state: 'running', board_targets: [],
+    flash_targets: [{target_id: target.target_id, generation: 'brom-initial'}],
+    progress: {phase: 'awaiting-selection'}, flash: {inspection: {layout_digest: 'actual', storages: capabilities.storages},
+      payload_candidates: [artifact]}};
+  h.api.discover(); h.take('/api/flash-discover').resolve({targets: [target]}); await drain();
+  const history = h.take('/api/tasks');
+  assert.equal(h.requests.some(entry => entry.url === '/api/flash-target'), false);
+  history.resolve({tasks: [original]}); await drain();
+  assert.equal(h.requests.some(entry => entry.url === '/api/flash-target'), false, 'endpoint remains owned by the original task');
+  assert.match(h.take('/api/flash-events').url, /target_generation=brom-initial/);
+  const row = h.get('fl-partitions').children[0]; row.checkbox.checked = true; row.artifactSelect.value = artifact.id;
+  h.get('fl-select').click(); const preview = h.take('/api/flash-selection');
+  assert.equal(preview.payload.id, original.id); assert.equal(preview.payload.target_generation, 'brom-initial');
+  preview.resolve({plan: {id: 'original-selection', writes: [{storage: row.storageId, partition: row.partitionId, size: 32}]}}); await drain();
+  h.get('fl-select').click(); const commit = h.take('/api/flash-selection');
+  assert.equal(commit.payload.id, original.id); assert.equal(commit.payload.target_generation, 'brom-initial');
+  assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
+});
+
+test('an unavailable executor can still show a disconnected recovery target and release the original task', async () => {
+  const h = harness(), target = {target_id: 'disconnected', target_generation: 'fresh-list', present: false};
+  const original = {id: 'retained-recovery', kind: 'flash', state: 'failed', board_targets: [],
+    flash_targets: [{target_id: target.target_id, generation: 'original-generation'}], progress: {},
+    flash: {recovery_required: true, attempt_id: 'original-attempt', write_result: 'unknown-or-partial'}};
+  h.api.discover(); h.take('/api/flash-discover').resolve({available: false, targets: [target]}, 503); await drain();
+  assert.match(h.get('fl-device').textContent, /设备未连接，原任务待处理/);
+  h.take('/api/tasks').resolve({tasks: [original]}); await drain();
+  assert.equal(h.requests.some(entry => entry.url === '/api/flash-target'), false);
+  h.get('fl-recovery-reason').value = 'Checked the original external process is stopped';
+  h.get('fl-recovery-reason').emit('input'); h.get('fl-release').click();
+  const release = h.take('/api/flash-recovery');
+  assert.equal(release.payload.target_generation, 'original-generation');
+  assert.equal(release.payload.id, original.id);
+  release.resolve({task: {...original, flash: {...original.flash, recovery_required: false}}}); await drain();
+  assert.equal(h.get('fl-plan').disabled, true, 'a task snapshot cannot submit a new flash');
+  assert.equal(h.get('fl-upload').disabled, true);
+  assert.equal(h.get('fl-discover').disabled, false);
+});
+
+test('awaiting-selection upload carries the original task id and does not create another preparation', async () => {
+  const h = harness(), target = {target_id: 'upload-target', target_generation: 'new-loader'};
+  const original = {id: 'upload-original', kind: 'flash', state: 'running', board_targets: [],
+    flash_targets: [{target_id: target.target_id, generation: 'initial-brom'}], progress: {phase: 'awaiting-selection'},
+    flash: {inspection: {layout_digest: 'live', storages: capabilities.storages}, payload_candidates: [artifact]}};
+  h.api.open(target, original); await drain();
+  h.get('fl-files').files = [{name: 'payload.bin', size: 3, slice: () => ({arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer})}];
+  assert.equal(h.get('fl-upload').disabled, false);
+  h.get('fl-upload').click(); const create = h.take('/api/artifact-create');
+  assert.equal(create.payload.task_id, original.id);
+  assert.equal(create.payload.target_generation, 'initial-brom');
+  create.resolve({artifact: {id: 'new-payload', size: 3}}); await drain();
+  const append = h.take('/api/artifact-append');
+  assert.equal('task_id' in append.payload, false);
+  append.resolve({artifact: {received: 3}}); await drain();
+  h.take('/api/artifact-seal').resolve({artifact: {id: 'new-payload', name: 'payload.bin', size: 3, sha256: 'e'.repeat(64)}}); await drain();
+  assert.match(h.get('fl-status').textContent, /原任务选择实际分区/);
+  assert.equal(h.requests.some(entry => entry.url === '/api/task-start' || entry.url === '/api/flash-target'), false);
+});
+
 (async () => {
   for (const [name, fn] of tests) { await fn(); console.log('ok - ' + name); }
   console.log(tests.length + ' flash frontend isolation tests passed');

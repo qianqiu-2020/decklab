@@ -4,6 +4,7 @@ Only one TaskManager owns a collector's task execution. Restart never replays
 commands: queued/running records become interrupted, keeping partial progress.
 """
 import json
+import re
 import secrets
 import threading
 import time
@@ -63,7 +64,7 @@ class TaskStore:
 
     def create_board(self, kind, actor, client_id, serial, request_id, input_digest,
                      details, resources, connection_id=None, *, initial_state='queued',
-                     resource_state='active', error=''):
+                     resource_state='active', error='', target_id=None, target_generation=None):
         """Atomically bind one execution, idempotency key and durable resource holds."""
         from .flash_store import encode_document, validate_request
         validate_request(request_id, input_digest)
@@ -71,8 +72,16 @@ class TaskStore:
             raise TaskError('invalid board task kind or actor')
         if not isinstance(client_id, str) or len(client_id) > 80:
             raise TaskError('invalid board task client')
-        if not isinstance(serial, str) or not serial or len(serial.encode()) > 100:
+        if not isinstance(serial, str) or len(serial.encode()) > 100 or not (serial or target_id):
             raise TaskError('invalid board task serial')
+        if target_id is not None:
+            if (actor != 'web' or not isinstance(target_id, str) or not target_id or len(target_id) > 80
+                    or not isinstance(target_generation, str) or not target_generation or len(target_generation) > 80):
+                raise TaskError('automatic flash targets require a human and a USB generation', 403)
+        elif target_generation is not None:
+            raise TaskError('USB generation requires a flash target')
+        if not serial and connection_id is not None:
+            raise TaskError('unidentified USB target cannot carry a UART connection')
         if connection_id is not None and (not isinstance(connection_id, str) or not connection_id
                                            or len(connection_id) > 80):
             raise TaskError('invalid board task connection snapshot')
@@ -82,11 +91,22 @@ class TaskStore:
         encoded = encode_document(details)
         task_id, now = secrets.token_hex(12), time.time()
         with self.store.lock, self.store.db:
-            if self.store.db.execute('SELECT serial FROM boards WHERE serial=?', (serial,)).fetchone() is None:
+            if serial and self.store.db.execute('SELECT serial FROM boards WHERE serial=?', (serial,)).fetchone() is None:
                 raise TaskError('flash board is not registered', 404)
+            if target_id:
+                target = self.store.db.execute('SELECT generation,serial,present FROM flash_targets WHERE id=?',
+                                               (target_id,)).fetchone()
+                if (target is None or initial_state == 'queued' and (
+                        target['generation'] != target_generation
+                        or (target['serial'] or '') != serial or not target['present'])):
+                    raise TaskError('flash USB target generation or identity changed', 409)
             self.store.db.execute('INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                 (task_id, kind, actor, client_id if actor == 'web' else '', initial_state, '{}', None, error, now, now, 0))
-            self.store.db.execute('INSERT INTO task_board_targets VALUES(?,?)', (task_id, serial))
+            if serial:
+                self.store.db.execute('INSERT INTO task_board_targets VALUES(?,?)', (task_id, serial))
+            if target_id:
+                self.store.db.execute('INSERT INTO task_flash_targets VALUES(?,?,?)',
+                                      (task_id, target_id, target_generation))
             if connection_id is not None:
                 self.store.db.execute('INSERT INTO task_targets VALUES(?,?,?)', (task_id, serial, connection_id))
             self.store.db.execute('INSERT INTO flash_requests VALUES(?,?,?,?)',
@@ -97,6 +117,8 @@ class TaskStore:
         return task_id
 
     def get(self, task_id):
+        if not isinstance(task_id, str) or not re.fullmatch(r'[0-9a-f]{24}', task_id):
+            raise TaskError('task not found', 404)
         with self.store.lock:
             row = self.store.db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
             if row is None:
@@ -111,11 +133,15 @@ class TaskStore:
                 'SELECT serial FROM task_board_targets WHERE task_id=? ORDER BY serial', (task_id,))]
             if board_targets:
                 record['board_targets'] = board_targets
-                detail = self.store.db.execute('SELECT document FROM flash_details WHERE task_id=?',
-                                                (task_id,)).fetchone()
-                if detail:
-                    from .flash_store import FlashStore
-                    record['flash'] = FlashStore(self.store).public_details(task_id)
+            flash_targets = [dict(target) for target in self.store.db.execute(
+                'SELECT target_id,generation FROM task_flash_targets WHERE task_id=? ORDER BY target_id', (task_id,))]
+            if flash_targets:
+                record['flash_targets'] = flash_targets
+            detail = self.store.db.execute('SELECT document FROM flash_details WHERE task_id=?',
+                                            (task_id,)).fetchone()
+            if detail:
+                from .flash_store import FlashStore
+                record['flash'] = FlashStore(self.store).public_details(task_id)
         for target in record['targets']:
             if target['resolved_serial'] is None:
                 del target['resolved_serial']
@@ -124,9 +150,13 @@ class TaskStore:
         record['cancel_requested'] = bool(record['cancel_requested'])
         return record
 
-    def list(self, actor=None, serials=None, limit=20, offset=0, connection_id=None, target_serial=None):
+    def list(self, actor=None, serials=None, limit=20, offset=0, connection_id=None, target_serial=None,
+             target_id=None):
         if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0:
             raise TaskError('invalid task pagination')
+        if target_id is not None and (not isinstance(target_id, str)
+                                      or not re.fullmatch(r'[0-9a-f]{24}', target_id)):
+            raise TaskError('invalid flash target filter')
         clauses, arguments = [], []
         if actor is not None:
             clauses.append('actor=?')
@@ -145,6 +175,10 @@ class TaskStore:
             clauses.append('NOT EXISTS (SELECT 1 FROM task_targets t WHERE t.task_id=tasks.id AND '
                            + effective + ' NOT IN (' + placeholders + '))')
             arguments.extend(serials)
+            # An unbound download attachment has no board grant, even if its
+            # historical target lists are otherwise empty (all([]) is unsafe).
+            clauses.append('NOT EXISTS (SELECT 1 FROM task_flash_targets f WHERE f.task_id=tasks.id '
+                           'AND NOT EXISTS (SELECT 1 FROM task_board_targets b WHERE b.task_id=tasks.id))')
             clauses.append('NOT EXISTS (SELECT 1 FROM task_board_targets b WHERE b.task_id=tasks.id '
                            'AND b.serial NOT IN (' + placeholders + '))')
             arguments.extend(serials)
@@ -160,6 +194,9 @@ class TaskStore:
                 raise TaskError('invalid task connection')
             clauses.append('EXISTS (SELECT 1 FROM task_targets WHERE task_id=tasks.id AND connection_id=?)')
             arguments.append(connection_id)
+        if target_id is not None:
+            clauses.append('EXISTS (SELECT 1 FROM task_flash_targets f WHERE f.task_id=tasks.id AND target_id=?)')
+            arguments.append(target_id)
         where = ' WHERE ' + ' AND '.join(clauses) if clauses else ''
         with self.store.lock:
             ids = [row[0] for row in self.store.db.execute(
@@ -171,6 +208,8 @@ class TaskStore:
     def visible_serial(task, serial):
         if task.get('board_targets'):
             return all(value == serial for value in task['board_targets'])
+        if task.get('flash_targets'):
+            return False
         targets = task['targets']
         if len(targets) == 1 and not targets[0]['serial'] and 'resolved_serial' not in targets[0]:
             return task['kind'] == 'identify' and (task.get('result') or {}).get('serial') == serial
@@ -285,7 +324,8 @@ class TaskManager:
         return self.store.get(task_id)
 
     def start_board(self, kind, actor, client_id, serial, run, *, request_id, input_digest,
-                    details=None, resources=(), maintenance=None, connection_id=None):
+                    details=None, resources=(), maintenance=None, connection_id=None,
+                    target_id=None, target_generation=None):
         from .flash_store import FlashStore
         if not callable(run) or maintenance is None:
             raise TaskError('board task requires a runner and maintenance coordinator')
@@ -298,9 +338,12 @@ class TaskManager:
                 raise TaskError('collector is stopping', 503)
             if len(self._active) >= self.max_active:
                 raise TaskError('too many active tasks', 429)
-            with maintenance.admission(serial, resources, actor, client_id) as selected:
+            admission = (maintenance.target_admission(target_id, target_generation, serial, resources, actor, client_id)
+                         if target_id is not None else maintenance.admission(serial, resources, actor, client_id))
+            with admission as selected:
                 task_id = self.store.create_board(kind, actor, client_id, serial, request_id, input_digest,
-                    details if details is not None else {}, selected, connection_id)
+                    details if details is not None else {}, selected, connection_id,
+                    target_id=target_id, target_generation=target_generation)
             context = TaskContext(task_id, self.store)
             worker = threading.Thread(target=self._run_board, args=(context, run, maintenance), daemon=True)
             self._active[task_id] = (context, worker)

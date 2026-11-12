@@ -1,5 +1,6 @@
 require('./serial-progress.test.js');
 require('./flashing.test.js');
+require('./device-order.test.js');
 'use strict';
 
 // 无浏览器、无网络、无 tty：执行页面原脚本，用可控的延迟模拟最危险的交错。
@@ -10,8 +11,9 @@ const vm = require('node:vm');
 require('./i18n.test.js');
 const { TextDecoder } = require('node:util');
 
-const script = ['ui-common.js', 'terminal-policy.js', 'serial-progress.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'tasks.js', 'app.js'].map(name =>
+const script = ['ui-common.js', 'terminal-policy.js', 'serial-progress.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'tasks.js'].map(name =>
   fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
+const appScript = fs.readFileSync(path.join(__dirname, '..', 'static', 'app.js'), 'utf8');
 
 class Element {
   constructor(tag = 'div') {
@@ -171,6 +173,13 @@ function harness(options = {}) {
   sandbox.addEventListener = function () {};
   sandbox.prompt = () => '新编号';
   vm.runInNewContext(script, sandbox, { filename: 'index.html' });
+  const flashCalls = []; let taskOptions;
+  if (options.flashCapture) {
+    const createTasks = sandbox.SerialdTasks.create;
+    sandbox.SerialdTasks.create = captured => { taskOptions = captured; return createTasks(captured); };
+    sandbox.SerialdFlashing = {create: () => ({open: (...args) => flashCalls.push(args), discover() {}})};
+  }
+  vm.runInNewContext(appScript, sandbox, { filename: 'app.js' });
   if (options.transfer) vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'static', 'file-transfer.js'), 'utf8'), sandbox);
   const take = (route, predicate = () => true) => {
     const request = requests.find(r => !r.taken && r.url.split('?')[0] === route && predicate(r));
@@ -186,7 +195,8 @@ function harness(options = {}) {
   };
   const timer = delay => [...timers.entries()].find(([, t]) => t.delay === delay);
   const fire = id => { const t = timers.get(id); timers.delete(id); assert.ok(t); t.fn(); };
-  return { get, document, requests, terminals, streams, timers, intervals, take, sends, select, timer, fire, clientId: sandbox.SerialdUI.clientId, transfer: sandbox.SerialdFileTransfer };
+  return { get, document, requests, terminals, streams, timers, intervals, take, sends, select, timer, fire,
+    clientId: sandbox.SerialdUI.clientId, transfer: sandbox.SerialdFileTransfer, taskOptions, flashCalls };
 }
 
 async function drain() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
@@ -794,6 +804,25 @@ test('late rename and SSH close responses cannot mutate another device', async (
   assert.equal(h.get('d-name').textContent, 'B');
   assert.ok(h.get('d-tabs').children.some(child => child.textContent === 'SSH ssh1'));
   assert.deepEqual(close.body, { key: 'A', sid: 'ssh1', client_id: h.clientId });
+});
+
+test('pending serial labels update display without rekeying identity or replacing the terminal', async () => {
+  const h = harness();
+  const key = 'unprovisioned-fixed-port';
+  h.take('/api/devices').resolve({ devices: [{key, label: key, serial: '', state: 'pending',
+    connection_id: 'pending-generation', by_path: 'usb-port-1', alive: true, info: {}}] });
+  await drain();
+  const terminal = h.select(key);
+  h.get('b-rename').click();
+  const request = h.take('/api/label');
+  assert.equal(request.body.key, key);
+  assert.equal(request.body.serial, '');
+  assert.equal(request.body.connection_id, 'pending-generation');
+  request.resolve({ok: true, device_key: key, serial: '', label: 'uart-left', attachment_label: 'uart-left'});
+  await drain();
+  assert.equal(h.get('d-name').textContent, 'uart-left');
+  assert.equal(h.terminals.at(-1), terminal);
+  assert.equal(h.sends().length, 0);
 });
 
 test('late read failure cannot replace the new view status', async () => {
@@ -2023,6 +2052,20 @@ test('task history recovers progress on a fresh page and cancels only the select
   row.children[1].click();
   assert.equal(h.take('/api/task-cancel').body.id, 'existing');
   assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 0);
+});
+
+test('task-panel USB flash action opens its own original target without a selected UART board', async () => {
+  const h = harness({flashCapture: true});
+  h.take('/api/devices').resolve({devices: []}); await drain();
+  const current = {id: 'usb-only-original', kind: 'flash', state: 'interrupted', board_targets: [],
+    flash_targets: [{target_id: 'original-usb-target', generation: 'initial-bootrom'}]};
+  h.taskOptions.openFlash(current);
+  assert.equal(h.flashCalls.length, 1);
+  assert.equal(h.flashCalls[0][0].target_id, 'original-usb-target');
+  assert.equal(h.flashCalls[0][0].target_generation, 'initial-bootrom');
+  assert.equal(h.flashCalls[0][1].id, current.id);
+  assert.equal('key' in h.flashCalls[0][0], false, 'never associate it with an unrelated current UART');
+  assert.equal(h.requests.some(request => request.url === '/api/task-start'), false);
 });
 
 function copyHarness() {

@@ -146,10 +146,14 @@ class TaskActions:
         except (TaskError, TransactionError, TransferError, ValueError) as error:
             return response(getattr(error, 'status', 400), {'ok': False, 'error': str(error)})
 
-    def query(self, task_id=None, actor='web', serial=None, limit=20, offset=0, connection_id=None, target_serial=None):
+    def query(self, task_id=None, actor='web', serial=None, limit=20, offset=0, connection_id=None, target_serial=None,
+              target_id=None):
         try:
             if task_id:
                 task = self.tasks.store.get(task_id)
+                if target_id is not None and not any(value['target_id'] == target_id
+                                                     for value in task.get('flash_targets', [])):
+                    raise TaskError('task not found', 404)
                 if (actor != 'web' and task['actor'] != actor or serial is not None
                         and not self.tasks.store.visible_serial(task, serial) or connection_id is not None
                         and (not task['targets'] or any(target['connection_id'] != connection_id
@@ -158,7 +162,8 @@ class TaskActions:
                 return response(200, {'task': task})
             tasks = self.tasks.store.list(actor=actor if actor != 'web' else None,
                                          serials=[serial] if serial is not None else None,
-                                         limit=limit, offset=offset, connection_id=connection_id, target_serial=target_serial)
+                                         limit=limit, offset=offset, connection_id=connection_id, target_serial=target_serial,
+                                         target_id=target_id)
             return response(200, {'tasks': tasks})
         except TaskError as error:
             return response(error.status, {'error': str(error)})

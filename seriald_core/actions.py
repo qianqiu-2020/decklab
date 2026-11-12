@@ -33,8 +33,9 @@ def capabilities():
         'input_ownership': 'optional-client',
         'hardware': {'actions': list(ACTIONS), 'configuration': 'explicit-serial',
                      'host_adapter': host_adapter(), 'default': 'disabled'},
-        'flashing': {'configuration': 'explicit-board-binding', 'default': 'disabled',
-                     'reset': 'manual', 'task_target': 'board'},
+        'flashing': {'configuration': 'automatic-usb-or-explicit-board-binding',
+                     'discovery': 'local-usb', 'requires_executor': True, 'automatic_actor': 'web',
+                     'reset': 'manual', 'task_target': 'board-or-usb-target'},
     })
 
 
@@ -395,8 +396,10 @@ class DeviceActions:
 
         if action == 'label':
             try:
-                key = self.manager.rename(d, payload.get('label'))
-                return response(200, {'ok': True, 'label': key, 'device_key': key, 'serial': d.serial})
+                key = self.manager.rename(d, payload.get('label'), payload.get('connection_id'),
+                                          payload.get('serial'))
+                return response(200, {'ok': True, 'label': d.label, 'device_key': key, 'serial': d.serial,
+                                      'attachment_label': d.attachment_label if not d.serial else ''})
             except IdentityError as error:
                 return response(409, {'ok': False, 'error': str(error)})
 

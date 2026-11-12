@@ -123,6 +123,21 @@ class Store:
         with self.lock:
             return self._board(self.db.execute('SELECT * FROM boards WHERE label=?', (label,)).fetchone())
 
+    def attachment_label(self, port):
+        with self.lock:
+            row = self.db.execute('SELECT label FROM attachment_labels WHERE port=?', (port,)).fetchone()
+        return row['label'] if row else ''
+
+    def rename_attachment(self, port, label):
+        label = validate_label(label)
+        if (not isinstance(port, str) or not port or len(port.encode()) > 2048
+                or any(ord(char) < 32 for char in port)):
+            raise IdentityError('当前串口没有有效的连接位置')
+        with self.lock, self.db:
+            self.db.execute('INSERT INTO attachment_labels VALUES(?,?) '
+                            'ON CONFLICT(port) DO UPDATE SET label=excluded.label', (port, label))
+        return label
+
     def get_ssh_credentials(self, serial):
         """Private connection input; never include this result in an API record."""
         if not isinstance(serial, str) or not serial:
@@ -216,7 +231,7 @@ class Store:
             if old:
                 label = old['label'] if label is None else validate_label(label)
             else:
-                proposed = label or info.get('hostname') or ('board-' + serial_component(serial)[:32])
+                proposed = label or self.attachment_label(path) or info.get('hostname') or ('board-' + serial_component(serial)[:32])
                 try:
                     label = validate_label(proposed)
                 except IdentityError:

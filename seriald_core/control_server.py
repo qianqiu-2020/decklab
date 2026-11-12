@@ -431,6 +431,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             if self.headers.get('Authorization', '').startswith('Bearer seriald-ag-') and grant is None:
                 return self._json(401, {'error': 'Agent 授权已撤销或过期', 'code': 'unauthorized'})
             agent_actor = grant['actor'] if grant else self._agent_actor()
+            if agent_actor and route in ('/api/flash-discover', '/api/flash-target'):
+                return self._json(403, {'error': '只有网页操作者可以发现和选择新的刷机设备'})
             if agent_actor and route == '/api/probe-settings':
                 return self._json(403, {'error': '只有网页操作者可以管理探测命令'})
             if grant and self.command == 'POST' and route in self.agent_denied_posts:
@@ -457,6 +459,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 if ('association' in payload and (route == '/api/identify'
                         or route == '/api/task-start')):
                     return self._json(403, {'error': 'Agent 令牌不能确认关联历史档案'})
+                if payload.get('target_id'):
+                    return self._json(403, {'error': '自动发现的刷机目标只允许网页操作者访问'})
                 if grant and grant['scope'] == 'device':
                     if not payload.get('key'):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
@@ -521,7 +525,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             slow = self.command == 'POST' and urlparse(self.path).path in (
                 '/api/identify', '/api/ssh-enable', '/api/ssh-connect',
                 '/api/file-transfer/start', '/api/file-transfer/chunk', '/api/file-transfer/batch',
-                '/api/file-transfer/finish', '/api/file-transfer/abort', '/api/artifact-seal', '/api/flash-plan', '/api/flash-selection')
+                '/api/file-transfer/finish', '/api/file-transfer/abort', '/api/artifact-seal', '/api/flash-plan',
+                '/api/flash-selection', '/api/flash-target')
             timeout = 300 if slow else 30
             connection = (http.client.HTTPConnection(*self.collector_socket, timeout=timeout)
                           if isinstance(self.collector_socket, tuple)

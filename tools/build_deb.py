@@ -143,6 +143,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
                 write('usr/share/seriald/skills/seriald-board/' + str(path.relative_to(ROOT / 'skills/seriald-board')), text)
         publish_docs(stage / 'usr/share/doc/seriald', 'linux')
         if executor_metadata is not None:
+            put('packaging/70-seriald-fastboot.rules', 'lib/udev/rules.d/70-seriald-fastboot.rules')
             target = stage / executor_metadata['installed_path'].lstrip('/')
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(flash_executor, target)
@@ -168,7 +169,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
         for name in ('postinst', 'prerm', 'postrm'):
             put('packaging/' + name, 'DEBIAN/' + name, 0o755)
         write('DEBIAN/conffiles', '/etc/seriald/seriald.env\n/etc/sudoers.d/seriald-rescue\n')
-        flash_dependency = ', libusb-1.0-0' if executor_metadata is not None else ''
+        flash_dependency = ', libusb-1.0-0, udev' if executor_metadata is not None else ''
         write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency))
         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)
     return artifact

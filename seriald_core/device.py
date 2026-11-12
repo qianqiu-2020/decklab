@@ -23,7 +23,7 @@ if sys.platform == 'win32':
     from .sessions_windows import SshSession, check_password_login
 else:
     from .sessions import SshSession, check_password_login
-from .storage import IdentityConfirmationRequired, IdentityError
+from .storage import IdentityConfirmationRequired, IdentityError, Store
 from .identity import eeprom_serial, hardware_serial, usable_serial
 from .boot_marker import init_command, marker_serial
 from .log_archive import boot_epochs
@@ -45,6 +45,8 @@ class Device:
         record = self.record
         self.connection_id = secrets.token_hex(12)
         self.by_path = key                    # physical attachment, not board identity
+        store = getattr(manager, 'store', None)
+        self.attachment_label = store.attachment_label(key) if isinstance(store, Store) and key else ''
         self.temporary_id = hashlib.sha256(key.encode()).hexdigest()[:16] if key else self.connection_id[:16]
         self.dev = dev                    # 当前 /dev/ttyUSBx(会变)
         self.hostname = record['info'].get('hostname', '') if record else ''
@@ -232,7 +234,7 @@ class Device:
 
     @property
     def label(self):
-        return self.key
+        return self.key if self.serial else self.attachment_label or self.key
 
     def stable_dir(self):
         if self.serial:
@@ -873,7 +875,11 @@ class Device:
                 'last_seen': self.record['last_seen'] if self.record else self.last_rx,
                 'state': ('online' if self.fd is not None and self.present else 'offline') if self.serial else 'pending',
                 'label': self.label,
+                'attachment_label': self.attachment_label if not self.serial else '',
                 'hostname': self.hostname, 'alive': self.fd is not None and self.present,
+                'flash_connected': bool(getattr(self, 'flash_connected', False)),
+                'flash_mode': getattr(self, 'flash_mode', ''),
+                'flash_last_seen': getattr(self, 'flash_last_seen', 0),
                 'bytes': self.bytes, 'last_rx': self.last_rx,
                 'last_health_check': self.last_health_check, 'capture_started': self.started,
                 'serial_health': self.health.snapshot(),

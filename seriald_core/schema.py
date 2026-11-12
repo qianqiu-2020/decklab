@@ -114,9 +114,38 @@ def _registry_flashing(db):
                'task_id TEXT NOT NULL REFERENCES tasks(id), state TEXT NOT NULL, updated REAL NOT NULL)')
 
 
+def _registry_attachment_labels(db):
+    # Port labels are human annotations, never hardware identity or archive keys.
+    db.execute('CREATE TABLE IF NOT EXISTS attachment_labels '
+               '(port TEXT PRIMARY KEY, label TEXT NOT NULL)')
+
+
+def _registry_flash_targets(db):
+    # USB download attachments can be used before a board exposes its identity.
+    # Their generation is independent of every UART connection generation.
+    db.execute('CREATE TABLE IF NOT EXISTS flash_targets ('
+               'id TEXT PRIMARY KEY, generation TEXT NOT NULL, '
+               'serial TEXT REFERENCES boards(serial) ON UPDATE CASCADE, '
+               'document TEXT NOT NULL, seen REAL NOT NULL, present INTEGER NOT NULL)')
+    db.execute('CREATE TABLE IF NOT EXISTS task_flash_targets ('
+               'task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, '
+               'target_id TEXT NOT NULL REFERENCES flash_targets(id), generation TEXT NOT NULL, '
+               'PRIMARY KEY(task_id,target_id))')
+    db.execute('CREATE INDEX IF NOT EXISTS task_flash_endpoint ON task_flash_targets(target_id,task_id)')
+    db.execute('ALTER TABLE flash_plans RENAME TO flash_plans_before_targets')
+    db.execute('CREATE TABLE flash_plans (id TEXT PRIMARY KEY, actor TEXT NOT NULL, '
+               'serial TEXT REFERENCES boards(serial) ON UPDATE CASCADE, digest TEXT NOT NULL, '
+               'document TEXT NOT NULL, created REAL NOT NULL, '
+               'target_id TEXT REFERENCES flash_targets(id), '
+               'CHECK(serial IS NOT NULL OR target_id IS NOT NULL))')
+    db.execute('INSERT INTO flash_plans(id,actor,serial,digest,document,created) '
+               'SELECT id,actor,serial,digest,document,created FROM flash_plans_before_targets')
+    db.execute('DROP TABLE flash_plans_before_targets')
+
+
 REGISTRY_MIGRATIONS = (_registry_initial, _registry_history, _registry_tasks, _registry_artifacts,
                        _registry_connections, _registry_probe_settings, _registry_ssh_credentials,
-                       _registry_flashing)
+                       _registry_flashing, _registry_attachment_labels, _registry_flash_targets)
 GRANT_MIGRATIONS = (_grants_initial, _grants_connections)
 _SCHEMAS = {
     'registry': (0x444C5247, REGISTRY_MIGRATIONS, {
@@ -132,11 +161,14 @@ _SCHEMAS = {
         'probe_settings': 'port document',
         'ssh_credentials': 'serial ssh_user ssh_password revision',
         'task_board_targets': 'task_id serial',
-        'flash_plans': 'id actor serial digest document created',
+        'flash_plans': 'id actor serial digest document created target_id',
         'flash_requests': 'actor request_id input_digest task_id',
         'flash_details': 'task_id document next_event',
         'flash_events': 'task_id cursor document',
         'flash_resource_holds': 'resource task_id state updated',
+        'attachment_labels': 'port label',
+        'flash_targets': 'id generation serial document seen present',
+        'task_flash_targets': 'task_id target_id generation',
     }),
     'grants': (0x444C4147, GRANT_MIGRATIONS, {
         'grants': 'id token_hash actor scope serial created expires revoked key connection_id',

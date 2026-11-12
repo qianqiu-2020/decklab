@@ -282,13 +282,39 @@ HTTP staging use these limits; browser and background CLI file transfers are int
 
 ## Hardware helpers
 
+Packages with the local flash executor automatically discover USB download
+devices from the browser's flashing panel. Ordinary discovery does not require
+`SERIALD_FLASH` or a previous serial-console identification. A target without a
+reliable board serial remains a separate USB target; its location is not a board
+identity. Selecting a target reads supported live layout/capability information
+before previewing writes. Reliable GPT and target partition sizes can enable
+partition-only writes; full-disk writes additionally require independently
+verified capacity, sector format and whole-disk capability. Missing information
+is reported rather than guessed. Discovery never starts a write or resets a board.
+
+Detected SpacemiT K1/K3 BootROM devices can prepare their temporary environment
+from the standard package's fixed FSBL/U-Boot members, with no handwritten JSON.
+Uploading or previewing a package does not load it; an explicit background task
+performs the fixed steps, then reads the live layout for partition selection in
+that same task. Missing loaders, incompatible chips or unchecked layouts stop
+the flow. Special boards and nonstandard loader sequences still use advanced
+administrator bindings below.
+
+`SERIALD_FLASH_EXECUTOR` optionally overrides automatic discovery's executable
+with an administrator-owned absolute path. Without an override, installed Linux
+packages use `/usr/libexec/seriald/decklab-flash`; source deployments can
+place `decklab-flash` (or `decklab-flash.exe`) in the application source directory.
+Other layouts can select the path explicitly. The browser
+cannot supply this path. A missing executor is reported as unavailable.
+
 `SERIALD_FLASH` selects the optional administrator-owned JSON configuration for
-dedicated board-level flashing. It is disabled when unset. Each registered board
+advanced fixed board-level flashing. Each registered board
 has a `binding_revision`, board profile, separate manual control/serial endpoint
 descriptions, and a local executor with an absolute executable and fixed USB bus
 and port path. The browser submits managed artifact IDs and plan IDs, never host
-paths or executable arguments. Configure an executor separately; the DeckLab
-Python package does not imply that goflash or a board-specific loader is bundled.
+paths or executable arguments. Source deployments and packages without the
+executor need it installed separately; an included executor does not imply that
+board-specific temporary loaders are bundled.
 Enter download mode manually for this flow. See the
 [hardware extension guide](HARDWARE_EXTENSIONS.md) for the adapter contract and
 capacity limits. Reload the collector to replace its cached binding configuration;
@@ -315,7 +341,7 @@ values before starting the host.
 | Retention and disk warnings | 3 | `maintenance.py`; maintenance tests; see [log operations](LOG_OPERATIONS.md) |
 | Transfer quotas and expiry | 6 | `transfer_artifacts.py`; artifact tests; see [transfer staging](TRANSFER_ARTIFACTS.md) |
 | Hardware helper file | 1 | `hardware.py`; helper/handoff tests; see [hardware extensions](HARDWARE_EXTENSIONS.md) |
-| Board-level flash binding file | 1 | `flash_runner.py`; executor, task, maintenance and HTTP integration tests |
+| Flash discovery and fixed binding | 2 | `flash_discovery.py`, `flash_runner.py`; executor, task, maintenance and HTTP integration tests |
 
 The configuration inventory checker verifies name coverage only. Platform
 behavior requires its adapter tests and installation checks; Linux fixtures and

@@ -24,6 +24,12 @@ case "$1" in
     fi
     chown root:seriald /etc/seriald/seriald.env
     chmod 0640 /etc/seriald/seriald.env
+    if [ -f /lib/udev/rules.d/70-seriald-fastboot.rules ] && command -v udevadm >/dev/null 2>&1; then
+      # A change event updates access permissions, without resetting USB or
+      # changing the single-reader ownership of serial connections.
+      udevadm control --reload-rules || true
+      udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=361c || true
+    fi
     if [ -d /run/systemd/system ]; then
       restart_marker=/run/seriald-collector-restart-required
       systemctl daemon-reload

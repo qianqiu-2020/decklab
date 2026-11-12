@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Discover local download USB devices through the installed flashing executor,
+  with explicit target selection, live layout checks and persistent tasks that
+  also work without an identified UART connection.
+- Add image/partition previews, bounded flashing progress and separate write,
+  verification and boot results; preserve resources when cleanup is uncertain.
+- Let pending serial connections keep a user label without inventing a board
+  identity or merging existing archives.
+- Allow dragging or moving device cards, with keyboard controls and a saved
+  personal order that survives refreshes and online/offline changes.
+
 ## 1.7.4
 
 - Recognize BusyBox ash directory prompts such as `~ #` and `/ #` when
