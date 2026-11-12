@@ -5,6 +5,13 @@ BootROM support and layout readiness are separate. The engine may return
 offer the storage-free loader preparation preview before partition selection,
 and defer readback capability conclusions until the live layout is available.
 
+NOR firmware recovery uses the fixed `partition_nor.json` six-partition layout
+only in full-package mode. Keep its MTD adapter separate from GPT discovery.
+Loader completion must stop for a new human scope review before storage writes;
+`flash:mtd` changes the namespace and can erase env. Include the conservative
+whole-MTD erase risk, unknown NOR/NAND type and excluded optional EC operation in
+the preview. Never mark missing readback as verification success or replay writes.
+
 Current behavior and module ownership: [architecture](docs/ARCHITECTURE.md).
 Release changes: [CHANGELOG.md](CHANGELOG.md).
 Contributor checks and conventions: [CONTRIBUTING.md](CONTRIBUTING.md).

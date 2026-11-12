@@ -367,6 +367,17 @@
     '检测到多个下载设备，请按 USB 位置选择本次刷写目标。': 'Multiple download devices detected. Choose the target by its USB location.'
   });
   Object.assign(dictionary, {
+    '偏移 / 分区容量': 'Offset / partition capacity', 'MTD 映射 / env 擦除': 'MTD mapping / env erase',
+    "准备环境并核对固件范围": "Prepare environment and check firmware scope",
+    "预览固件写入与擦除范围": "Preview firmware write and erase scope",
+    "确认固件范围并刷写": "Confirm firmware scope and flash",
+    "先加载临时环境并核对现场容量；完成后还需确认固件写入与擦除范围，才会写入存储。": "Load the temporary environment and check the live capacity first. Storage writes require a second confirmation of the firmware write and erase scope.",
+    "临时环境已准备；请核对 NOR 固件写入与擦除范围，确认后才会写入存储。": "Temporary environment ready. Review the NOR firmware write and erase scope; storage writes start only after confirmation.",
+    "NOR 固件包需要选择“完整镜像”后重新预览；将恢复包内全部 NOR 分区并擦除 env。: nor-package-requires-full": "Select Full image and preview this NOR firmware package again. It restores all NOR partitions in the package and erases env. (nor-package-requires-full)",
+    "NOR 固件恢复将建立包内 MTD 分区映射，并擦除 env；不能保留原环境设置。": "NOR firmware recovery establishes the package MTD partition mapping and erases env; existing environment settings are not preserved.",
+    "擦除风险范围按整片 MTD 保守列出；不宣称只影响载荷字节。": "The erase risk is conservatively listed for the entire MTD device, not just the payload bytes.",
+    "本计划仅恢复 NOR 固件；包内可选 EC 升级不执行。": "This plan restores NOR firmware only. The optional EC update in the package is not executed.",
+    "下载固件只提供 MTD 容量，未独立报告 NOR/NAND 类型；请核对当前板卡使用 NOR，不能用于 NAND。": "The loader reports MTD capacity but does not independently identify NOR versus NAND. Confirm this board uses NOR; this flow must not be used for NAND.",
     '这是 NOR 固件刷机包；当前自动刷机仅支持 GPT 镜像包，尚未支持 NOR 固件刷写。: nor-package-unsupported': 'This is a NOR firmware package. Automatic flashing currently supports GPT packages; NOR firmware flashing is not supported yet. (nor-package-unsupported)',
     '模式待确认': 'Mode not confirmed', '尚未识别': 'Not identified', '本次不执行复位': 'No reset in this operation',
     '连接诊断': 'Connection diagnostic', '尚未取得设备能力，回读支持待确认。': 'Device capabilities have not been read; readback support is unknown.',

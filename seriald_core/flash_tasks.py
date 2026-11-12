@@ -665,7 +665,10 @@ class FlashActions:
                 if payload.get('preview') is True:
                     intent = dict(record['intent'], selections=payload.get('selections', []))
                     intent = self._intent(intent)
-                    if not intent['selections']:
+                    full_review = record['intent']['mode'] == 'full' and record['executor_plan'].get('confirm_after_prepare') is True
+                    if full_review and intent['selections']:
+                        raise TaskError('firmware confirmation cannot change the full package scope')
+                    if not full_review and not intent['selections']:
                         raise TaskError('select at least one target partition')
                     try:
                         cached = (record if record['executor_plan'].get('image_type') in ('package', 'payload', 'payload.gz')
@@ -685,6 +688,9 @@ class FlashActions:
                         raise
                     operation.check()
                     current_layout = (selected.get('inspection') or {}).get('layout_digest') or selected['executor_plan'].get('layout_digest')
+                    if full_review and (_write_scope(selected['executor_plan']) != _write_scope(record['executor_plan'])
+                            or selected['executor_plan'].get('erase_ranges') != record['executor_plan'].get('erase_ranges')):
+                        raise TaskError('firmware confirmation changed its reviewed scope', 409)
                     if selected['requires_prepare'] or current_layout != actual:
                         raise TaskError('flash target layout changed during preview', 409)
                     return response(200, {'ok': True, 'plan': self._preview(selected)})
@@ -701,6 +707,11 @@ class FlashActions:
                 selected_layout = (selected.get('inspection') or {}).get('layout_digest') or selected['executor_plan'].get('layout_digest')
                 if selected_layout != actual:
                     raise TaskError('flash selection layout differs from prepared target', 409)
+                if record['intent']['mode'] == 'full' and (
+                        selected['intent'] != record['intent']
+                        or _write_scope(selected['executor_plan']) != _write_scope(record['executor_plan'])
+                        or selected['executor_plan'].get('erase_ranges') != record['executor_plan'].get('erase_ranges')):
+                    raise TaskError('firmware confirmation differs from the prepared scope', 409)
                 added = []
                 try:
                     for artifact_id in sorted({value['artifact_id'] for value in selected['intent']['selections']}):
@@ -734,6 +745,7 @@ class FlashOperation:
         actions, record = self.actions, self.record
         store, maintenance = actions.store, maintenance_for(self.manager)
         claimed, cleanup_confirmed, write_started, outcome = [], True, False, {}
+        submitted_full_review = False
         def check():
             context.check()
             if record.get('target_id'):
@@ -770,6 +782,10 @@ class FlashOperation:
             if record['serial']:
                 self.manager.store.event(record['serial'], self.actor, 'flash-start', context.id)
             if record['requires_prepare']:
+                submitted_full_review = record['executor_plan'].get('confirm_after_prepare') is True
+                if submitted_full_review and (record['intent']['mode'] != 'full'
+                        or (self.binding.profile_data.get('storages') or [{}])[0].get('layout_source') != 'spacemit-nor'):
+                    raise TaskError('post-prepare firmware confirmation requires the NOR template', 502)
                 context.progress(0, 0, 'prepare')
                 previous_device = None
                 if self.binding.target_id and not record.get('execution_profile'):
@@ -800,11 +816,14 @@ class FlashOperation:
                                            previous_device=previous_device)
                 if record['requires_prepare']:
                     raise TaskError('flash loader preparation did not provide a usable target', 502)
-                if (submitted['intent']['mode'] == 'full' or submitted['intent']['selections']) and (
+                if submitted_full_review and record['executor_plan'].get('confirm_after_prepare') is not True:
+                    raise TaskError('prepared firmware lost its mandatory review', 502)
+                if not submitted_full_review and (submitted['intent']['mode'] == 'full' or submitted['intent']['selections']) and (
                         _write_scope(submitted['executor_plan']) != _write_scope(record['executor_plan'])
                         or submitted['executor_plan'].get('write_layout') != record['executor_plan'].get('write_layout')):
                     raise TaskError('prepared write scope differs from preview; create a new preview', 409)
-            if record['intent']['mode'] == 'partitions' and not record['intent']['selections']:
+            if (record['intent']['mode'] == 'partitions' and not record['intent']['selections']
+                    or submitted_full_review):
                 record = self._wait_selection(context, record, event, check, claimed)
             plan = record['executor_plan']
             if plan.get('ready') is False or not plan.get('writes'):
@@ -879,7 +898,9 @@ class FlashOperation:
         self.actions.store.update_details(context.id, {
             'inspection': _public(record.get('inspection') or {}),
             'payload_candidates': _public(record.get('payload_candidates') or []),
-            'selection_deadline': waiter['deadline']})
+            'selection_deadline': waiter['deadline'],
+            'confirmation_mode': record['intent']['mode'],
+            'prepared_plan': self.actions._preview(record) if record['intent']['mode'] == 'full' else None})
         context.progress(0, 0, 'awaiting-selection')
         context.on_cancel(waiter['event'].set)
         while True:

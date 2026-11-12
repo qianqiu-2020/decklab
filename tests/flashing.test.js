@@ -399,6 +399,43 @@ for (const supported of [true, false]) test('BootROM image preparation is explic
   assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false, 'never create another preparation task');
 });
 
+test('NOR full package preview prepares first and requires a second explicit confirmation in the original task', async () => {
+  const h = harness(), target = {target_id: 'nor-target', target_generation: 'nor-brom'};
+  h.api.open(target); h.take('/api/tasks').resolve({tasks: []}); await drain();
+  h.take('/api/flash-target').resolve({target, capabilities: {...capabilities, preparable: true,
+    modes: ['partitions', 'full'], storages: []}}); await drain();
+  assert.equal(h.get('fl-mode').disabled, false);
+  assert.equal(h.get('fl-mode').value, 'partitions', 'full recovery is a separate explicit choice');
+  h.get('fl-mode').value = 'full'; h.get('fl-mode').emit('change');
+  h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change');
+  h.get('fl-plan').click(); const preview = h.take('/api/flash-plan');
+  assert.equal(preview.payload.mode, 'full');
+  const writes = [{storage: 'active', partition: 'layout', kind: 'layout', target: 'mtd', size: 123},
+    {storage: 'active', partition: 'fsbl', kind: 'partition', size: 456}];
+  preview.resolve({requires_prepare: true, plan: {id: 'nor-prep', ready: false,
+    confirm_after_prepare: true, write_layout: true, writes}}); await drain();
+  assert.equal(h.get('fl-start').disabled, false);
+  assert.match(h.get('fl-start').textContent, /准备环境并核对固件范围/);
+  assert.match(h.get('fl-preview').textContent, /还需确认固件写入与擦除范围/);
+  h.get('fl-start').click(); const submit = h.take('/api/task-start');
+  const finalPlan = {id: 'nor-checked', ready: true, confirm_after_prepare: true, write_layout: true,
+    writes, erase_ranges: [{storage: 'active', offset: 0, size: 8388608}]};
+  const current = {id: 'one-nor-task', kind: 'flash', state: 'running', progress: {phase: 'awaiting-selection'},
+    flash: {confirmation_mode: 'full', prepared_plan: finalPlan,
+      inspection: {layout_digest: 'mtd-capacity', storages: []}}};
+  submit.resolve({task: current}); await drain();
+  assert.match(h.get('fl-preview').textContent, /擦除风险范围.*8388608/);
+  assert.match(h.get('fl-select').textContent, /预览固件写入与擦除范围/);
+  h.get('fl-select').click(); const checked = h.take('/api/flash-selection');
+  assert.equal(checked.payload.preview, true); assert.deepEqual(checked.payload.selections, []);
+  checked.resolve({plan: finalPlan}); await drain();
+  assert.match(h.get('fl-select').textContent, /确认固件范围并刷写/);
+  assert.equal(h.requests.some(r => r.url === '/api/task-start'), false);
+  h.get('fl-select').click(); const commit = h.take('/api/flash-selection');
+  assert.equal(commit.payload.id, current.id); assert.equal(commit.payload.plan_id, 'nor-checked');
+  assert.ok(commit.payload.request_id); assert.equal(commit.payload.preview, undefined);
+});
+
 test('BootROM preparation cannot acquire a hidden storage-write scope', async () => {
   const h = harness(), target = {target_id: 'brom-invalid', target_generation: 'brom-one'};
   h.api.open(target);

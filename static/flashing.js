@@ -75,6 +75,7 @@
     function prepareOnly(value) {
       return value && value.ready === false && $('fl-mode').value === 'partitions' && !(value.writes || []).length;
     }
+    function fullConfirmation() { return task && task.flash && task.flash.confirmation_mode === 'full'; }
     function preparationPending() {
       // Supported BootROM targets still need an image-provided loader before
       // they expose a live layout. Readiness is separate from support.
@@ -93,20 +94,20 @@
       ['fl-mode', 'fl-artifact', 'fl-files', 'fl-verify', 'fl-target-storage'].forEach(function (name) {
         $(name).disabled = busy || !!active;
       });
-      $('fl-mode').disabled = busy || !!active || !!preparable;
+      $('fl-mode').disabled = busy || !!active || !!preparable && !(capabilities.modes || []).includes('full');
       $('fl-files').disabled = busy || !!active && !selecting;
       $('fl-upload').disabled = busy || !!active && !selecting || !uploadAvailable;
       $('fl-plan').disabled = busy || !!active || !!(board && board.observingTask)
         || !(available || preparable) || !$('fl-artifact').value;
       $('fl-plan').textContent = preparable ? '预览刷机准备步骤' : '预览写入范围';
       $('fl-start').disabled = busy || !!active || !plan || submissionUnknown;
-      $('fl-start').textContent = prepareOnly(plan) ? '准备刷机环境并读取布局' : '开始刷写';
+      $('fl-start').textContent = plan && plan.confirm_after_prepare && plan.ready === false ? '准备环境并核对固件范围' : prepareOnly(plan) ? '准备刷机环境并读取布局' : '开始刷写';
       $('fl-cancel').disabled = !active || task.cancel_requested;
-      $('fl-partitions-field').hidden = $('fl-mode').value !== 'partitions' && !selecting;
+      $('fl-partitions-field').hidden = $('fl-mode').value !== 'partitions' && (!selecting || fullConfirmation());
       $('fl-target-storage-field').hidden = $('fl-mode').value !== 'full';
       $('fl-select').hidden = !selecting;
       $('fl-select').disabled = busy || !selecting;
-      $('fl-select').textContent = selectionPlan ? '确认分区并继续' : '预览分区写入范围';
+      $('fl-select').textContent = fullConfirmation() ? (selectionPlan ? '确认固件范围并刷写' : '预览固件写入与擦除范围') : selectionPlan ? '确认分区并继续' : '预览分区写入范围';
       $('fl-recover').hidden = !submissionUnknown;
       var recovery = task && task.flash && task.flash.recovery_required === true;
       $('fl-recovery-field').hidden = !recovery;
@@ -218,9 +219,9 @@
       }
       artifacts = (capabilities.artifacts || []).slice(); artifactOptions($('fl-artifact'));
       renderPartitions(); renderStorages();
-      var modes = preparationPending() ? ['partitions'] : capabilities.modes || ['full', 'partitions'];
+      var modes = preparationPending() ? capabilities.modes || ['partitions'] : capabilities.modes || ['full', 'partitions'];
       Array.from($('fl-mode').children).forEach(function (option) { option.disabled = modes.indexOf(option.value) < 0; });
-      $('fl-mode').value = modes.indexOf('full') >= 0 ? 'full' : modes[0] || 'full';
+      $('fl-mode').value = preparationPending() ? 'partitions' : modes.indexOf('full') >= 0 ? 'full' : modes[0] || 'full';
       status(preparationPending() ? '已检测到 BootROM；上传刷机包后可准备临时环境并读取布局，此阶段不写存储。'
         : capabilities.supported === false ? capabilityReason()
         : '选择镜像并预览写入范围；预览不会复位或写入存储。');
@@ -323,30 +324,40 @@
       var box = $('fl-preview'); box.textContent = '';
       text('strong', '待写入清单', box);
       if (prepareOnly(value)) text('p', '准备阶段仅加载临时环境并读取现场布局，不写入存储。', box);
+      else if (value.confirm_after_prepare && value.ready === false) text('p', '先加载临时环境并核对现场容量；完成后还需确认固件写入与擦除范围，才会写入存储。', box);
       else if (value.ready === false) text('p', '开始后先加载临时环境并核对现场，检查通过后按清单写入。', box);
       text('p', value.write_layout ? '本计划将修改分区布局。' : '本计划保留现有分区布局。', box);
       var table = document.createElement('table');
       var heading = document.createElement('tr');
-      ['存储', '分区或范围', '写入字节', '写入范围 SHA-256'].forEach(function (label) { text('th', label, heading); });
+      var showRanges = value.confirm_after_prepare === true;
+      var columns = ['存储', '分区或范围', '写入字节'];
+      if (showRanges) columns.push('偏移 / 分区容量');
+      columns.push('写入范围 SHA-256');
+      columns.forEach(function (label) { text('th', label, heading); });
       table.appendChild(heading);
       (value.writes || []).forEach(function (write) {
         var row = document.createElement('tr');
-        [write.storage || write.storage_id || '—', write.partition || write.target || write.partition_id || '完整磁盘',
-         format(write.write_size || write.size || write.bytes || 0), write.write_sha256 || write.sha256 || '—'].forEach(function (item) { text('td', item, row); });
+        var cells = [write.storage || write.storage_id || '—', write.partition || write.target || write.partition_id || '完整磁盘',
+          format(write.write_size || write.size || write.bytes || 0)];
+        if (showRanges) cells.push(write.kind === 'layout' ? translate('MTD 映射 / env 擦除')
+          : (write.offset === undefined ? '—' : write.offset) + ' / ' + format(write.capacity || 0));
+        cells.push(write.write_sha256 || write.sha256 || '—');
+        cells.forEach(function (item) { text('td', item, row); });
         table.appendChild(row);
         if (write.write_size > write.size) {
           var paddingRow = document.createElement('tr');
           var padding = text('td', '载荷 ' + write.size + ' 字节，扇区尾部补零 ' + (write.write_size - write.size) + ' 字节', paddingRow);
-          padding.setAttribute('colspan', '4'); table.appendChild(paddingRow);
+          padding.setAttribute('colspan', String(columns.length)); table.appendChild(paddingRow);
         }
         if (write.write_sha256 && write.sha256 && write.write_sha256 !== write.sha256) {
           var sourceRow = document.createElement('tr');
-          text('td', '载荷 SHA-256: ' + write.sha256, sourceRow).setAttribute('colspan', '4');
+          text('td', '载荷 SHA-256: ' + write.sha256, sourceRow).setAttribute('colspan', String(columns.length));
           table.appendChild(sourceRow);
         }
       });
       box.appendChild(table);
       text('p', '计划摘要 · ' + (value.digest || value.sha256 || '—'), box).dataset.i18nIgnore = '';
+      (value.erase_ranges || []).forEach(function (range) { text('p', '擦除风险范围（保守上限） · ' + range.storage + ' · ' + range.offset + ' + ' + format(range.size), box).dataset.i18nIgnore = ''; });
       (value.warnings || []).forEach(function (warning) { text('p', warning, box); });
       (value.pending_checks || []).forEach(function (check) { text('p', check, box); });
       text('p', '开始后仅写入以上范围；写入、校验与启动结果分别记录。', box);
@@ -361,14 +372,14 @@
       invalidatePlan(); busy = true; updateControls(); status('正在核对镜像和现场布局…');
       try {
         var payload = Object.assign(scope(selected), {
-          artifact_id: $('fl-artifact').value, mode: preparing ? 'partitions' : $('fl-mode').value, selections: chosen,
+          artifact_id: $('fl-artifact').value, mode: $('fl-mode').value, selections: chosen,
           binding_revision: capabilities.binding_revision, verify: $('fl-verify').value });
         if (payload.mode === 'full' && $('fl-target-storage').value) payload.target_storage = $('fl-target-storage').value;
         var result = await client.request('/api/flash-plan', payload);
         if (!same(selected, seq)) return;
         var value = result.plan || result;
         if (result.requires_prepare || value.requires_prepare) value.ready = false;
-        if (preparing && (value.ready !== false || !Array.isArray(value.writes) || value.writes.length
+        if (preparing && payload.mode === 'partitions' && (value.ready !== false || !Array.isArray(value.writes) || value.writes.length
             || value.write_layout !== false)) throw new Error('刷机准备计划包含存储写入，不能执行。');
         if (result.inspection && Array.isArray(result.inspection.storages)) {
           inspection = result.inspection; renderPartitions(); renderStorages();
@@ -405,9 +416,11 @@
     function renderTask(current) {
       task = current;
       var p = current.progress || {}, result = current.result || {}, details = current.flash || {};
-      if (awaitingSelection(current)) $('fl-intro').textContent = '临时刷机环境已准备；请先预览实际分区范围，再继续写入。';
+      if (awaitingSelection(current) && fullConfirmation()) $('fl-intro').textContent = '临时环境已准备；请核对 NOR 固件写入与擦除范围，确认后才会写入存储。';
+      else if (awaitingSelection(current)) $('fl-intro').textContent = '临时刷机环境已准备；请先预览实际分区范围，再继续写入。';
       else if (p.phase === 'writing' || details.write_result === 'running' || result.write_result === 'completed')
         $('fl-intro').textContent = '请先让开发板进入下载模式。本次仅执行刷写，不控制复位；串口可继续被动观察。';
+      if (awaitingSelection(current) && fullConfirmation() && details.prepared_plan && !selectionPlan) renderPlan(details.prepared_plan);
       if (awaitingSelection(current) && details.inspection && details.inspection !== inspection) {
         var changed = !inspection || (inspection.layout_digest || '') !== (details.inspection.layout_digest || '');
         inspection = details.inspection;
@@ -498,8 +511,8 @@
     }
     async function submitSelection() {
       if (busy || !task || !awaitingSelection(task) || !inspection) return;
-      var chosen = selections();
-      if (!chosen.length || chosen.some(function (entry) { return !entry.artifact_id; })) {
+      var chosen = fullConfirmation() ? [] : selections();
+      if (!fullConfirmation() && (!chosen.length || chosen.some(function (entry) { return !entry.artifact_id; }))) {
         status('请选择至少一个分区及其载荷。'); return;
       }
       var selected = board, seq = sequence, current = task;

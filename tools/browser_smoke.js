@@ -22,6 +22,11 @@ const flashUsbTargets = [2, 3].map(port => ({target_id:'fixture-usb-' + port,
 const flashArtifact = {id:'aaaaaaaaaaaaaaaaaaaaaaaa', name:'模拟镜像 · fixture.img', size:1048576, sha256:'a'.repeat(64)};
 const flashStorages = ['emmc', 'nvme'].map(id => ({id, name:id.toUpperCase(), size:8589934592,
   partitions:[{id:'rootfs', name:'rootfs', size:4294967296}]}));
+const norFixturePlan = {id:'nor-final-fixture',ready:true,confirm_after_prepare:true,write_layout:true,
+  writes:[{storage:'active',partition:'layout',kind:'layout',target:'mtd',size:967},
+    {storage:'active',partition:'fsbl',kind:'partition',offset:131072,size:465504}],
+  erase_ranges:[{storage:'active',offset:0,size:8388608}],
+  warnings:['浏览器模拟：NOR 固件恢复会擦除 env；包内 EC 升级不执行。']};
 let probeSettings = {mode: 'linux', command: '', default_command: "printf 'HOST=%s\\n' \"$(hostname)\""};
 let serialPayload = null;
 const serialLiveChunks = [];
@@ -61,7 +66,7 @@ const server = http.createServer((req, res) => {
           profile:'自动识别 · 模拟 K3 下载环境',console:null,
           executor:{provider:'goflash',node:'local',endpoint:target.target_id},
           artifacts:[flashArtifact],storages:preparable?[]:flashStorages,
-          modes:preparable?['partitions']:['full','partitions']}});
+          modes:preparable&&!target.nor?['partitions']:['full','partitions']}});
       }); return;
     }
     if (u.pathname === '/api/flash-selection') {
@@ -71,7 +76,11 @@ const server = http.createServer((req, res) => {
         if (!current || payload.target_generation !== current.flash_targets[0].generation) {
           res.statusCode=409; return json({error:'simulated task generation changed'});
         }
-        json({plan:{id:'same-task-selection-plan',write_layout:false,writes:payload.selections.map(item=>({
+        if (current.flash.confirmation_mode === 'full') {
+          if (payload.preview) return json({plan:norFixturePlan});
+          current.progress.phase='writing';current.flash.write_result='writing';return json({task:current});
+        }
+        json({plan:{id:'same-task-selection-plan' ,write_layout:false,writes:payload.selections.map(item=>({
           storage:item.storage,partition:item.partition,size:1048576,sha256:flashArtifact.sha256}))}});
       }); return;
     }
@@ -92,6 +101,7 @@ const server = http.createServer((req, res) => {
       req.on('end', () => {
         const payload = JSON.parse(body); flashPlans.push(payload);
         const target = flashUsbTargets.find(item => item.target_id === payload.target_id);
+        if (target && target.nor && payload.mode === 'full') return json({requires_prepare:true,plan:{...norFixturePlan,ready:false,erase_ranges:[]}});
         if (target && target.mode === 'bootrom') return json({ok:true,requires_prepare:true,
           plan:{id:'brom-preparation-plan',binding_revision:1,ready:false,write_layout:false,writes:[],digest:'d'.repeat(64)}});
         const writes = payload.mode === 'partitions'
@@ -123,6 +133,7 @@ const server = http.createServer((req, res) => {
               if (preparing) Object.assign(task.flash,{target_id:target.target_id,
                 target_generation:target.target_generation,write_result:'not-started',
                 inspection:{layout_digest:'post-loader-layout',storages:flashStorages},payload_candidates:[flashArtifact]});
+              if (target && target.nor) Object.assign(task.flash,{confirmation_mode:'full',prepared_plan:norFixturePlan});
               flashRecords.push(task);
             }
             return json({ok:true,task});
@@ -906,6 +917,37 @@ let chrome, ws;
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-select").textContent.includes("确认分区并继续")');n++)await delay(50);
   assert.equal(flashSubmissions.length,2,'refresh must recover the original preparation rather than start again');
   assert.ok(await evaluate('document.querySelector("#fl-preview").textContent.includes("保留现有分区布局")'));
+  // NOR scope confirmation is a separate human step after loader preparation.
+  await evaluate('document.querySelector("#fl-close").click()');
+  flashRecords.splice(0); flashUsbTargets[1].mode='bootrom';flashUsbTargets[1].nor=true;
+  flashUsbTargets[1].target_generation='fixture-nor-brom';
+  await evaluate('document.querySelector("#b-flash-discover").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length===3');n++)await delay(50);
+  await evaluate('document.querySelector("#fl-device").value="fixture-usb-3";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
+  for(let n=0;n<40 && await evaluate('document.querySelector("#fl-mode").disabled');n++)await delay(50);
+  await evaluate('document.querySelector("#fl-mode").value="full";document.querySelector("#fl-mode").dispatchEvent(new Event("change"));document.querySelector("#fl-artifact").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-artifact").dispatchEvent(new Event("change"));document.querySelector("#fl-plan").click()');
+  for(let n=0;n<40 && await evaluate('document.querySelector("#fl-start").disabled');n++)await delay(50);
+  assert.ok(await evaluate('document.querySelector("#fl-start").textContent.includes("准备环境")'));
+  await evaluate('document.querySelector("#fl-start").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-select").textContent.includes("预览固件写入")');n++)await delay(50);
+  assert.equal(flashRecords[0].flash.write_result,'not-started');
+  assert.ok(await evaluate('document.querySelector("#fl-preview").textContent.includes("擦除风险范围")'));
+  await evaluate('document.querySelector("#fl-select").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-select").textContent.includes("确认固件范围")');n++)await delay(50);
+  assert.equal(flashRecords[0].flash.write_result,'not-started','a scope preview cannot begin storage writes');
+  await evaluate('document.querySelector("#fl-preview").scrollIntoView({block:"center"})');
+  const norShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-nor-confirmation-fixture.png'),Buffer.from(norShot.data,'base64'));
+  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await delay(100);
+  assert.ok(await evaluate('(()=>{const d=document.querySelector("#flash-dialog"),r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&d.scrollWidth<=d.clientWidth+1;})()'),'NOR review must fit mobile viewport');
+  const norMobileShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-nor-confirmation-mobile-fixture.png'),Buffer.from(norMobileShot.data,'base64'));
+  const norSubmissions=flashSubmissions.length;
+  await evaluate('document.querySelector("#fl-select").click()');
+  for(let n=0;n<40 && flashRecords[0].flash.write_result!=='writing';n++)await delay(50);
+  assert.equal(flashRecords[0].flash.write_result,'writing');
+  assert.equal(flashSubmissions.length,norSubmissions,'final confirmation continues the same task');
   assert.deepEqual(errors,[]);
   console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing, server-remembered SSH credentials and offline-board flash preview/task recovery (isolated simulated fixtures).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{

@@ -403,6 +403,10 @@ class LocalFlashExecutor:
             raise FlashRunnerError('invalid prepared execution profile') from error
         baseline = json.loads(json.dumps(binding.profile_data))
         candidate = json.loads(json.dumps(profile))
+        # Go serializes an absent identity map as null. Both mean no extra
+        # checks; the detected chip and BootROM checks must still match below.
+        baseline.setdefault('identity', None)
+        candidate.setdefault('identity', None)
         steps = candidate.pop('prepare', None)
         baseline.pop('prepare', None)
         if (not isinstance(steps, list) or len(steps) != 4
@@ -418,6 +422,14 @@ class LocalFlashExecutor:
                 and not original_storages[0].get('package_tables')):
             storages[0].pop('package_tables')
             original_storages[0].pop('package_tables', None)
+        if (isinstance(storages, list) and len(storages) == 1
+                and storages[0] == {'id': 'active', 'label': 'MTD (NOR firmware package)',
+                    'layout_source': 'spacemit-nor', 'size_getvar': 'mtd-size', 'sector_size': 512,
+                    'partitions': None, 'package_tables': ['partition_nor.json'],
+                    'layout_target': 'mtd', 'sparse': False}):
+            # This template is produced by host image import, never by USB.
+            # Keep original chip/BootROM checks and validate cached loaders below.
+            candidate['storages'] = baseline['storages']
         if candidate != baseline:
             raise FlashRunnerError('prepared execution profile changed device capabilities or identity')
         if not isinstance(workspace, (str, os.PathLike)):
@@ -639,6 +651,8 @@ class LocalFlashExecutor:
                 if event['event'] == 'error':
                     outcome.update(safe_outcome(event.get('result')))
                     message = 'flashing executor reported failure'
+                    if event.get('code') == 'nor-package-requires-full':
+                        message = 'NOR 固件包需要选择“完整镜像”后重新预览；将恢复包内全部 NOR 分区并擦除 env。'
                     if event.get('code') == 'nor-package-unsupported':
                         message = '这是 NOR 固件刷机包；当前自动刷机仅支持 GPT 镜像包，尚未支持 NOR 固件刷写。'
                     raise FlashRunnerError(message, outcome=outcome, code=event.get('code'))

@@ -196,6 +196,27 @@ class FlashRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(FlashRunnerError, 'symbolic link'):
                 self.runner.execution_binding(binding, original, workspace)
 
+    def test_nor_execution_profile_accepts_only_fixed_host_import_template(self):
+        binding = self.automatic_binding()
+        workspace = self.runner._directory(self.root / 'workspace' / 'cache') / 'plan-abcdefgh'
+        workspace.mkdir()
+        profile = self.prepared_profile(binding, workspace)
+        profile['storages'] = [{'id': 'active', 'label': 'MTD (NOR firmware package)',
+            'layout_source': 'spacemit-nor', 'size_getvar': 'mtd-size', 'sector_size': 512,
+            'partitions': None, 'package_tables': ['partition_nor.json'], 'layout_target': 'mtd', 'sparse': False}]
+        self.assertEqual(self.runner.execution_binding(binding, profile, workspace).profile_data, profile)
+        absent = replace(binding, profile_data=dict(binding.profile_data))
+        absent.profile_data.pop('identity')
+        go_profile = json.loads(json.dumps(profile))
+        go_profile['identity'] = None
+        self.assertEqual(self.runner.execution_binding(absent, go_profile, workspace).profile_data, go_profile)
+        for field, value in [('size_getvar', 'blk-size'), ('sparse', True), ('layout_target', 'gpt'),
+                             ('select_oem', 'erase-all'), ('partitions', [{'name': 'rootfs'}])]:
+            broken = json.loads(json.dumps(profile))
+            broken['storages'][0][field] = value
+            with self.subTest(field=field), self.assertRaises(FlashRunnerError):
+                self.runner.execution_binding(binding, broken, workspace)
+
     def test_prepared_connection_transition_is_explicit_and_only_for_unready_plan(self):
         initial = self.automatic_binding()
         workspace = self.runner._directory(self.root / 'workspace' / 'cache') / 'plan-abcdefgh'

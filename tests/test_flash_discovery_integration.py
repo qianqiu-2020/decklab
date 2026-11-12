@@ -169,6 +169,35 @@ class FakeBootROMExecutor(FakeDiscoveryExecutor):
         return super().execute(binding, plan, on_event, check, **identity)
 
 
+class FakeNORExecutor(FakeBootROMExecutor):
+    """Real HTTP/task coordination, fake USB; no field-board operations."""
+    def __init__(self, root):
+        super().__init__(root)
+        self.candidates[0]['modes'] = ['partitions', 'full']
+        self.mutate_review = False
+
+    def plan(self, binding, artifact, mode, *args, **kwargs):
+        result = super().plan(binding, artifact, mode, *args, **kwargs)
+        self.assert_mode = mode
+        result['plan'].update(confirm_after_prepare=True, write_layout=True,
+            writes=[{'storage': 'active', 'partition': 'layout', 'kind': 'layout',
+                     'target': 'mtd', 'size': 123, 'sha256': 'a' * 64},
+                    {'storage': 'active', 'partition': 'fsbl', 'kind': 'partition',
+                     'target': 'fsbl', 'size': 456, 'sha256': 'b' * 64}])
+        profile = result['execution_profile']
+        profile['storages'] = [{'id': 'active', 'label': 'MTD (NOR firmware package)',
+            'layout_source': 'spacemit-nor', 'size_getvar': 'mtd-size', 'sector_size': 512,
+            'partitions': None, 'package_tables': ['partition_nor.json'], 'layout_target': 'mtd', 'sparse': False}]
+        return result
+
+    def check_plan(self, binding, plan, *args, **kwargs):
+        result = super().check_plan(binding, plan, *args, **kwargs)
+        result['plan']['erase_ranges'] = [{'storage': 'active', 'offset': 0, 'size': 8 * 1024 * 1024}]
+        if self.mutate_review:
+            result['plan']['writes'][1]['size'] += 1
+        return result
+
+
 def bootrom_package():
     destination = io.BytesIO()
     with zipfile.ZipFile(destination, 'w') as archive:
@@ -356,6 +385,46 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(len(fixture.executor.preparations), 1)
             self.assertEqual(len(fixture.executor.plans), 1)
             self.assertEqual(fixture.store.boards(), [])
+
+    def test_nor_full_recovery_waits_for_new_preview_after_loader_and_never_replays(self):
+        with automatic_flashing() as fixture:
+            fixture.manager.flash_executor = fixture.executor = FakeNORExecutor(
+                fixture.manager.artifacts.root.parent / 'flashing')
+            target = self.probe(fixture, self.discover(fixture)[0])['target']
+            image = self.image(fixture, target, bootrom_package(), 'nor-fixture.zip')
+            code, preview = self.request(fixture, '/api/flash-plan', dict(self.scope(target),
+                artifact_id=image['id'], mode='full', selections=[], verify='if-supported'))
+            self.assertEqual(code, 200, preview)
+            code, started = self.request(fixture, '/api/task-start', dict(self.scope(target), kind='flash',
+                plan_id=preview['plan']['id'], binding_revision=1, request_id='nor-full-initial-request-001'))
+            self.assertEqual(code, 202, started)
+            task_id = started['task']['id']
+            waiting = self.phase(fixture, task_id, 'awaiting-selection')
+            self.assertEqual(waiting['flash']['confirmation_mode'], 'full')
+            self.assertEqual(len(waiting['flash']['prepared_plan']['erase_ranges']), 1)
+            self.assertEqual(len(fixture.executor.preparations), 1)
+            self.assertEqual(fixture.executor.executions, [], 'loader completion must never start NOR writes')
+            layout = waiting['flash']['inspection']['layout_digest']
+            payload = dict(self.scope(target), id=task_id, layout_digest=layout, preview=True, selections=[])
+            code, selected = self.request(fixture, '/api/flash-selection', dict(payload,
+                selections=[{'storage': 'active', 'partition': 'fsbl', 'artifact_id': image['id']}]))
+            self.assertEqual(code, 400, selected)
+            fixture.executor.mutate_review = True
+            code, selected = self.request(fixture, '/api/flash-selection', payload)
+            self.assertEqual(code, 409, selected)
+            fixture.executor.mutate_review = False
+            code, selected = self.request(fixture, '/api/flash-selection', payload)
+            self.assertEqual(code, 200, selected)
+            self.assertEqual(fixture.executor.executions, [])
+            commit = dict(self.scope(target), id=task_id, layout_digest=layout,
+                plan_id=selected['plan']['id'], request_id='nor-full-final-confirmation-001')
+            code, resumed = self.request(fixture, '/api/flash-selection', commit)
+            self.assertEqual(code, 200, resumed)
+            self.assertEqual(self.terminal(fixture, task_id)['state'], 'completed')
+            code, repeated = self.request(fixture, '/api/flash-selection', commit)
+            self.assertEqual(code, 200, repeated)
+            self.assertEqual(len(fixture.executor.executions), 1)
+            self.assertEqual(len(fixture.executor.preparations), 1)
 
     def test_bootrom_prepare_cleanup_unknown_does_not_write_and_keeps_image_and_target_holds(self):
         with automatic_flashing() as fixture:
