@@ -99,6 +99,9 @@ jobs:
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Packaged Web and backend roles over TLS with simulated boards
+        shell: pwsh
+        run: .\build\windows-venv\Scripts\python.exe tools/test_split_nodes.py --exe dist/seriald/seriald.exe
       - name: Verify install and upgrade preserve runtime data
         shell: pwsh
         run: .\tools\test_windows_installer.ps1

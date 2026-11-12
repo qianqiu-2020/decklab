@@ -68,7 +68,8 @@ def main():
         backend_port, web_port = port(), port()
         address = 'http://127.0.0.1:%d' % web_port
         common = {key: value for key, value in os.environ.items() if not key.startswith('SERIALD_')}
-        common.update(SERIALD_STATIC=str(ROOT), SERIALD_MCP_ENABLED='0', SERIALD_AUTH_TOKEN='split-web-owner',
+        static = args.exe.resolve().parent / '_internal' if args.exe else ROOT
+        common.update(SERIALD_STATIC=str(static), SERIALD_MCP_ENABLED='0', SERIALD_AUTH_TOKEN='split-web-owner',
                       SERIALD_BACKEND_TOKEN='split-backend-' + 'x' * 48)
         cert = ROOT / 'tests/fixtures/backend-tls/certificate.pem'
         key = ROOT / 'tests/fixtures/backend-tls/public-test-key.pem'

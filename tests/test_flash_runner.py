@@ -109,7 +109,7 @@ class FlashBookTests(unittest.TestCase):
 class FlashRunnerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.helper = self.root / 'helper.py'
         self.runner = LocalFlashExecutor(self.root / 'workspace')
 
