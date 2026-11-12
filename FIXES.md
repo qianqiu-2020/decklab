@@ -1,5 +1,10 @@
 # Maintenance references
 
+BootROM support and layout readiness are separate. The engine may return
+`supported: true` together with `can_prepare_from_image: true`; the web UI must
+offer the storage-free loader preparation preview before partition selection,
+and defer readback capability conclusions until the live layout is available.
+
 Current behavior and module ownership: [architecture](docs/ARCHITECTURE.md).
 Release changes: [CHANGELOG.md](CHANGELOG.md).
 Contributor checks and conventions: [CONTRIBUTING.md](CONTRIBUTING.md).

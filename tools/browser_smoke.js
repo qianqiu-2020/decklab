@@ -54,7 +54,8 @@ const server = http.createServer((req, res) => {
           && item.target_generation === payload.target_generation);
         if (!target) {res.statusCode=409; return json({error:'simulated target changed'});}
         const preparable = target.mode === 'bootrom';
-        json({target,capabilities:{supported:!preparable,can_prepare_from_image:preparable,
+        // The real engine supports BootROM while still requiring preparation.
+        json({target,capabilities:{supported:true,can_prepare_from_image:preparable,
           can_upload:true,target_id:target.target_id,
           target_generation:target.target_generation,binding_revision:1,
           profile:'自动识别 · 模拟 K3 下载环境',console:null,

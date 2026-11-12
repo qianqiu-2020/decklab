@@ -260,6 +260,17 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertEqual(FlashRunnerError('failure', code='/private/secret').code, '')
         self.assertNotIn('/private', str(FlashRunnerError('failure', code='/private/secret')))
 
+    def test_nor_package_error_explains_missing_adapter_without_helper_details(self):
+        binding = self.binding("print(json.dumps({'event':'error','code':'nor-package-unsupported',"
+                               "'message':'host-secret /private/image'}))")
+        with self.assertRaises(FlashRunnerError) as error:
+            self.runner.inspect(binding)
+        self.assertEqual(error.exception.code, 'nor-package-unsupported')
+        self.assertIn('NOR 固件刷机包', str(error.exception))
+        self.assertIn('尚未支持', str(error.exception))
+        self.assertNotIn('host-secret', str(error.exception))
+        self.assertNotIn('/private', str(error.exception))
+
     def test_required_verification_failure_keeps_completed_write_evidence(self):
         binding = self.binding("print(json.dumps({'event':'result','result':{'write_result':'completed',"
                                "'verify_result':'unavailable','confirmed_bytes':8192}}))")

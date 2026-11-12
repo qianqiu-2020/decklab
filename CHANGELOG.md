@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Show the loader preparation flow for supported BootROM targets before live
+  partition selection. Report NOR firmware packages as an unsupported adapter
+  rather than a corrupt image; this does not add NOR flashing support.
+
 - Preserve bounded USB opening/protocol diagnostics and show actionable messages
   when a download connection is unavailable; keep layout and readback unknown
   until probing succeeds instead of presenting them as unsupported.

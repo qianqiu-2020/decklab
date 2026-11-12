@@ -367,6 +367,7 @@
     '检测到多个下载设备，请按 USB 位置选择本次刷写目标。': 'Multiple download devices detected. Choose the target by its USB location.'
   });
   Object.assign(dictionary, {
+    '这是 NOR 固件刷机包；当前自动刷机仅支持 GPT 镜像包，尚未支持 NOR 固件刷写。: nor-package-unsupported': 'This is a NOR firmware package. Automatic flashing currently supports GPT packages; NOR firmware flashing is not supported yet. (nor-package-unsupported)',
     '模式待确认': 'Mode not confirmed', '尚未识别': 'Not identified', '本次不执行复位': 'No reset in this operation',
     '连接诊断': 'Connection diagnostic', '尚未取得设备能力，回读支持待确认。': 'Device capabilities have not been read; readback support is unknown.',
     '无法打开 USB 下载连接。请查看连接诊断，检查数据线、权限或其他刷机程序占用后重新检测。': 'Cannot open the USB download connection. Check the diagnostic, cable, permissions and competing flash programs, then detect again.',

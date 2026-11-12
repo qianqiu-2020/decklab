@@ -76,7 +76,9 @@
       return value && value.ready === false && $('fl-mode').value === 'partitions' && !(value.writes || []).length;
     }
     function preparationPending() {
-      return capabilities && capabilities.supported === false
+      // Supported BootROM targets still need an image-provided loader before
+      // they expose a live layout. Readiness is separate from support.
+      return capabilities
         && (capabilities.can_prepare_from_image === true || capabilities.preparable === true);
     }
     function updateControls() {
@@ -210,7 +212,7 @@
         if (option.value === 'required') option.disabled = !requiredSupported;
       });
       if (!requiredSupported) {
-        text('dt', '回读能力', box); text('dd', capabilities.supported === false
+        text('dt', '回读能力', box); text('dd', capabilities.supported === false || preparationPending()
           ? '尚未取得设备能力，回读支持待确认。' : '当前下载环境不支持写后回读校验。', box);
         $('fl-verify').value = 'if-supported';
       }

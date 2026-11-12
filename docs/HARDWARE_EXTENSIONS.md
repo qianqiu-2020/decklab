@@ -128,12 +128,16 @@ termination; the Windows build must run these tests before packaging.
 无法证明介质和分区命名空间的下载环境（包括部分 NOR／NAND 环境）可以被发现，
 但不会据同名分区猜测写入目标；这些设备需要额外的板端能力或经过核实的高级配置。
 
-对于已识别的 SpacemiT K1／K3 BootROM，可上传标准刷机包，由执行器从受管缓存中
+对于已识别的 SpacemiT K1／K3 BootROM，可上传包含 `partition_universal.json` 的 GPT
+刷机包，由执行器从受管缓存中
 提取固定的 `factory/FSBL.bin` 和 `u-boot.itb`，核对摘要后生成临时加载方案。
 上传和预览不加载设备；开始原任务后才按固定的“加载 FSBL、继续、加载 U-Boot、继续”
 顺序准备环境，再读取真实存储布局。指定分区仍在同一个任务内选择、预览并开始写入，
 不重复进入模式或重新导入镜像。不完整的包、芯片不匹配或无法核对布局会停止。
 这条标准包流程不要求用户编写 JSON；下载设备重枚举仅在原任务占用的固定 USB 接线上接受。
+仅包含 `partition_nor.json` 的 Firmware 固件包目前不能使用这个自动 GPT 适配流程；
+它需要单独的 NOR／MTD 介质、分区与擦除范围适配。USB 已识别或 TitanFlasher 可刷写，
+都不表示当前自动 GPT 适配器已具备 NOR 写入能力。
 
 安装包为受支持的 SpacemiT Fastboot USB 接口提供服务账户访问规则；其他厂商设备
 仍受操作系统 USB 权限约束。设备可被枚举但无法打开时，应按显示的权限原因处理，

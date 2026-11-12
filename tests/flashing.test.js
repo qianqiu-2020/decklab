@@ -364,17 +364,19 @@ test('automatic primary-GPT capacity and missing readback remain explicit capabi
   assert.equal(h.get('fl-verify').value, 'if-supported');
 });
 
-test('BootROM image preparation is explicit, storage-free and continues partition selection in one task', async () => {
+for (const supported of [true, false]) test('BootROM image preparation is explicit, storage-free and continues partition selection in one task (supported=' + supported + ')', async () => {
   const h = harness(), target = {target_id: 'brom-target', target_generation: 'brom-one', mode: 'bootrom'};
   h.api.open(target);
   h.take('/api/tasks').resolve({tasks: []}); await drain();
-  h.take('/api/flash-target').resolve({target, capabilities: {...capabilities, supported: false,
+  h.take('/api/flash-target').resolve({target, capabilities: {...capabilities, supported,
     can_prepare_from_image: true, can_upload: true, modes: ['partitions'], storages: [], readback_supported: false}}); await drain();
   assert.equal(h.get('fl-mode').value, 'partitions');
   assert.equal(h.get('fl-mode').disabled, true);
   assert.equal(h.get('fl-upload').disabled, false);
   assert.match(h.get('fl-status').textContent, /BootROM.*不写存储/);
   assert.match(h.get('fl-intro').textContent, /准备阶段.*不写入存储/);
+  assert.match(h.get('fl-connections').textContent, /回读支持待确认/);
+  assert.match(h.get('fl-partitions').textContent, /准备阶段将读取现场布局/);
   h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change');
   assert.equal(h.get('fl-plan').disabled, false);
   assert.match(h.get('fl-plan').textContent, /准备步骤/);
@@ -401,7 +403,7 @@ test('BootROM preparation cannot acquire a hidden storage-write scope', async ()
   const h = harness(), target = {target_id: 'brom-invalid', target_generation: 'brom-one'};
   h.api.open(target);
   h.take('/api/tasks').resolve({tasks: []}); await drain();
-  h.take('/api/flash-target').resolve({target, capabilities: {...capabilities, supported: false,
+  h.take('/api/flash-target').resolve({target, capabilities: {...capabilities, supported: true,
     preparable: true, modes: ['partitions'], storages: []}}); await drain();
   h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change'); h.get('fl-plan').click();
   h.take('/api/flash-plan').resolve({requires_prepare: true, plan: {id: 'unsafe', ready: false,

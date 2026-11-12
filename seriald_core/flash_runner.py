@@ -638,7 +638,10 @@ class LocalFlashExecutor:
                     raise FlashRunnerError('flashing executor returned an invalid event')
                 if event['event'] == 'error':
                     outcome.update(safe_outcome(event.get('result')))
-                    raise FlashRunnerError('flashing executor reported failure', outcome=outcome, code=event.get('code'))
+                    message = 'flashing executor reported failure'
+                    if event.get('code') == 'nor-package-unsupported':
+                        message = '这是 NOR 固件刷机包；当前自动刷机仅支持 GPT 镜像包，尚未支持 NOR 固件刷写。'
+                    raise FlashRunnerError(message, outcome=outcome, code=event.get('code'))
                 if result is not None:
                     raise FlashRunnerError('flashing executor emitted events after its result')
                 if event['event'] == 'result':
