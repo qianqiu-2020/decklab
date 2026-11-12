@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 
 from seriald_core.storage import Store
 from seriald_core import __version__
-from tools.build_deb import build, collector_build_id, flash_executor_metadata
+from tools.build_deb import build, collector_build_id, flash_executor_metadata, flash_notice_files
 from tools import build_linux_mcp as mcp_builder
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -57,8 +57,12 @@ class PackageTests(unittest.TestCase):
             runtime = self.prepare_runtime_fixture(root)
             executor = root / 'decklab-flash'
             executor.write_bytes(b'\x7fELF\x02\x01' + bytes(12) + struct.pack('<H', 62) + b'not-executed-fixture')
+            notices = root / 'notices'
+            notices.mkdir()
+            (notices / 'LICENSE').write_text('fixture upstream notice')
             with mock.patch.object(mcp_builder, 'notice_module'):
-                package = build(root / 'dist', '1.7.5~local1', runtime=runtime, flash_executor=executor)
+                package = build(root / 'dist', '1.7.5~local1', runtime=runtime,
+                                flash_executor=executor, flash_notices=notices)
             extracted, control = root / 'extract', root / 'control'
             subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True)
             subprocess.run(['dpkg-deb', '--control', str(package), str(control)], check=True)
@@ -71,6 +75,9 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(metadata['size'], executor.stat().st_size)
             self.assertEqual(metadata['architecture'], 'amd64')
             self.assertNotIn(str(root), json.dumps(metadata))
+            self.assertEqual((extracted / 'usr/share/doc/seriald/flash-third-party/LICENSE').read_text(),
+                             'fixture upstream notice')
+            self.assertEqual(metadata['notices'], flash_notice_files(notices))
             example = json.loads((extracted / 'usr/share/doc/seriald/examples/flash.json').read_text())
             self.assertEqual(list(example['boards']), ['YOUR-REGISTERED-BOARD-SERIAL'])
             self.assertEqual(example['boards']['YOUR-REGISTERED-BOARD-SERIAL']['flash']['argv'],
@@ -92,6 +99,14 @@ class PackageTests(unittest.TestCase):
             executor.write_bytes(b'#!/bin/sh\necho unsafe\n')
             with self.assertRaisesRegex(ValueError, 'architecture differs'):
                 flash_executor_metadata(executor, 'amd64')
+
+    def test_flash_notices_reject_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'LICENSE').write_text('notice')
+            (root / 'alias').symlink_to(root / 'LICENSE')
+            with self.assertRaisesRegex(ValueError, 'links or special'):
+                flash_notice_files(root)
 
     def test_collector_build_id_ignores_control_but_tracks_collector(self):
         with tempfile.TemporaryDirectory() as temporary:

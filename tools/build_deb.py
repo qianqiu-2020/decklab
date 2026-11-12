@@ -62,7 +62,26 @@ def flash_executor_metadata(path, architecture):
             'origin': 'explicit-local-build-input'}
 
 
-def build(output, version, runtime=None, flash_executor=None):
+def flash_notice_files(directory):
+    directory = Path(directory)
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError('flash notices require a regular non-symlink directory')
+    files, total = {}, 0
+    for path in sorted(directory.rglob('*')):
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise ValueError('flash notices must not contain links or special files')
+        if path.is_file():
+            total += path.stat().st_size
+            if len(files) >= 128 or total > 16 * 1024 * 1024:
+                raise ValueError('flash notices exceed the size or file limit')
+            files[path.relative_to(directory).as_posix()] = {
+                'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'size': path.stat().st_size}
+    if not files:
+        raise ValueError('flash notices are empty')
+    return files
+
+
+def build(output, version, runtime=None, flash_executor=None, flash_notices=None):
     if runtime is None:
         architecture = {'x86_64': 'amd64', 'aarch64': 'arm64',
                         'riscv64': 'riscv64'}.get(platform.machine())
@@ -74,6 +93,9 @@ def build(output, version, runtime=None, flash_executor=None):
     descriptor = validate_runtime(runtime)
     architecture = descriptor['architecture']
     executor_metadata = flash_executor_metadata(flash_executor, architecture) if flash_executor is not None else None
+    if flash_notices is not None and executor_metadata is None:
+        raise ValueError('flash notices require an explicit flash executor')
+    notices = flash_notice_files(flash_notices) if flash_notices is not None else None
     output.mkdir(parents=True, exist_ok=True)
     artifact = output.resolve() / ('seriald_%s_%s.deb' % (version, architecture))
     with tempfile.TemporaryDirectory(prefix='seriald-deb-') as folder:
@@ -127,6 +149,13 @@ def build(output, version, runtime=None, flash_executor=None):
             target.chmod(0o755)
             if flash_executor_metadata(target, architecture) != executor_metadata:
                 raise ValueError('flash executor changed while preparing the package')
+            if notices is not None:
+                notice_target = stage / 'usr/share/doc/seriald/flash-third-party'
+                for name in notices:
+                    put(Path(flash_notices) / name, 'usr/share/doc/seriald/flash-third-party/' + name)
+                if flash_notice_files(notice_target) != notices:
+                    raise ValueError('flash notices changed while preparing the package')
+                executor_metadata['notices'] = notices
             write('usr/share/doc/seriald/flash-executor.json',
                   json.dumps(executor_metadata, sort_keys=True, indent=2) + '\n')
             example = stage / 'usr/share/doc/seriald/examples/flash.json'
@@ -152,5 +181,8 @@ if __name__ == '__main__':
     parser.add_argument('--runtime', type=Path, help='prepared architecture-specific MCP runtime')
     parser.add_argument('--flash-executor', type=Path,
                         help='optional local decklab-flash ELF to include for private testing')
+    parser.add_argument('--flash-notices', type=Path,
+                        help='license/build notices accompanying the optional local executor')
     args = parser.parse_args()
-    print(build(args.output, args.version, runtime=args.runtime, flash_executor=args.flash_executor))
+    print(build(args.output, args.version, runtime=args.runtime, flash_executor=args.flash_executor,
+                flash_notices=args.flash_notices))

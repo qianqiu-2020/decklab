@@ -43,12 +43,15 @@ glibc 2.35 为基线，包含私有 Python、MCP SDK 与全部 Python 依赖；�
 ```sh
 python3 tools/build_deb.py --version '1.7.5~flash1' \
   --runtime build/linux-mcp/amd64/runtime \
-  --flash-executor /path/to/decklab-flash --output dist/local-flash
+  --flash-executor /path/to/decklab-flash \
+  --flash-notices /path/to/executor-license-notices --output dist/local-flash
 ```
 
 运行时仍须按本次源码重新生成并通过校验。构建器不执行刷机程序；它核对 ELF 架构，
 将程序安装到 `/usr/libexec/seriald/decklab-flash`，并记录文件摘要、大小和架构于
 `/usr/share/doc/seriald/flash-executor.json`。该测试包增加系统 `libusb-1.0-0` 依赖。
+`--flash-notices` 将执行器依赖声明及构建记录放入
+`/usr/share/doc/seriald/flash-third-party/`，逐文件摘要记入同一元数据。
 不传 `--flash-executor` 的默认构建保持原行为，不包含刷机执行器。
 
 安装测试包不会自动登记板卡或启用刷机。须复制包内
