@@ -40,12 +40,14 @@ def safe_outcome(value):
     for field, allowed in values.items():
         if isinstance(value.get(field), str) and value[field] in allowed:
             result[field] = value[field]
-    for field in ('written_bytes', 'confirmed_bytes'):
+    for field in ('written_bytes', 'confirmed_bytes', 'verified_bytes', 'readback_bytes'):
         count = value.get(field)
         if type(count) is int and 0 <= count <= 2 ** 63 - 1:
             result[field] = count
     if 'written_bytes' not in result and 'confirmed_bytes' in result:
         result['written_bytes'] = result['confirmed_bytes']
+    if value.get('verification_scope') == 'payloads-and-outside-selected-partitions':
+        result['verification_scope'] = value['verification_scope']
     digest = value.get('plan_digest')
     if isinstance(digest, str) and re.fullmatch(r'[0-9a-f]{64}', digest):
         result['plan_digest'] = digest
@@ -309,6 +311,8 @@ def public_plan(value):
 
 
 class LocalFlashExecutor:
+    supports_nor_snapshot = True
+
     def __init__(self, work_dir):
         # Canonicalize the administrator-selected root once. On Windows, TEMP
         # may use an 8.3 alias; comparing it with GetFinalPathName output would
@@ -491,6 +495,38 @@ class LocalFlashExecutor:
                 raise FlashRunnerError('prepared loader checksum changed')
         return replace(binding, profile_data=json.loads(json.dumps(profile)))
 
+    def _payload_metadata(self, result, workspace):
+        """Read bounded NOR payloads, retaining paths only in the fixed Go plan."""
+        from .archive_io import open_archive
+        from .nor_contents import MAX_PARTITION_BYTES, partition_content
+        root = self._owned_workspace(workspace)
+        metadata, seen = [], set()
+        for value in list((result.get('plan') or {}).get('writes') or []) + list(result.get('payload_candidates') or []):
+            part = value.get('partition')
+            if part not in ('bootinfo', 'fsbl', 'env', 'esos', 'opensbi', 'uboot'):
+                continue
+            key = (value.get('storage'), part, value.get('sha256'))
+            if key in seen or len(metadata) >= 128:
+                continue
+            seen.add(key)
+            path = Path(value.get('path', ''))
+            if (not path.is_absolute() or not path.is_relative_to(root)
+                    or path.resolve(strict=True) != path):
+                raise FlashRunnerError('NOR payload metadata escaped its managed workspace')
+            size = value.get('size')
+            if type(size) is not int or not 0 < size <= MAX_PARTITION_BYTES:
+                continue
+            with open_archive(path) as source:
+                data = source.read(MAX_PARTITION_BYTES + 1)
+            if len(data) != size:
+                raise FlashRunnerError('NOR payload size changed during metadata read')
+            content = partition_content(data, part)
+            if content['sha256'] != value.get('sha256'):
+                raise FlashRunnerError('NOR payload checksum changed during metadata read')
+            metadata.append({'storage': value.get('storage'), 'partition': part,
+                             'sha256': content['sha256'], 'content': content})
+        return metadata
+
     def plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
              target_storage=None, inspection_scope=None):
         if input_mode not in ('full', 'partitions') or verify not in ('none', 'if-supported', 'optional', 'required'):
@@ -538,6 +574,7 @@ class LocalFlashExecutor:
             with scope:
                 result = self._run(execution, 'check-plan', inspection_request, check=check)
             result['workspace'] = str(workspace)
+            result['payload_metadata'] = self._payload_metadata(result, workspace)
             if image.get('execution_profile') is not None:
                 result['execution_profile'] = execution.profile_data
             return result
@@ -558,8 +595,70 @@ class LocalFlashExecutor:
                 self._cache_reserved -= budget
                 self._active_workspaces.discard(str(workspace))
 
-    def execute(self, binding, plan, on_event=None, check=lambda: None, task_id='', attempt_id=''):
+    def nor_workspace(self, binding, check=lambda: None):
+        """Prepare a RAM-only read profile without importing a dummy image."""
+        if (not binding.target_id or binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
+                or binding.profile_data.get('chip_family') != 'k3'):
+            raise TaskError('NOR reading requires a detected K3 USB target', 409)
+        cache = self._directory(self.root / 'cache')
+        with self._cache_lock:
+            free = max(0, shutil.disk_usage(cache).free - 256 * 1024 ** 2 - self._cache_reserved)
+            budget = min(free, max(0, binding.max_cache_bytes - self._cache_size(cache) - self._cache_reserved),
+                         800 * 1024 ** 2)
+            if budget < 32 * 1024 ** 2:
+                raise TaskError('insufficient free space or cache quota for NOR backup', 503)
+            workspace = Path(tempfile.mkdtemp(prefix='plan-', dir=cache))
+            self._cache_reserved += budget
+            self._active_workspaces.add(str(workspace))
+        try:
+            request = dict(self._request(binding), mode='partitions', workspace=str(workspace),
+                           max_cache_bytes=budget)
+            if binding.profile_data.get('bootrom_identity'):
+                from .flash_loaders import prepare_materials
+                request['boot_materials'] = prepare_materials(binding, workspace, check)
+                if request['boot_materials'].get('protocol') != 'decklab-nor-v1':
+                    raise TaskError('NOR backup requires the RAM-only NOR loader', 409)
+            profile = self._run(binding, 'nor-read-profile', request, check=check)
+            execution = self.execution_binding(binding, profile, workspace, check)
+            return {'workspace': str(workspace), 'execution_profile': execution.profile_data}
+        except BaseException as error:
+            if getattr(error, 'cleanup_confirmed', True):
+                shutil.rmtree(workspace)
+            else:
+                error.workspace = str(workspace)
+            raise
+        finally:
+            with self._cache_lock:
+                self._cache_reserved -= budget
+                self._active_workspaces.discard(str(workspace))
+
+    def _owned_workspace(self, workspace):
+        if not isinstance(workspace, (str, os.PathLike)):
+            raise TaskError('NOR operation requires its managed workspace', 409)
+        path = Path(workspace)
+        resolved = path.resolve(strict=True)
+        cache = (self.root / 'cache').resolve()
+        if (not path.is_absolute() or path != resolved or resolved.parent != cache
+                or not resolved.name.startswith('plan-') or not stat.S_ISDIR(os.lstat(path).st_mode)):
+            raise TaskError('NOR operation workspace changed', 409)
+        return resolved
+
+    def snapshot(self, binding, workspace, on_event=None, check=lambda: None, task_id='', attempt_id=''):
+        workspace = self._owned_workspace(workspace)
+        request = dict(self._request(binding), workspace=str(workspace), task_id=task_id,
+                       attempt_id=attempt_id, mode='partitions')
+        return self._run(binding, 'snapshot-nor', request, on_event, check)
+
+    def execute(self, binding, plan, on_event=None, check=lambda: None, task_id='', attempt_id='',
+                workspace=None, nor_baseline=None):
         request = dict(self._request(binding), plan=plan, task_id=task_id, attempt_id=attempt_id)
+        if workspace is not None:
+            request['workspace'] = str(self._owned_workspace(workspace))
+        if nor_baseline is not None:
+            if not isinstance(nor_baseline, dict) or not isinstance(nor_baseline.get('path'), str):
+                raise TaskError('invalid NOR baseline')
+            self._owned_workspace(Path(nor_baseline['path']).parent)
+            request['nor_baseline'] = {key: nor_baseline[key] for key in ('id', 'path', 'size', 'sha256')}
         return self._run(binding, 'execute', request, on_event, check)
 
     def check_plan(self, binding, plan, payload_candidates=None, check=lambda: None, selections=None,
@@ -589,7 +688,17 @@ class LocalFlashExecutor:
                     or previous_device.get('port_path') != binding.device.get('port_path')):
                 raise TaskError('USB connection transition requires this plan\'s loader preparation', 409)
             request['previous_device'] = previous_device
-        return self._run(binding, 'check-plan', request, check=check)
+        result = self._run(binding, 'check-plan', request, check=check)
+        paths = [value.get('path') for value in (result.get('plan') or {}).get('writes', [])
+                 if value.get('partition') in ('bootinfo', 'fsbl', 'env', 'esos', 'opensbi', 'uboot')]
+        if paths:
+            cache = self.root / 'cache'
+            source = Path(paths[0])
+            if not source.is_absolute() or not source.is_relative_to(cache):
+                raise FlashRunnerError('NOR payload is outside the managed cache')
+            workspace = cache / source.relative_to(cache).parts[0]
+            result['payload_metadata'] = self._payload_metadata(result, workspace)
+        return result
 
     def _run(self, binding, operation, request, on_event=None, check=lambda: None, timeout=None):
         encoded = json.dumps(request, allow_nan=False, separators=(',', ':')).encode('utf-8')
@@ -600,7 +709,7 @@ class LocalFlashExecutor:
         descriptor, path = tempfile.mkstemp(prefix='flash-', suffix='.json', dir=directory)
         process, reader, stopping = None, None, threading.Event()
         cleanup_attempted = False
-        outcome = {}
+        outcome, nor_snapshots = {}, {}
         events = queue.Queue(maxsize=32)
         try:
             with os.fdopen(descriptor, 'wb') as target:
@@ -671,9 +780,21 @@ class LocalFlashExecutor:
                     raise FlashRunnerError('flashing executor returned invalid JSON') from None
                 if not isinstance(event, dict) or event.get('event') not in ('progress', 'phase', 'result', 'error'):
                     raise FlashRunnerError('flashing executor returned an invalid event')
+                if isinstance(event.get('result'), dict):
+                    # Keep private, untrusted file receipts only on this process
+                    # result/error. Publication independently validates the fixed
+                    # task filename, workspace, size and every partition digest.
+                    nor_snapshots.update({key: event['result'][key] for key in ('nor_before', 'nor_after')
+                                          if isinstance(event['result'].get(key), dict)})
                 if event['event'] == 'error':
                     outcome.update(safe_outcome(event.get('result')))
                     message = 'flashing executor reported failure'
+                    if event.get('code') == 'nor-baseline-changed':
+                        message = '板上 NOR 内容在备份后发生变化，尚未写入；请重新读取备份并核对。'
+                    if event.get('code') == 'nor-read-failed':
+                        message = 'NOR 读取未完成，请查看原任务；不会自动重试写入。'
+                    if event.get('code') == 'verify-failed':
+                        message = '回读校验失败；请核对写入结果和回读文件，不会自动重刷。'
                     if event.get('code') == 'nor-package-requires-full':
                         message = '当前执行器仍限制 NOR 固件包选区，请升级刷机执行器；不要为刷单分区改选“完整镜像”。'
                     if event.get('code') == 'nor-partition-loader-required':
@@ -715,6 +836,8 @@ class LocalFlashExecutor:
             # write result; preserve that evidence without inferring success.
             if outcome and not getattr(error, 'outcome', None):
                 error.outcome = dict(outcome)
+            if nor_snapshots:
+                error.nor_snapshots = dict(nor_snapshots)
             if not getattr(error, 'stage', ''):
                 error.stage = operation
             if not getattr(error, 'operation', ''):

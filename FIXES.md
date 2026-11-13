@@ -37,6 +37,18 @@ DDR-training persistence or SD/USB auto-flash. Its build recipe checks the
 configuration and late-init disassembly. When installed, the same RAM environment
 also prepares full firmware packages without changing their write catalogue.
 
+The NOR workspace changes add bounded whole-NOR snapshots and
+readback verification to the safe RAM partition path. Backups use the existing
+artifact ownership/quota service, with opaque env contents. Comparison checks
+exact padded payload bytes and every byte outside selected partition capacities;
+it does not invent erased-tail contents. A separate current-code field run on
+sub23-1 verified the complete Web backup, selected opensbi write, and automatic
+whole-NOR readback; before/after bytes matched. This remains a single-board,
+original-content rewrite, not different-version or multi-partition acceptance.
+Single-file previews accept a null executor package catalogue as empty, while
+required readback checks must use the proven RAM NOR reader capability.
+Current workflow and validation limits: [NOR workspace](docs/FLASH_WORKSPACE.md).
+
 Web/backend split deployments use one authenticated HTTPS hardware owner on
 Windows or Ubuntu. All serial readers, durable hardware tasks, image downloads
 and cache stay on that backend. A Web restart must not restart the backend or

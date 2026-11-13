@@ -11,7 +11,8 @@ class Element {
   set textContent(value) { this.content = value; this.children = []; }
   get textContent() { return String(this.content || '') + this.children.map(item => item.textContent).join(''); }
   appendChild(child) { this.children.push(child); return child; }
-  setAttribute() {}
+  setAttribute(name, value) { (this.attributes ||= {})[name] = value; }
+  removeAttribute(name) { if (this.attributes) delete this.attributes[name]; }
   addEventListener(type, fn) { (this.events[type] ||= []).push(fn); }
   emit(type) { for (const fn of this.events[type] || []) fn(); }
   click() { if (!this.disabled) this.emit('click'); }
@@ -648,6 +649,76 @@ test('a confirmed failed import permits an explicit new download request', async
   h.take('/api/task?id=failed-image').resolve({task:{id:'failed-image',state:'failed',error:'fixture download failure'}}); await drain();
   h.get('fl-download').click(); const next = h.take('/api/image-download');
   assert.notEqual(next.payload.request_id, first.payload.request_id);
+});
+
+
+const norTarget = {target_id:'nor-fixture', target_generation:'brom-original', label:'模拟 NOR'};
+const norBackup = {artifact:{id:'b'.repeat(24), name:'nor-before.bin', size:8388608, sha256:'1'.repeat(64)},
+  partitions:[{name:'opensbi', offset:1769472, size:393216, content:{version:'OpenSBI v1.6',version_state:'identified',
+    size:393216,sha256:'2'.repeat(64)}}, {name:'env',offset:655360,size:65536,content:{version_state:'not-applicable',sha256:'3'.repeat(64)}}]};
+const norReady = {id:'nor-task',kind:'flash',state:'running',flash_targets:[{target_id:norTarget.target_id,generation:norTarget.target_generation}],
+  progress:{phase:'awaiting-selection'},flash:{operation:'nor-workspace',nor_before:norBackup,write_result:'not-started',
+    inspection:{layout_digest:'nor-live',storages:[{id:'active',label:'NOR',size:8388608,partitions:[
+      {name:'opensbi',offset:1769472,size:393216},{name:'env',offset:655360,size:65536}]}]},payload_candidates:[artifact]}};
+
+test('image-free NOR preparation posts no payload or write scope and recovers an uncertain submission', async () => {
+  const h=harness();h.api.open(norTarget);
+  h.take('/api/tasks').resolve({tasks:[]});await drain();
+  h.take('/api/flash-target').resolve({target:norTarget,capabilities:{...capabilities,artifacts:[],storages:[],
+    nor_workspace_supported:true,preparable:true,modes:['partitions']}});await drain();
+  assert.equal(h.get('fl-read-nor').disabled,false);
+  assert.equal(h.get('fl-mode').value,'partitions');assert.equal(h.get('fl-verify').value,'required');
+  h.get('fl-read-nor').click();const request=h.take('/api/task-start');
+  assert.equal(request.payload.kind,'nor-backup');assert.equal(request.payload.target_generation,'brom-original');
+  assert.equal('artifact_id' in request.payload,false);assert.equal('plan_id' in request.payload,false);
+  request.reject(new Error('lost response'));await drain();
+  assert.equal(h.get('fl-read-nor').disabled,true);assert.equal(h.get('fl-recover').hidden,false);
+  assert.equal(h.get('fl-upload').disabled,true);
+  h.get('fl-read-nor').click();assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+  h.get('fl-recover').click();h.take('/api/tasks').resolve({tasks:[{...norReady,flash:{...norReady.flash,request_id:request.payload.request_id}}]});await drain();
+  assert.match(h.get('fl-task-id').textContent,/nor-task/);
+  assert.equal(h.get('fl-recover').hidden,true);
+});
+
+test('NOR partition comparison shows real backup versions and file metadata after preview in the original task', async () => {
+  const h=harness();h.api.open(norTarget,norReady);await drain();
+  assert.match(h.get('fl-partitions').textContent,/OpenSBI v1.6/);
+  assert.match(h.get('fl-partitions').textContent,/配置内容，无软件版本/);
+  assert.match(h.get('fl-backups').textContent,/写前整片备份/);
+  const link=h.get('fl-backups').children[0].children[1];
+  assert.match(link.href,/artifact-download\?id=bbbbbbbbbbbbbbbbbbbbbbbb/);
+  assert.equal(h.get('fl-progress').hidden,true);
+  assert.match(h.get('fl-progress-text').textContent,/等待选择替换内容/);
+  const row=h.get('fl-partitions').children[0];row.checkbox.checked=true;row.artifactSelect.value=artifact.id;
+  row.checkbox.emit('change');h.get('fl-select').click();
+  const preview=h.take('/api/flash-selection');assert.equal(preview.payload.id,'nor-task');
+  assert.equal(preview.payload.target_generation,'brom-original');
+  preview.resolve({plan:{id:'new-partition-plan',write_layout:false,writes:[{storage:'active',partition:'opensbi',size:32}],
+    payload_metadata:[{storage:'active',partition:'opensbi',content:{version:'OpenSBI v1.7',version_state:'identified',sha256:'4'.repeat(64),size:32}}]}});await drain();
+  assert.match(row.payloadInfo.textContent,/OpenSBI v1.7/);assert.equal(row.checkbox.checked,true);
+  h.get('fl-select').click();const commit=h.take('/api/flash-selection');
+  assert.equal(commit.payload.id,'nor-task');assert.equal(commit.payload.plan_id,'new-partition-plan');
+  assert.equal('selections' in commit.payload,false);
+});
+
+test('NOR byte progress and readback failures remain separate from completed writes', async () => {
+  const h=harness();h.api.open(norTarget,{...norReady,state:'failed',error:'readback mismatch',
+    progress:{phase:'verifying-nor',done:4194304,total:8388608},flash:{...norReady.flash,
+      write_result:'completed',verify_result:'failed',nor_after:{...norBackup,artifact:{...norBackup.artifact,id:'c'.repeat(24)}}}});await drain();
+  assert.equal(h.get('fl-progress').value,4194304);assert.equal(h.get('fl-progress').max,8388608);
+  assert.match(h.get('fl-progress-text').textContent,/回读整片 NOR 并校验.*50%/);
+  assert.match(h.get('fl-results').textContent,/写入结果.*已完成/);assert.match(h.get('fl-results').textContent,/校验结果.*失败/);
+  assert.match(h.get('fl-backups').textContent,/写后整片回读/);
+  assert.equal(h.get('fl-current-heading').textContent,'写后回读内容');
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('URL payload import during NOR selection carries the original task generation', async () => {
+  const h=harness();h.api.open(norTarget,norReady);await drain();
+  assert.equal(h.get('fl-download').disabled,false);
+  h.get('fl-url').value='https://firmware.example/opensbi.itb';h.get('fl-download').click();
+  const download=h.take('/api/image-download');assert.equal(download.payload.task_id,'nor-task');
+  assert.equal(download.payload.target_generation,'brom-original');
 });
 
 (async () => {

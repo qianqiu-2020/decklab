@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased: NOR workspace
+
+- Read and download a complete NOR backup before choosing any image, using the pinned RAM-only loader and one durable hardware task.
+- Compare partition versions, build timestamps, hashes and replacement file metadata; preserve unselected partitions and require an explicit scope preview before writing.
+- Recheck the backup before writing, read back the entire NOR afterwards, and retain separate write/verification results and scoped backup files, including failed verification evidence.
+- Show stage-specific byte progress, responsive partition rows, keyboard confirmation and both themes. Keep firmware metadata as text and recover lost submissions by the original durable request ID.
+- Accept an absent package catalogue for standalone partition files, keep their metadata inputs inside the managed plan cache, and preserve required NOR readback through live plan checking.
+- Validate the Web workflow on sub23-1: back up 8 MiB, rewrite only the original 384 KiB opensbi partition, automatically read back the whole NOR and confirm all bytes match, including env.
+
 ## Unreleased — split nodes and partition images
 
 - Web and hardware backend can run separately on Windows or Ubuntu over authenticated TLS; Web restarts preserve backend tasks and connections.

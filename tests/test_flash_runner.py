@@ -123,6 +123,85 @@ class FlashRunnerTests(unittest.TestCase):
         config['boards']['board-a']['flash']['timeout'] = timeout
         return FlashBook(config).binding('board-a')
 
+    def test_nor_snapshot_uses_only_its_managed_workspace_and_fixed_identity(self):
+        workspace = self.runner._directory(self.runner.root / 'cache' / 'plan-nor-test')
+        binding = self.binding("assert sys.argv[-3]=='snapshot-nor'\n"
+            "assert request['mode']=='partitions' and request['task_id']=='task-fixed' and request['attempt_id']=='attempt-fixed'\n"
+            "print(json.dumps({'event':'result','result':{'ok':True,'write_result':'not-started'}}))\n")
+        result = self.runner.snapshot(binding, workspace, task_id='task-fixed', attempt_id='attempt-fixed')
+        self.assertEqual(result['write_result'], 'not-started')
+        for path in (self.root, workspace / 'missing', self.root / 'foreign'):
+            with self.assertRaises((TaskError, OSError)):
+                self.runner.snapshot(binding, path, task_id='task-fixed', attempt_id='attempt-fixed')
+
+    def test_execute_passes_snapshot_reference_without_changing_the_fixed_plan(self):
+        workspace = self.runner._directory(self.runner.root / 'cache' / 'plan-nor-execute')
+        source = workspace / 'nor-before.bin'
+        source.write_bytes(b'private-baseline')
+        baseline = dict(id='backup-id', path=str(source), size=source.stat().st_size,
+                        sha256=hashlib.sha256(source.read_bytes()).hexdigest())
+        binding = self.binding("assert request['nor_baseline']['id']=='backup-id'\n"
+            "assert request['plan']=={'verify':'required'}\n"
+            "print(json.dumps({'event':'result','result':{'ok':True,'write_result':'completed','verify_result':'verified','verified_bytes':8388608}}))\n")
+        result = self.runner.execute(binding, {'verify': 'required'}, workspace=workspace, nor_baseline=baseline)
+        self.assertEqual(result['verified_bytes'], 8388608)
+        with self.assertRaises(TaskError):
+            self.runner.execute(binding, {'verify': 'required'}, workspace=workspace,
+                                nor_baseline=dict(baseline, path=str(self.root / 'foreign.bin')))
+
+    def test_failed_verification_keeps_private_readback_receipt_separate_from_public_outcome(self):
+        binding = self.binding("print(json.dumps({'event':'error','code':'verify-failed','result':"
+            "{'write_result':'completed','verify_result':'failed','nor_after':{'path':'/private/readback.bin'}}}))\n")
+        with self.assertRaises(FlashRunnerError) as caught:
+            self.runner.execute(binding, {'verify': 'required'})
+        self.assertEqual(caught.exception.outcome['write_result'], 'completed')
+        self.assertEqual(caught.exception.outcome['verify_result'], 'failed')
+        self.assertEqual(caught.exception.nor_snapshots['nor_after']['path'], '/private/readback.bin')
+        self.assertNotIn('private', str(caught.exception))
+        self.assertNotIn('path', str(caught.exception.outcome))
+
+    def test_nor_workspace_prepares_fixed_materials_without_any_image_or_usb_operation(self):
+        binding = self.automatic_binding()
+        self.helper.write_text("import json,sys\nfrom pathlib import Path\n"
+            "request=json.loads(Path(sys.argv[-1]).read_text())\n"
+            "assert sys.argv[-3]=='nor-read-profile' and 'artifact' not in request\n"
+            "profile=request['profile'];profile['ram_loader_protocol']='decklab-nor-v1';profile['prepare']=[]\n"
+            "for name in ('fsbl','uboot'):\n"
+            " loader=request['boot_materials'][name]\n"
+            " profile['prepare'].extend([{'kind':'stage','path':loader['path'],'sha256':loader['sha256']},{'kind':'continue'}])\n"
+            "print(json.dumps({'event':'result','result':profile}))\n")
+        def materials(binding, workspace, check):
+            result = {'protocol': 'decklab-nor-v1', 'chip_family': 'k3'}
+            for key, member in [('fsbl', 'factory/FSBL.bin'), ('uboot', 'u-boot.itb')]:
+                path = Path(workspace) / 'ram-loaders' / member
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'fixed temporary test loader')
+                result[key] = dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                                   size=path.stat().st_size, name=path.name, id=key)
+            return result
+        with mock.patch('seriald_core.flash_loaders.prepare_materials', side_effect=materials):
+            result = self.runner.nor_workspace(binding)
+        self.assertEqual(result['execution_profile']['ram_loader_protocol'], 'decklab-nor-v1')
+        self.assertEqual(len(result['execution_profile']['prepare']), 4)
+        self.assertTrue(Path(result['workspace']).is_dir())
+
+    def test_payload_content_metadata_is_separate_from_immutable_plan_and_rejects_foreign_paths(self):
+        workspace = self.runner._directory(self.runner.root / 'cache' / 'plan-metadata')
+        payload = workspace / 'FSBL.bin'
+        payload.write_bytes(b'U-Boot SPL 2022.10-test\0')
+        write = dict(storage='active', partition='fsbl', path=str(payload), size=payload.stat().st_size,
+                     sha256=hashlib.sha256(payload.read_bytes()).hexdigest())
+        result = {'plan': {'writes': [write], 'digest': 'fixed'}, 'payload_candidates': [write]}
+        original = json.dumps(result, sort_keys=True)
+        info = self.runner._payload_metadata(result, workspace)
+        self.assertEqual(len(info), 1)
+        self.assertEqual(info[0]['content']['version'], 'U-Boot SPL 2022.10-test')
+        self.assertEqual(json.dumps(result, sort_keys=True), original)
+        self.assertNotIn(str(workspace), str(info))
+        write['path'] = str(self.root / 'foreign.bin')
+        with self.assertRaises(FlashRunnerError):
+            self.runner._payload_metadata(result, workspace)
+
     def automatic_binding(self):
         profile = {'id': 'auto-spacemit-gpt-v1', 'chip_family': 'k3', 'identity': {},
                    'bootrom_identity': {'version-IC': 'K3', 'version-brom': '1.0'},

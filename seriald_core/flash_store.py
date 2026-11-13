@@ -118,7 +118,13 @@ class FlashStore:
     def public_details(self, task_id):
         """Expose domain results while keeping recovery/cache paths server-side."""
         from .flash_runner import public_plan
-        return public_plan(self.details(task_id))
+        document = self.details(task_id)
+        with self.store.lock:
+            request = self.store.db.execute('SELECT request_id FROM flash_requests WHERE task_id=?',
+                                             (task_id,)).fetchone()
+        if request:
+            document['request_id'] = request['request_id']
+        return public_plan(document)
 
     def update_details(self, task_id, values):
         encode_document(values)

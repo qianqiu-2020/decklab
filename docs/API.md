@@ -318,6 +318,24 @@ not the flash target. Other connection-bound operations keep their existing guar
 | POST `/api/flash-selection` | For the same task in `awaiting-selection`, `id`, `layout_digest` and `selections` with `preview=true` return a preview; submit its `plan_id` and unique `request_id` to continue |
 | POST `/api/flash-recovery` | Human-only recovery receipt: `key`, `serial`, task `id`, expected `attempt_id`, nonempty `reason` and `confirm_stopped=true`; releases recovery resources after the operator verifies the original executor stopped |
 | POST `/api/task-start`, `kind=flash` | `key`, `serial`, `plan_id`, `binding_revision` and unique `request_id`; creates or retrieves the same durable task |
+| POST `/api/task-start`, `kind=nor-backup` | Human-only K3 NOR workspace: `target_id`, `target_generation`, `binding_revision` and unique `request_id`; no image or write scope. Loads pinned RAM materials, backs up the entire NOR, then waits for selection in the same `flash` task |
+
+NOR workspaces expose `flash.nor_before` and `flash.nor_after` with scoped download
+artifact IDs and bounded partition content metadata. Versions are embedded fields
+or component banners; build timestamps are not firmware versions. Environment values
+are opaque. The immutable executor plan is unchanged by `payload_metadata` sidecars.
+The Web UI defaults to selected partitions and required readback in this workflow.
+`readback_bytes` counts all returned bytes; `verified_bytes` counts exact padded
+payload bytes and bytes outside the selected partition capacities. Selected tails
+remain in the readback file without an invented expected value.
+
+The same task stops in `awaiting-selection` before any storage write. Uploads and
+URL imports may include its `task_id` plus the **original** target generation, even
+when the task loaded a new RAM USB generation. The backend checks the waiting task
+and lease before accepting host-side imports. Preview with `/api/flash-selection`,
+then confirm its fixed `plan_id` in the original task. Cancelling preparation keeps
+the completed backup. `flash.request_id` comes from the durable request table and
+allows recovery of an uncertain submission without replaying it.
 
 For automatically discovered devices, `target_id` and `target_generation`
 replace the configured board's `key`/`serial` scope in capability, artifact
@@ -517,7 +535,8 @@ primary Web credential; `/api/settings` manages the Web node. The private
 and is not exposed directly by Web. See [deployment](DISTRIBUTED.md).
 
 `POST /api/image-download` accepts a Web-operated device/USB target scope,
-`url`, required stable `request_id`, optional `name` and `sha256`. It returns
+`url`, required stable `request_id`, optional `name` and `sha256`. During prepared
+USB selection, include `task_id` and the original USB scope as described above. It returns
 HTTP 202 and the existing durable task. Poll `/api/task?id=...`, cancel with
 `/api/task-cancel`. Completion returns `result.artifact` (`id`, `name`, `size`,
 `sha256`, `serial`, `state: ready`), usable by `/api/flash-plan`. Reusing an ID

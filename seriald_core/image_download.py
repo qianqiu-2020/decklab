@@ -152,15 +152,19 @@ class ImageDownloads:
                 raise TaskError('image URL imports require a human operator', 403)
             if not isinstance(payload, dict) or set(payload) - {
                     'url', 'name', 'sha256', 'request_id', 'client_id', 'actor', 'key', 'serial',
-                    'target_id', 'target_generation', 'connection_id'}:
+                    'target_id', 'target_generation', 'connection_id', 'task_id'}:
                 raise TaskError('invalid image download request')
             image_url(payload.get('url'))
-            if payload.get('target_id'):
+            if payload.get('task_id'):
                 from .flash_tasks import FlashActions
-                device = FlashActions(self.manager)._device(None, payload, actor)
-            if device is None:
-                raise TaskError('image download target is required')
-            serial = device.serial or ''
+                serial = FlashActions(self.manager).waiting_payload_serial(payload, actor)
+            else:
+                if payload.get('target_id'):
+                    from .flash_tasks import FlashActions
+                    device = FlashActions(self.manager)._device(None, payload, actor)
+                if device is None:
+                    raise TaskError('image download target is required')
+                serial = device.serial or ''
             checksum = payload.get('sha256') or None
             if checksum is not None and (not isinstance(checksum, str) or not re.fullmatch('[a-f0-9]{64}', checksum)):
                 raise TaskError('invalid expected image SHA-256')

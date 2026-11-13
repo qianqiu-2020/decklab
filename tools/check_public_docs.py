@@ -11,7 +11,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 ENVIRONMENT = re.compile(r'\bSERIALD_[A-Z_]+\b')
 GUIDES = ('CONFIGURATION', 'INSTALL', 'WINDOWS', 'LOG_OPERATIONS',
-          'TRANSFER_ARTIFACTS', 'HARDWARE_EXTENSIONS', 'AGENT_ACCESS')
+          'TRANSFER_ARTIFACTS', 'HARDWARE_EXTENSIONS', 'FLASH_WORKSPACE', 'AGENT_ACCESS')
 
 
 def inventory(root):

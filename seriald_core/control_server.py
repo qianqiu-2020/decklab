@@ -562,7 +562,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
                     payload['serial'] = grant['serial']
                 if grant and grant['scope'] == 'connection':
-                    if route in ('/api/flash-plan', '/api/flash-selection') or (route == '/api/task-start' and payload.get('kind') == 'flash'):
+                    if route in ('/api/flash-plan', '/api/flash-selection') or (route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup')):
                         return self._json(403, {'error': '刷机需要已登记板卡范围的授权'})
                     if not payload.get('key') and route not in ('/api/task-cancel',
                             '/api/artifact-append', '/api/artifact-seal', '/api/artifact-delete'):

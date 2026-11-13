@@ -490,8 +490,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = flash.selection(payload, None, actor)
             elif route == '/api/flash-recovery':
                 result = flash.recovery(payload, None, actor)
-            elif route == '/api/task-start' and payload.get('kind') == 'flash':
-                result = flash.start(payload, None, actor)
+            elif route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup'):
+                result = (flash.backup(payload, None, actor) if payload['kind'] == 'nor-backup'
+                          else flash.start(payload, None, actor))
             else:
                 return self._json(400, {'error': 'USB flash targets are not serial connections'})
             return self._json(result.status, result.payload)
