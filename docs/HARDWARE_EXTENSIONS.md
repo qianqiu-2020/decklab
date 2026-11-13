@@ -139,6 +139,11 @@ termination; the Windows build must run these tests before packaging.
 顺序准备环境，再读取真实存储布局。指定分区仍在同一个任务内选择、预览并开始写入，
 不重复进入模式或重新导入镜像。不完整的包、芯片不匹配或无法核对布局会停止。
 这条标准包流程不要求用户编写 JSON；下载设备重枚举仅在原任务占用的固定 USB 接线上接受。
+K3 NOR 固件包也可选择“指定分区”：包内表仅用于提取和校验载荷，不写入板上分区表。
+使用下载专用 RAM 环境，先读取并校验 NOR 偏移、分区容量，再在原任务选择分区并确认；
+已经运行该 RAM 环境时可直接预览。此路径不会发送 `flash:mtd`，也不会额外擦除 env。
+没有安全 RAM 环境的旧执行器必须升级，不能以改选完整镜像代替单分区操作。
+
 包含 `partition_nor.json` 的 K1／K3 Firmware 包使用独立的 NOR 恢复流程：选择“完整镜像”，
 预览包内 `bootinfo/fsbl/env/esos/opensbi/uboot` 六个固定分区与摘要，然后准备临时环境。
 现场 `mtd-size` 必须报告受支持的容量；不会使用 GPT、块设备或同名分区猜测 MTD。

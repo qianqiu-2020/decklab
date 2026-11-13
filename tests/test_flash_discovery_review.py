@@ -47,6 +47,17 @@ class DiscoveryReviewTests(unittest.TestCase):
                 with self.assertRaises(TaskError):
                     _profile(profile)
 
+    def test_live_ram_profile_accepts_only_the_fixed_download_environment(self):
+        profile = {'id': 'auto-spacemit-gpt-v1', 'chip_family': 'k3',
+            'identity': {'version-IC': 'spacemit,k3-pico'}, 'ram_loader_protocol': 'decklab-nor-v1',
+            'storages': [{'id': 'active', 'layout_source': 'spacemit-gpt',
+                'size_getvar': '__decklab_gpt_capacity', 'sector_size': 512, 'partitions': [], 'sparse': False}]}
+        self.assertEqual(_profile(copy.deepcopy(profile)), profile)
+        for change in ({'ram_loader_protocol': 'arbitrary-oem'}, {'chip_family': 'k1'},
+                       {'bootrom_identity': {'version-IC': 'SPA3609'}}, {'prepare': []}):
+            with self.subTest(change=change), self.assertRaises(TaskError):
+                _profile(dict(profile, **change))
+
     def test_parallel_refreshes_cannot_commit_old_enumeration_after_new_generation(self):
         entered, release, second = threading.Event(), threading.Event(), threading.Event()
         calls, failures = [], []

@@ -6,11 +6,18 @@ offer the storage-free loader preparation preview before partition selection,
 and defer readback capability conclusions until the live layout is available.
 
 NOR firmware recovery uses the fixed `partition_nor.json` six-partition layout
-only in full-package mode. Keep its MTD adapter separate from GPT discovery.
+for explicit full-package recovery. Keep its MTD adapter separate from GPT discovery.
 Loader completion must stop for a new human scope review before storage writes;
 `flash:mtd` changes the namespace and can erase env. Include the conservative
 whole-MTD erase risk, unknown NOR/NAND type and excluded optional EC operation in
 the preview. Never mark missing readback as verification success or replay writes.
+
+NOR packages also support partition mode through the separate RAM adapter.
+Import `partition_nor.json` as a payload catalogue only; it grants no layout-write
+capability. After preparing RAM, bind only selected payloads to independently
+checked NOR offsets/capacities in the same task. The running RAM environment may
+also import a package without restaging. Missing safe loaders must ask for a
+backend upgrade, never tell a single-partition caller to choose full recovery.
 
 Single-file partition flashing uses preinstalled RAM-only FSBL/U-Boot rather
 than requiring another firmware package. The separate `decklab-nor-v1` RAM
@@ -21,6 +28,10 @@ the standard map and selected-partition erase risk; this adapter does not make
 the old stock full-recovery namespace operation safe for single partitions.
 The K3 loader patch/build recipe and simulated execution tests are source and
 build evidence, not physical-board acceptance.
+The [BMC single-board field record](docs/audits/2026-11-14-bmc-sub23-1.md)
+covers real BS01DCMA NOR partition writing, independent whole-NOR readback and
+serial handoff. Its boot recovery and verification limits remain explicit;
+this does not establish acceptance for other boards or built-in readback.
 The dedicated RAM build must enter fastboot before normal board provisioning,
 DDR-training persistence or SD/USB auto-flash. Its build recipe checks the
 configuration and late-init disassembly. When installed, the same RAM environment

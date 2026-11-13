@@ -406,21 +406,31 @@ class LocalFlashExecutor:
             raise FlashRunnerError('invalid prepared execution profile') from error
         baseline = json.loads(json.dumps(binding.profile_data))
         candidate = json.loads(json.dumps(profile))
+        baseline_protocol = baseline.pop('ram_loader_protocol', None)
         protocol = candidate.pop('ram_loader_protocol', None)
         if protocol is not None and protocol not in ('stock', 'decklab-nor-v1'):
             raise FlashRunnerError('unsupported RAM loader protocol')
+        if baseline_protocol and baseline_protocol != protocol:
+            raise FlashRunnerError('prepared execution profile changed RAM loader protocol')
         # Go serializes an absent identity map as null. Both mean no extra
         # checks; the detected chip and BootROM checks must still match below.
         baseline.setdefault('identity', None)
         candidate.setdefault('identity', None)
         steps = candidate.pop('prepare', None)
-        baseline.pop('prepare', None)
-        if (not isinstance(steps, list) or len(steps) != 4
+        original_steps = baseline.pop('prepare', None)
+        live_catalogue = (baseline_protocol == protocol == 'decklab-nor-v1'
+                          and not baseline.get('bootrom_identity') and not original_steps and not steps)
+        if not live_catalogue and (not isinstance(steps, list) or len(steps) != 4
                 or [step.get('kind') if isinstance(step, dict) else None for step in steps]
                     != ['stage', 'continue', 'stage', 'continue']):
             raise FlashRunnerError('prepared loader steps differ from the fixed execution sequence')
         # The importer's one package table is fixed, never a user-supplied path.
         storages, original_storages = candidate.get('storages'), baseline.get('storages')
+        nor_catalogue = {'id': 'active', 'label': 'NOR (package payload catalogue)',
+            'layout_source': 'spacemit-gpt', 'size_getvar': '__decklab_gpt_capacity',
+            'sector_size': 512, 'partitions': [], 'package_tables': ['partition_nor.json'], 'sparse': False}
+        if protocol == 'decklab-nor-v1' and storages == [nor_catalogue]:
+            candidate['storages'] = baseline['storages']
         if (isinstance(storages, list) and len(storages) == 1 and isinstance(storages[0], dict)
                 and isinstance(original_storages, list) and len(original_storages) == 1
                 and isinstance(original_storages[0], dict)
@@ -446,7 +456,7 @@ class LocalFlashExecutor:
                 or target.is_symlink() or not target.is_dir() or cache.is_symlink()
                 or target.resolve() != target):
             raise FlashRunnerError('prepared loader workspace is outside the managed image cache')
-        for index, step in enumerate(steps):
+        for index, step in enumerate(steps or []):
             check()
             if index in (1, 3):
                 if set(step) != {'kind'}:
@@ -665,7 +675,9 @@ class LocalFlashExecutor:
                     outcome.update(safe_outcome(event.get('result')))
                     message = 'flashing executor reported failure'
                     if event.get('code') == 'nor-package-requires-full':
-                        message = 'NOR 固件包需要选择“完整镜像”后重新预览；将恢复包内全部 NOR 分区并擦除 env。'
+                        message = '当前执行器仍限制 NOR 固件包选区，请升级刷机执行器；不要为刷单分区改选“完整镜像”。'
+                    if event.get('code') == 'nor-partition-loader-required':
+                        message = 'NOR 固件包选区需要下载专用 RAM 刷机环境，请升级后端或配置预备 FSBL/U-Boot；无需改选完整镜像。'
                     if event.get('code') == 'nor-package-unsupported':
                         message = '这是 NOR 固件刷机包；当前自动刷机仅支持 GPT 镜像包，尚未支持 NOR 固件刷写。'
                     raise FlashRunnerError(message, outcome=outcome, code=event.get('code'))

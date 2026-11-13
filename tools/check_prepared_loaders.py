@@ -5,7 +5,6 @@ This performs filesystem-only `image-plan`; no discovery, check-plan, preparatio
 or execute operation reaches the external binary or physical hardware.
 """
 import argparse
-from dataclasses import replace
 import hashlib
 import json
 import os
@@ -22,16 +21,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--executor', type=Path, required=True)
     parser.add_argument('--manifest', type=Path, required=True)
+    parser.add_argument('--nor-package', type=Path, help='validate a complete NOR package in partition mode')
+    parser.add_argument('--running', action='store_true', help='model an already running RAM environment')
     args = parser.parse_args()
+    if args.running and not args.nor_package:
+        parser.error('--running requires --nor-package')
     with tempfile.TemporaryDirectory(prefix='decklab-ram-plan-') as directory:
         root = Path(directory)
         payload = root / 'opensbi.itb'
         payload.write_bytes(b'offline single partition payload')
+        if args.nor_package:
+            payload = args.nor_package.resolve()
         sha = hashlib.sha256(payload.read_bytes()).hexdigest()
         profile = {'id': 'auto-spacemit-gpt-v1', 'chip_family': 'k3',
             'bootrom_identity': {'version-IC': 'SPA3609', 'version-brom': '1.0'},
             'storages': [{'id': 'active', 'layout_source': 'spacemit-gpt', 'sector_size': 512,
                           'size_getvar': '__decklab_gpt_capacity', 'partitions': None, 'sparse': False}]}
+        if args.running:
+            profile.pop('bootrom_identity')
+            profile.update(ram_loader_protocol='decklab-nor-v1', identity={'version-IC': 'spacemit,k3-pico'})
         binding = FlashBinding('', 1, profile['id'], profile, BoardControl(), SerialEndpoint(provider='none'),
             'offline-fixture', (str(args.executor.resolve()),),
             {'port_path': [99, 99], 'vendor_id': 0x361c, 'usb_address': 99}, target_id='offline-target',
@@ -42,7 +50,7 @@ def main():
         def run(current, operation, request, *values, **keywords):
             operations.append(operation)
             if operation == 'check-plan':
-                return {'plan': request['plan'], 'payload_candidates': request['payload_candidates'], 'requires_prepare': True}
+                return {'plan': request['plan'], 'payload_candidates': request['payload_candidates'], 'requires_prepare': not args.running}
             if operation != 'image-plan':
                 raise AssertionError('hardware operation forbidden in offline validation')
             return original(current, operation, request, *values, **keywords)
@@ -52,12 +60,17 @@ def main():
                 'size': payload.stat().st_size, 'sha256': sha}, 'partitions')
         plan = result['plan']
         assert plan['write_layout'] is False and plan['writes'] == []
-        assert len(plan['ram_loaders']) == 2
-        assert len(result['execution_profile']['prepare']) == 4
+        assert len(plan.get('ram_loaders', [])) == (0 if args.running else 2)
+        assert len(result['execution_profile'].get('prepare', [])) == (0 if args.running else 4)
         assert result['execution_profile']['ram_loader_protocol'] == 'decklab-nor-v1'
+        if args.nor_package:
+            assert len(result['payload_candidates']) == 6
+            assert result['execution_profile']['storages'][0]['package_tables'] == ['partition_nor.json']
+            assert not result['execution_profile']['storages'][0].get('layout_target')
         assert operations == ['image-plan', 'check-plan']
         print(json.dumps({'ok': True, 'external_operations': ['image-plan'], 'usb_phase': 'mocked',
-            'storage_writes': [], 'ram_loaders': plan['ram_loaders'], 'payload_sha256': sha}, indent=2))
+            'storage_writes': [], 'ram_loaders': plan.get('ram_loaders', []), 'payload_sha256': sha,
+            'package_partitions': [row['partition'] for row in result.get('payload_candidates', [])]}, indent=2))
 
 
 if __name__ == '__main__':

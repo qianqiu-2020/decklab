@@ -196,6 +196,32 @@ class FlashRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(FlashRunnerError, 'symbolic link'):
                 self.runner.execution_binding(binding, original, workspace)
 
+    def test_nor_package_catalogue_accepts_pinned_loaders_and_live_ram_without_adding_steps(self):
+        initial = self.automatic_binding()
+        workspace = self.runner._directory(self.root / 'workspace/cache') / 'plan-abcdefgh'
+        workspace.mkdir()
+        profile = self.prepared_profile(initial, workspace)
+        profile['ram_loader_protocol'] = 'decklab-nor-v1'
+        profile['storages'] = [{'id': 'active', 'label': 'NOR (package payload catalogue)',
+            'layout_source': 'spacemit-gpt', 'size_getvar': '__decklab_gpt_capacity',
+            'sector_size': 512, 'partitions': [], 'package_tables': ['partition_nor.json'], 'sparse': False}]
+        self.assertEqual(self.runner.execution_binding(initial, profile, workspace).profile_data, profile)
+        live_data = json.loads(json.dumps(initial.profile_data))
+        live_data.pop('bootrom_identity')
+        live_data['ram_loader_protocol'] = 'decklab-nor-v1'
+        live = replace(initial, profile_data=live_data)
+        live_profile = json.loads(json.dumps(profile))
+        live_profile.pop('bootrom_identity'); live_profile.pop('prepare')
+        self.assertEqual(self.runner.execution_binding(live, live_profile, workspace).profile_data, live_profile)
+        for mutation in (lambda p: p['storages'][0].update(layout_target='mtd'),
+                         lambda p: p['storages'][0].update(package_tables=['different.json']),
+                         lambda p: p['identity'].update(product='different-board'),
+                         lambda p: p.update(ram_loader_protocol='stock'),
+                         lambda p: p.update(prepare=[{'kind': 'continue'}])):
+            changed = json.loads(json.dumps(live_profile)); mutation(changed)
+            with self.subTest(profile=changed), self.assertRaises(FlashRunnerError):
+                self.runner.execution_binding(live, changed, workspace)
+
     def test_nor_execution_profile_accepts_only_fixed_host_import_template(self):
         binding = self.automatic_binding()
         workspace = self.runner._directory(self.root / 'workspace' / 'cache') / 'plan-abcdefgh'
