@@ -54,6 +54,7 @@
         <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-info"/></svg>设备信息</button>
         <button id="b-probe-settings" type="button">探测设置</button>
         <button id="b-flash" type="button">刷机</button>
+        <button id="b-board-control" class="icon-button" type="button" hidden title="板卡控制" aria-label="板卡控制"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg></button>
         <button id="b-device-share" type="button" hidden title="分享链接直接打开当前设备；网页访问授权覆盖整个平台"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>分享设备</button>
         <button id="b-agent-share" type="button" disabled title="分享当前设备或全部设备给 Claude Code、Codex 等 Agent"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>分享给 Agent</button>
         <select id="language-select-detail" aria-label="Language / 语言" title="Language / 语言" data-language-select data-i18n-ignore><option value="zh-CN">中文</option><option value="en">English</option></select>
@@ -156,6 +157,14 @@
 
   </div>
 </div>
+<dialog id="board-control-dialog" class="identity-association-dialog" aria-labelledby="board-control-title">
+  <div class="agent-share-head"><strong id="board-control-title">板卡控制</strong><button id="board-control-close" type="button">关闭</button></div>
+  <p id="board-control-target" data-i18n-ignore></p>
+  <label class="ft-field">操作<select id="board-control-action"></select></label>
+  <p>操作会改变板卡电源或启动状态。</p>
+  <p id="board-control-status" role="status"></p>
+  <div class="ft-actions"><button id="board-control-cancel" type="button">取消</button><button id="board-control-submit" class="pri" type="button">确认执行</button></div>
+</dialog>
 <dialog id="identity-association-dialog" class="identity-association-dialog" aria-labelledby="ia-title" aria-describedby="ia-intro ia-warning">
   <div class="agent-share-head"><strong id="ia-title">关联已有设备档案</strong><button id="ia-close" type="button" aria-label="关闭">关闭</button></div>
   <p id="ia-intro">当前编号曾发生冲突。请核实此连接对应的开发板与已有档案属于同一块硬件。</p>
@@ -341,6 +350,7 @@ Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\seriald-mcp.exe'</code></pre>
 <script src="/static/archives.js"></script>
 <script src="/static/devices.js"></script>
 <script src="/static/tasks.js"></script>
+<script src="/static/board-control.js"></script>
 <script src="/static/file-transfer.js"></script>
 <script src="/static/flashing.js"></script>
 <script src="/static/boot-compare.js"></script>

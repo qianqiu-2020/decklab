@@ -5,6 +5,9 @@
 不需要手动配置 `SERIALD_MCP_PYTHON`。核心服务仍使用系统 Python 3.10+，系统依赖由 apt 处理。
 其他上位机架构可使用源码运行方式，目前不提供对应的预编译 deb。
 
+新安装默认单机，在本机提供主要功能。多机模式由 Linux/Windows 上位机连接专用 Linux 控制机，
+串口、USB 刷机、复位适配与板卡数据集中在控制机；配置见 [部署模式](DISTRIBUTED.md)。
+
 统一终端解析需要发行版 `nodejs`（Node 12+）；`apt install ./dist/…deb` 会一并安装。
 如果用 `dpkg -i` 安装且提示缺少依赖，执行一次 `sudo apt -f install`。
 Windows 安装器已内置该运行时，使用者无需额外安装。
@@ -43,7 +46,7 @@ GitHub 正式包不包含 goflash 执行器、USB 驱动及 RAM 加载材料。
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.8.0_amd64.deb
+sudo apt install ./dists/seriald_1.9.0_amd64.deb
 ```
 
 arm64 构建将上述 `amd64` 改为 `arm64`，在对应原生构建机执行。

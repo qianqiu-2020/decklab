@@ -12,8 +12,9 @@ import time
 from .profiles import _unique_object
 from .tasks import TaskError, TaskCancelled
 from .transactions import transactions_for, TransactionError
+from .board_control import CONTROL_ACTIONS, ControlAction, control_actions
 
-ACTIONS = ('power-on', 'power-off', 'reset', 'flash')
+ACTIONS = CONTROL_ACTIONS + ('flash',)
 
 
 def host_adapter():
@@ -110,6 +111,7 @@ class HardwareCommand:
     timeout: int = 60
     allow_agent: bool = False
     exclusive_serial: bool = False
+    provider = 'command'
 
     def __post_init__(self):
         if (not isinstance(self.argv, tuple) or not 1 <= len(self.argv) <= 64
@@ -134,20 +136,38 @@ class HardwareCommand:
                     raise TaskError('configured helper requires a current serial attachment', 409)
         return [arg.format(serial=device.serial, device=device.dev, port=device.by_path) for arg in self.argv]
 
+    def bind(self, device):
+        return BoundCommand(self, self.expand(device))
+
+
+@dataclass(frozen=True)
+class BoundCommand:
+    command: HardwareCommand
+    argv: list
+
+    def run(self, check, cleanup_failed=None):
+        return run_command(self.argv, self.command.timeout, check, cleanup_failed)
+
 
 class HardwareBook:
     def __init__(self, document=None):
         document = {} if document is None else document
         if not isinstance(document, dict) or set(document) - {'boards'} or not isinstance(document.get('boards', {}), dict):
             raise ValueError('hardware configuration requires a boards object')
-        self.boards = {}
+        self.boards: dict[str, dict[str, ControlAction]] = {}
         for serial, actions in document.get('boards', {}).items():
             if not isinstance(serial, str) or not serial or len(serial.encode()) > 100:
                 raise ValueError('invalid hardware board serial')
-            if not isinstance(actions, dict) or set(actions) - set(ACTIONS):
+            if not isinstance(actions, dict) or set(actions) - (set(ACTIONS) | {'control'}):
                 raise ValueError('invalid hardware action')
             self.boards[serial] = {}
+            if 'control' in actions:
+                self.boards[serial].update(control_actions(actions['control']))
             for action, values in actions.items():
+                if action == 'control':
+                    continue
+                if action in self.boards[serial]:
+                    raise ValueError('duplicate board control action')
                 if (not isinstance(values, dict) or set(values) - {'argv', 'timeout', 'allow_agent', 'exclusive_serial'}
                         or not isinstance(values.get('argv'), list)):
                     raise ValueError('invalid hardware command configuration')
@@ -179,7 +199,9 @@ class HardwareBook:
     def available(self, serial, actor):
         return {'actions': [action for action, command in self.boards.get(serial, {}).items()
                             if actor == 'web' or command.allow_agent],
-                'supported': os.name in ('posix', 'nt'), 'adapter': host_adapter()}
+                'supported': os.name in ('posix', 'nt'), 'adapter': host_adapter(),
+                'providers': {action: command.provider for action, command in self.boards.get(serial, {}).items()
+                              if actor == 'web' or command.allow_agent}}
 
 
 def run_command(argv, timeout, check, cleanup_failed=None):
@@ -213,7 +235,7 @@ class HardwareOperation:
         self.serial, self.connection, self.stop = device.serial or '', device.connection_id, device.stop
         self.was_stopped = self.stop.is_set()
         self.command = manager.hardware.command(self.serial, action, actor)
-        self.argv = self.command.expand(device)
+        self.bound = self.command.bind(device)
 
     def run(self, context):
         device = self.device
@@ -241,8 +263,8 @@ class HardwareOperation:
                 handoff = (self.manager.exclusive_serial(device, check)
                            if self.command.exclusive_serial else nullcontext())
                 with handoff as permit:
-                    result = run_command(self.argv, self.command.timeout, check,
-                                         (lambda: permit.update(resume=False)) if permit is not None else None)
+                    result = self.bound.run(check,
+                        (lambda: permit.update(resume=False)) if permit is not None else None)
                 check()
                 self.manager.store.event(self.serial, self.actor, 'hardware-complete', self.action)
                 context.progress(1, 1, self.action)

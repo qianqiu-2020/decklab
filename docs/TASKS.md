@@ -276,7 +276,7 @@ final state and `file-fetch` to retrieve completed downloads later.
 
 ## Configured hardware tasks
 
-`hardware-power-on`, `hardware-power-off`, `hardware-reset` and `hardware-flash`
+`hardware-power-on`, `hardware-power-off`, `hardware-reset`, `hardware-enter-download` and `hardware-flash`
 use the same persistent task API, actor scope, ownership and cancellation rules.
 `GET /api/hardware?key=…` discovers permitted actions without running a tool.
 Configuration fixes argv and optional exclusive UART handoff; clients cannot

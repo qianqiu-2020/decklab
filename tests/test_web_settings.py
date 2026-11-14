@@ -57,6 +57,17 @@ class SettingsTests(unittest.TestCase):
         self.save({'version': 1, 'documents': {'profiles': {}}})
         self.assertEqual(self.settings.effective()['documents']['profiles'], {})
 
+    def test_control_provider_preview_and_save_never_read_credentials_or_send_requests(self):
+        document = {'version': 1, 'documents': {'hardware': {'boards': {'SN': {'control': {
+            'provider': 'bmc', 'url': 'https://bmc.example', 'board': 'sub23-1',
+            'module_index': 47, 'usb_port': '1-8.3',
+            'credentials_file': str(self.path.parent / 'missing-credentials.json'), 'actions': ['reset']}}}}}}
+        with mock.patch('seriald_core.board_control._credentials', side_effect=AssertionError('must not execute')), \
+                mock.patch('seriald_core.board_control.build_opener', side_effect=AssertionError('must not connect')):
+            self.save(document, preview=True)
+            self.save(document)
+        self.assertEqual(self.settings.effective()['documents']['hardware'], document['documents']['hardware'])
+
     def test_invalid_input_and_preview_leave_original_file_unchanged(self):
         self.save(self.patch(PORT='9000'))
         before = self.path.read_bytes()

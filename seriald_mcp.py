@@ -117,11 +117,15 @@ class Adapter:
             return execute(client, command, timeout)
 
     def start_task(self, device, kind, connection_id='', token=None):
-        if kind not in ('identify', 'ssh-connect', 'ssh-enable'):
-            raise ClientError('Supported task kinds: identify, ssh-connect, ssh-enable')
+        if kind not in ('identify', 'ssh-connect', 'ssh-enable', 'hardware-reset',
+                        'hardware-power-on', 'hardware-power-off', 'hardware-enter-download'):
+            raise ClientError('Unsupported task kind; hardware control must be explicitly enabled by the administrator')
         client = self.client(token, device, connection_id, writing=True)
         with self.writing(client):
             return client.post('/api/task-start', kind=kind, connection_id=client.connection_id)
+
+    def hardware(self, device, token=None):
+        return self.client(token, device).get('/api/hardware')
 
     def tasks(self, device, offset=0, limit=20, token=None):
         bounded(offset, 0, 2 ** 31 - 1, 'offset')
@@ -232,10 +236,16 @@ def create_server(settings, adapter=None):
                     connection_id=connection_id)
 
     @server.tool(annotations=write, structured_output=True)
-    def start_task(device: str, kind: Literal['identify', 'ssh-connect', 'ssh-enable'], ctx: Context,
+    def start_task(device: str, kind: Literal['identify', 'ssh-connect', 'ssh-enable', 'hardware-reset',
+                   'hardware-power-on', 'hardware-power-off', 'hardware-enter-download'], ctx: Context,
                    connection_id: str = '') -> dict[str, Any]:
-        """Start a durable device task. identify probes; ssh-enable may change the board's SSH configuration."""
+        """Start a durable device task. Hardware actions change power/boot state and require admin allow_agent. Never replay an uncertain submission; inspect list_tasks/get_task first."""
         return call(ctx, adapter.start_task, device=device, kind=kind, connection_id=connection_id)
+
+    @server.tool(annotations=read_only, structured_output=True)
+    def hardware_actions(device: str, ctx: Context) -> dict[str, Any]:
+        """List configured hardware control actions allowed for this grant; never resets, probes or opens UART."""
+        return call(ctx, adapter.hardware, device=device)
 
     @server.tool(annotations=read_only, structured_output=True)
     def list_tasks(device: str, ctx: Context, offset: int = 0, limit: int = 20) -> dict[str, Any]:

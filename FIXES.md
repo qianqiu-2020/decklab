@@ -49,10 +49,17 @@ Single-file previews accept a null executor package catalogue as empty, while
 required readback checks must use the proven RAM NOR reader capability.
 Current workflow and validation limits: [NOR workspace](docs/FLASH_WORKSPACE.md).
 
-Web/backend split deployments use one authenticated HTTPS hardware owner on
-Windows or Ubuntu. All serial readers, durable hardware tasks, image downloads
+Single-host deployments support Linux and Windows. Split deployments use a
+Windows/Linux Web host and one authenticated HTTPS Linux hardware owner.
+All serial readers, durable hardware tasks, image downloads
 and cache stay on that backend. A Web restart must not restart the backend or
 replay task submissions. Each node keeps private storage; do not share SQLite.
+
+Board control providers share HardwareOperation authorization, task persistence
+and console leases. Fixed commands remain compatible; BMC control pins the
+configured board/module/USB mapping before one HTTP mutation. Lost receipts
+remain unknown and are never retried. The control provider does not own UART,
+loaders or flash writes. See the hardware extension guide for configuration.
 
 Current behavior and module ownership: [architecture](docs/ARCHITECTURE.md).
 Release changes: [CHANGELOG.md](CHANGELOG.md).

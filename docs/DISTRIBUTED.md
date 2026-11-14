@@ -1,10 +1,23 @@
-# Web 与硬件后端分开部署
+# 单机与多机部署
 
-当前支持一个 Web 节点连接一个硬件后端。Web/API/MCP 留在 Web 节点；串口采集、SSH 会话、USB 刷机、复位执行器、设备档案、日志、任务和镜像缓存都由同一个后端节点持有。两个节点分别可运行 Windows 或 Ubuntu，也可跨系统组合。只重启 Web 不会重建后端连接或重新执行任务。
+项目主要支持两种使用模式：
+
+| 模式 | 上位机 | 板卡操作与数据归属 |
+|---|---|---|
+| 单机 | Linux 或 Windows，同机运行页面与硬件服务 | 本机提供串口、SSH、设备档案、日志、任务、MCP 和刷机等主要功能 |
+| 多机 | Linux 或 Windows，运行 Web/API/MCP，通过网络连接控制机 | 一台专用 Linux 控制机集中持有串口、SSH、USB 刷机、复位适配器、档案、日志、任务和镜像缓存 |
+
+新安装默认单机，升级保留已有部署角色。Windows 的硬件验收重点是单机串口与刷机；
+自动复位在 Linux 控制机侧按板型和适配器验证。单机未配置复位控制时，由用户手动进入下载模式。
+后续板卡控制能力优先在 Linux 控制机侧完善，上位机负责交互与访问。
+
+当前多机实现为一个 Web 节点连接一个硬件后端。只重启 Web 不会重建后端连接或重新执行任务。
 
 节点间使用 HTTPS 与独立 Bearer 密钥，校验服务器证书和主机名；不自动降级 HTTP、跳转或重试写操作。网页主密码和 Agent 令牌由 Web 校验，不作为节点间凭证。后端只应接受 Web 所在网络的访问。当前不支持一个 Web 聚合多个后端，也不支持把串口、USB 和复位拆成三个硬件节点。
 
-## 配置两台主机
+## 配置多机模式
+
+以下后端部署在专用 Linux 控制机，上位机可选择 Linux 或 Windows。
 
 先为后端准备包含实际主机名或 IP 的 TLS 证书和私钥。可使用组织 CA 签发的 PEM 证书；Web 配置其 CA 文件。自签名证书也须包含后端地址的 subjectAltName，Web 显式信任该证书。仓库的 `tests/fixtures/backend-tls` 是公开测试证书与私钥，不能用于部署。
 
@@ -68,16 +81,21 @@ python3 -m seriald_core.backend_server
 python3 -m seriald_core.control_server --require-backend --no-browser
 ```
 
-### Windows 安装包 / 便携包
+### Windows 上位机
 
-分别使用 `Start-seriald-Backend.cmd` 和 `Start-seriald-Web.cmd`，或在各自 PowerShell 窗口设置 `$env:SERIALD_变量名='值'` 后运行：
+在 PowerShell 中设置上述 Web 环境变量，再使用 `Start-seriald-Web.cmd`，或运行：
 
 ```powershell
-.\seriald.exe backend
 .\seriald.exe web --no-browser
 ```
 
-证书、CA、数据目录等路径使用该 Windows 主机的绝对路径，例如 `C:\DeckLab\backend-cert.pem`。Web 角色不加载 COM 采集器；后端采用现有 WindowsManager 和相同的 HTTPS API。后端需要实际串口/USB 驱动和适配 Windows 的刷机执行器；构建时可通过 `tools/build_windows.ps1 -FlashExecutor ... -FlashNotices ... -FlashLoaders ...` 打包。两端均不需要安装 MCP SDK，AI 客户端连接 Web 提供的 MCP 地址。
+CA、数据目录等路径使用该 Windows 主机的绝对路径，例如 `C:\DeckLab\backend-ca.pem`。
+Web 角色不加载本机 COM 采集器或刷机执行器，板卡驱动、执行器与 RAM 加载器安装在 Linux 控制机。
+两端均不需要另装 MCP SDK，AI 客户端连接 Web 提供的 MCP 地址。
+
+Windows 单机使用普通 `Start-seriald.cmd` 或局域网启动入口，本机安装串口/USB 驱动及独立刷机组件。
+现有 `Start-seriald-Backend.cmd` / `seriald.exe backend` 入口保留为兼容与调试能力；
+多机产品部署与验收按 Linux 控制机执行，不要求 Windows 硬件复位验收。
 
 ## 页面管理和恢复
 
@@ -94,5 +112,15 @@ Web `/healthz` 的 `backend_transport: https` 说明选择了远程链路；后�
 完整 NOR 固件包同样支持“指定分区”：包内表只作为载荷目录，勾选哪个分区就取出对应文件，不附带写入表或其他分区。准备完成后，在同一任务选择实际存储、分区和载荷，核对预览，再确认写入。GPT 设备读取现场分区表，不按文件名猜目标。K3 NOR 的专用 RAM 下载环境提供不写存储的标准分区映射，并回报偏移、容量；页面标明这是预备的标准 NOR 布局，需要与板卡固件布局一致。单分区不发送 `flash:mtd`，不写分区表或顺带清空 env；预览保守列出所选 NOR 分区内的擦除风险。完整 NOR 恢复仍是独立模式，会明确列出布局写入和 env 擦除。
 
 ## 验证边界
+
+| 验收组合 | 主要覆盖 | 复位验收归属 |
+|---|---|---|
+| Linux 单机 | 本机主要功能、真实串口与 USB 刷写/回读 | 配有控制适配器时验证 |
+| Windows 单机 | 安装升级、主要功能、原生串口与 USB 刷写/回读 | 不要求 Windows 硬件复位验收 |
+| Windows 上位机 + Linux 控制机 | 远程终端、任务、镜像、刷写/回读、授权、断线与恢复 | Linux 控制机按实际适配器验证 |
+| Linux 上位机 + Linux 控制机 | 同上，并验证 Web 重启与控制机任务独立 | Linux 控制机按实际适配器验证 |
+
+Windows 单机测试中经 Linux BMC 使板子进入下载模式或恢复上电，是外部测试条件与收尾操作，
+不计作 Windows 复位能力验收。Windows 通用执行器的进程管理软件回归继续保留。
 
 `python tools/test_split_nodes.py` 启动独立 Web/后端进程和真实 HTTPS 链路，后端显式使用模拟板卡，绝不发现或打开真实串口/USB。`--exe PATH` 对 Windows 包执行同一流程。单元回归还覆盖镜像上传、复位、SSE、授权撤销及 Web 重建后原刷机任务不重复执行。源码与模拟测试不能替代 Windows 原生打包、USB 驱动或实体板刷写验收。

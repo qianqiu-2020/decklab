@@ -1,0 +1,17 @@
+{
+  "boards": {
+    "YOUR-BOARD-SERIAL": {
+      "control": {
+        "provider": "bmc",
+        "url": "https://bmc.example.com",
+        "board": "YOUR-BMC-BOARD-NAME",
+        "module_index": 47,
+        "usb_port": "1-8.3",
+        "credentials_file": "/etc/seriald/bmc-credentials.json",
+        "actions": ["reset", "power-on", "power-off", "enter-download"],
+        "timeout": 30,
+        "allow_agent": false
+      }
+    }
+  }
+}

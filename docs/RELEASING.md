@@ -3,22 +3,22 @@
 ## 发布新版本
 
 版本号以 `seriald_core/version.py` 为准，标签必须是对应的 `v版本号`。
-例如发布 1.8.0：
+例如发布 1.9.0：
 
-1. 更新 `__version__` 为 `1.8.0`；将 CHANGELOG.md 的待发布内容整理为
-   `## 1.8.0`，保留新的 `## Unreleased`。同步安装示例中的版本号。
+1. 更新 `__version__` 为 `1.9.0`；将 CHANGELOG.md 的待发布内容整理为
+   `## 1.9.0`，保留新的 `## Unreleased`。同步安装示例中的版本号。
 2. 按 [贡献指南](../CONTRIBUTING.md) 运行检查并提交改动。确认 main 的
    Linux、原生 amd64/arm64 包验收和 Windows 流水线通过，再给该提交打标签。
 3. 推送标签至 GitHub。当前开发仓库的 GitHub remote 名为 `github`；
    从 GitHub 克隆的仓库通常是 `origin`，以 `git remote -v` 为准。
 
 ```sh
-python3 tools/check_release_tag.py v1.8.0
+python3 tools/check_release_tag.py v1.9.0
 python3 tools/release_notes.py /tmp/decklab-release-notes.md
 git push github main
 # 等待该提交的检查通过后执行：
-git tag -a v1.8.0 -m "DeckLab 1.8.0"
-git push github v1.8.0
+git tag -a v1.9.0 -m "DeckLab 1.9.0"
+git push github v1.9.0
 ```
 
 标签推送触发 `Tagged packages`：amd64 与 arm64 分别在原生 Ubuntu 22.04 runner
@@ -38,7 +38,7 @@ glibc 2.35 为基线，包含私有 Python、MCP SDK 与全部 Python 依赖；�
 
 ### 本次公开分发范围
 
-1.8.0 的 GitHub 正式附件只分发主程序、终端运行时和 MCP 依赖。
+1.9.0 的 GitHub 正式附件只分发主程序、终端运行时和 MCP 依赖。
 goflash、USB 驱动和 RAM 材料单独安装，公开流水线不传入这些内网构建材料。
 附件验收时同时确认未混入执行器或加载材料；需要刷机的使用者参考
 [组件安装](HARDWARE_EXTENSIONS.md#独立安装刷机组件)。
@@ -48,7 +48,7 @@ goflash、USB 驱动和 RAM 材料单独安装，公开流水线不传入这些�
 仅供本机安装测试时，可显式包含已经构建的同架构 `decklab-flash` 执行器：
 
 ```sh
-python3 tools/build_deb.py --version '1.8.0~local1' \
+python3 tools/build_deb.py --version '1.9.0~local1' \
   --runtime build/linux-mcp/amd64/runtime \
   --flash-executor /path/to/decklab-flash \
   --flash-notices /path/to/executor-license-notices \
@@ -91,7 +91,7 @@ Linux CI 对每个架构在 Ubuntu 22.04 和 24.04 容器中安装候选包并�
 发布前下载草稿的全部附件，对下载内容再次执行：
 
 ```sh
-python3 tools/verify_release.py /path/to/downloaded-draft --version 1.8.0
+python3 tools/verify_release.py /path/to/downloaded-draft --version 1.9.0
 ```
 
 确认两个架构版本化 deb、下载别名、Windows 安装包/ZIP、运行时和第三方清单均齐全，

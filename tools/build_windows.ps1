@@ -86,7 +86,7 @@ try {
                          'test_image_download.py', 'test_flash_loaders.py',
                          'test_transfer_artifacts.py', 'test_file_tasks.py',
                          'test_transfer_tasks.py', 'test_input_ownership.py',
-                         'test_models.py', 'test_maintenance.py', 'test_agent_grants.py',
+                         'test_models.py', 'test_maintenance.py', 'test_agent_grants.py', 'test_board_control.py',
                          'test_ui_language.py', 'test_boot_compare.py', 'test_sse.py',
                          'test_terminal_backend.py', 'test_terminal_runtime.py',
                          'test_console_visibility.py', 'test_serial_health.py')) {

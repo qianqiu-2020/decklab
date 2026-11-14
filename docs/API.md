@@ -106,7 +106,7 @@ begun: a truncated download or dropped SSE connection requires client recovery.
 | GET `/api/serial` | Serial-only cursor read, same byte semantics |
 | GET `/api/session-events` | Same session selection; SSE, resumed by `Last-Event-ID` or `off` |
 | GET `/api/operation` | Active console lease and optional input owner |
-| GET `/api/hardware` | Configured actions allowed for the caller; never executes tools |
+| GET `/api/hardware` | Configured actions and provider names allowed for the caller; never executes tools |
 | GET `/api/diagnostics` | Sanitized platform diagnostic summary; unavailable to single-board grants |
 
 Session packets contain `off`, `alive` and `data_b64`. Decode bytes incrementally
@@ -141,6 +141,13 @@ suppress automatic replies, including DSR, DA and terminal-mode queries.
 long-poll for up to 15 seconds while the stream is alive; there is no public
 `wait` parameter. `/api/operation` and `/api/hardware` require `key` and support
 expected `serial`, like session routes. `/api/commands` returns at most 20 entries.
+
+Board controls use existing `POST /api/task-start` kinds `hardware-reset`,
+`hardware-power-on`, `hardware-power-off` and `hardware-enter-download`.
+Only administrator-configured actions are accepted; clients cannot supply a BMC
+address, target mapping, credential, reset type or helper arguments. The BMC
+provider's outbound `/api/v1/login` belongs to the configured BMC service, not
+DeckLab's public API. See [control adapters](HARDWARE_EXTENSIONS.md#板卡控制适配).
 
 `/api/health` returns process responsiveness separately from logging and storage
 status: HTTP 200 and `ok=true` do not imply a healthy board or successful log

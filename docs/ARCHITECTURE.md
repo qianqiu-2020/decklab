@@ -1,6 +1,10 @@
 # 架构与数据模型
 
-支持本机双进程部署，也支持 Web 和硬件后端分别运行在 Windows 或 Ubuntu。分布式角色使用经过证书与节点密钥校验的 HTTPS；Web 不创建采集器、设备数据库或硬件任务队列，原任务、镜像、日志、SSH 与串口均留在唯一后端。详见 [分开部署](DISTRIBUTED.md)。
+主要支持两种模式：Linux/Windows 单机提供本机主要功能；多机由 Linux/Windows 上位机运行
+Web/API/MCP，一台专用 Linux 控制机集中负责串口、SSH、刷机、复位适配及板卡数据。
+后续板卡操作优先在 Linux 控制机侧扩展，Windows 硬件验收聚焦单机串口与刷机。
+分布式角色使用经过证书与节点密钥校验的 HTTPS；Web 不创建采集器、设备数据库或硬件任务队列，
+原任务、镜像、日志、SSH 与串口均留在唯一后端。详见 [部署模式](DISTRIBUTED.md)。
 
 ## Web 系统配置
 
@@ -67,9 +71,10 @@ collector 干净重启时写入一次性短期 handoff；仅在同一 host boot�
 API 视图以查看归档。点击准备换板会分离原 Board、关闭其会话并给待识别连接
 分配独立注册表。SSH 建立请求的预留名额始终归原注册表，即使请求结束时已换板。
 
-生产环境由两个进程组成。`seriald-collector` 长期持有串口、SSH 会话、数据库和内部 API；
+Linux 单机环境由两个进程组成。`seriald-collector` 长期持有串口、SSH 会话、数据库和内部 API；
 `seriald-control` 提供 TCP HTTP、静态页面和 Unix socket 反向代理。重启 control 不关闭 tty fd。
-collector 只监听 `SERIALD_SOCKET`，不暴露网络端口。
+collector 只监听 `SERIALD_SOCKET`，不暴露网络端口。Windows 单机由本机 host 入口持有 COM 采集与会话。
+多机模式将控制面与硬件后端分到两台主机，硬件后端部署在 Linux 控制机。
 
 HTTP API 模块导入时不创建 Manager。Linux collector、Windows host 和 demo
 入口各创建一次管理器，注入对应 HTTP server；请求从 server 取得管理器，再注入应用服务。

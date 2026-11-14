@@ -90,6 +90,10 @@
   var flashing = window.SerialdFlashing && window.SerialdFlashing.create({
     byId: $, fetch: fetch, formatBytes: fmt
   });
+  var boardControl = window.SerialdBoardControl && window.SerialdBoardControl.create({
+    byId: $, fetch: fetch, getView: function () { return terminalView.current; },
+    onTask: function () { taskUI.refresh(); }
+  });
   window.SerialdShareSelection = function () {
     return deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0] || null;
   };
@@ -935,6 +939,7 @@
       });
   });
   function renderInfo(info) {
+    if (boardControl) boardControl.refresh(terminalView.current);
     var box = $('d-info');
     if (!info || (!info.serial && !info.hostname && !(info.ips || []).length && !info.raw)) {
       box.hidden = true; $('b-info').disabled = true; return;
@@ -1081,6 +1086,7 @@
   }
   $('d-term').addEventListener('click', function () { if (terminalView.current) terminalView.current.term.focus(); });
   $('b-close').addEventListener('click', function () {
+    if (boardControl) boardControl.close();
     closeIdentityAssociation(); closeSshCredentials();
     disposeView(); deviceDirectory.selectionChanged(null); $('detail').hidden = true;
     $('workspace').classList.toggle('selected', false);

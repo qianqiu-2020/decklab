@@ -231,7 +231,8 @@ Debian 包的依赖或内置程序损坏时，先确认没有遗留的 Python �
 | `read_terminal` | 读取串口或指定 SSH 会话；返回字节游标及丢失/截断信息 |
 | `send_input` | 向当前终端发送原始文本或控制字符，可选追加回车；不要求特定操作系统 |
 | `execute_command` | 使用现有 SSH 配置执行 POSIX shell 命令，返回退出码及完成状态 |
-| `start_task` | 提交识别、建立 SSH、启用 SSH 后台任务 |
+| `start_task` | 提交识别、建立 SSH、启用 SSH，以及管理员明确允许的复位／上下电／进入下载模式任务 |
+| `hardware_actions` | 只读查询当前授权可用的板卡控制动作及适配类型 |
 | `list_tasks` / `get_task` / `cancel_task` | 查询、跟踪或请求取消后台任务 |
 | `list_logs` / `read_boot` / `search_boots` | 按稳定启动 ID 分页读取或搜索归档 |
 | `get_activity` | 查询会话与操作记录 |

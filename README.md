@@ -56,7 +56,7 @@ first (Docker and build-time downloads are required by the default builder):
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.8.0_amd64.deb
+sudo apt install ./dists/seriald_1.9.0_amd64.deb
 ```
 
 For an arm64 host, build on the matching native runner with `--arch arm64` and
@@ -113,6 +113,11 @@ simulated transports are separate from physical-board validation. Firmware-only
 targets can use manual mode without Linux shell probes; unconfirmed identities
 remain provisional.
 
+Two deployment modes are supported: a Linux/Windows single-machine workbench,
+or a Linux/Windows Web host connected to a dedicated Linux hardware controller.
+The controller owns board operations and data. Windows hardware acceptance focuses
+on local serial and flashing; reset integration is validated on the Linux controller.
+
 The service is intended for local or trusted-LAN development. Authentication is
 optional. Explicit SSH setup and manual root configuration can modify a
 development board, and SSH host keys can change after flashing. See
@@ -129,4 +134,4 @@ devices.
 Application code and original branding: [Apache-2.0](LICENSE).
 Bundled and build dependencies retain their licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
 
-[Web 与硬件后端分开部署](docs/DISTRIBUTED.md)：Windows / Ubuntu 双角色、HTTPS 节点链路、后端镜像缓存与预备刷机环境。
+[部署模式](docs/DISTRIBUTED.md)：Linux/Windows 单机，或 Linux/Windows 上位机与专用 Linux 控制机。

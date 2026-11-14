@@ -1,10 +1,14 @@
 # Configured hardware actions
 
-当前包含固定外部命令适配，以及[本机刷机流程](#本机刷机流程)：开发板已手动进入下载模式后，
+当前包含可替换的板卡控制适配（BMC HTTP、固定外部命令），以及[本机刷机流程](#本机刷机流程)：开发板进入下载模式后，
 可在网页自动检测 USB 下载设备、上传镜像、预览完整镜像或指定分区的写入范围，
 并提交持久刷机任务；实际可写范围由已核实的设备能力决定。
-复位控制、串口采集和刷写执行保持独立；自动复位与远程／混合节点仍属于
-[架构设计](#刷机功能架构设计)的后续工作。软件回归不代表真实板型已完成刷机验证。
+复位控制、串口采集和刷写执行保持独立。当前产品按 Linux/Windows 单机，或
+Linux/Windows 上位机加专用 Linux 控制机两种模式部署；多机的板卡操作集中在 Linux 控制机。
+复位和进入下载模式可单独提交任务；刷机仍由用户确认后开始，不自动串联复位步骤。
+跨模式自动编排与进一步拆分硬件节点属于[架构设计](#刷机功能架构设计)的后续工作。
+Windows 单机硬件验收聚焦串口与刷机；复位在 Linux 控制机侧按适配器验收。
+软件回归不代表真实板型已完成刷机验证。
 
 Hardware actions are disabled by default. A host administrator can configure
 power-on, power-off, reset and an external flashing tool for specific board
@@ -74,6 +78,53 @@ a partially written image. Service restart interrupts tasks without replay.
 Validate with simulation first. The regression suite launches only local Python
 fixtures in temporary directories; it does not invoke relays, real flashers,
 serial readers or recovery helpers.
+
+## 板卡控制适配
+
+`HardwareOperation` 统一持有授权、板卡身份检查、事务占用、取消和持久任务；
+控制适配只负责固定目标上的操作，不打开串口，也不执行刷写。
+`seriald_core/board_control.py` 的适配契约是 `bind(device)` 返回
+`run(check, cleanup_failed)` 执行对象。现有 `command` 适配保留进程组／Job Object
+清理规则，新增 `bmc` 适配调用当前 SpacemiT BMC HTTP API。
+以后增加继电器、GPIO 或其他控制服务，只增加适配及配置校验，客户端仍使用相同任务。
+不支持从网页导入任意 Python 插件。
+
+在 Linux 控制机的 `hardware` 配置中添加 `control`，参见
+[`examples/hardware-bmc.json`](../examples/hardware-bmc.json)。也可通过网页“设置 → 硬件动作”
+导入相同 JSON，保存后显式应用配置。不要在配置中填写明文密码；
+`credentials_file` 指向**控制机**上服务账户可读的私有 JSON：
+
+```json
+{"username": "BMC-ACCOUNT", "password": "BMC-PASSWORD"}
+```
+
+Linux 文件权限应为 `0600`；配置外部 CA 时可添加绝对路径 `ca_file`，默认正常验证 HTTPS
+证书。`url` 是 BMC 根地址，不含账号、查询参数或 API 路径；内网 BMC 也可显式配置 HTTP。
+`board` 是 BMC 板名，`module_index` 和 `usb_port` 是该板固定模组及 USB 物理路径。
+每次执行前读取映射并逐项核对，变化时拒绝发送控制请求。登录按 `/api/v1/login`
+取得短期令牌，随后查询板卡映射和调用对应控制接口；不转发浏览器凭据，不使用环境代理，
+不跟随重定向，不自动重试，也不把上游错误正文写入日志或任务。
+
+`actions` 显式启用 `reset`、`power-on`、`power-off`、`enter-download` 中需要的操作；
+默认不允许 Agent，管理员设置 `allow_agent: true` 后仍受设备授权和输入占用限制。
+同板可以为不同动作混用 BMC 和旧命令，同一动作重复配置会被拒绝。
+检测设备、预览／保存配置和查询能力均不连接 BMC 或改变板卡状态。
+
+网页只在当前板配置了控制动作时显示“板卡控制”；选择操作并确认后提交后台任务。
+关闭面板、换板或刷新不重发操作，结果在“任务”中保留。CLI 和 MCP 使用同一入口：
+
+```sh
+# 在上位机执行；多机模式的服务地址指向 Web 节点
+serialctl --device YOUR-BOARD-SERIAL hardware
+serialctl --device YOUR-BOARD-SERIAL task-start hardware-enter-download
+serialctl --device YOUR-BOARD-SERIAL task-start hardware-reset
+```
+
+BMC 成功回执记为 `control_result=acknowledged`，表示控制请求获得确认；
+是否启动成功需另看新串口输出。请求发出后超时、取消或回执异常时，结果保持未知；
+先查询原任务和板卡状态，再决定是否发起新操作。不会以自动重试、复位或断电收尾。
+Windows 硬件验收继续只覆盖串口和刷机，BMC 复位在 Linux 控制机验收。
+实际结果与启动限制见[控制适配验收](audits/2026-11-14-control-adapters-sub23-1.md)。
 
 ## Linux process ownership
 
@@ -259,10 +310,15 @@ BootROM 能响应不表示已经通过存储布局检查，也不能用串口档
 清理载荷后仍保留计划摘要及任务回执。
 
 软件测试使用模拟执行器、假 USB 传输、临时文件和隔离浏览器夹具。真实板型、存储介质、
-512／4096 扇区、USB 模式变化，以及 Linux／Windows 节点仍须分别留下实测记录；本次未刷写真实板，
-也不表示代码已经发布或部署。后续完整拓扑的要求保留在下方设计中。
+512／4096 扇区、USB 模式变化，以及 Linux／Windows 单机仍须分别留下实测记录；
+现有 NOR 实测范围见 [Linux 云板验收](audits/2026-11-14-nor-workspace-sub23-1.md)和
+[Windows 单机验收](audits/2026-11-14-windows-vm-sub23-1.md)。下方保留进一步拆分硬件节点的扩展设计。
 
 ## 刷机功能架构设计
+
+当前产品与验收以[单机和多机两种部署模式](DISTRIBUTED.md)为准，多机的硬件后端集中在 Linux 控制机。
+下文的混合接线、多个硬件节点是保留的扩展方案，不是当前发布的必需交付项；
+Windows 硬件复位不列入验收范围。
 
 目标是在 DeckLab 板卡界面提供完整镜像与指定分区刷写。DeckLab 负责板级任务、接线绑定和
 操作协调；goflash 负责在刷机数据线所在主机执行传输。复位控制、串口采集、刷机执行分别配置，
@@ -542,7 +598,7 @@ USB 速度切换可能改变端口路径，使用经过配置／验证的转换�
 | 镜像与写入计划 | goflash 增加解析／检查／计划执行；DeckLab 扩展受管制品元数据 |
 | 界面与客户端 | 新 `static/flashing.js`，复用 `tasks.js`、`devices.js`，同步中英文文案和命令行入口 |
 
-### 实施顺序与完成标准
+### 保留扩展的实施与验证建议
 
 | 阶段 | 交付 | 完成标准 |
 | --- | --- | --- |
@@ -551,7 +607,8 @@ USB 速度切换可能改变端口路径，使用经过配置／验证的转换�
 | 远程与混合接线 | 控制／串口／刷写节点适配、执行回执、制品缓存 | 覆盖上方本机、远程和三处分离拓扑；断网查询同一次操作，不重复复位／刷写 |
 | 产品收口 | Linux／Windows 打包、能力说明、恢复操作与硬件矩阵 | 软件测试与准确板型实测分别记录，未验证的存储、板型或原始镜像格式不宣称支持 |
 
-验收至少覆盖以下场景，自动测试使用假控制器、假 USB 传输、临时文件和模拟节点，不能操作在用板：
+实施相应扩展时，按以下场景补充验收；当前两种部署模式的验收矩阵见 [部署说明](DISTRIBUTED.md#验证边界)。
+自动测试使用假控制器、假 USB 传输、临时文件和模拟节点，不能操作在用板：
 
 - 同机、远程控制而本机刷写、远程串口、全远程、三节点分离，以及无自动复位的人工模式。
 - 串口离线且系统损坏仍可进入恢复；观察缺失不冒充启动通过；正常刷机不创建第二串口读者。
@@ -582,4 +639,4 @@ USB 速度切换可能改变端口路径，使用经过配置／验证的转换�
 
 ## Web 与硬件节点分开部署
 
-现已实现 Web 节点通过认证 HTTPS 连接一个 Windows / Ubuntu 硬件后端；串口、USB 刷机和复位仍在同一后端，`node: local` 均指该后端。参见 [部署说明](DISTRIBUTED.md)。把这三种硬件能力进一步拆成独立节点、或聚合多个后端，仍属于后续扩展。单文件刷分区使用预备 RAM 下载环境，URL 镜像由后端后台下载，不增加新的串口读者或任务队列。
+多机模式由 Linux/Windows 上位机通过认证 HTTPS 连接一个专用 Linux 控制机；串口、USB 刷机、复位适配及板卡数据由该控制机集中持有，`node: local` 均指该控制机。参见 [部署说明](DISTRIBUTED.md)。把硬件能力进一步拆成独立节点、或聚合多个后端，属于保留的扩展设计，不是当前两种模式的交付与验收要求。单文件刷分区使用预备 RAM 下载环境，URL 镜像由控制机后台下载，不增加新的串口读者或任务队列。

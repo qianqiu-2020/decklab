@@ -1,4 +1,5 @@
 require('./serial-progress.test.js');
+require('./board-control.test.js');
 require('./flashing.test.js');
 require('./device-order.test.js');
 'use strict';

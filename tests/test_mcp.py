@@ -150,6 +150,15 @@ class AdapterTests(APICase):
             self.adapter.devices()
         self.assertEqual(caught.exception.status, 401)
 
+    def test_hardware_discovery_and_typed_control_tasks_use_authenticated_api(self):
+        self.adapter.hardware('board-B', token=TOKEN_B)
+        self.assertEqual(self.api.calls[-1][1], '/api/hardware')
+        for kind in ('hardware-reset', 'hardware-power-on', 'hardware-power-off', 'hardware-enter-download'):
+            self.assertEqual(self.adapter.start_task('board-B', kind, token=TOKEN_B)['task']['kind'], kind)
+            self.assertEqual(self.api.calls[-1][0], TOKEN_B)
+        with self.assertRaises(ClientError):
+            self.adapter.start_task('board-B', 'hardware-flash', token=TOKEN_B)
+
     def test_bounds_and_no_serial_close(self):
         for kwargs in ({'offset': -1}, {'offset': True}, {'limit': 65537}):
             with self.assertRaises(ClientError):
@@ -184,7 +193,9 @@ class MCPTransportTests(APICase):
                 tools = await client.list_tools()
                 names = {tool.name for tool in tools.tools}
                 self.assertTrue({'list_devices', 'read_terminal', 'send_input', 'execute_command', 'start_task',
-                                 'get_task', 'cancel_task', 'read_boot'}.issubset(names))
+                                 'get_task', 'cancel_task', 'read_boot', 'hardware_actions'}.issubset(names))
+                capabilities = await client.call_tool('hardware_actions', {'device': 'raw-A'})
+                self.assertTrue(capabilities.structured_content['ok'])
                 raw = await client.call_tool('list_devices', {})
                 self.assertEqual(raw.structured_content['devices'][0]['key'], 'raw-A')
                 read = await client.call_tool('read_terminal', {'device': 'raw-A'})

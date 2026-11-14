@@ -200,6 +200,26 @@ class HardwareTaskTests(unittest.TestCase):
         task = self.finish(response)
         self.assertEqual(task['state'], 'completed', task)
 
+    def test_bmc_provider_uses_existing_durable_task_and_offline_board_lease(self):
+        from test_board_control import bmc_fixture
+        offline = self.manager.resolve('demo-offline')
+        offline.stop.set()
+        credentials = self.root / 'bmc.json'
+        credentials.write_text(json.dumps({'username': 'tester', 'password': 'private-password'}))
+        credentials.chmod(0o600)
+        with bmc_fixture() as (origin, state):
+            self.manager.hardware = HardwareBook({'boards': {offline.serial: {'control': {
+                'provider': 'bmc', 'url': origin, 'board': 'sub23-1', 'module_index': 47,
+                'usb_port': '1-8.3', 'credentials_file': str(credentials), 'actions': ['reset']}}}})
+            with mock.patch.object(self.manager, 'exclusive_serial', side_effect=AssertionError('no reader handoff')):
+                task = self.finish(self.actions.start({'kind': 'hardware-reset',
+                    'connection_id': offline.connection_id}, offline, 'web'))
+            self.assertEqual(task['state'], 'completed', task)
+            self.assertEqual(task['result']['control_result'], 'acknowledged')
+            self.assertEqual(len(state['requests']), 3)
+            self.assertNotIn('private', json.dumps(task))
+            self.assertIsNone(offline.transactions.snapshot())
+
     def test_unknown_target_and_missing_attachment_are_rejected(self):
         self.configure('pass')
         self.device.dev = ''

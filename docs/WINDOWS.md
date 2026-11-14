@@ -19,7 +19,7 @@ GitHub 正式安装包不包含 goflash、USB 驱动及 RAM 加载材料。
 没有安装默认值时跟随浏览器语言。切换不会重建终端或放弃输入占用。
 桌面快捷方式默认仅本机访问、无密码；开始菜单另有局域网无密码和有密码入口。
 
-首次运行 `seriald-1.8.0-windows-x64-setup.exe`，选择一个可写的安装目录。默认在安装包所在位置创建可见的 `seriald-installed/`；若安装包位于源码的 `dist/`，默认改用源码目录下的 `seriald-installed/`，与构建目录分开。首次从解压版迁移时，**选择原安装目录**，无需搬运数据。
+首次运行 `seriald-1.9.0-windows-x64-setup.exe`，选择一个可写的安装目录。默认在安装包所在位置创建可见的 `seriald-installed/`；若安装包位于源码的 `dist/`，默认改用源码目录下的 `seriald-installed/`，与构建目录分开。首次从解压版迁移时，**选择原安装目录**，无需搬运数据。
 
 后续双击新版本 Setup，安装器记住上次目录并覆盖程序文件，保留 `data/` 中的日志、设备档案和认证配置。升级前关闭 seriald 窗口以释放 COM 口；安装器也会检测占用的文件并提示关闭程序。安装完成从开始菜单或安装目录重新启动，三种模式任选其一。卸载仅移除安装的程序与快捷方式，保留运行数据。
 
@@ -130,6 +130,9 @@ py serialctl.py devices
 
 ## 可选硬件命令
 
+Windows 单机的硬件验收以串口和 USB 刷机为重点，不要求硬件复位验收。
+多机模式中的复位与其他板卡操作由 Linux 控制机执行；以下 Windows 通用命令适配保留为可选能力。
+
 Windows 10+ 可用 `SERIALD_HARDWARE` 配置按板子序列号绑定的电源、复位及外部刷机 EXE。
 默认关闭，不自动提权。使用绝对 Windows 路径；具体配置、agent 权限及串口占用限制见
 [硬件扩展](HARDWARE_EXTENSIONS.md)。命令创建时绑定 Job Object，超时、取消及
@@ -148,4 +151,6 @@ Native-library and frozen-output attribution still require release review.
 
 ## Separate Web and hardware roles
 
-See [distributed deployment](DISTRIBUTED.md) for Windows/Ubuntu role launchers, TLS certificates, node credentials and data ownership. The default local role remains available.
+Use Windows as the Web/API/MCP host and a dedicated Linux machine as the hardware backend.
+See [deployment modes](DISTRIBUTED.md) for role launchers, TLS certificates, node credentials and data ownership.
+The default Windows single-machine mode provides local serial, SSH, logging, MCP and flashing functions.

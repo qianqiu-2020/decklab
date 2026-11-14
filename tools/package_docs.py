@@ -26,12 +26,15 @@ def document_map(platform):
     prefix = '' if platform == 'linux' else 'docs/'
     pairs['docs/README.md'] = prefix + 'index.md'
     pairs.update({'docs/' + name + '.md': prefix + name + '.md' for name in GUIDES})
+    for name in ('2026-11-14-nor-workspace-sub23-1', '2026-11-14-windows-vm-sub23-1',
+                 '2026-11-14-control-adapters-sub23-1'):
+        pairs['docs/audits/' + name + '.md'] = prefix + 'audits/' + name + '.md'
     for name in ('seriald-architecture.png', 'seriald-architecture.svg',
                  'seriald-architecture-en.png', 'seriald-architecture-en.svg',
                  'decklab-demo.png', 'decklab-demo-zh.png'):
         pairs['docs/' + name] = prefix + name
     pairs['docs/windows-wheel-observation.json'] = prefix + 'windows-wheel-observation.json'
-    for path in ('examples/profiles.json', 'examples/hardware.json', 'examples/flash.json', 'skills/seriald-board/SKILL.md',
+    for path in ('examples/profiles.json', 'examples/hardware.json', 'examples/hardware-bmc.json', 'examples/flash.json', 'skills/seriald-board/SKILL.md',
                  'skills/seriald-board/SKILL.zh-CN.md'):
         pairs[path] = path
     if platform == 'windows':

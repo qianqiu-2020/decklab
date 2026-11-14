@@ -16,6 +16,7 @@ const savedSshCredentials = new Map(), sshAuthentications = [], fixtureSshSessio
 // Flash fixtures exercise the real UI only. No executor or physical board runs.
 const flashPlans = [], flashSubmissions = [], flashRecords = [], flashRecoveryPosts = [];
 const flashTargetReads = [];
+const hardwarePosts = [];
 const flashDeletedArtifacts = new Set(), flashDeletePosts = [];
 const flashUsbTargets = [2, 3].map(port => ({target_id:'fixture-usb-' + port,
   target_generation:'fixture-generation-' + port, label:'模拟 USB 下载设备 ' + port,
@@ -127,6 +128,11 @@ const server = http.createServer((req, res) => {
           probeSettingsPosts.push(payload); probeSettings = {...probeSettings, ...payload}; return json({ok:true, ...probeSettings});
         }
         if (u.pathname === '/api/task-start') {
+          if (payload.kind === 'hardware-reset') {
+            hardwarePosts.push(payload);
+            return json({ok:true, task:{id:'hardware-fixture-' + hardwarePosts.length,
+              state:'completed',result:{ok:true,control_result:'acknowledged'}}});
+          }
           if (payload.kind === 'flash') {
             flashSubmissions.push(payload);
             let task = flashRecords.find(item => item.flash.request_id === payload.request_id);
@@ -176,6 +182,7 @@ const server = http.createServer((req, res) => {
     json(u.pathname === '/api/session-send' && serialPayload ? {ok:true} : { ok: false, error: 'read-only fixture' }); return;
   }
   if (u.pathname === '/api/devices') return json({ devices: fixtures });
+  if (u.pathname === '/api/hardware') return json({supported:true,actions:['reset'],providers:{reset:'bmc'}});
   if (u.pathname === '/api/session') {
     const chunk = u.searchParams.get('off') === '0' ? serialPayload ||
       'root@bianbu:~# \x1b[6n\x1b[?6n\x1b[c\x1b]11;?\x07'.repeat(15)
@@ -226,7 +233,7 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/api/task' && flashRecords.length) return json({task:flashRecords[0]});
   if (u.pathname === '/api/tasks') return json({tasks:flashRecords});
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, route)));
 });
@@ -985,6 +992,21 @@ let chrome, ws;
   assert.equal(await evaluate('document.querySelector("#fl-artifact").options.length'),1);
   assert.equal(await evaluate('document.querySelector("#fl-delete").disabled'),true);
   assert.equal(await evaluate('document.querySelector("#fl-plan").disabled'),true);
+  assert.deepEqual(errors,[]);
+  await evaluate('document.querySelector("#fl-close").click();document.querySelector(\'[data-key="milkv2"]\').click()');
+  for(let n=0;n<40 && !await evaluate('!document.querySelector("#b-board-control").hidden');n++)await delay(50);
+  await evaluate('document.querySelector("#b-board-control").click()');
+  assert.equal(await evaluate('document.querySelector("#board-control-dialog").open'),true);
+  assert.equal(hardwarePosts.length,0,'control confirmation never submits by opening');
+  assert.equal(await evaluate('document.querySelector("#board-control-target").textContent'),'0059D968E583C49A');
+  await evaluate('document.querySelector("#board-control-title").textContent="板卡控制 · 模拟界面验收"');
+  const controlShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-board-control-fixture.png'),Buffer.from(controlShot.data,'base64'));
+  await evaluate('document.querySelector("#board-control-submit").click();document.querySelector("#board-control-submit").click()');
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#board-control-status").textContent.includes("控制请求已确认")');n++)await delay(50);
+  assert.equal(hardwarePosts.length,1);assert.equal(hardwarePosts[0].serial,'0059D968E583C49A');
+  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  assert.ok(await evaluate('(()=>{const d=document.querySelector("#board-control-dialog"),r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&d.scrollWidth<=d.clientWidth+1;})()'));
   assert.deepEqual(errors,[]);
   console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing, server-remembered SSH credentials and offline-board flash preview/task recovery (isolated simulated fixtures).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{

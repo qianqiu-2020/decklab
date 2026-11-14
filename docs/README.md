@@ -35,4 +35,4 @@ SpacemiT K3. See the overview for the board support list and default credentials
 Completed implementation plans and historical investigations are retained in Git
 history rather than distributed as current instructions.
 
-[Web 与硬件后端分开部署](DISTRIBUTED.md)：Windows / Ubuntu 双角色、HTTPS 节点链路、后端镜像缓存与预备刷机环境。
+[部署模式](DISTRIBUTED.md)：Linux/Windows 单机，或 Linux/Windows 上位机与专用 Linux 控制机。

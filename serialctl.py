@@ -537,7 +537,7 @@ def parser():
     fetch_file.add_argument('--overwrite', action='store_true')
     task_start = commands.add_parser('task-start', help='start a background device operation')
     task_start.add_argument('kind', choices=('identify', 'ssh-enable', 'ssh-connect',
-        'hardware-power-on', 'hardware-power-off', 'hardware-reset', 'hardware-flash'))
+        'hardware-power-on', 'hardware-power-off', 'hardware-reset', 'hardware-enter-download', 'hardware-flash'))
     commands.add_parser('operation', help='show the active serial operation and cancellation ID')
     cancel = commands.add_parser('operation-cancel', help='cancel your active serial operation by ID')
     cancel.add_argument('id', help='operation ID returned by operation')
