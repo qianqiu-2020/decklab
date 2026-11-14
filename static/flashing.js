@@ -121,13 +121,10 @@
       var active = task && ['queued', 'running'].indexOf(task.state) !== -1;
       var selecting = active && awaitingSelection(task);
       var nor = norContext();
+      $('fl-review').hidden = !$('fl-preview').children.length;
+      $('fl-task-details').hidden = !task;
       $('fl-read-nor').disabled = busy || uploading || !!active || submissionUnknown || !!(board && board.observingTask)
         || !(capabilities && capabilities.nor_workspace_supported);
-      $('fl-read-note').textContent = task && task.flash && task.flash.nor_before
-        ? '整片备份已保存；确认分区范围后才会写入。只需备份时，可取消准备并保留备份文件。'
-        : nor ? '无需先上传镜像。先加载内存刷机器并备份整片 NOR，此阶段不写存储。'
-        : '此下载环境尚未提供 NOR 备份能力，可按已有刷机能力选择镜像。';
-      renderSteps();
       if (active || busy || uploading) dismissDelete();
       $('fl-delete').disabled = busy || uploading || submissionUnknown || !!active || !!(board && board.observingTask)
         || !board || !artifacts.some(function (item) { return item.id === $('fl-artifact').value; });
@@ -169,6 +166,8 @@
       var rows = $('fl-partitions').children;
       Array.from(rows).forEach(function (row) {
         if (row.checkbox) row.checkbox.disabled = busy || uploading || !!active && !selecting || nor && !selecting;
+        if (row.artifactSelect) row.artifactSelect.hidden = nor && !row.checkbox.checked;
+        if (row.replacementField) row.replacementField.dataset.empty = nor && !row.checkbox.checked ? 'true' : '';
         if (row.artifactSelect) row.artifactSelect.disabled = busy || uploading || !!active && !selecting || nor && (!selecting || !row.checkbox.checked);
       });
     }
@@ -180,7 +179,7 @@
       return !!(capabilities && capabilities.nor_workspace_supported || task && task.flash
         && (task.flash.nor_before || task.flash.operation === 'nor-workspace'));
     }
-    function renderContent(parent, content, fallback) {
+    function renderContent(parent, content, fallback, omitSize) {
       parent.textContent = '';
       if (!content) { text('small', fallback || '尚未读取', parent); return; }
       var labels = {'unknown': '版本未知', 'not-applicable': '配置内容，无软件版本',
@@ -190,7 +189,7 @@
       if (content.version) version.dataset.i18nIgnore = '';
       if (content.description) text('small', content.description, parent).dataset.i18nIgnore = '';
       if (content.built_at) text('small', translate('构建时间') + ' · ' + content.built_at, parent).dataset.i18nIgnore = '';
-      if (content.size !== undefined) text('small', format(content.size), parent).dataset.i18nIgnore = '';
+      if (!omitSize && content.size !== undefined) text('small', format(content.size), parent).dataset.i18nIgnore = '';
       if (content.sha256) {
         var details = document.createElement('details');
         text('summary', '内容 SHA-256', details);
@@ -227,8 +226,8 @@
       Array.from($('fl-partitions').children).forEach(function (row) {
         if (!row.payloadInfo || !row.artifactSelect) return;
         var match = metadata.find(function (item) { return item.storage === row.storageId && item.partition === row.partitionId; });
-        renderContent(row.payloadInfo, match && match.content,
-          row.artifactSelect.value ? '预览后显示文件内容信息' : '保留现有内容');
+        if (match && match.content && row.checkbox.checked) renderContent(row.payloadInfo, match.content);
+        else row.payloadInfo.textContent = '';
       });
     }
     function setProgress(phase, done, total, active) {
@@ -239,6 +238,7 @@
         'image-ready': '镜像已准备', 'uploading-image': '上传替换文件'};
       var label = names[phase] || phase || '尚未开始', bar = $('fl-progress');
       bar.hidden = phase === 'awaiting-selection';
+      $('fl-execution').hidden = !phase || phase === 'awaiting-selection';
       done = Math.max(0, Number(done) || 0); total = Math.max(0, Number(total) || 0);
       bar.max = Math.max(1, total);
       if (active && !total && phase !== 'awaiting-selection' && bar.removeAttribute) bar.removeAttribute('value');
@@ -247,19 +247,6 @@
         ? done + ' / ' + total + ' ' + translate('步骤') : format(done) + ' / ' + format(total)) : '';
       $('fl-progress-text').textContent = translate(label) + (counts ? ' · ' + counts + ' · ' + Math.floor(Math.min(done, total) / total * 100) + '%' : '');
       bar.setAttribute('aria-valuetext', $('fl-progress-text').textContent);
-    }
-    function renderSteps() {
-      var details = task && task.flash || {}, phase = task && task.progress && task.progress.phase || '';
-      var current = details.nor_before ? 1 : 0;
-      if (selectionPlan || plan && !prepareOnly(plan)) current = 2;
-      if (['checking-nor-baseline', 'writing', 'verifying-nor'].includes(phase)
-          || details.write_result === 'completed' || details.write_result === 'partial') current = 3;
-      ['read', 'select', 'review', 'write'].forEach(function (name, index) {
-        var node = $('fl-step-' + name);
-        node.dataset.state = index < current || index === 3 && details.verify_result === 'verified' ? 'done' : index === current ? 'current' : 'waiting';
-        if (index === current) node.setAttribute('aria-current', 'step');
-        else if (node.removeAttribute) node.removeAttribute('aria-current');
-      });
     }
     function renderPartitions() {
       var box = $('fl-partitions'), previous = {};
@@ -276,13 +263,15 @@
           var checkbox = document.createElement('input'); checkbox.type = 'checkbox';
           label.appendChild(checkbox);
           var storageName = storage.capacity_source === 'decklab-nor-v1' ? 'NOR' : storage.label || storage.name || storage.id;
-          var name = text('span', storageName + ' / ' + (partition.name || partition.id), label);
+          var prefix = norContext() && ((inspection || capabilities || {}).storages || []).length === 1 ? '' : storageName + ' / ';
+          var name = text('span', prefix + (partition.name || partition.id), label);
+          checkbox.setAttribute('aria-label', storageName + ' / ' + (partition.name || partition.id));
           name.dataset.i18nIgnore = '';
           text('small', format(partition.size) + (partition.offset === undefined ? '' : ' · ' + translate('偏移') + ' ' + partition.offset), name).dataset.i18nIgnore = '';
           row.appendChild(label);
           var current = document.createElement('div'); current.className = 'fl-content'; current.dataset.label = translate(after ? '写后回读内容' : '板上现有内容');
           var old = existing && (existing.partitions || []).find(function (part) { return part.name === (partition.name || partition.id); });
-          renderContent(current, old && old.content, '尚未读取'); row.appendChild(current);
+          renderContent(current, old && old.content, '尚未读取', true); row.appendChild(current);
           var replacement = document.createElement('div'); replacement.className = 'fl-content'; replacement.dataset.label = translate('替换文件');
           var select = document.createElement('select');
           select.setAttribute('aria-label', translate('替换文件') + ' · ' + (partition.name || partition.id));
@@ -291,8 +280,7 @@
           artifactOptions(select, chosen, payloadCandidates); replacement.appendChild(select);
           checkbox.checked = !!(saved && saved.checked);
           var payloadInfo = document.createElement('div'); replacement.appendChild(payloadInfo); row.payloadInfo = payloadInfo;
-          renderContent(payloadInfo, null, select.value ? '预览后显示文件内容信息' : '保留现有内容');
-          row.appendChild(replacement); row.checkbox = checkbox; row.artifactSelect = select;
+          row.appendChild(replacement); row.checkbox = checkbox; row.artifactSelect = select; row.replacementField = replacement;
           row.storageId = storage.id; row.partitionId = partition.id || partition.name;
           checkbox.addEventListener('change', function () {
             if (checkbox.checked && !select.value && artifacts.length === 1) select.value = artifacts[0].id;
@@ -381,9 +369,6 @@
       return messages[capabilities && capabilities.reason] || capabilities && capabilities.reason || '此设备尚未配置刷机执行器。';
     }
     function renderCapabilities() {
-      $('fl-intro').textContent = preparationPending()
-        ? '准备阶段仅加载临时环境并读取现场布局，不写入存储。'
-        : '请先让开发板进入下载模式。本次仅执行刷写，不控制复位；串口可继续被动观察。';
       var box = $('fl-connections'); box.textContent = '';
       [['板型', capabilities.profile || (capabilities.mode === 'unknown' ? '尚未识别' : '未配置')], ['复位控制', '本次不执行复位'],
        ['串口观察', location(capabilities.console)], ['刷写位置', location(capabilities.executor)]].forEach(function (item) {
@@ -418,7 +403,7 @@
       Array.from($('fl-mode').children).forEach(function (option) { option.disabled = modes.indexOf(option.value) < 0; });
       $('fl-mode').value = preparationPending() ? 'partitions' : modes.indexOf('full') >= 0 ? 'full' : modes[0] || 'full';
       if (capabilities.nor_workspace_supported) { $('fl-mode').value = 'partitions'; $('fl-verify').value = 'required'; $('fl-sources').open = false; }
-      status(capabilities.nor_workspace_supported ? '先读取并备份 NOR，再选择需要替换的分区文件。'
+      status(capabilities.nor_workspace_supported ? ''
         : preparationPending() ? '已检测到 BootROM；上传刷机包后可准备临时环境并读取布局，此阶段不写存储。'
         : capabilities.supported === false ? capabilityReason()
         : '选择镜像并预览写入范围；预览不会复位或写入存储。');
@@ -530,26 +515,30 @@
           text('p', loader.name + ' · ' + format(loader.size) + ' · SHA-256 ' + loader.sha256, box).dataset.i18nIgnore = '';
         });
       }
-      text('strong', '待写入清单', box);
       if (prepareOnly(value)) text('p', '准备阶段仅加载临时环境并读取现场布局，不写入存储。', box);
       else if (value.confirm_after_prepare && value.ready === false) text('p', '先加载临时环境并核对现场容量；完成后还需确认固件写入与擦除范围，才会写入存储。', box);
       else if (value.ready === false) text('p', '开始后先加载临时环境并核对现场，检查通过后按清单写入。', box);
-      text('p', value.write_layout ? '本计划将修改分区布局。' : '本计划保留现有分区布局。', box);
+      if (value.write_layout) text('p', '本计划将修改分区布局。', box);
       var table = document.createElement('table');
       var heading = document.createElement('tr');
       var showRanges = value.confirm_after_prepare === true || !!(value.erase_ranges || []).length;
-      var columns = ['存储', '分区或范围', '写入字节'];
-      if (showRanges) columns.push('偏移 / 分区容量');
-      columns.push('写入范围 SHA-256');
+      var compact = norContext() && new Set((value.writes || []).map(function (write) {
+        return write.storage || write.storage_id;
+      })).size === 1;
+      table.dataset.compact = String(compact);
+      var columns = compact ? ['分区', '写入字节'] : ['存储', '分区或范围', '写入字节'];
+      if (showRanges) columns.push('偏移 / 容量');
+      if (!compact) columns.push('写入范围 SHA-256');
       columns.forEach(function (label) { text('th', label, heading); });
       table.appendChild(heading);
       (value.writes || []).forEach(function (write) {
         var row = document.createElement('tr');
-        var cells = [write.storage || write.storage_id || '未知', write.partition || write.target || write.partition_id || '完整磁盘',
+        var cells = [write.partition || write.target || write.partition_id || '完整磁盘',
           format(write.write_size || write.size || write.bytes || 0)];
+        if (!compact) cells.unshift(write.storage || write.storage_id || '未知');
         if (showRanges) cells.push(write.kind === 'layout' ? translate('MTD 映射 / env 擦除')
           : (write.offset === undefined ? '未知' : write.offset) + ' / ' + format(write.capacity || 0));
-        cells.push(write.write_sha256 || write.sha256 || '未知');
+        if (!compact) cells.push(write.write_sha256 || write.sha256 || '未知');
         cells.forEach(function (item) { text('td', item, row); });
         table.appendChild(row);
         if (write.write_size > write.size) {
@@ -557,18 +546,26 @@
           var padding = text('td', '载荷 ' + write.size + ' 字节，扇区尾部补零 ' + (write.write_size - write.size) + ' 字节', paddingRow);
           padding.setAttribute('colspan', String(columns.length)); table.appendChild(paddingRow);
         }
-        if (write.write_sha256 && write.sha256 && write.write_sha256 !== write.sha256) {
+        if (!compact && write.write_sha256 && write.sha256 && write.write_sha256 !== write.sha256) {
           var sourceRow = document.createElement('tr');
           text('td', '载荷 SHA-256: ' + write.sha256, sourceRow).setAttribute('colspan', String(columns.length));
           table.appendChild(sourceRow);
         }
       });
       box.appendChild(table);
-      text('p', '计划摘要 · ' + (value.digest || value.sha256 || '未知'), box).dataset.i18nIgnore = '';
+      var digest = document.createElement('details');
+      digest.className = 'fl-details'; text('summary', '计划摘要', digest);
+      text('p', value.digest || value.sha256 || '未知', digest).dataset.i18nIgnore = '';
+      if (compact) (value.writes || []).forEach(function (write) {
+        text('p', (write.partition || write.target) + ' · ' + translate('写入范围 SHA-256'), digest).dataset.i18nIgnore = '';
+        text('small', write.write_sha256 || write.sha256 || '未知', digest).className = 'fl-hash';
+        if (write.write_sha256 && write.sha256 && write.write_sha256 !== write.sha256)
+          text('p', '载荷 SHA-256: ' + write.sha256, digest).dataset.i18nIgnore = '';
+      });
+      box.appendChild(digest);
       (value.erase_ranges || []).forEach(function (range) { text('p', '擦除风险范围（保守上限） · ' + range.storage + ' · ' + range.offset + ' + ' + format(range.size), box).dataset.i18nIgnore = ''; });
       (value.warnings || []).forEach(function (warning) { text('p', warning, box); });
       (value.pending_checks || []).forEach(function (check) { text('p', check, box); });
-      text('p', '开始后仅写入以上范围；写入、校验与启动结果分别记录。', box);
     }
     async function makePlan() {
       if (busy || !board || !$('fl-artifact').value) return;
@@ -632,10 +629,6 @@
         renderedBackup = backupSignature; renderPartitions();
         if (details.nor_before && !details.nor_after && !artifacts.length) $('fl-sources').open = true;
       }
-      if (awaitingSelection(current) && fullConfirmation()) $('fl-intro').textContent = '临时环境已准备；请核对 NOR 固件写入与擦除范围，确认后才会写入存储。';
-      else if (awaitingSelection(current)) $('fl-intro').textContent = '临时刷机环境已准备；请先预览实际分区范围，再继续写入。';
-      else if (p.phase === 'writing' || details.write_result === 'running' || result.write_result === 'completed')
-        $('fl-intro').textContent = '请先让开发板进入下载模式。本次仅执行刷写，不控制复位；串口可继续被动观察。';
       if (awaitingSelection(current) && fullConfirmation() && details.prepared_plan && !selectionPlan) renderPlan(details.prepared_plan);
       if (awaitingSelection(current) && details.inspection && details.inspection !== inspection) {
         var changed = !inspection || (inspection.layout_digest || '') !== (details.inspection.layout_digest || '');
@@ -649,8 +642,12 @@
       var box = $('fl-results'); box.textContent = '';
       [['写入结果', result.write_result || details.write_result], ['校验结果', result.verify_result || details.verify_result],
        ['启动结果', result.boot_result || details.boot_result]].forEach(function (item) {
+        var state = typeof item[1] === 'string' ? item[1] : item[1] && item[1].status;
+        if (!item[1] || ['not-requested', 'not-started'].includes(state)) return;
         text('dt', item[0], box); text('dd', outcome(item[1]), box).dataset.result = typeof item[1] === 'string' ? item[1] : '';
       });
+      if (box.children.length && !awaitingSelection(current)) $('fl-execution').hidden = false;
+      box = $('fl-verification'); box.textContent = '';
       var evidence = result.verification_scope || details.verification_scope;
       if (evidence === 'payloads-and-outside-selected-partitions') {
         text('dt', '校验范围', box); text('dd', '写入文件与所选分区之外的全部内容', box);
@@ -658,13 +655,12 @@
         text('dd', format(result.readback_bytes || details.readback_bytes || 0) + ' / '
           + format(result.verified_bytes || details.verified_bytes || 0), box).dataset.i18nIgnore = '';
       }
-      if (!uploading) status(current.error || (awaitingSelection(current) ? '等待选择实际分区和载荷；确认后在同一任务继续，取消可退出准备状态。'
-        + (details.selection_deadline ? ' · ' + new Date(details.selection_deadline * 1000).toLocaleString() : '')
-        : current.cancel_requested ? '已请求取消；等待执行器确认停止，可能已部分写入。'
-        : ['queued', 'running'].indexOf(current.state) !== -1
-          ? '刷机在服务端执行；关闭面板或刷新页面后可从任务列表继续查看。' : '任务已结束，请分别核对写入、校验和启动结果。'));
-      if (board && board.observingTask && ['queued', 'running'].indexOf(current.state) < 0)
-        status($('fl-status').textContent + ' · 新刷写请先重新检测设备。');
+      if (!uploading) status(current.error || (current.cancel_requested
+        ? '已请求取消；等待执行器确认停止，可能已部分写入。'
+        : awaitingSelection(current) && details.selection_deadline
+          ? translate('选区截止') + ' · ' + new Date(details.selection_deadline * 1000).toLocaleTimeString()
+          : board && board.observingTask && !['queued', 'running'].includes(current.state)
+            ? '新刷写请先重新检测设备。' : ''));
       updateControls();
     }
     async function loadEvents(selected, seq, current) {
@@ -772,7 +768,7 @@
           if (!(result.plan.id || result.plan.plan_id) || !Array.isArray(result.plan.writes) || !result.plan.writes.length)
             throw new Error('刷机计划缺少写入范围，不能执行。');
           selectionPlan = result.plan; renderPlan(selectionPlan);
-          status('计划已准备，请核对板卡和全部写入范围后开始。');
+          status(norContext() ? '' : '计划已准备，请核对板卡和全部写入范围后开始。');
         } else observe(result.task, selected, seq);
       } catch (error) {
         if (same(selected, seq)) status(error.result ? error.message : '选择提交结果未确认；正在查询原任务，请勿创建新任务。');
@@ -889,7 +885,7 @@
           invalidatePlan(); artifactOptions($('fl-artifact'), artifacts[artifacts.length - 1].id); renderPartitions();
           if (norContext()) $('fl-sources').open = false;
           status(task && ['queued', 'running'].indexOf(task.state) >= 0 && awaitingSelection(task)
-            ? '载荷已准备，请在原任务选择实际分区并预览。'
+            ? (norContext() ? '' : '载荷已准备，请在原任务选择实际分区并预览。')
             : preparationPending()
             ? '镜像已准备；请预览仅加载临时环境和读取布局的准备步骤。'
             : capabilities && capabilities.supported === false
@@ -902,12 +898,11 @@
     async function open(selected, existing) {
       if (uploading) { $('flash-dialog').show(); return; }
       board = selected || {}; selected = board; var seq = ++sequence; clearTimeout(pollTimer);
-      busy = false; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; cursor = 0; eventLines = []; ++eventSequence;
+      busy = false; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; $('fl-execution').hidden = true; cursor = 0; eventLines = []; ++eventSequence;
       inspection = null; payloadCandidates = []; selectionRequestId = ''; selectionPlan = null; renderedBackup = '';
       $('fl-target-storage').value = ''; $('fl-recovery-reason').value = '';
       invalidatePlan(); $('fl-task-id').textContent = ''; $('fl-events').textContent = '';
       $('fl-event-status').textContent = ''; $('fl-results').textContent = '';
-      $('fl-intro').textContent = '请先让开发板进入下载模式。本次仅执行刷写，不控制复位；串口可继续被动观察。';
       $('fl-connections').textContent = ''; $('fl-partitions').textContent = '';
       $('fl-board').textContent = selected.target_id ? targetName(selected)
         : selected.key ? (selected.label || selected.key) + ' · SN ' + (selected.serial || '未知') : translate('自动检测本机 USB 下载设备');
@@ -977,9 +972,10 @@
       if (!board || !$('flash-dialog').open) return;
       renderDiscovered(); renderStorages(); renderPartitions();
       $('fl-backups').dataset.signature = ''; renderBackups();
-      renderReplacementInfo(selectionPlan || plan); renderSteps();
+      renderReplacementInfo(selectionPlan || plan);
       if (board.target_id) $('fl-board').textContent = targetName(board);
       else if (!board.key) $('fl-board').textContent = translate('自动检测本机 USB 下载设备');
+      updateControls();
     });
     updateControls();
     return { open: open, discover: function () { return open(); } };

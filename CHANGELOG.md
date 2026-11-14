@@ -2,6 +2,8 @@
 
 ## Unreleased: NOR workspace
 
+- Simplify the flashing workspace with aligned partition rows and contextual controls; remove duplicate workflow explanations, collapse diagnostics and keep write scope and failures visible.
+
 - Read and download a complete NOR backup before choosing any image, using the pinned RAM-only loader and one durable hardware task.
 - Compare partition versions, build timestamps, hashes and replacement file metadata; preserve unselected partitions and require an explicit scope preview before writing.
 - Recheck the backup before writing, read back the entire NOR afterwards, and retain separate write/verification results and scoped backup files, including failed verification evidence.

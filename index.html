@@ -222,39 +222,31 @@ PasswordAuthentication yes</code></pre>
 </dialog>
 <dialog id="flash-dialog" class="flash-dialog" aria-labelledby="fl-title">
   <div class="fl-head"><div><strong id="fl-title">刷机工作区</strong><small id="fl-board" data-i18n-ignore></small></div><button id="fl-close" type="button">关闭</button></div>
-  <p id="fl-intro" class="fl-intro">先备份现有内容，再选择替换的分区。刷写前会再次核对板上内容，完成后读回校验。</p>
-  <ol class="fl-steps" aria-label="刷机流程">
-    <li id="fl-step-read" data-state="current"><span class="fl-step-number" aria-hidden="true">1</span><span>连接与备份</span></li>
-    <li id="fl-step-select"><span class="fl-step-number" aria-hidden="true">2</span><span>选择替换内容</span></li>
-    <li id="fl-step-review"><span class="fl-step-number" aria-hidden="true">3</span><span>核对写入范围</span></li>
-    <li id="fl-step-write"><span class="fl-step-number" aria-hidden="true">4</span><span>刷写与校验</span></li>
-  </ol>
   <section class="fl-section" aria-labelledby="fl-connect-title">
     <h3 id="fl-connect-title">连接与备份</h3>
     <div class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label><button id="fl-discover" type="button">重新检测</button></div>
-    <div class="fl-read-action"><button id="fl-read-nor" class="pri" type="button" disabled>读取并备份 NOR</button><p id="fl-read-note" class="fl-note">先让板卡进入下载模式；临时刷机器只加载到内存，备份包含整片 NOR。</p></div>
+    <div class="fl-read-action"><button id="fl-read-nor" class="pri" type="button" disabled>读取并备份 NOR</button></div>
     <div id="fl-backups" class="fl-backups" hidden></div>
     <details class="fl-details"><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl></details>
   </section>
   <section class="fl-section" aria-labelledby="fl-replace-title">
     <h3 id="fl-replace-title">选择替换内容</h3>
-    <p class="fl-note">只勾选要替换的分区，为每个分区选择文件。未勾选的分区保持原样。</p>
     <details id="fl-sources" class="fl-details" open><summary>添加替换文件</summary>
-      <div class="fl-inputs">
-        <label class="ft-field">镜像文件<input id="fl-files" type="file" multiple></label><button id="fl-upload" type="button">上传镜像</button>
-        <label class="ft-field">镜像 URL<input id="fl-url" type="url" placeholder="https://…/opensbi.itb" spellcheck="false"><small>由后端节点下载，也支持完整固件包。</small></label>
-        <label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label>
-        <button id="fl-download" type="button">从 URL 下载</button><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button>
-        <label class="ft-field">已准备镜像<select id="fl-artifact"></select></label><button id="fl-delete" type="button" disabled>删除所选镜像</button>
+      <div class="fl-sources">
+        <div class="fl-source-row"><label class="ft-field">镜像文件<input id="fl-files" type="file" multiple></label><button id="fl-upload" type="button">上传镜像</button></div>
+        <div class="fl-source-row fl-source-url"><label class="ft-field">镜像 URL<input id="fl-url" type="url" placeholder="https://…/opensbi.itb" spellcheck="false"></label>
+          <label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label>
+          <button id="fl-download" type="button">从 URL 下载</button><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button></div>
+        <div class="fl-source-row"><label class="ft-field">已准备镜像<select id="fl-artifact"></select></label><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
       </div>
     </details>
-    <fieldset id="fl-delete-field" hidden><legend>确认删除镜像</legend>
+    <fieldset id="fl-delete-field" class="fl-alert" hidden><legend>确认删除镜像</legend>
       <p id="fl-delete-name" data-i18n-ignore style="overflow-wrap:anywhere"></p>
       <p>仅删除服务端保存的这份镜像，不影响开发板内容；任务占用中的镜像不能删除。</p>
       <button id="fl-delete-confirm" type="button">确认删除</button><button id="fl-delete-cancel" type="button">保留镜像</button>
     </fieldset>
-    <fieldset id="fl-partitions-field" hidden><legend>分区内容与替换文件</legend>
-      <div class="fl-partition-heading" aria-hidden="true"><span>分区与范围</span><span id="fl-current-heading">板上现有内容</span><span>替换文件</span></div>
+    <fieldset id="fl-partitions-field" hidden><legend class="visually-hidden">分区内容与替换文件</legend>
+      <div class="fl-partition-heading" aria-hidden="true"><span>分区</span><span id="fl-current-heading">板上现有内容</span><span>替换文件</span></div>
       <div id="fl-partitions"></div>
     </fieldset>
     <details id="fl-advanced" class="fl-details"><summary>刷写方式与校验设置</summary><div class="fl-inputs">
@@ -262,23 +254,24 @@ PasswordAuthentication yes</code></pre>
       <label class="ft-field" id="fl-target-storage-field">原始整盘目标存储<select id="fl-target-storage"></select><small>仅用于原始磁盘镜像；刷机包始终按包内映射列出全部写入范围。</small></label>
       <label class="ft-field">回读校验<select id="fl-verify"><option value="if-supported">能力支持时校验</option><option value="required">必须回读校验</option></select></label>
     </div></details>
+    <div class="fl-section-foot"><button id="fl-plan" type="button">预览写入范围</button></div>
   </section>
-  <section class="fl-section" aria-labelledby="fl-review-title">
+  <section id="fl-review" class="fl-section" aria-labelledby="fl-review-title" hidden>
     <h3 id="fl-review-title">核对写入范围</h3>
-    <button id="fl-plan" type="button">预览写入范围</button><div id="fl-preview" class="fl-preview"></div>
+    <div id="fl-preview" class="fl-preview"></div>
   </section>
-  <section class="fl-section fl-execution" aria-labelledby="fl-execution-title">
+  <section id="fl-execution" class="fl-section fl-execution" aria-labelledby="fl-execution-title" hidden>
     <div class="fl-progress-heading"><h3 id="fl-execution-title">刷写与校验</h3><span id="fl-progress-text" role="status">尚未开始</span></div>
     <progress id="fl-progress" max="1" value="0" aria-label="当前阶段进度"></progress>
-    <p id="fl-status" role="status"></p><p id="fl-task-id" class="log-note" data-i18n-ignore></p><dl id="fl-results" class="fl-connections"></dl>
+    <dl id="fl-results" class="fl-connections"></dl>
   </section>
-  <fieldset id="fl-recovery-field" hidden><legend>恢复占用待处理</legend>
+  <fieldset id="fl-recovery-field" class="fl-alert" hidden><legend>恢复占用待处理</legend>
     <p>执行器退出尚未确认。仅在你已确认外部刷机进程停止后释放占用；释放不表示写入成功，也不改变原任务结果。</p>
     <label class="ft-field">确认依据<input id="fl-recovery-reason" type="text" maxlength="1000" placeholder="填写已确认进程停止的检查方式和结果"></label>
     <button id="fl-release" type="button" disabled>确认外部刷机进程已停止，释放占用</button>
   </fieldset>
-  <details><summary>执行事件</summary><p id="fl-event-status" role="status"></p><pre id="fl-events" data-i18n-ignore></pre></details>
-  <div class="ft-actions fl-actions"><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+  <details id="fl-task-details" class="fl-details" hidden><summary>执行详情</summary><p id="fl-task-id" class="log-note" data-i18n-ignore></p><dl id="fl-verification" class="fl-connections"></dl><p id="fl-event-status" role="status"></p><pre id="fl-events" data-i18n-ignore></pre></details>
+  <div class="ft-actions fl-actions"><p id="fl-status" role="status"></p><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
 </dialog>
 <dialog id="probe-settings-dialog" class="probe-settings-dialog" aria-labelledby="probe-settings-title">
   <div class="agent-share-head"><strong id="probe-settings-title">探测设置</strong><button id="probe-settings-close" type="button">关闭</button></div>

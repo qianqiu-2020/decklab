@@ -68,7 +68,8 @@ test('flash preview pins exact storage/partition and upload reference, never a h
   assert.equal('argv' in preview.payload, false); assert.equal('path' in preview.payload, false);
   preview.resolve({plan: {id: 'plan-1', binding_revision: 7, digest: 'fixed', write_layout: false,
     writes: [{storage: 'disk-b', partition: 'rootfs-b', size: 32, sha256: artifact.sha256}]}}); await drain();
-  assert.match(h.get('fl-preview').textContent, /保留现有分区布局/);
+  assert.match(h.get('fl-preview').textContent, /disk-b.*rootfs-b/);
+  assert.doesNotMatch(h.get('fl-preview').textContent, /将修改分区布局/);
   assert.equal(h.get('fl-start').disabled, false);
   h.get('fl-verify').value = 'required'; h.get('fl-verify').emit('change');
   assert.equal(h.get('fl-start').disabled, true, 'changing intent invalidates preview');
@@ -162,7 +163,7 @@ test('lost flash submission locks start and queries original request rather than
   h.get('fl-start').click(); assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
   h.get('fl-recover').click(); h.take('/api/tasks').resolve({tasks: [{id: 'original', kind: 'flash', state: 'completed',
     progress: {}, flash: {request_id: request.payload.request_id}, result: {write_result: 'written', verify_result: 'unsupported', boot_result: 'not-requested'}}]}); await drain();
-  assert.match(h.get('fl-results').textContent, /写入完成.*不支持回读校验.*未请求/);
+  assert.match(h.get('fl-results').textContent, /写入完成.*不支持回读校验/);
   assert.equal(h.get('fl-recover').hidden, true);
 });
 
@@ -437,7 +438,6 @@ for (const supported of [true, false]) test('BootROM image preparation is explic
   assert.equal(h.get('fl-mode').disabled, true);
   assert.equal(h.get('fl-upload').disabled, false);
   assert.match(h.get('fl-status').textContent, /BootROM.*不写存储/);
-  assert.match(h.get('fl-intro').textContent, /准备阶段.*不写入存储/);
   assert.match(h.get('fl-connections').textContent, /回读支持待确认/);
   assert.match(h.get('fl-partitions').textContent, /准备阶段将读取现场布局/);
   h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change');
@@ -689,8 +689,12 @@ test('NOR partition comparison shows real backup versions and file metadata afte
   assert.match(link.href,/artifact-download\?id=bbbbbbbbbbbbbbbbbbbbbbbb/);
   assert.equal(h.get('fl-progress').hidden,true);
   assert.match(h.get('fl-progress-text').textContent,/等待选择替换内容/);
-  const row=h.get('fl-partitions').children[0];row.checkbox.checked=true;row.artifactSelect.value=artifact.id;
-  row.checkbox.emit('change');h.get('fl-select').click();
+  const row=h.get('fl-partitions').children[0];
+  assert.equal(row.artifactSelect.hidden,true);
+  assert.equal(row.payloadInfo.textContent,'');
+  assert.doesNotMatch(h.get('fl-results').textContent,/未开始|未请求|启动结果/);
+  row.checkbox.checked=true;row.artifactSelect.value=artifact.id;
+  row.checkbox.emit('change');assert.equal(row.artifactSelect.hidden,false);h.get('fl-select').click();
   const preview=h.take('/api/flash-selection');assert.equal(preview.payload.id,'nor-task');
   assert.equal(preview.payload.target_generation,'brom-original');
   preview.resolve({plan:{id:'new-partition-plan',write_layout:false,writes:[{storage:'active',partition:'opensbi',size:32}],

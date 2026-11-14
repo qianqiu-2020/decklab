@@ -2,6 +2,9 @@
 (function (global) {
   'use strict';
   var dictionary = {
+    "分区": "Partition", "偏移 / 容量": "Offset / capacity",
+    "执行详情": "Execution details", "计划摘要": "Plan digest", "选区截止": "Selection deadline",
+    "新刷写请先重新检测设备。": "Detect the device again before starting a new write.",
     "校验范围": "Verification scope", "回读 / 比较": "Read / compared",
     "写入文件与所选分区之外的全部内容": "Written files and all bytes outside the selected partitions",
     "结束准备并保留备份": "End preparation and keep the backup",
