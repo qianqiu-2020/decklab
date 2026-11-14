@@ -169,7 +169,7 @@
   .dev-order-button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   .dev-order-button:disabled{opacity:.3;cursor:default}
   .dev-order-button[draggable="true"]{cursor:grab;touch-action:pan-y}
-  .dev.order-dragging{opacity:.45}.dev.order-drop-target{outline:2px solid var(--accent);outline-offset:-2px}
+  .dev.order-dragging{opacity:.4;border:1px dashed var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-line)}
 
   .detail{margin-top:20px;background:var(--surface);border:1px solid var(--line);
     border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}

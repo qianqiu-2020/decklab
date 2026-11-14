@@ -7,6 +7,7 @@
     var ownershipRevision = 0, pollSeq = 0, requestedDevice = '';
     var orderStorageKey = 'decklab.device-order.v1', deviceOrder = [], visibleOrder = [];
     var orderElements = {}, draggedId = '', renderAfterDrag = false;
+    var dragPreview = null, dragAnimations = [];
     try {
       var savedOrder = JSON.parse(global.localStorage && global.localStorage.getItem(orderStorageKey) || 'null');
       if (savedOrder && savedOrder.version === 1 && Array.isArray(savedOrder.ids)) {
@@ -78,11 +79,75 @@
     }
     function finishDrag() {
       var id = draggedId;
-      draggedId = '';
+      draggedId = ''; dragPreview = null;
+      dragAnimations.forEach(function (animation) { animation.cancel(); }); dragAnimations = [];
       if (renderAfterDrag || id) {
         renderAfterDrag = false; renderDevices(lastDevices); focusOrder(id, 'drag');
       }
     }
+    function previewDrag(card, event) {
+      if (!draggedId || card.dataset.orderId === draggedId) return;
+      var moving = orderElements[draggedId] && orderElements[draggedId].card;
+      if (!moving) return;
+      var next = (dragPreview || visibleOrder).filter(function (id) { return id !== draggedId; });
+      var target = next.indexOf(card.dataset.orderId);
+      if (target < 0) return;
+      var rect = card.getBoundingClientRect();
+      // The sidebar is vertical; overview grids and mobile strips can have
+      // several cards on one row. Use the corresponding insertion midpoint.
+      var horizontal = visibleOrder.some(function (id) {
+        var other = orderElements[id].card.getBoundingClientRect();
+        return id !== card.dataset.orderId && Math.abs(other.top - rect.top) < 2 && Math.abs(other.left - rect.left) > 2;
+      });
+      var after = horizontal && typeof event.clientX === 'number' && event.clientX >= rect.left && event.clientX <= rect.right
+        ? event.clientX > rect.left + rect.width / 2 : event.clientY > rect.top + rect.height / 2;
+      if (after) target++;
+      next.splice(target, 0, draggedId);
+      if (JSON.stringify(next) === JSON.stringify(dragPreview || visibleOrder)) return;
+      var before = {};
+      visibleOrder.forEach(function (id) { before[id] = orderElements[id].card.getBoundingClientRect(); });
+      dragAnimations.forEach(function (animation) { animation.cancel(); }); dragAnimations = [];
+      var following = next[next.indexOf(draggedId) + 1];
+      $('grid').insertBefore(moving, following ? orderElements[following].card : null);
+      dragPreview = next;
+      if (global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      visibleOrder.forEach(function (id) {
+        var node = orderElements[id].card, end = node.getBoundingClientRect(), start = before[id];
+        if (id === draggedId || !node.animate || start.left === end.left && start.top === end.top) return;
+        dragAnimations.push(node.animate([
+          { transform: 'translate(' + (start.left - end.left) + 'px,' + (start.top - end.top) + 'px)' },
+          { transform: 'translate(0,0)' }
+        ], { duration: 140, easing: 'cubic-bezier(.2,.7,.2,1)' }));
+      });
+    }
+    function commitDrag() {
+      if (!draggedId) return;
+      var moving = draggedId, next = (dragPreview || visibleOrder).slice();
+      if (JSON.stringify(next) === JSON.stringify(visibleOrder)) { finishDrag(); return; }
+      draggedId = ''; dragPreview = null; renderAfterDrag = false;
+      dragAnimations.forEach(function (animation) { animation.cancel(); }); dragAnimations = [];
+      applyVisibleOrder(next, moving, 'drag');
+    }
+    function previewGrid(event) {
+      var closest = null, distance = Infinity;
+      visibleOrder.forEach(function (id) {
+        if (id === draggedId) return;
+        var card = orderElements[id].card, r = card.getBoundingClientRect();
+        var dx = Math.max(r.left - event.clientX, 0, event.clientX - r.right);
+        var dy = Math.max(r.top - event.clientY, 0, event.clientY - r.bottom);
+        if (dx * dx + dy * dy < distance) { closest = card; distance = dx * dx + dy * dy; }
+      });
+      if (closest) previewDrag(closest, event);
+    }
+    $('grid').addEventListener('dragover', function (event) {
+      if (!draggedId) return;
+      event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      previewGrid(event);
+    });
+    $('grid').addEventListener('drop', function (event) {
+      if (!draggedId) return;
+      event.preventDefault(); event.stopPropagation(); if (!dragPreview) previewGrid(event); commitDrag();
+    });
     function orderKeys(event, id, control) {
       if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
         event.preventDefault(); event.stopPropagation();
@@ -135,21 +200,14 @@
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); options.open(d.key); }
         });
         card.addEventListener('dragover', function (e) {
-          if (!draggedId || draggedId === id) return;
-          e.preventDefault(); card.classList.toggle('order-drop-target', true);
+          if (!draggedId) return;
+          e.preventDefault(); e.stopPropagation(); previewDrag(card, e);
           if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
         });
-        card.addEventListener('dragleave', function () { card.classList.remove('order-drop-target'); });
         card.addEventListener('drop', function (e) {
-          if (!draggedId || draggedId === id) return;
+          if (!draggedId) return;
           e.preventDefault(); e.stopPropagation();
-          var moving = draggedId, next = visibleOrder.filter(function (item) { return item !== moving; });
-          var target = next.indexOf(id);
-          if (target < 0 || visibleOrder.indexOf(moving) < 0) { finishDrag(); return; }
-          var rect = card.getBoundingClientRect();
-          if (typeof e.clientY === 'number' && e.clientY > rect.top + rect.height / 2) target++;
-          next.splice(target, 0, moving); draggedId = ''; renderAfterDrag = false;
-          applyVisibleOrder(next, moving, 'drag');
+          if (!dragPreview) previewDrag(card, e); commitDrag();
         });
 
         var r1 = document.createElement('div'); r1.className = 'r1';
@@ -258,10 +316,16 @@
         }
         var drag = orderButton('drag', '↕', '拖动调整设备顺序'); drag.draggable = true;
         drag.addEventListener('dragstart', function (e) {
-          draggedId = id; card.classList.toggle('order-dragging', true);
+          draggedId = id; dragPreview = null;
           if (e.dataTransfer) {
             e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id);
+            if (e.dataTransfer.setDragImage) {
+              var rect = card.getBoundingClientRect();
+              e.dataTransfer.setDragImage(card, Math.max(0, (e.clientX || rect.left) - rect.left),
+                Math.max(0, (e.clientY || rect.top) - rect.top));
+            }
           }
+          card.classList.toggle('order-dragging', true);
           e.stopPropagation();
         });
         drag.addEventListener('dragend', finishDrag);

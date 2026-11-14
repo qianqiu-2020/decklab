@@ -15,7 +15,12 @@ class Element {
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
   set innerHTML(value) { this.textContent = value; }
-  appendChild(child) { this.children.push(child); return child; }
+  appendChild(child) { return this.insertBefore(child,null); }
+  insertBefore(child, before) {
+    if(child.parentNode){const old=child.parentNode.children;old.splice(old.indexOf(child),1);}
+    child.parentNode=this;const index=before?this.children.indexOf(before):this.children.length;
+    this.children.splice(index,0,child);return child;
+  }
   addEventListener(name, handler) { (this.events[name] ||= []).push(handler); }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   emit(name, extra = {}) {
@@ -25,7 +30,7 @@ class Element {
   }
   click() { if (!this.disabled) this.emit('click'); }
   focus() { this.focused = true; }
-  getBoundingClientRect() { return { top: 100, height: 100 }; }
+  getBoundingClientRect() { return this.rect || {top:100,height:100,bottom:200,left:0,width:100,right:100}; }
 }
 
 function harness(storage = new Map()) {
@@ -137,6 +142,53 @@ test('drag handles reorder exact visible targets while polling cannot replace an
   assert.deepEqual(h.order(), ['C', 'A', 'B', 'D']);
   assert.equal(data['text/plain'], 'board:C');
   assert.deepEqual(h.opened, []);
+});
+
+test('dragover previews a landing slot and moves neighbors before saving on the placeholder', async () => {
+  const h=harness();await h.poll([board('A'),board('B'),board('C')]);
+  const initial=h.storage.get('decklab.device-order.v1'), source=h.cards()[2], target=h.cards()[0];
+  let dragImage=null;
+  h.button('C','drag').emit('dragstart',{clientX:50,clientY:120,dataTransfer:{setData(){},setDragImage:node=>{dragImage=node;}}});
+  const event=target.emit('dragover',{clientY:110,dataTransfer:{}});
+  assert.equal(event.prevented,true);assert.equal(dragImage,source);
+  assert.deepEqual(h.order(),['C','A','B']);assert.equal(h.cards()[1],target,'existing cards shift instead of being rebuilt');
+  assert.equal(h.storage.get('decklab.device-order.v1'),initial,'preview must not persist');
+  source.emit('drop',{clientY:110});
+  assert.deepEqual(h.order(),['C','A','B']);
+  assert.deepEqual(JSON.parse(h.storage.get('decklab.device-order.v1')).ids,['board:C','board:A','board:B']);
+  assert.deepEqual(h.opened,[]);
+});
+
+test('cancel restores the original order and keeps updates deferred during preview', async () => {
+  const h=harness();await h.poll([board('A'),board('B'),board('C')]);
+  const initial=h.storage.get('decklab.device-order.v1'), handle=h.button('C','drag');
+  handle.emit('dragstart');h.cards()[0].emit('dragover',{clientY:110});
+  await h.poll([board('A'),board('B'),board('C'),board('D')]);
+  assert.deepEqual(h.order(),['C','A','B']);
+  assert.equal(h.storage.get('decklab.device-order.v1'),initial);
+  handle.emit('dragend');
+  assert.deepEqual(h.order(),['A','B','C','D']);
+  assert.deepEqual(JSON.parse(h.storage.get('decklab.device-order.v1')).ids,['board:A','board:B','board:C','board:D']);
+});
+
+test('downward preview commits its visible position and a late dragend does not undo it', async () => {
+  const h=harness();await h.poll([board('A'),board('B'),board('C')]);
+  const handle=h.button('A','drag'), source=h.cards()[0], target=h.cards()[2];
+  handle.emit('dragstart');target.emit('dragover',{clientY:190});
+  assert.deepEqual(h.order(),['B','C','A']);
+  source.emit('dragover',{clientY:120});source.emit('drop');handle.emit('dragend');
+  assert.deepEqual(h.order(),['B','C','A']);
+});
+
+test('filtered preview preserves hidden slots and horizontal layouts use the x midpoint', async () => {
+  const h=harness();await h.poll([board('A',{label:'group-A'}),board('B'),board('C',{label:'group-C'}),board('D')]);
+  h.byId('device-search').value='group';h.byId('device-search').emit('input');
+  h.cards()[0].rect={top:0,bottom:100,height:100,left:0,right:100,width:100};
+  h.cards()[1].rect={top:0,bottom:100,height:100,left:110,right:210,width:100};
+  h.button('A','drag').emit('dragstart');h.cards()[1].emit('dragover',{clientX:200,clientY:10});
+  assert.deepEqual(h.order(),['C','A']);h.cards()[1].emit('drop');
+  h.byId('device-search').value='';h.byId('device-search').emit('input');
+  assert.deepEqual(h.order(),['C','B','A','D']);
 });
 
 test('external drops and corrupted or unavailable browser storage cannot break discovery', async () => {

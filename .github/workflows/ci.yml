@@ -90,6 +90,9 @@ jobs:
       - name: Real browser with hardware-free fixtures
         if: matrix.python == '3.12'
         run: node tools/browser_smoke.js
+      - name: Native mouse dragging previews device positions without hardware
+        if: matrix.python == '3.12'
+        run: node tools/browser_device_order.js
       - name: Web configuration in an isolated hardware-free host
         if: matrix.python == '3.12'
         run: node tools/settings_smoke.js
@@ -114,6 +117,8 @@ jobs:
           name: browser-smoke
           path: |
             dist/ui-*.png
+            dist/device-drag-browser/*.png
+            dist/device-drag-browser/receipt.json
             dist/demo-ui.png
             dist/nor-workspace-browser/*.png
             dist/nor-workspace-browser/receipt.json
