@@ -20,6 +20,45 @@ from seriald_core.web_settings import WebSettings, SettingsError
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@unittest.skipUnless(os.name == 'posix', 'SIGTERM graceful shutdown is a POSIX service contract')
+class ControlShutdownTests(unittest.TestCase):
+    def test_sigterm_shuts_down_control_without_traceback_or_collector(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1', 0))
+                port = listener.getsockname()[1]
+            environment = {key: value for key, value in os.environ.items() if not key.startswith('SERIALD_')}
+            environment.update(SERIALD_BASE=folder, SERIALD_SOCKET=str(Path(folder) / 'absent.sock'),
+                               SERIALD_STATIC=str(ROOT), SERIALD_MCP_ENABLED='0')
+            process = subprocess.Popen([sys.executable, '-m', 'seriald_core.control_server',
+                '--bind', '127.0.0.1', '--port', str(port), '--no-browser'], cwd=ROOT,
+                env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            try:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    connection = http.client.HTTPConnection('127.0.0.1', port, timeout=1)
+                    try:
+                        connection.request('GET', '/api/access')
+                        response = connection.getresponse()
+                        response.read()
+                        if response.status == 200:
+                            break
+                    except OSError:
+                        time.sleep(.05)
+                    finally:
+                        connection.close()
+                else:
+                    self.fail('isolated control did not become ready')
+                process.terminate()
+                output = process.communicate(timeout=5)[0].decode(errors='replace')
+                self.assertEqual(process.returncode, 0, output)
+                self.assertNotIn('Traceback', output)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate(timeout=5)
+
+
 class RestartAdmissionTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()

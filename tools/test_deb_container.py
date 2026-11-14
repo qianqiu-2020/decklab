@@ -82,7 +82,7 @@ def start(program):
                                env=environment, start_new_session=True)
     workers.append(process)
     return process
-def stop(process):
+def stop(process, clean=False):
     if process.poll() is None:
         os.killpg(process.pid, signal.SIGTERM)
         try:
@@ -90,6 +90,8 @@ def stop(process):
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=5)
+    if clean:
+        assert process.returncode == 0, 'candidate process did not stop cleanly'
 def ready():
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
@@ -114,8 +116,13 @@ try:
     installed_id = pathlib.Path('/usr/lib/seriald/.collector-build-id').read_bytes()
     previous = pathlib.Path('/tmp/seriald-previous.deb').is_file()
     if previous:
+        previous_version = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'seriald'], text=True)
+        previous_bundled_mcp = pathlib.Path('/usr/lib/seriald/mcp-runtime/seriald-mcp-worker').is_file()
         with urlopen('http://127.0.0.1:18898/api/access', timeout=3) as response:
-            assert not json.load(response)['mcp_enabled'], 'Legacy thin fixture unexpectedly supplies MCP'
+            assert bool(json.load(response)['mcp_enabled']) == previous_bundled_mcp, 'previous installed MCP availability differs from package contents'
+        if previous_bundled_mcp:
+            subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:18898'],
+                           env=environment, check=True, timeout=30)
     stop(control)
     subprocess.run(['dpkg', '--force-confold', '-i', '/tmp/seriald.deb'], check=True)
     collector_changed = pathlib.Path('/usr/lib/seriald/.collector-build-id').read_bytes() != installed_id
@@ -146,7 +153,7 @@ try:
     # Seed only after the incoming package is active: the old thin upgrade
     # fixture predates remembered credentials. A second real reinstall proves
     # that the new private record survives package scripts and a fresh process.
-    stop(control)
+    stop(control, clean=True)
     subprocess.run(['dpkg', '--force-confold', '-i', '/tmp/seriald.deb'], check=True)
     assert not restart_marker.exists(), 'same-code reinstall requested a collector restart'
     control = start('/usr/bin/seriald-control')
@@ -167,7 +174,7 @@ try:
         except (OSError, IndexError):
             pass
     assert worker_users and set(worker_users) == {str(account.pw_uid)}, worker_users
-    stop(control)
+    stop(control, clean=True)
     control = start('/usr/bin/seriald-control')
     ready()
     subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:18898'],
@@ -177,7 +184,7 @@ try:
     credentials('check')
     assert importlib.util.find_spec('mcp') is None
     if previous:
-        print('PASS: published 1.7.0 thin package upgrades to included MCP with configuration and runtime data preserved', flush=True)
+        print('PASS: published %s package upgrades with bundled MCP, configuration and runtime data preserved' % previous_version, flush=True)
     assert collector.poll() is None
     subprocess.run(['/usr/bin/serialctl', '--url', 'http://127.0.0.1:18898', 'devices'], check=True)
     subprocess.run(['/usr/bin/seriald-admin', '--help'], check=True, stdout=subprocess.DEVNULL)
@@ -219,7 +226,7 @@ def main():
     parser.add_argument('--image', choices=('ubuntu:22.04', 'ubuntu:24.04'), default='ubuntu:24.04')
     parser.add_argument('--runtime', type=Path, help='prepared native MCP runtime directory')
     parser.add_argument('--package', type=Path, help='test this already-built package instead of building')
-    parser.add_argument('--upgrade-from', type=Path, help='published 1.7.0 thin package to install first')
+    parser.add_argument('--upgrade-from', type=Path, help='published prior package to install first (thin or bundled MCP)')
     args = parser.parse_args()
     for path in (args.package, args.upgrade_from):
         if path is not None and not path.is_file():
