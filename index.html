@@ -249,15 +249,15 @@ PasswordAuthentication yes</code></pre>
     <details class="fl-details"><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl></details>
   </section>
   <section class="fl-section" aria-labelledby="fl-replace-title">
-    <h3 id="fl-replace-title">选择替换内容</h3>
-    <details id="fl-sources" class="fl-details" open><summary>添加替换文件</summary>
+    <h3 id="fl-replace-title">镜像来源与分区内容</h3>
+    <details id="fl-sources" class="fl-details" open><summary>导入镜像包或分区文件</summary>
       <div class="fl-sources">
         <div class="fl-source-row"><button id="fl-store" type="button">从镜像商店选择</button></div>
         <div class="fl-source-row"><label class="ft-field">镜像文件<input id="fl-files" type="file" multiple></label><button id="fl-upload" type="button">上传镜像</button></div>
         <div class="fl-source-row fl-source-url"><label class="ft-field">镜像 URL<input id="fl-url" type="url" placeholder="https://…/opensbi.itb" spellcheck="false"></label>
           <label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label>
           <button id="fl-download" type="button">从 URL 下载</button><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button></div>
-        <div class="fl-source-row"><label class="ft-field">已准备镜像<select id="fl-artifact"></select></label><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
+        <div class="fl-source-row"><label class="ft-field">当前镜像来源<select id="fl-artifact"></select></label><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
       </div>
     </details>
     <fieldset id="fl-delete-field" class="fl-alert" hidden><legend>确认删除镜像</legend>

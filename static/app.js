@@ -91,7 +91,7 @@
   $('b-image-store').addEventListener('click', function () { if (imageStore) imageStore.open(); });
   var flashing = window.SerialdFlashing && window.SerialdFlashing.create({
     byId: $, fetch: fetch, formatBytes: fmt,
-    openImageStore: function (choose) { if (imageStore) imageStore.open(choose); }
+    openImageStore: function (choose, picker) { if (imageStore) imageStore.open(choose, picker); }
   });
   var boardControl = window.SerialdBoardControl && window.SerialdBoardControl.create({
     byId: $, fetch: fetch, getView: function () { return terminalView.current; },

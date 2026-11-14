@@ -74,7 +74,7 @@ const server = http.createServer((req,res) => {
     res.setHeader('Content-Type','text/html');
     return res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/static/app.css"><body>'+dialog+
       '<script src="/static/i18n.js"></script><script src="/static/tasks.js"></script><script src="/static/flashing.js"></script><script>'+
-      'SerialdI18n.setLocale("zh-CN");window.ui=SerialdFlashing.create({byId:id=>document.getElementById(id),fetch:fetch,translate:SerialdI18n.translate,'+
+      'SerialdI18n.setLocale("zh-CN");window.ui=SerialdFlashing.create({byId:id=>document.getElementById(id),fetch:fetch,translate:SerialdI18n.translate,openImageStore:(choose,picker)=>{window.fixtureChooseFile=choose;window.fixturePicker=picker;},'+
       'formatBytes:n=>n>=1048576?(n/1048576).toFixed(1)+" MiB":n>=1024?(n/1024).toFixed(1)+" KiB":n+" B"});ui.open('+JSON.stringify(target)+');</script></body></html>');
   }
   if(url.pathname==='/api/tasks') return json({tasks:current?[current]:[]});
@@ -128,7 +128,12 @@ let chrome,ws;
   await rpc('DOM.setFileInputFiles',{nodeId:input.nodeId,files:[path.resolve(file)]});
   await evaluate('document.querySelector("#fl-upload").click()');
   await wait('document.querySelectorAll("#fl-artifact option").length===2');
-  await evaluate('(()=>{const row=[...document.querySelectorAll(".fl-partition")].find(r=>r.partitionId==="opensbi");row.checkbox.checked=true;row.checkbox.dispatchEvent(new Event("change"));row.artifactSelect.value="'+artifactId+'";document.querySelector("#fl-sources").open=false;document.querySelector("#fl-partitions-field").scrollIntoView({block:"start"})})()');
+  await evaluate('(()=>{const row=[...document.querySelectorAll(".fl-partition")].find(r=>r.partitionId==="opensbi");row.chooseFile.click();})()');
+  assert.equal(await evaluate('window.fixturePicker.fileOnly'),true);
+  await evaluate('window.fixtureChooseFile('+JSON.stringify(artifact)+')');
+  assert.equal(await evaluate('document.querySelectorAll(".fl-partition input:checked").length'),1,'file selection checks only its own partition');
+  assert.equal(await evaluate('[...document.querySelectorAll(".fl-partition")].find(r=>r.partitionId==="opensbi").artifactSelect.value'),artifactId,'file is bound without a second selection');
+  await evaluate('document.querySelector("#fl-sources").open=false;document.querySelector("#fl-partitions-field").scrollIntoView({block:"start"})');
   await shot('nor-partitions-light-fixture');
   const download=await evaluate('fetch(document.querySelector("#fl-backups a").href).then(r=>r.arrayBuffer()).then(b=>b.byteLength)');assert.equal(download,before.length);
   await evaluate('document.querySelector("#fl-select").focus()');

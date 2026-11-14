@@ -9,10 +9,10 @@ class Element {
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function setup(request){
-  const ids={};for(const id of ['image-store-dialog','is-list','is-search','is-path','is-status','is-refresh','is-downloads','is-source','is-close'])ids[id]=new Element();
+  const ids={};for(const id of ['is-title','image-store-dialog','is-list','is-search','is-path','is-status','is-refresh','is-downloads','is-source','is-close'])ids[id]=new Element();
   ids['is-source'].value='public';let consent=false;const watches=[];
   const window={crypto:{randomUUID:()=> 'fixture-request'}, confirm:()=>consent,
-    SerialdTasks:{createClient:()=>({request,watch:(task,ctx,update)=>{watches.push({task,update});return new Promise(()=>{});}})}};
+    SerialdTasks:{createClient:()=>({request,watch:(task,ctx,update)=>new Promise((resolve,reject)=>watches.push({task,update,resolve,reject}))})}};
   vm.runInNewContext(fs.readFileSync('static/image-store.js','utf8'),{window,document:{createElement:()=>new Element()}});
   const store=window.SerialdImageStore.create({byId:id=>ids[id],formatBytes:n=>n+' bytes'});
   function buttons(node=ids['is-list']){return node.children.flatMap(n=>[n,...buttons(n)]).filter(n=>n.events.click);}
@@ -39,5 +39,35 @@ function setup(request){
   local.buttons().find(n=>n.textContent==='删除').fire();assert.equal(deleted,0);
   local.consent(true);local.buttons().find(n=>n.textContent==='删除').fire();await flush();assert.equal(deleted,1);
   local.buttons().find(n=>n.textContent==='使用').fire();assert.equal(selected,1);assert.equal(local.ids['image-store-dialog'].open,false);
-  console.log('5 image-store tests passed: stale source, duplicate download, task cancellation, unknown submission, confirmed cache deletion/selection.');
+  const archive={id:'archive',name:'firmware.tar.gz',kind:'package',url:'https://repo/firmware.tar.gz',size:100};
+  const scoped=setup(url=>Promise.resolve(url.startsWith('/api/image-catalog')?{entries:[archive,item]}:{artifacts:[archive,{id:'raw',name:'opensbi.itb',size:1}],tasks:[]}));
+  scoped.store.open(()=>{}, {fileOnly:true,partition:'opensbi'});await flush();
+  assert.equal(scoped.ids['is-source'].value,'local');
+  await scoped.source('public');
+  assert.ok(!scoped.ids['is-list'].textContent.includes('firmware.tar.gz'));
+  assert.ok(scoped.ids['is-list'].textContent.includes('image.img'));
+  await scoped.source('local');assert.ok(!scoped.ids['is-list'].textContent.includes('firmware.tar.gz'));
+  assert.ok(scoped.ids['is-list'].textContent.includes('opensbi.itb'));
+  function autoHarness(){return setup(url=>Promise.resolve(url.startsWith('/api/image-catalog')?{entries:[item,{...item,name:'other.img',url:'https://repo/other.img'}]}:{task:{id:url==='never'?'none':Math.random().toString(),state:'running'}}));}
+  const auto=autoHarness();let chosen=null;
+  auto.store.open(value=>{chosen=value;});await flush();
+  auto.buttons().find(n=>n.textContent==='下载并使用').fire();await flush();
+  auto.watches[0].resolve({artifact:{id:'downloaded',name:'image.img',state:'ready'}});await flush();
+  assert.equal(chosen.id,'downloaded');assert.equal(auto.ids['image-store-dialog'].open,false);
+  const staleDownload=autoHarness();let oldChoices=0,newChoices=0;
+  staleDownload.store.open(()=>{oldChoices++;});await flush();staleDownload.buttons().find(n=>n.textContent==='下载并使用').fire();await flush();
+  staleDownload.ids['is-close'].fire();staleDownload.store.open(()=>{newChoices++;});await flush();
+  staleDownload.watches[0].resolve({artifact:{id:'old-download',name:'image.img'}});await flush();
+  assert.equal(oldChoices,0);assert.equal(newChoices,0);assert.equal(staleDownload.ids['image-store-dialog'].open,true);
+  const latest=autoHarness();let latestChoice=null;
+  latest.store.open(value=>{latestChoice=value;});await flush();
+  latest.buttons().filter(n=>n.textContent==='下载并使用').forEach(n=>n.fire());await flush();
+  latest.watches[0].resolve({artifact:{id:'first',name:'image.img'}});await flush();assert.equal(latestChoice,null);
+  latest.watches[1].resolve({artifact:{id:'second',name:'other.img'}});await flush();assert.equal(latestChoice.id,'second');
+  const changed=autoHarness();
+  changed.store.open(()=>{throw new Error('target changed');});await flush();changed.buttons().find(n=>n.textContent==='下载并使用').fire();await flush();
+  changed.watches[0].resolve({artifact:{id:'changed',name:'image.img'}});await flush();
+  assert.equal(changed.ids['image-store-dialog'].open,true);assert.equal(changed.ids['is-status'].textContent,'target changed');
+  assert.ok(!changed.ids['is-downloads'].textContent.includes('已返回当前选择'));
+  console.log('10 image-store tests passed: filtering, direct use, stale dialogs, changed targets, latest selection and existing task safety.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

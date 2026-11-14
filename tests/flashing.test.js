@@ -20,7 +20,7 @@ class Element {
   close() { this.open = false; }
 }
 function harness(storage) {
-  const elements = new Map(), requests = [], timers = new Map(); let timer = 0, imageChoice;
+  const elements = new Map(), requests = [], timers = new Map(); let timer = 0, imageChoice, imagePicker;
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('fl-mode').value = 'full'; get('fl-verify').value = 'if-supported';
   const sandbox = {document: {createElement: () => new Element()}, Uint8Array, Date, Math,
@@ -32,13 +32,13 @@ function harness(storage) {
   sandbox.window = sandbox;
   vm.runInNewContext(source, sandbox);
   const api = sandbox.SerialdFlashing.create({byId: get, formatBytes: value => value + ' B',
-    openImageStore: choose => {imageChoice=choose;},
+    openImageStore: (choose,picker) => {imageChoice=choose;imagePicker=picker;},
     fetch: (url, options = {}) => new Promise((resolve, reject) => requests.push({url, options,
       payload: options.body && JSON.parse(options.body), reject,
       resolve: (data, status = 200) => resolve({ok: status < 400, status, json: async () => data})}))});
   function take(prefix) { const index = requests.findIndex(entry => entry.url.startsWith(prefix));
     assert.notEqual(index, -1, 'missing request ' + prefix); return requests.splice(index, 1)[0]; }
-  return {api, get, requests, timers, take, chooseImage:item=>imageChoice(item)};
+  return {api, get, requests, timers, take, chooseImage:item=>imageChoice(item), imagePicker:()=>imagePicker};
 }
 async function drain() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
 const board = {key: 'board-1', serial: 'SN-1', label: 'Pico'};
@@ -64,6 +64,58 @@ test('image store selection only prepares current board and stale choices cannot
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
   h.api.open({...board,key:'board-2',serial:'SN-2'});
   assert.throws(()=>h.chooseImage(artifact),/当前设备或任务状态已变化/);
+});
+
+test('partition rows offer only the active package mapping, never arbitrary cached archives', async () => {
+  const h=harness(), pkg={id:'package',name:'firmware.tar.gz',size:1024}, other={id:'unrelated',name:'other.zip',size:2000};
+  h.api.open(board);h.take('/api/flash-capabilities').resolve({...capabilities,artifacts:[artifact,pkg,other]});await drain();
+  h.take('/api/tasks').resolve({tasks:[]});await drain();
+  let row=h.get('fl-partitions').children[0];
+  assert.equal(row.artifactSelect.children.some(o=>o.value===pkg.id||o.value===other.id),false);
+  row.checkbox.checked=true;row.checkbox.emit('change');
+  h.get('fl-artifact').value=pkg.id;h.get('fl-artifact').emit('change');
+  row=h.get('fl-partitions').children[0];
+  assert.equal(row.artifactSelect.value,pkg.id);
+  assert.match(row.artifactSelect.children.find(o=>o.value===pkg.id).textContent,/匹配包内分区.*rootfs-a/);
+  assert.equal(row.artifactSelect.children.some(o=>o.value===other.id),false);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('single selected partition receives a chosen raw file without a second selection', async () => {
+  const h=harness();await open(h);let rows=h.get('fl-partitions').children;
+  rows[0].checkbox.checked=true;rows[0].checkbox.emit('change');
+  h.get('fl-store').click();h.chooseImage({id:'new-file',name:'opensbi.itb',size:32});
+  rows=h.get('fl-partitions').children;
+  assert.equal(rows[0].artifactSelect.value,'new-file');assert.equal(rows[1].artifactSelect.value,'');
+  assert.equal(rows[1].checkbox.checked,false);assert.equal(h.get('fl-start').disabled,true);
+});
+
+test('partition file picker excludes packages and binds only its requested row', async () => {
+  const h=harness();await open(h);let rows=h.get('fl-partitions').children;
+  rows[1].chooseFile.click();assert.equal(h.imagePicker().fileOnly,true);assert.equal(h.imagePicker().partition,'rootfs');
+  assert.throws(()=>h.chooseImage({id:'bad',name:'firmware.tar.gz'}),/整包请在镜像来源中导入/);
+  h.chooseImage({id:'replacement',name:'rootfs.ext4',size:32});rows=h.get('fl-partitions').children;
+  assert.equal(rows[1].artifactSelect.value,'replacement');assert.equal(rows[1].checkbox.checked,true);
+  assert.equal(rows[0].artifactSelect.value,'');assert.equal(rows[0].checkbox.checked,false);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('a raw file is not automatically duplicated into multiple selected partitions', async () => {
+  const h=harness();await open(h);const rows=h.get('fl-partitions').children;
+  rows.forEach(row=>{row.checkbox.checked=true;row.checkbox.emit('change');});
+  h.get('fl-store').click();h.chooseImage({id:'new-raw',name:'payload.bin',size:32});
+  assert.equal(h.get('fl-partitions').children.some(row=>row.artifactSelect.value==='new-raw'),false);
+});
+
+test('a per-partition raw override keeps the source package for the other partition mappings', async () => {
+  const h=harness(), pkg={id:'package',name:'firmware.tar.gz',size:1024};
+  h.api.open(board);h.take('/api/flash-capabilities').resolve({...capabilities,artifacts:[pkg]});await drain();
+  h.take('/api/tasks').resolve({tasks:[]});await drain();
+  h.get('fl-mode').value='partitions';h.get('fl-artifact').value=pkg.id;h.get('fl-artifact').emit('change');
+  h.get('fl-partitions').children.forEach(row=>{row.checkbox.checked=true;row.checkbox.emit('change');});
+  h.get('fl-partitions').children[1].chooseFile.click();h.chooseImage({id:'override',name:'rootfs.ext4',size:32});
+  const rows=h.get('fl-partitions').children;
+  assert.equal(h.get('fl-artifact').value,pkg.id);assert.equal(rows[0].artifactSelect.value,pkg.id);assert.equal(rows[1].artifactSelect.value,'override');
 });
 
 test('flash preview pins exact storage/partition and upload reference, never a host command', async () => {

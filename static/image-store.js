@@ -5,6 +5,7 @@
     var $ = options.byId, client = global.SerialdTasks.createClient(options.fetch);
     var source = 'public', path = '', generation = 0, entries = [], choose = null;
     var active = Object.create(null), unknown = false, opening = false;
+    var picker = {}, selectionSession = 0;
     var labels = {'package': '镜像包', 'disk-image': '磁盘镜像', 'partition-file': '分区文件'};
     function text(tag, value, parent) {
       var node = document.createElement(tag); node.textContent = value;
@@ -16,12 +17,15 @@
     function status(value) { $('is-status').textContent = value; }
     function selected(item) {
       if (!choose) return;
-      try { choose(item); $('image-store-dialog').close(); }
-      catch (error) { status(error.message); }
+      ++selectionSession;
+      try { choose(item); $('image-store-dialog').close(); return true; }
+      catch (error) { status(error.message); return false; }
     }
+    function packageFile(item) { return /\.(tar(?:\.(?:gz|xz|bz2|zst))?|tgz|zip|7z)$/i.test(item.name || ''); }
     function render(rows, local) {
       var box = $('is-list'), filter = $('is-search').value.toLowerCase(); box.textContent = '';
-      rows.filter(function (item) { return item.name.toLowerCase().includes(filter); }).forEach(function (item) {
+      rows.filter(function (item) { return item.name.toLowerCase().includes(filter)
+        && (!picker.fileOnly || item.kind === 'directory' || !packageFile(item)); }).forEach(function (item) {
         var row = text('div', '', box); row.className = 'is-row';
         var main = text('div', '', row); main.className = 'is-main';
         if (item.kind === 'directory') {
@@ -44,12 +48,12 @@
               }).catch(function (error) { status(error.message); remove.disabled = false; });
             });
           } else {
-            var download = button('下载到控制机', row, function () { startDownload(item, download); });
+            var download = button(choose ? '下载并使用' : '下载到控制机', row, function () { startDownload(item, download); });
             download.disabled = unknown || !!active[item.url];
           }
         }
       });
-      if (!box.children.length) text('p', '当前目录没有匹配的受支持镜像。', box).className = 'log-note';
+      if (!box.children.length) text('p', picker.fileOnly ? '当前目录没有可直接替换的分区文件。' : '当前目录没有匹配的受支持镜像。', box).className = 'log-note';
     }
     function breadcrumbs() {
       var box = $('is-path'); box.textContent = '';
@@ -84,7 +88,7 @@
       } catch (error) { if (seq === generation) status(error.message); }
       finally { if (seq === generation) $('is-refresh').disabled = false; }
     }
-    function follow(task, key) {
+    function follow(task, key, useAfterDownload) {
       if (Object.values(active).includes(task.id)) return;
       active[key] = task.id;
       var box = text('div', '', $('is-downloads'));
@@ -99,8 +103,11 @@
         var p = current.progress || {};
         progress.textContent = '控制机下载：' + options.formatBytes(p.done || 0)
           + (p.total ? ' / ' + options.formatBytes(p.total) : '');
-      }).then(function () {
-        progress.textContent = '镜像已保存到控制机，可从“已下载”中选择。';
+      }).then(function (result) {
+        if (useAfterDownload && useAfterDownload.session === selectionSession && choose === useAfterDownload.choose
+            && $('image-store-dialog').open && result.artifact) {
+          progress.textContent = selected(result.artifact) ? '下载完成，已返回当前选择。' : '下载完成，请重新选择替换目标。';
+        } else progress.textContent = '镜像已保存到控制机，可从“已下载”中选择。';
         if (source === 'local' && $('image-store-dialog').open) loadLibrary();
       }).catch(function (error) { progress.textContent = error.message; })
         .finally(function () { delete active[key]; cancel.remove(); if (source !== 'local') render(entries, false); });
@@ -108,23 +115,28 @@
     async function startDownload(item, button) {
       if (unknown || active[item.url]) return;
       button.disabled = true; active[item.url] = 'submitting';
+      var useAfterDownload = choose ? {choose:choose,session:++selectionSession} : null;
       var id = global.crypto && global.crypto.randomUUID ? global.crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
       try {
         var result = await client.request('/api/image-download', {url:item.url,name:item.name,request_id:id,actor:'web'});
-        delete active[item.url]; follow(result.task, item.url);
+        delete active[item.url]; follow(result.task, item.url, useAfterDownload);
       } catch (error) {
         delete active[item.url];
         if (!error.result) { unknown = true; status('提交结果未知，请打开“已下载”检查原下载任务；不会自动重新提交。'); }
         else { status(error.message); button.disabled = false; }
       }
     }
-    function open(onChoose) {
+    function open(onChoose, configuration) {
+      ++selectionSession; picker = configuration || {};
       choose = typeof onChoose === 'function' ? onChoose : null;
+      $('is-title').textContent = picker.fileOnly ? '选择分区文件' + (picker.partition ? ' · ' + picker.partition : '') : '镜像商店';
       if (!$('image-store-dialog').open) $('image-store-dialog').showModal();
       if (!opening) { opening = true; source = $('is-source').value || 'public'; }
+      if (picker.fileOnly) { source = 'local'; path = ''; $('is-source').value = 'local'; }
       load();
     }
-    $('is-close').addEventListener('click', function () { ++generation; $('image-store-dialog').close(); });
+    $('is-close').addEventListener('click', function () { ++generation; ++selectionSession; $('image-store-dialog').close(); });
+    $('image-store-dialog').addEventListener('cancel', function () { ++selectionSession; });
     $('is-source').addEventListener('change', function () { source = $('is-source').value; path = ''; load(); });
     $('is-refresh').addEventListener('click', function () { load(true); });
     $('is-search').addEventListener('input', function () { render(entries, source === 'local'); });

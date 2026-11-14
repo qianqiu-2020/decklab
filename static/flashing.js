@@ -96,6 +96,52 @@
       if (artifact && /\.(itb|ext[234]|f2fs|squashfs|ubifs|dtb)$/i.test(artifact.name || '')
           && !(task && ['queued', 'running'].includes(task.state))) $('fl-mode').value = 'partitions';
     }
+    function packageFile(artifact) {
+      return artifact && /\.(tar(?:\.(?:gz|xz|bz2|zst))?|tgz|zip|7z)$/i.test(artifact.name || '');
+    }
+    function partitionOptions(select, selected, storage, partition) {
+      select.textContent = '';
+      text('option', '选择分区内容', select).value = '';
+      var seen = Object.create(null), source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
+      function add(item, mapped) {
+        var key = item.id || item.artifact_id;
+        if (!key || seen[key]) return;
+        seen[key] = true;
+        var label = mapped ? translate('匹配包内分区') + ' ' + partition + ' · ' + item.name : item.name + ' · ' + format(item.size);
+        var option = text('option', label, select); option.value = key; option.dataset.i18nIgnore = '';
+      }
+      artifacts.filter(function (item) { return !packageFile(item); }).forEach(function (item) { add(item, false); });
+      if (packageFile(source)) add(source, true);
+      // Prepared candidates are already bound by the executor's partition map.
+      // Never offer another partition's candidate or every cached archive as a file.
+      payloadCandidates.forEach(function (candidate) {
+        if (candidate.storage && candidate.storage !== storage || candidate.partition && candidate.partition !== partition) return;
+        var known = artifacts.find(function (item) { return item.id === (candidate.id || candidate.artifact_id); });
+        if (packageFile(known)) {
+          if (!packageFile(source) || source.id === known.id) add(known, true);
+        } else add(known || candidate, !!(candidate.storage && candidate.partition));
+      });
+      select.value = seen[selected] ? selected : '';
+    }
+    function addSource(artifact, target) {
+      var source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
+      artifacts = artifacts.filter(function (item) { return item.id !== artifact.id; }).concat([artifact]);
+      selectPayloadMode(artifact);
+      // A partition override does not replace the package supplying other rows
+      // (or its RAM preparation materials).
+      var anchor = packageFile(source) && !packageFile(artifact) && $('fl-mode').value === 'partitions' ? source.id : artifact.id;
+      artifactOptions($('fl-artifact'), anchor); renderPartitions();
+      var rows = Array.from($('fl-partitions').children).filter(function (row) { return row.checkbox; });
+      var selected = target ? rows.filter(function (row) { return row.storageId === target.storage && row.partitionId === target.partition; })
+        : rows.filter(function (row) { return row.checkbox.checked; });
+      if (target && !selected.length) throw new Error('当前设备或任务状态已变化，请重新选择。');
+      if (packageFile(artifact) || selected.length === 1) selected.forEach(function (row) {
+        if (Array.from(row.artifactSelect.children).some(function (option) { return option.value === artifact.id; })) {
+          row.artifactSelect.value = artifact.id; row.checkbox.checked = true;
+        }
+      });
+      invalidatePlan(); renderReplacementInfo(null);
+    }
     function invalidatePlan() {
       dismissDelete();
       plan = null; requestId = ''; submissionUnknown = false;
@@ -168,8 +214,9 @@
       Array.from(rows).forEach(function (row) {
         if (row.checkbox) row.checkbox.disabled = busy || uploading || !!active && !selecting || nor && !selecting;
         if (row.artifactSelect) row.artifactSelect.hidden = nor && !row.checkbox.checked;
-        if (row.replacementField) row.replacementField.dataset.empty = nor && !row.checkbox.checked ? 'true' : '';
+        if (row.replacementField) row.replacementField.dataset.empty = nor && !row.checkbox.checked && !row.chooseFile ? 'true' : '';
         if (row.artifactSelect) row.artifactSelect.disabled = busy || uploading || !!active && !selecting || nor && (!selecting || !row.checkbox.checked);
+        if (row.chooseFile) row.chooseFile.disabled = busy || uploading || submissionUnknown || !!active && !selecting || nor && !selecting;
       });
     }
     function awaitingSelection(current) {
@@ -311,14 +358,34 @@
           var select = document.createElement('select');
           select.setAttribute('aria-label', translate('替换文件') + ' · ' + (partition.name || partition.id));
           var saved = previous[storage.id + '/' + (partition.id || partition.name)];
-          var chosen = saved && artifacts.concat(payloadCandidates).some(function (item) { return (item.id || item.artifact_id) === saved.artifact; }) ? saved.artifact : norContext() ? '' : $('fl-artifact').value;
-          artifactOptions(select, chosen, payloadCandidates); replacement.appendChild(select);
+          var chosen = saved ? saved.artifact : '';
+          partitionOptions(select, chosen, storage.id, partition.id || partition.name); replacement.appendChild(select);
           checkbox.checked = !!(saved && saved.checked);
           var payloadInfo = document.createElement('div'); replacement.appendChild(payloadInfo); row.payloadInfo = payloadInfo;
           row.appendChild(replacement); row.checkbox = checkbox; row.artifactSelect = select; row.replacementField = replacement;
           row.storageId = storage.id; row.partitionId = partition.id || partition.name;
+          if (options.openImageStore) {
+            var chooseFile = text('button', '从商店选择文件', replacement); chooseFile.type = 'button'; chooseFile.className = 'fl-choose-file'; row.chooseFile = chooseFile;
+            chooseFile.addEventListener('click', function () {
+              if (chooseFile.disabled) return;
+              var context = board, seq = sequence, taskId = task && task.id, target = {storage:row.storageId,partition:row.partitionId};
+              options.openImageStore(function (artifact) {
+                var current = Array.from($('fl-partitions').children).find(function (item) {
+                  return item.storageId === target.storage && item.partitionId === target.partition;
+                });
+                if (!same(context, seq) || (task && task.id) !== taskId || !current || current.chooseFile.disabled) throw new Error('当前设备或任务状态已变化，请重新选择。');
+                if (packageFile(artifact)) throw new Error('请选择直接写入该分区的文件；整包请在镜像来源中导入。');
+                addSource(artifact, target); status('已选择分区文件；请预览写入范围。');
+              }, {fileOnly:true,partition:partition.name || partition.id});
+            });
+          }
           checkbox.addEventListener('change', function () {
-            if (checkbox.checked && !select.value && artifacts.length === 1) select.value = artifacts[0].id;
+            if (checkbox.checked && !select.value) {
+              var source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
+              var checked = Array.from(box.children).filter(function (item) { return item.checkbox && item.checkbox.checked; });
+              if (source && (packageFile(source) || checked.length === 1)
+                  && Array.from(select.children).some(function (option) { return option.value === source.id; })) select.value = source.id;
+            }
             invalidatePlan(); renderReplacementInfo(null);
           });
           select.addEventListener('change', function () { invalidatePlan(); renderReplacementInfo(null); });
@@ -856,9 +923,7 @@
         if (downloadTask.state !== 'completed') throw new Error(downloadTask.error || '镜像下载未完成');
         var artifact = (downloadTask.result || {}).artifact;
         if (!artifact || artifact.state !== 'ready') throw new Error('镜像尚未准备好');
-        artifacts = artifacts.filter(function (item) { return item.id !== artifact.id; }).concat([artifact]);
-        selectPayloadMode(artifact);
-        artifactOptions($('fl-artifact'), artifact.id); renderPartitions(); invalidatePlan();
+        addSource(artifact);
         if (norContext()) $('fl-sources').open = false;
         downloadRequest = null;
         status('镜像已下载并校验 SHA-256；请选择写入范围并预览。');
@@ -925,8 +990,8 @@
           }
         }
         if (same(selected, seq)) {
-          if (files.length === 1) selectPayloadMode(artifacts[artifacts.length - 1]);
-          invalidatePlan(); artifactOptions($('fl-artifact'), artifacts[artifacts.length - 1].id); renderPartitions();
+          if (files.length === 1) addSource(artifacts[artifacts.length - 1]);
+          else { invalidatePlan(); artifactOptions($('fl-artifact'), artifacts[artifacts.length - 1].id); renderPartitions(); }
           if (norContext()) $('fl-sources').open = false;
           status(task && ['queued', 'running'].indexOf(task.state) >= 0 && awaitingSelection(task)
             ? (norContext() ? '' : '载荷已准备，请在原任务选择实际分区并预览。')
@@ -987,7 +1052,10 @@
       }
     });
     $('fl-mode').addEventListener('change', invalidatePlan);
-    $('fl-artifact').addEventListener('change', invalidatePlan);
+    $('fl-artifact').addEventListener('change', function () {
+      var selected = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
+      if (selected) addSource(selected); else { renderPartitions(); invalidatePlan(); }
+    });
     $('fl-delete').addEventListener('click', beginDelete);
     $('fl-delete-confirm').addEventListener('click', confirmDelete);
     $('fl-delete-cancel').addEventListener('click', dismissDelete);
@@ -996,12 +1064,10 @@
     $('fl-upload').addEventListener('click', upload); $('fl-plan').addEventListener('click', makePlan);
     $('fl-store').addEventListener('click', function () {
       if (!board || $('fl-store').disabled || !options.openImageStore) return;
-      var selected = board, seq = sequence;
+      var selected = board, seq = sequence, taskId = task && task.id;
       options.openImageStore(function (artifact) {
-        if (!same(selected, seq) || $('fl-store').disabled) throw new Error('当前设备或任务状态已变化，请重新选择。');
-        artifacts = artifacts.filter(function (item) { return item.id !== artifact.id; }).concat([artifact]);
-        selectPayloadMode(artifact); artifactOptions($('fl-artifact'), artifact.id);
-        renderPartitions(); invalidatePlan();
+        if (!same(selected, seq) || (task && task.id) !== taskId || $('fl-store').disabled) throw new Error('当前设备或任务状态已变化，请重新选择。');
+        addSource(artifact);
         status('已选择控制机缓存中的镜像；请核对写入范围并预览。');
       });
     });

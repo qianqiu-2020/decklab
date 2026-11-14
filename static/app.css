@@ -356,6 +356,7 @@
   .fl-partition label>span{font-family:var(--font-mono)}
   .fl-partition input[type="checkbox"]{margin-top:2px;flex:none}
   .fl-partition select{min-width:0;width:100%}
+  .fl-choose-file{margin-top:6px;font-size:12px}
   .fl-partition small,.fl-content small{display:block;color:var(--ink-3);margin-top:3px;overflow-wrap:anywhere;font-weight:400;font-family:inherit;font-size:11px}
   .fl-partition label small{font-family:var(--font-mono)}
   .fl-content{min-width:0;overflow-wrap:anywhere}.fl-content-title{display:block;font-weight:600;color:var(--ink)}
