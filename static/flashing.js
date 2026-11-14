@@ -182,20 +182,54 @@
     function renderContent(parent, content, fallback, omitSize) {
       parent.textContent = '';
       if (!content) { text('small', fallback || '尚未读取', parent); return; }
-      var labels = {'unknown': '版本未知', 'not-applicable': '配置内容，无软件版本',
-        'empty': '空白分区', 'invalid-format': '无法解析内容格式'};
+      var labels = {'unknown': content.format === 'compressed' ? '压缩镜像，未解析内容' : '版本未知',
+        'not-applicable': '配置内容，无软件版本', 'empty': '空白分区', 'invalid-format': '无法解析内容格式',
+        'no-version-files': '未找到版本文件'};
       var version = text('span', content.version || labels[content.version_state] || '版本未知', parent);
       version.className = 'fl-content-title';
       if (content.version) version.dataset.i18nIgnore = '';
       if (content.description) text('small', content.description, parent).dataset.i18nIgnore = '';
       if (content.built_at) text('small', translate('构建时间') + ' · ' + content.built_at, parent).dataset.i18nIgnore = '';
       if (!omitSize && content.size !== undefined) text('small', format(content.size), parent).dataset.i18nIgnore = '';
+      renderSystem(parent, content);
       if (content.sha256) {
         var details = document.createElement('details');
         text('summary', '内容 SHA-256', details);
         text('small', content.sha256, details).className = 'fl-hash';
         parent.appendChild(details);
       }
+    }
+    // OS image facts come from the payload bytes; every value is data, never markup.
+    function line(parent, label, value) {
+      var node = text('small', translate(label) + ' · ' + value, parent);
+      node.dataset.i18nIgnore = ''; return node;
+    }
+    function systemSummary(content) {
+      var fs = content.filesystem || {};
+      return [fs.type, fs.label].filter(Boolean).join(' · ');
+    }
+    function renderSystem(parent, content) {
+      if (content.sparse) line(parent, 'Android sparse，展开后', format(content.expanded_size || 0));
+      if (content.filesystem) line(parent, '文件系统', systemSummary(content));
+      (content.kernels || []).slice(0, 3).forEach(function (kernel) { line(parent, '内核', kernel.release); });
+      if (!(content.kernels || []).length && (content.kernel_modules || []).length)
+        line(parent, '内核模块', content.kernel_modules.join(', '));
+      var boot = content.boot || {};
+      if (boot.loader && boot.loader !== content.version) line(parent, '引导程序', boot.loader);
+      if ((boot.entries || []).length) line(parent, '引导项', boot.entries.slice(0, 4).join(' ; '));
+      var parts = content.partitions || [];
+      if (!parts.length) return;
+      var details = document.createElement('details');
+      text('summary', translate('磁盘分区') + ' · ' + parts.length, details).dataset.i18nIgnore = '';
+      parts.forEach(function (part) {
+        var inner = part.content || part, facts = [part.name || ('#' + part.index), format(part.size)];
+        if (part.filesystem) facts.push(systemSummary(part));
+        var found = (part.versions || [])[0] || (inner.version ? {value: inner.version} : null);
+        if (found) facts.push(found.value);
+        (part.kernels || []).slice(0, 1).forEach(function (kernel) { facts.push('Linux ' + kernel.release); });
+        text('small', facts.join(' · '), details).dataset.i18nIgnore = '';
+      });
+      parent.appendChild(details);
     }
     function renderBackups() {
       var box = $('fl-backups'), details = task && task.flash || {};
@@ -541,6 +575,15 @@
         if (!compact) cells.push(write.write_sha256 || write.sha256 || '未知');
         cells.forEach(function (item) { text('td', item, row); });
         table.appendChild(row);
+        var found = !norContext() && (value.payload_metadata || []).find(function (item) {
+          return item.content && item.storage === (write.storage || write.storage_id)
+            && (item.partition || '') === (write.partition || '') && (!item.sha256 || item.sha256 === write.sha256);
+        });
+        if (found) {
+          var infoRow = document.createElement('tr'), cell = document.createElement('td');
+          cell.setAttribute('colspan', String(columns.length)); cell.className = 'fl-content fl-write-content';
+          renderContent(cell, Object.assign({}, found.content, {sha256: ''}), '', true); infoRow.appendChild(cell); table.appendChild(infoRow);
+        }
         if (write.write_size > write.size) {
           var paddingRow = document.createElement('tr');
           var padding = text('td', '载荷 ' + write.size + ' 字节，扇区尾部补零 ' + (write.write_size - write.size) + ' 字节', paddingRow);

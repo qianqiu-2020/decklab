@@ -13,6 +13,7 @@ import queue
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import tempfile
 import threading
@@ -504,6 +505,10 @@ class LocalFlashExecutor:
         for value in list((result.get('plan') or {}).get('writes') or []) + list(result.get('payload_candidates') or []):
             part = value.get('partition')
             if part not in ('bootinfo', 'fsbl', 'env', 'esos', 'opensbi', 'uboot'):
+                if value.get('kind') in ('partition', 'disk') and value.get('path') and len(metadata) < 128:
+                    item = self._os_payload_metadata(value, root, seen)
+                    if item:
+                        metadata.append(item)
                 continue
             key = (value.get('storage'), part, value.get('sha256'))
             if key in seen or len(metadata) >= 128:
@@ -526,6 +531,43 @@ class LocalFlashExecutor:
             metadata.append({'storage': value.get('storage'), 'partition': part,
                              'sha256': content['sha256'], 'content': content})
         return metadata
+
+    @staticmethod
+    def _os_payload_metadata(value, root, seen):
+        """Filesystem/OS metadata for large partition or disk payloads without hashing them again."""
+        from .archive_io import open_archive
+        from .os_contents import ImageError, image_content
+        key = (value.get('storage'), value.get('partition') or value.get('target') or '', value.get('sha256'))
+        if key in seen:
+            return None
+        seen.add(key)
+        path = Path(value.get('path', ''))
+        # Descriptive only: payloads the executor streams from elsewhere are
+        # simply not inspected, so full-image plans never fail on metadata.
+        try:
+            if (not path.is_absolute() or not path.is_relative_to(root)
+                    or path.resolve(strict=True) != path):
+                return None
+        except OSError:
+            return None
+        size = value.get('size')
+        if type(size) is not int or size <= 0:
+            return None
+        with open_archive(path) as source:
+            before = os.fstat(source.fileno())
+            if before.st_size != size:
+                raise FlashRunnerError('OS payload size changed during metadata read')
+            try:
+                content = image_content(source, size, value.get('partition') or '', value.get('kind'))
+            except (ImageError, OSError, ValueError, IndexError, struct.error):
+                content = {'size': size, 'format': 'raw', 'version': None, 'version_state': 'unknown', 'versions': []}
+            after = os.fstat(source.fileno())
+        if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+            raise FlashRunnerError('OS payload changed during metadata read')
+        # The executor already hashed this exact file for the plan; reuse it.
+        content['sha256'] = value.get('sha256')
+        return {'storage': value.get('storage'), 'partition': value.get('partition') or '',
+                'kind': value.get('kind'), 'sha256': value.get('sha256'), 'content': content}
 
     def plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
              target_storage=None, inspection_scope=None):

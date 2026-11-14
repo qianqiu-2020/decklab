@@ -202,6 +202,34 @@ class FlashRunnerTests(unittest.TestCase):
         with self.assertRaises(FlashRunnerError):
             self.runner._payload_metadata(result, workspace)
 
+    def test_os_payload_metadata_reads_filesystem_facts_without_rehashing(self):
+        import gzip
+        disk = gzip.decompress((Path(__file__).parent / 'fixtures' / 'os-disk.img.gz').read_bytes())
+        workspace = self.runner._directory(self.runner.root / 'cache' / 'plan-os-metadata')
+        rootfs = workspace / 'rootfs.ext4'
+        rootfs.write_bytes(disk[12288 * 512:28672 * 512])
+        image = workspace / 'disk.img'
+        image.write_bytes(disk)
+        executor_digest = 'e' * 64
+        writes = [dict(storage='mmc', partition='rootfs', kind='partition', path=str(rootfs),
+                       size=rootfs.stat().st_size, sha256=executor_digest),
+                  dict(storage='mmc', partition='', target='mmc', kind='disk', path=str(image),
+                       size=image.stat().st_size, sha256='d' * 64)]
+        result = {'plan': {'writes': writes, 'digest': 'fixed'}, 'payload_candidates': writes[:1]}
+        info = self.runner._payload_metadata(result, workspace)
+        self.assertEqual([item['kind'] for item in info], ['partition', 'disk'])
+        self.assertEqual(info[0]['content']['version'], 'Bianbu 2.3.5 · 20260908194336')
+        self.assertEqual(info[0]['content']['kernels'][0]['release'], '6.6.63')
+        self.assertEqual(info[0]['content']['sha256'], executor_digest)
+        self.assertEqual(info[1]['content']['format'], 'gpt')
+        self.assertNotIn(str(workspace), str(info))
+        writes[0]['size'] += 1
+        with self.assertRaises(FlashRunnerError):
+            self.runner._payload_metadata(result, workspace)
+        writes[0].update(size=rootfs.stat().st_size, path=str(self.root / 'foreign.ext4'))
+        info = self.runner._payload_metadata(result, workspace)
+        self.assertEqual([item['kind'] for item in info], ['disk'], 'unmanaged OS payloads are skipped, not fatal')
+
     def automatic_binding(self):
         profile = {'id': 'auto-spacemit-gpt-v1', 'chip_family': 'k3', 'identity': {},
                    'bootrom_identity': {'version-IC': 'K3', 'version-brom': '1.0'},

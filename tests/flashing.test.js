@@ -75,6 +75,26 @@ test('flash preview pins exact storage/partition and upload reference, never a h
   assert.equal(h.get('fl-start').disabled, true, 'changing intent invalidates preview');
 });
 
+test('full-image preview shows OS payload facts as text under the matching write', async () => {
+  const h = harness(); await open(h);
+  h.get('fl-plan').click();
+  const preview = h.take('/api/flash-plan');
+  const content = {format: 'ext4', version: 'Bianbu 2.3.5 · 20260908194336', version_state: 'identified',
+    filesystem: {type: 'ext4', label: '<b>rootfs</b>'}, kernels: [{release: '6.6.63'}],
+    boot: {loader: 'GRUB 2.14', entries: ['/boot/vmlinuz-6.6.63']},
+    partitions: [{index: 1, name: 'esp', size: 4096, filesystem: {type: 'fat32'}, versions: [{value: 'GRUB 2.14'}]}]};
+  preview.resolve({plan: {id: 'plan-os', binding_revision: 7, digest: 'fixed', write_layout: false,
+    writes: [{storage: 'disk-b', partition: 'rootfs-b', size: 32, sha256: artifact.sha256}],
+    payload_metadata: [{storage: 'disk-b', partition: 'rootfs-b', sha256: 'f'.repeat(64), content},
+                       {storage: 'disk-b', partition: 'rootfs-b', sha256: artifact.sha256, content}]}}); await drain();
+  const text = h.get('fl-preview').textContent;
+  assert.match(text, /Bianbu 2\.3\.5 · 20260908194336/);
+  assert.match(text, /内核 · 6\.6\.63/); assert.match(text, /引导程序 · GRUB 2\.14/);
+  assert.match(text, /文件系统 · ext4 · <b>rootfs<\/b>/, 'payload labels stay literal text');
+  assert.match(text, /磁盘分区 · 1/); assert.match(text, /esp · .* · fat32 · GRUB 2\.14/);
+  assert.equal((text.match(/Bianbu 2\.3\.5/g) || []).length, 1, 'metadata for a different digest is ignored');
+});
+
 test('mirror deletion confirms the exact artifact, preserves cancelled previews and removes only its id', async () => {
   const h = harness(); h.api.open(board);
   h.take('/api/flash-capabilities').resolve({...capabilities,

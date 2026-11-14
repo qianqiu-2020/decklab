@@ -3,6 +3,9 @@
   'use strict';
   var dictionary = {
     "分区": "Partition", "偏移 / 容量": "Offset / capacity",
+    "压缩镜像，未解析内容": "Compressed image; contents not inspected", "未找到版本文件": "No version files found",
+    "Android sparse，展开后": "Android sparse, expanded", "文件系统": "Filesystem", "内核": "Kernel",
+    "内核模块": "Kernel modules", "引导程序": "Bootloader", "引导项": "Boot entries", "磁盘分区": "Disk partitions",
     "执行详情": "Execution details", "计划摘要": "Plan digest", "选区截止": "Selection deadline",
     "新刷写请先重新检测设备。": "Detect the device again before starting a new write.",
     "校验范围": "Verification scope", "回读 / 比较": "Read / compared",
