@@ -52,15 +52,13 @@ Source: "{#BundleDir}\*"; DestDir: "{app}"; Excludes: "data\*"; Flags: ignorever
 ; Runtime data belongs to the user: upgrades and uninstall leave it intact.
 Name: "{app}\data"; Flags: uninsneveruninstall
 
-#if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
-[Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Install-seriald-USB-Driver.ps1"""; Tasks: usbdriver; Flags: waituntilterminated runhidden; StatusMsg: "Installing USB flashing driver / 正在安装 USB 刷机驱动"
-#endif
-
 [Icons]
 Name: "{group}\DeckLab - 本机访问"; Filename: "{app}\Start-seriald.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"
 Name: "{group}\DeckLab - 局域网无密码"; Filename: "{app}\Start-seriald-LAN-Open.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"
 Name: "{group}\DeckLab - 局域网有密码"; Filename: "{app}\Start-seriald-LAN.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"
+#if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
+Name: "{group}\DeckLab - 安装 USB 刷机驱动"; Filename: "{app}\Install-seriald-USB-Driver.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"
+#endif
 Name: "{group}\卸载 DeckLab"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\DeckLab"; Filename: "{app}\Start-seriald.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"; Tasks: desktopicon
 
@@ -81,6 +79,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   LanguageFile, LanguageCode: String;
+  DriverResult: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
@@ -95,5 +94,19 @@ begin
       if not SaveStringToFile(LanguageFile, LanguageCode + #13#10, False) then
         RaiseException('Cannot save the application default language.');
     end;
+#if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
+    if WizardIsTaskSelected('usbdriver') then
+    begin
+      DriverResult := -1;
+      if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+        '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\Install-seriald-USB-Driver.ps1') + '"',
+        ExpandConstant('{app}'), SW_SHOW, ewWaitUntilTerminated, DriverResult) or (DriverResult <> 0) then
+      begin
+        Log('USB driver installation did not complete: ' + IntToStr(DriverResult));
+        if WizardSilent then RaiseException('USB driver installation did not complete. Run Install-seriald-USB-Driver.cmd.');
+        MsgBox('USB driver installation did not complete. Run Install-seriald-USB-Driver.cmd from the Start menu before flashing.', mbError, MB_OK);
+      end;
+    end;
+#endif
   end;
 end;

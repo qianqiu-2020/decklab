@@ -3,16 +3,16 @@
 当前包含可替换的板卡控制适配（BMC HTTP、固定外部命令），以及[本机刷机流程](#本机刷机流程)：开发板进入下载模式后，
 可在网页自动检测 USB 下载设备、上传镜像、预览完整镜像或指定分区的写入范围，
 并提交持久刷机任务；实际可写范围由已核实的设备能力决定。
-复位控制、串口采集和刷写执行保持独立。当前产品按 Linux/Windows 单机，或
-Linux/Windows 上位机加专用 Linux 控制机两种模式部署；多机的板卡操作集中在 Linux 控制机。
+复位控制、串口采集和刷写执行保持独立。推荐在 Linux 控制机安装完整 DeckLab，其他电脑直接用浏览器访问；Windows 也支持完整单机，Web/后端分离保留为高级选项。
 复位和进入下载模式可单独提交任务；刷机仍由用户确认后开始，不自动串联复位步骤。
 跨模式自动编排与进一步拆分硬件节点属于[架构设计](#刷机功能架构设计)的后续工作。
 Windows 单机硬件验收聚焦串口与刷机；复位在 Linux 控制机侧按适配器验收。
 软件回归不代表真实板型已完成刷机验证。
 
-Hardware actions are disabled by default. A host administrator can configure
+Custom reset/power actions are disabled by default. Complete installs automatically
+discover local USB download devices; a human still confirms flashing. An administrator can configure
 power-on, power-off, reset and an external flashing tool for specific board
-serials. This is an adapter interface, not a bundled relay or board flasher.
+serials. Reset/power actions use configured adapters; no relay hardware is assumed.
 Linux/POSIX uses an owned process group; Windows 10+ uses a Job Object.
 Native Windows runtime validation is a separate release gate, not proven by
 Linux mocks. Windows helpers should be EXEs (or an explicit interpreter plus
@@ -231,7 +231,7 @@ K3 NOR 固件包也可选择“指定分区”：包内表仅用于提取和校�
 
 ### 独立安装刷机组件
 
-本次 GitHub 正式版仅公开主程序，刷机组件由维护者或设备供应方单独提供。
+1.10.0 起默认[完整包](COMPLETE_INSTALL.md)内置执行器与 RAM 材料，无需本节的手工配置。以下用于历史 1.9.0 精简包或管理员替换外部组件，刷机组件由维护者或设备供应方提供。
 安装操作在硬件后端主机完成；分离部署时不放在纯 Web 节点。
 
 1. 取得与上位机系统和架构匹配的 `decklab-flash`（Windows 为 `decklab-flash.exe`），

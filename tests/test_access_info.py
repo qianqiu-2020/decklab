@@ -39,3 +39,19 @@ class AccessTests(unittest.TestCase):
             opener=Opener();result=links({'SERIALD_BASE':directory},opener)
             self.assertEqual(opener.url,'http://[::1]:1235/api/access')
             self.assertEqual(result['urls'],['http://[::1]:1235/'])
+
+    def test_real_service_share_link_grants_browser_cookie_without_owner_password(self):
+        from urllib.request import build_opener, HTTPCookieProcessor, ProxyHandler
+        from http.cookiejar import CookieJar
+        from urllib.parse import urlsplit
+        from test_connection_access import protected_connection
+        with protected_connection() as fixture, tempfile.TemporaryDirectory() as directory:
+            port=str(urlsplit(fixture.url).port)
+            result=links({'SERIALD_BASE':directory,'SERIALD_BIND':'127.0.0.1','SERIALD_PORT':port,'SERIALD_AUTH_TOKEN':fixture.owner_token})
+            opener=build_opener(ProxyHandler({}), HTTPCookieProcessor(CookieJar()))
+            # Follow the existing share redirect and then access authenticated API.
+            with opener.open(result['urls'][0],timeout=3) as response:
+                self.assertEqual(response.status,200)
+            with opener.open(fixture.url+'/api/access',timeout=3) as response:
+                self.assertFalse(json.load(response)['open_access'])
+            self.assertNotIn(fixture.owner_token,json.dumps(result))

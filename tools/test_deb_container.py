@@ -4,6 +4,7 @@ No host mounts, devices, published ports or privileged mode. This tests real dpk
 scripts and installed entrypoints, not systemd activation or real serial adapters.
 """
 import argparse
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -278,6 +279,15 @@ def main():
             subprocess.run(['docker', 'exec', name, 'apt-get', 'update', '-qq'], check=True, timeout=300)
             subprocess.run(['docker', 'exec', '-e', 'DEBIAN_FRONTEND=noninteractive', name,
                             'apt-get', 'install', '-y', initial], check=True, timeout=300)
+            if args.upgrade_from:
+                # Resolve new system dependencies while retaining the old
+                # application. Only DeckLab installation/runtime are accepted
+                # offline; apt's ordinary OS dependency resolution is online.
+                depends = subprocess.check_output(['dpkg-deb', '--field', str(package), 'Depends'], text=True)
+                packages = [re.match(r'[a-z0-9][a-z0-9+.-]*', item.strip()).group(0)
+                            for item in depends.split(',') if item.strip()]
+                subprocess.run(['docker', 'exec', '-e', 'DEBIAN_FRONTEND=noninteractive', name,
+                                'apt-get', 'install', '-y', *packages], check=True, timeout=300)
             subprocess.run(['docker', 'network', 'disconnect', 'bridge', name], check=True)
             subprocess.run(['docker', 'exec', name, 'python3', '/tmp/check.py'], check=True, timeout=180)
             subprocess.run(['docker', 'inspect', '--format', '{{.Image}}', name], check=True)

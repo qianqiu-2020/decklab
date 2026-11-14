@@ -20,7 +20,7 @@ class Element {
   close() { this.open = false; }
 }
 function harness(storage) {
-  const elements = new Map(), requests = [], timers = new Map(); let timer = 0;
+  const elements = new Map(), requests = [], timers = new Map(); let timer = 0, imageChoice;
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('fl-mode').value = 'full'; get('fl-verify').value = 'if-supported';
   const sandbox = {document: {createElement: () => new Element()}, Uint8Array, Date, Math,
@@ -32,12 +32,13 @@ function harness(storage) {
   sandbox.window = sandbox;
   vm.runInNewContext(source, sandbox);
   const api = sandbox.SerialdFlashing.create({byId: get, formatBytes: value => value + ' B',
+    openImageStore: choose => {imageChoice=choose;},
     fetch: (url, options = {}) => new Promise((resolve, reject) => requests.push({url, options,
       payload: options.body && JSON.parse(options.body), reject,
       resolve: (data, status = 200) => resolve({ok: status < 400, status, json: async () => data})}))});
   function take(prefix) { const index = requests.findIndex(entry => entry.url.startsWith(prefix));
     assert.notEqual(index, -1, 'missing request ' + prefix); return requests.splice(index, 1)[0]; }
-  return {api, get, requests, timers, take};
+  return {api, get, requests, timers, take, chooseImage:item=>imageChoice(item)};
 }
 async function drain() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
 const board = {key: 'board-1', serial: 'SN-1', label: 'Pico'};
@@ -54,6 +55,16 @@ async function open(h) {
 }
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
+
+test('image store selection only prepares current board and stale choices cannot cross devices', async () => {
+  const h=harness();await open(h);h.get('fl-store').click();
+  h.chooseImage({id:'global-image',name:'opensbi.itb',size:32,sha256:'b'.repeat(64)});
+  assert.equal(h.get('fl-artifact').value,'global-image');assert.equal(h.get('fl-mode').value,'partitions');
+  assert.equal(h.get('fl-start').disabled,true);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+  h.api.open({...board,key:'board-2',serial:'SN-2'});
+  assert.throws(()=>h.chooseImage(artifact),/当前设备或任务状态已变化/);
+});
 
 test('flash preview pins exact storage/partition and upload reference, never a host command', async () => {
   const h = harness(); await open(h);

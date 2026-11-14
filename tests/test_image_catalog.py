@@ -79,3 +79,18 @@ class CatalogTests(unittest.TestCase):
             for field in ('key','serial','connection_id'):
                 result = ImageDownloads(manager).start({'url':url+'/image','request_id':'scoped-image-001',field:'missing'}, None)
                 self.assertEqual(result.status, 400)
+
+    def test_protected_http_catalog_owner_and_agent_grant_boundaries(self):
+        from test_connection_access import protected_connection, api_request
+        with protected_connection() as fixture, mock.patch.object(catalog, 'catalog', return_value={'entries':[]}) as fetch:
+            code, data = api_request(fixture.url,'/api/image-catalog',fixture.owner_token)
+            self.assertEqual((code,data),(200,{'entries':[]}))
+            for token in (fixture.token, fixture.grant_store.issue('all')[0]):
+                for route in ('/api/image-catalog','/api/image-library'):
+                    code, data = api_request(fixture.url,route,token)
+                    self.assertEqual(code,403,(route,data))
+            fetch.assert_called_once()
+            code, data = api_request(fixture.url,'/api/image-library',fixture.owner_token)
+            self.assertEqual(code,200,data)
+            self.assertEqual(data['artifacts'],[])
+            fixture.send.assert_not_called()
