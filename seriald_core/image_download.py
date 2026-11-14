@@ -6,6 +6,7 @@ import json
 import re
 import socket
 import ssl
+import sys
 import time
 from urllib.parse import unquote, urljoin, urlsplit
 
@@ -46,6 +47,20 @@ def _addresses(host, port):
     return output
 
 
+def image_ssl_context():
+    if sys.platform == 'win32':
+        try:
+            # Already included with the Windows MCP runtime. Use CryptoAPI's
+            # native chain building, including on-demand intermediate retrieval,
+            # without injecting a process-global SSL override.
+            from truststore import SSLContext
+        except ImportError:
+            pass  # Source-only installs can still use Python's default store.
+        else:
+            return SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    return ssl.create_default_context()
+
+
 class ImageConnection(http.client.HTTPConnection):
     def __init__(self, host, port, secure):
         super().__init__(host, port, timeout=15)
@@ -59,7 +74,7 @@ class ImageConnection(http.client.HTTPConnection):
             stream.settimeout(self.timeout)
             try:
                 stream.connect(address)
-                self.sock = (ssl.create_default_context().wrap_socket(stream, server_hostname=self.host)
+                self.sock = (image_ssl_context().wrap_socket(stream, server_hostname=self.host)
                              if self.secure else stream)
                 return
             except OSError as error:

@@ -7,3 +7,4 @@ pydantic==2.14.3
 pydantic_core==2.50.4
 rpds-py==0.30.0
 pywin32==312
+truststore==0.10.5

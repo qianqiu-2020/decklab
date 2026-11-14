@@ -3,6 +3,7 @@ from html.parser import HTMLParser
 import json
 import http.client
 import re
+import ssl
 import threading
 import time
 from urllib.parse import quote, unquote, urljoin, urlsplit
@@ -151,6 +152,8 @@ def catalog(source='public', path='', refresh=False):
             return json.loads(json.dumps(cached[1]))
     try:
         entries = parse_index(source, path, _fetch(SOURCES[source]['browse'] + quote(path, safe='/')))
+    except ssl.SSLCertVerificationError:
+        raise TaskError('镜像源 HTTPS 证书不受信任，请由管理员在控制机配置组织 CA 或更新系统证书', 502) from None
     except (OSError, ValueError, UnicodeError, http.client.HTTPException):
         raise TaskError('内部镜像源暂不可访问，请检查控制机内网连接' if source == 'internal'
                         else '公开镜像源暂不可访问，请检查控制机网络', 502) from None

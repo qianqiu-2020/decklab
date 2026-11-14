@@ -148,3 +148,17 @@ class ImageDownloadTests(unittest.TestCase):
         with mock.patch('socket.getaddrinfo', return_value=[
                 (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('10.0.90.10', 80))]):
             self.assertEqual(_addresses('repo.lan', 80)[0][3][0], '10.0.90.10')
+
+    def test_windows_tls_uses_native_store_without_global_ssl_injection(self):
+        import ssl
+        from seriald_core.image_download import image_ssl_context
+        native=mock.Mock()
+        with mock.patch('seriald_core.image_download.sys.platform','win32'), \
+                mock.patch.dict('sys.modules',{'truststore':SimpleNamespace(SSLContext=native)}), \
+                mock.patch('seriald_core.image_download.ssl.create_default_context') as default:
+            self.assertIs(image_ssl_context(),native.return_value)
+            native.assert_called_once_with(ssl.PROTOCOL_TLS_CLIENT)
+            default.assert_not_called()
+        with mock.patch('seriald_core.image_download.sys.platform','linux'), \
+                mock.patch('seriald_core.image_download.ssl.create_default_context') as default:
+            self.assertIs(image_ssl_context(),default.return_value)

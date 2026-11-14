@@ -94,3 +94,10 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(code,200,data)
             self.assertEqual(data['artifacts'],[])
             fixture.send.assert_not_called()
+
+    def test_certificate_error_is_actionable_without_disabling_validation(self):
+        import ssl
+        with mock.patch.object(catalog,'_fetch',side_effect=ssl.SSLCertVerificationError('private detail')):
+            with self.assertRaisesRegex(TaskError,'组织 CA') as result:catalog.catalog('internal',refresh=True)
+            self.assertEqual(result.exception.status,502)
+            self.assertNotIn('private detail',str(result.exception))

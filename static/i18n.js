@@ -3,6 +3,7 @@
   'use strict';
   var dictionary = {
     "分区": "Partition", "偏移 / 容量": "Offset / capacity",
+    '镜像源 HTTPS 证书不受信任，请由管理员在控制机配置组织 CA 或更新系统证书': 'The image source HTTPS certificate is not trusted. Ask an administrator to configure the organization CA or update system certificates on the controller.',
     '镜像商店': 'Image store', '公开镜像': 'Public images', '内部镜像': 'Internal images', '已下载': 'Downloaded',
     '搜索当前目录': 'Search this folder', '镜像来源': 'Image source', '搜索镜像': 'Search images', '镜像目录': 'Image folders',
     '下载到控制机': 'Download to controller', '镜像包': 'Image package', '磁盘镜像': 'Disk image', '分区文件': 'Partition payload',
