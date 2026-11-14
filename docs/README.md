@@ -19,7 +19,8 @@ SpacemiT K3. See the overview for the board support list and default credentials
 - [Logs](LOG_OPERATIONS.md): archives, retention and diagnostics.
 - [File transfers](TRANSFER_ARTIFACTS.md) and [throughput measurements](TRANSFER_PERFORMANCE.md).
 - [Background tasks](TASKS.md): task status, cancellation and result retrieval.
-- [Hardware extensions](HARDWARE_EXTENSIONS.md): configured tools, local manual-mode flashing, and the planned remote architecture.
+- [Flashing workspace](FLASH_WORKSPACE.md): NOR backup, partition selection, progress and readback.
+- [Hardware extensions](HARDWARE_EXTENSIONS.md): automatic USB discovery, manual download mode and configured hardware controls.
 - [Database upgrades](STORAGE_UPGRADES.md): automatic migration and backups.
 
 ## Develop and maintain

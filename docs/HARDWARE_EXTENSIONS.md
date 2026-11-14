@@ -178,6 +178,31 @@ K3 NOR 固件包也可选择“指定分区”：包内表仅用于提取和校�
 高级配置的 `flash.argv` 只指向该入口的绝对路径；网页不能传入脚本、参数或主机文件路径。
 进入下载模式的手动操作须在开始前完成；本流程不会复位、断电或恢复启动引脚。
 
+### 独立安装刷机组件
+
+本次 GitHub 正式版仅公开主程序，刷机组件由维护者或设备供应方单独提供。
+安装操作在硬件后端主机完成；分离部署时不放在纯 Web 节点。
+
+1. 取得与上位机系统和架构匹配的 `decklab-flash`（Windows 为 `decklab-flash.exe`），
+   核对提供方给出的版本及 SHA-256。Ubuntu 同时安装系统 `libusb-1.0-0`；Windows 使用对应 USB 驱动。
+2. 将执行器和匹配板型的 RAM 材料放入独立目录。材料目录包含 `manifest.json`、
+   FSBL、临时 U-Boot 及来源声明，保留相对路径；普通系统镜像不能代替下载专用 RAM 材料。
+3. 在后端的网页配置中设置 `SERIALD_FLASH_EXECUTOR` 为执行器绝对路径，
+   `SERIALD_FLASH_LOADERS` 为材料 `manifest.json` 的绝对路径，保存并应用后重新检测 USB。
+   沿用显式 `SERIALD_FLASH` 配置的环境也须同步其 `flash.argv`。
+
+Ubuntu 可在 `/etc/seriald/seriald.env` 设置，例如：
+
+```sh
+SERIALD_FLASH_EXECUTOR=/opt/decklab-flash/decklab-flash
+SERIALD_FLASH_LOADERS=/opt/decklab-flash/flash-loaders/manifest.json
+```
+
+Windows 可使用独立目录，例如 `C:\DeckLab-Flash\decklab-flash.exe` 和
+`C:\DeckLab-Flash\flash-loaders\manifest.json`。目录及文件需对运行后端的账户可读，
+Linux 执行器还需可执行。主程序升级不负责替换这些独立组件。
+缺少组件时不会启用对应刷写能力，也不会自动从网络下载执行器。
+
 在已经取得并确认可用的 goflash 源码中，使用 Go 1.25 或更新版本构建入口：
 
 ```sh

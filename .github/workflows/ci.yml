@@ -89,6 +89,12 @@ jobs:
       - name: Real browser with hardware-free fixtures
         if: matrix.python == '3.12'
         run: node tools/browser_smoke.js
+      - name: Web configuration in an isolated hardware-free host
+        if: matrix.python == '3.12'
+        run: node tools/settings_smoke.js
+      - name: NOR workspace in desktop and mobile browsers without hardware
+        if: matrix.python == '3.12'
+        run: node tools/browser_nor_workspace.js dist/nor-workspace-browser
       - name: Real browser against the simulated host
         if: matrix.python == '3.12'
         run: node tools/demo_smoke.js
@@ -108,4 +114,7 @@ jobs:
           path: |
             dist/ui-*.png
             dist/demo-ui.png
+            dist/nor-workspace-browser/*.png
+            dist/nor-workspace-browser/receipt.json
+            dist/settings-ui/*.png
           if-no-files-found: ignore

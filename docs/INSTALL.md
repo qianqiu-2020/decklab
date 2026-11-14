@@ -28,6 +28,12 @@ serialctl devices
 `seriald_latest_all.deb` 保留为 amd64 兼容别名，文件内的 `Architecture` 是 `amd64`，
 不能用于 arm64 安装。
 
+## 可选刷机组件
+
+GitHub 正式包不包含 goflash 执行器、USB 驱动及 RAM 加载材料。
+需要刷机时，在持有板卡 USB 的硬件后端单独安装，见
+[独立安装刷机组件](HARDWARE_EXTENSIONS.md#独立安装刷机组件)。终端、SSH、MCP 及日志功能不依赖这些组件。
+
 ## 从源码构建安装包
 
 在与目标架构匹配的原生构建机上，先冻结 Ubuntu 22.04 / glibc 2.35 基线的 MCP 运行时，
@@ -37,7 +43,7 @@ serialctl devices
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.7.4_amd64.deb
+sudo apt install ./dists/seriald_1.8.0_amd64.deb
 ```
 
 arm64 构建将上述 `amd64` 改为 `arm64`，在对应原生构建机执行。

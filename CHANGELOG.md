@@ -1,63 +1,34 @@
 # Changelog
 
-## Unreleased: NOR workspace
-
-- Simplify the flashing workspace with aligned partition rows and contextual controls; remove duplicate workflow explanations, collapse diagnostics and keep write scope and failures visible.
-
-- Read and download a complete NOR backup before choosing any image, using the pinned RAM-only loader and one durable hardware task.
-- Compare partition versions, build timestamps, hashes and replacement file metadata; preserve unselected partitions and require an explicit scope preview before writing.
-- Recheck the backup before writing, read back the entire NOR afterwards, and retain separate write/verification results and scoped backup files, including failed verification evidence.
-- Show stage-specific byte progress, responsive partition rows, keyboard confirmation and both themes. Keep firmware metadata as text and recover lost submissions by the original durable request ID.
-- Accept an absent package catalogue for standalone partition files, keep their metadata inputs inside the managed plan cache, and preserve required NOR readback through live plan checking.
-- Validate the Web workflow on sub23-1: back up 8 MiB, rewrite only the original 384 KiB opensbi partition, automatically read back the whole NOR and confirm all bytes match, including env.
-
-## Unreleased — split nodes and partition images
-
-- Web and hardware backend can run separately on Windows or Ubuntu over authenticated TLS; Web restarts preserve backend tasks and connections.
-- Import image URLs as durable backend tasks with bounded storage and optional SHA-256.
-- Complete NOR firmware packages support selecting individual partitions without writing layout or unselected payloads.
-- Preinstalled RAM-only FSBL/U-Boot allows standalone partition payloads; the dedicated K3 NOR adapter selects its standard map without writing a partition table or erasing env.
-- Add node-scoped settings, role launchers, collector exclusion, deployment documentation and hardware-free cross-platform acceptance.
-
 ## Unreleased
 
-- Add selected-image deletion with a filename/size/SHA-256 confirmation,
-  active-task protection and stale-response isolation. Reuse artifact cleanup
-  without altering board contents or replaying requests after a lost response.
+## 1.8.0
 
-- Add explicit standard NOR firmware package recovery with fixed loader steps,
-  live MTD capacity checks, a mandatory second scope review after preparation,
-  and bounded non-retrying writes. Show env erasure, conservative erase scope,
-  missing NOR/NAND type detection and excluded optional EC updates.
+正式安装包包含 DeckLab 主程序、终端运行时及服务端 MCP 依赖；goflash 刷机执行器、
+USB 驱动及 FSBL／临时 U-Boot 材料由管理员单独安装，不随本次 GitHub 附件分发。
 
-- Show the loader preparation flow for supported BootROM targets before live
-  partition selection. Report NOR firmware packages as an unsupported adapter
-  rather than a corrupt image.
+### 设备与配置
 
-- Preserve bounded USB opening/protocol diagnostics and show actionable messages
-  when a download connection is unavailable; keep layout and readback unknown
-  until probing succeeds instead of presenting them as unsupported.
+- 未识别的串口也能设置标签；设备列表支持拖动和键盘排序，顺序仅保存在当前浏览器。
+- 网页统一配置上位机、板卡与刷机能力，支持预览、保存、导入导出和显式应用；分享配置会隐藏凭据。
+- Web 与硬件后端可在 Windows、Ubuntu 上分开部署，通过认证 HTTPS 通信；串口、SSH、任务和镜像缓存由硬件后端持有。新安装默认单机，升级保留既有部署角色。
 
-- Import/export registry-managed labels and port probe overrides through the Web,
-  with connection-aware revisions, identity checks, atomic updates and audit.
+### 镜像与刷机
 
-- Add owner-managed Web settings for all host options and board/hardware/flash
-  configuration documents, with validated preview, revision-checked saving,
-  redacted sharing and explicit private backups.
-- Activate settings from the Web by re-executing existing processes after
-  shutdown; preserve the collector for control-only changes and reject collector
-  activation during tasks, flash holds, transactions or input reservations.
-- Optionally import/export this browser's language and personal device order.
+以下设备刷写能力需在硬件后端安装匹配的独立刷机组件后使用。
 
-- Discover local download USB devices through the installed flashing executor,
-  with explicit target selection, live layout checks and persistent tasks that
-  also work without an identified UART connection.
-- Add image/partition previews, bounded flashing progress and separate write,
-  verification and boot results; preserve resources when cleanup is uncertain.
-- Let pending serial connections keep a user label without inventing a board
-  identity or merging existing archives.
-- Allow dragging or moving device cards, with keyboard controls and a saved
-  personal order that survives refreshes and online/offline changes.
+- 自动发现 USB 下载设备，按物理连接绑定任务；未识别串口不再阻止进入刷机工作区。
+- 支持上传单文件或从 URL 下载镜像；镜像准备、取消和删除均通过原有后台任务及文件配额管理。
+- NOR 工作区先备份整片内容，显示分区版本、构建时间和摘要，再选择替换文件、预览并二次确认写入范围。未选分区保持原样，单分区模式不改写分区表、不自动擦除 env。
+- 安全 RAM 刷机环境支持预装加载材料；写入前重新核对整片基线，写后自动回读，分别记录写入和校验结果，并保留可下载的备份与回读文件。
+- 支持从完整 NOR 包选择分区；完整恢复单独显示 env 擦除等风险，不以完整恢复绕过单分区限制。
+- 从实际固件、压缩 FIT 和文件系统内容读取版本信息；系统镜像预览可展示发行版、内核和引导组件。缺少有效标记时显示未知，不以文件名推断版本。
+- 刷机界面采用分区对照和阶段字节进度，支持手机、明暗主题与中英文；保留原任务恢复和二次确认，移除重复说明与空白占位。
+
+### 验证范围
+
+- Ubuntu BMC 上的 BS01DCMA 已实测整片 8 MiB 备份、原 opensbi 单分区回写及自动整片回读，刷前刷后内容一致。该结果不代表所有板型、不同版本替换或完整恢复均已实测。
+- Windows 的双角色、协议和安装包验收由原生 CI 执行；本轮没有可用的 Windows 硬件测试机，不将模拟设备验收表述为 Windows 真机刷写通过。
 
 ## 1.7.4
 
