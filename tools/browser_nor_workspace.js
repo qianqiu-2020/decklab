@@ -7,7 +7,7 @@ const path = require('node:path');
 const os = require('node:os');
 const http = require('node:http');
 const crypto = require('node:crypto');
-const {launchBrowser} = require('./browser_launch');
+const {launchBrowser, stopBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
 const out = process.argv[2] || path.join(root, 'dist/nor-workspace-20261114/browser');
 fs.mkdirSync(out, {recursive: true});
@@ -164,4 +164,4 @@ let chrome,ws;
   fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,submissions:submissions.length,selections:selections.length,
     screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
   console.log('NOR browser workflow passed: image-free read, six partition rows, upload, scope preview, same-task confirmation, real byte progress, backups, desktop/mobile and light/dark (simulated data).');
-})().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();if(chrome){chrome.kill('SIGTERM');await delay(300);}server.close();fs.rmSync(profile,{recursive:true,force:true});});
+})().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});

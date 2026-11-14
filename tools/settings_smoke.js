@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const {spawn} = require('node:child_process');
-const {launchBrowser} = require('./browser_launch');
+const {launchBrowser, stopBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'seriald-settings-ui-'));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -104,6 +104,7 @@ let control, collector, chrome, ws;
   console.log('Settings browser checks passed: real control API, private storage, masked credentials, preview/save/import, personal order, desktop/mobile. Isolated collector scans an empty directory; all registry devices are explicit fixtures, no real board access.');
 })().catch(error => {console.error(error);process.exitCode=1;}).finally(async () => {
   if (ws) ws.close();
-  for (const child of [chrome,control,collector]) {if (child && child.exitCode == null) {child.kill('SIGTERM');await Promise.race([new Promise(resolve=>child.once('exit',resolve)),delay(2000)]);if(child.exitCode==null)child.kill('SIGKILL');}}
-  fs.rmSync(temporary,{recursive:true,force:true});
+  await stopBrowser(chrome);
+  for (const child of [control,collector]) {if (child && child.exitCode == null) {child.kill('SIGTERM');await Promise.race([new Promise(resolve=>child.once('exit',resolve)),delay(2000)]);if(child.exitCode==null)child.kill('SIGKILL');}}
+  await fs.promises.rm(temporary,{recursive:true,force:true,maxRetries:10,retryDelay:100});
 });

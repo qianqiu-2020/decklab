@@ -34,4 +34,24 @@ async function launchBrowser(profile) {
   }
 }
 
-module.exports = {launchBrowser};
+async function stopBrowser(chrome) {
+  if (!chrome) return;
+  for (const signal of ['SIGTERM', 'SIGKILL']) {
+    if (chrome.exitCode !== null || chrome.signalCode !== null) return;
+    const exited = await new Promise(resolve => {
+      const finish = value => {
+        clearTimeout(timer);
+        chrome.removeListener('exit', onExit);
+        resolve(value);
+      };
+      const onExit = () => finish(true);
+      const timer = setTimeout(() => finish(false), signal === 'SIGTERM' ? 5000 : 2000);
+      chrome.once('exit', onExit);
+      chrome.kill(signal);
+    });
+    if (exited) return;
+  }
+  throw new Error('Chromium did not exit; its profile was retained');
+}
+
+module.exports = {launchBrowser, stopBrowser};

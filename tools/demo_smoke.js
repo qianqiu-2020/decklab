@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const {spawn} = require('node:child_process');
-const {launchBrowser} = require('./browser_launch');
+const {launchBrowser, stopBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'decklab-demo-browser-'));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -193,12 +193,13 @@ async function until(check, description) {
   console.log('ok - demo browser: terminal input/SSE, archives, independent client takeover, copy/upload/download via UI, task results after reload, verified download link');
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   if (ws) ws.close();
-  for (const child of [chrome, demo]) {
+  await stopBrowser(chrome);
+  for (const child of [demo]) {
     if (child && child.exitCode === null) {
       child.kill('SIGTERM');
       for (let n = 0; n < 40 && child.exitCode === null; n++) await delay(100);
       if (child.exitCode === null) child.kill('SIGKILL');
     }
   }
-  fs.rmSync(profile, {recursive: true, force: true});
+  await fs.promises.rm(profile, {recursive: true, force: true, maxRetries: 10, retryDelay: 100});
 });

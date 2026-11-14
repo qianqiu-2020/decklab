@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {spawn} = require('node:child_process');
-const {launchBrowser} = require('./browser_launch');
+const {launchBrowser, stopBrowser} = require('./browser_launch');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'decklab-shared-browser-'));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let fixture, chrome, geometryFile, diagnostics = '', sockets = [];
@@ -116,6 +116,6 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   console.log('Shared terminal smoke passed: real Vim over serial/SSH PTYs, late join, live edits, takeover, resize, quiet tab restoration and exit.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   for(const socket of sockets)socket.close();
-  if(chrome){chrome.kill('SIGTERM');await delay(500);}if(fixture){fixture.kill('SIGTERM');await delay(700);}
-  fs.rmSync(profile,{recursive:true,force:true});
+  await stopBrowser(chrome);if(fixture){fixture.kill('SIGTERM');await delay(700);}
+  await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
 });

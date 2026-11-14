@@ -83,6 +83,7 @@ jobs:
       - run: python tools/check_public_docs.py
       - run: node tests/frontend.test.js
       - run: node tests/share.test.js
+      - run: node tests/browser-process.test.js
       - run: python -m compileall -q seriald_core serialctl.py seriald_mcp.py seriald.py seriald_demo.py
       - run: bash -n rescue.sh
       - run: git diff --check

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const http = require('node:http');
-const {launchBrowser} = require('./browser_launch');
+const {launchBrowser, stopBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'seriald-browser-'));
 const posts = [], errors = [];
@@ -988,6 +988,6 @@ let chrome, ws;
   assert.deepEqual(errors,[]);
   console.log('Browser smoke passed: real xterm, desktop/mobile layout, unidentified probe settings, MCP sharing, server-remembered SSH credentials and offline-board flash preview/task recovery (isolated simulated fixtures).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
-  if(ws)ws.close(); if(chrome){chrome.kill('SIGTERM');await delay(500);}server.close();
-  fs.rmSync(profile,{recursive:true,force:true});
+  if(ws)ws.close(); await stopBrowser(chrome);server.close();
+  await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
 });
