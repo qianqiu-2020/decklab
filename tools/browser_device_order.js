@@ -75,4 +75,4 @@ let chrome,ws;
   assert.equal(await evaluate('window.unexpectedSelection===true'),false);assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({native_mouse_drag:true,live_neighbor_movement:true,drop_persisted:true,cancel_rolled_back:true,poll_preserved_dom:true,horizontal_grid:true,fixtures_only:true},null,2)+'\n');
   console.log('Native device drag passed: live insertion, neighbor movement, drop, cancellation, polling and horizontal grids.');
-})().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();if(chrome)await stopBrowser(chrome);server.close();fs.rmSync(profile,{recursive:true,force:true});});
+})().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();if(chrome)await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
