@@ -63,7 +63,7 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.10.0_amd64.deb
+sudo apt install ./dists/seriald_1.10.1_amd64.deb
 ```
 
 默认运行时构建需要 Docker 和构建时下载；运行时准备后，deb 组装不访问网络。

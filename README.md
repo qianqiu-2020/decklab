@@ -59,7 +59,7 @@ first (Docker and build-time downloads are required by the default builder):
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.10.0_amd64.deb
+sudo apt install ./dists/seriald_1.10.1_amd64.deb
 ```
 
 For an arm64 host, build on the matching native runner with `--arch arm64` and
