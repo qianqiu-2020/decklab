@@ -162,9 +162,9 @@ class ImageDownloads:
                 if payload.get('target_id'):
                     from .flash_tasks import FlashActions
                     device = FlashActions(self.manager)._device(None, payload, actor)
-                if device is None:
+                if device is None and any(payload.get(key) for key in ('key', 'serial', 'connection_id')):
                     raise TaskError('image download target is required')
-                serial = device.serial or ''
+                serial = (device.serial or '') if device is not None else ''
             checksum = payload.get('sha256') or None
             if checksum is not None and (not isinstance(checksum, str) or not re.fullmatch('[a-f0-9]{64}', checksum)):
                 raise TaskError('invalid expected image SHA-256')

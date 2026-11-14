@@ -82,7 +82,8 @@ def flash_notice_files(directory):
     return files
 
 
-def build(output, version, runtime=None, flash_executor=None, flash_notices=None, flash_loaders=None):
+def build(output, version, runtime=None, flash_executor=None, flash_notices=None, flash_loaders=None,
+          complete=False, components_manifest=None):
     if runtime is None:
         architecture = {'x86_64': 'amd64', 'aarch64': 'arm64',
                         'riscv64': 'riscv64'}.get(platform.machine())
@@ -93,6 +94,18 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
                          '--arch <amd64|arm64> first, then pass --runtime PATH.')
     descriptor = validate_runtime(runtime)
     architecture = descriptor['architecture']
+    if complete:
+        from tools.install_components import load, default_manifest
+        explicit = any(value is not None for value in (flash_executor, flash_notices, flash_loaders))
+        if components_manifest is not None and explicit:
+            raise ValueError('component manifest cannot be combined with individual flashing inputs')
+        if explicit and not all(value is not None for value in (flash_executor, flash_notices, flash_loaders)):
+            raise ValueError('complete standalone installation requires executor, notices and RAM materials together')
+        if components_manifest is not None or flash_executor is None:
+            components = load(components_manifest or default_manifest('linux-' + architecture), 'linux-' + architecture)
+            flash_executor, flash_notices, flash_loaders = (components[name] for name in ('executor', 'notices', 'loaders'))
+        if not all(value is not None for value in (flash_executor, flash_notices, flash_loaders)):
+            raise ValueError('complete standalone installation requires executor, notices and RAM materials')
     executor_metadata = flash_executor_metadata(flash_executor, architecture) if flash_executor is not None else None
     if flash_notices is not None and executor_metadata is None:
         raise ValueError('flash notices require an explicit flash executor')
@@ -129,6 +142,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
         for name in ('SKILL.md', 'SKILL.zh-CN.md'):
             put('skills/seriald-board/' + name, 'usr/lib/seriald/skills/seriald-board/' + name)
         for command, invocation in [('serialctl', '/usr/lib/seriald/serialctl.py'),
+                                    ('seriald-access', '-m seriald_core.access_info'),
                                     ('seriald-admin', '-m seriald_core.admin'),
                                     ('seriald-collector', '-m seriald_core.collector_server'),
                                     ('seriald-control', '-m seriald_core.control_server'),
@@ -146,6 +160,10 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
                 text = path.read_text().replace('/data/seriald/serialctl.py', '/usr/lib/seriald/serialctl.py').replace('/data/seriald/docs/AGENT_ACCESS.md', '/usr/share/doc/seriald/AGENT_ACCESS.md')
                 write('usr/share/seriald/skills/seriald-board/' + str(path.relative_to(ROOT / 'skills/seriald-board')), text)
         publish_docs(stage / 'usr/share/doc/seriald', 'linux')
+        write('usr/lib/seriald/installation.json', json.dumps({
+            'profile': 'complete' if complete else 'core', 'version': version,
+            'flash_executor': '/usr/libexec/seriald/decklab-flash' if flash_executor else '',
+            'ram_loaders': '/usr/lib/seriald/flash-loaders/manifest.json' if flash_loaders else ''}, indent=2) + '\n')
         if flash_loaders is not None:
             publish_flash_loaders(flash_loaders, stage / 'usr/lib/seriald/flash-loaders')
         if executor_metadata is not None:
@@ -187,11 +205,16 @@ if __name__ == '__main__':
                         help='package output directory (default: dists/)')
     parser.add_argument('--version', default=__version__)
     parser.add_argument('--runtime', type=Path, help='prepared architecture-specific MCP runtime')
+    parser.add_argument('--components-manifest', type=Path, help='hash-pinned standalone installation input manifest')
+    parser.add_argument('--core-only', action='store_true', help='explicit compatibility/CI build without integrated flashing; not a complete standalone installer')
     parser.add_argument('--flash-executor', type=Path,
                         help='optional local decklab-flash ELF to include for private testing')
     parser.add_argument('--flash-notices', type=Path,
                         help='license/build notices accompanying the optional local executor')
     parser.add_argument('--flash-loaders', type=Path, help='prebuilt RAM-only FSBL/U-Boot bundle')
     args = parser.parse_args()
+    if args.core_only and any((args.components_manifest, args.flash_executor, args.flash_notices, args.flash_loaders)):
+        parser.error('--core-only cannot be combined with flashing components')
     print(build(args.output, args.version, runtime=args.runtime, flash_executor=args.flash_executor,
-                flash_notices=args.flash_notices, flash_loaders=args.flash_loaders))
+                flash_notices=args.flash_notices, flash_loaders=args.flash_loaders,
+                complete=not args.core_only, components_manifest=args.components_manifest))

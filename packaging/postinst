@@ -93,5 +93,10 @@ if bind == '0.0.0.0':
 elif bind not in ('127.0.0.1', 'localhost'):
     print(f'  bind:  http://{bind}:{port}/')
 PY
+    # Reuse the running service's existing share-link/cookie protocol. No node
+    # enrollment, collector restart, key copying or extra client installation.
+    if [ -d /run/systemd/system ] && ! systemctl is-enabled --quiet seriald-backend.service; then
+      /usr/bin/seriald-access || true
+    fi
     ;;
 esac

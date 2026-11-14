@@ -3,6 +3,14 @@
   'use strict';
   var dictionary = {
     "分区": "Partition", "偏移 / 容量": "Offset / capacity",
+    '镜像商店': 'Image store', '公开镜像': 'Public images', '内部镜像': 'Internal images', '已下载': 'Downloaded',
+    '搜索当前目录': 'Search this folder', '镜像来源': 'Image source', '搜索镜像': 'Search images', '镜像目录': 'Image folders',
+    '下载到控制机': 'Download to controller', '镜像包': 'Image package', '磁盘镜像': 'Disk image', '分区文件': 'Partition payload',
+    '镜像下载到控制机；刷写前仍需核对板型、预览范围并确认。': 'Images download to the controller. Check board compatibility, preview the write scope and confirm before flashing.',
+    '当前目录没有匹配的受支持镜像。': 'No matching supported images in this folder.',
+    '正在读取镜像目录…': 'Reading image directory…', '正在读取控制机缓存…': 'Reading controller cache…',
+    '取消下载': 'Cancel download', '正在下载…': 'Downloading…', '使用': 'Use',
+    '镜像已保存到控制机，可从“已下载”中选择。': 'Image saved on the controller. Choose it from Downloaded.',
     "压缩镜像，未解析内容": "Compressed image; contents not inspected", "未找到版本文件": "No version files found",
     "Android sparse，展开后": "Android sparse, expanded", "文件系统": "Filesystem", "内核": "Kernel",
     "内核模块": "Kernel modules", "引导程序": "Bootloader", "引导项": "Boot entries", "磁盘分区": "Disk partitions",

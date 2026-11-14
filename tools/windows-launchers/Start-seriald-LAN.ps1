@@ -31,10 +31,23 @@ if (Test-Path $tokenFile) {
 $env:SERIALD_AUTH_TOKEN = $token
 $env:SERIALD_TRUST_LOOPBACK = '1'
 Write-Host "seriald LAN: listening on 0.0.0.0:$Port"
-Write-Host "Open http://<Windows-IP>:$Port/ from another computer."
-Write-Host 'Browser username: seriald'
-Write-Host "Browser password: $token"
-Write-Host 'Local agents can use serialctl.cmd without a token; remote agents need SERIALD_TOKEN.'
-Write-Host 'Keep this window open. Allow inbound TCP on the selected port for Private networks in Windows Firewall.'
-& $exe --bind 0.0.0.0 --port $Port
-if ($LASTEXITCODE -ne 0) { throw "seriald exited with code $LASTEXITCODE" }
+Write-Host 'Other computers only need a browser. Keep this window open.'
+$process = Start-Process -FilePath $exe -WorkingDirectory $root -ArgumentList '--bind','0.0.0.0','--port',"$Port" -NoNewWindow -PassThru
+try {
+    $access = $null
+    for ($attempt = 0; $attempt -lt 40; $attempt++) {
+        try {
+            $access = Invoke-RestMethod "http://127.0.0.1:$Port/api/access" -Headers @{Authorization="Bearer $token"} -TimeoutSec 1
+            break
+        } catch { if ($process.HasExited) { break }; Start-Sleep -Milliseconds 250 }
+    }
+    if ($access) {
+        $share = Invoke-RestMethod "http://127.0.0.1:$Port/api/share-link" -Method Post -Headers @{Authorization="Bearer $token"} -TimeoutSec 3
+        Write-Host 'Open one of these links in the remote browser; no client or pairing configuration is needed:'
+        foreach ($address in $access.lan_hosts) { Write-Host ("  http://" + $address + ':' + $Port + $share.path) }
+        Write-Host ("  Local: http://127.0.0.1:" + $Port + $share.path)
+        Write-Host ('Link authorization expires in ' + ($share.expires_in / 3600) + ' hours. New links are available from Share access in the page.')
+    } else { Write-Warning 'Access links are not ready. Open the local page and use Share access after startup.' }
+} catch { Write-Warning 'Could not generate access links. Use Share access in the page; saved host configuration may override the launcher.' }
+$process.WaitForExit()
+if ($process.ExitCode -ne 0) { throw "seriald exited with code $($process.ExitCode)" }

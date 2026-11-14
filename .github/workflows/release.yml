@@ -42,9 +42,14 @@ jobs:
           busybox stty --help
       - run: python -m unittest discover -s tests
       - run: python tools/check_public_docs.py
-      - run: node tests/frontend.test.js && node tests/share.test.js
+      - run: node tests/frontend.test.js && node tests/share.test.js && node tests/image-store.test.js
       - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
         run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
+      - name: Prepare reviewed complete-install inputs
+        env:
+          DECKLAB_COMPONENTS_URL: ${{ matrix.arch == 'amd64' && secrets.COMPONENTS_LINUX_AMD64_URL || secrets.COMPONENTS_LINUX_ARM64_URL }}
+          DECKLAB_COMPONENTS_SHA256: ${{ matrix.arch == 'amd64' && secrets.COMPONENTS_LINUX_AMD64_SHA256 || secrets.COMPONENTS_LINUX_ARM64_SHA256 }}
+        run: python tools/fetch_install_components.py --platform 'linux-${{ matrix.arch }}'
       - run: python tools/build_deb.py --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
       - name: Fresh install and public MCP without network on Ubuntu 22.04
         run: python tools/test_deb_container.py --image ubuntu:22.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb"
@@ -64,6 +69,7 @@ jobs:
           path: dist/*.deb
   windows:
     uses: ./.github/workflows/windows-portable.yml
+    secrets: inherit
   publish:
     needs: [linux, windows]
     runs-on: ubuntu-latest

@@ -16,9 +16,12 @@ history attached to a stable board identity rather than a changing tty number.
 Actual UI with simulated boards; no physical hardware is required. Demo devices
 illustrate the workflow and do not establish hardware support.
 
-Official packages include the application, terminal runtime and server-side MCP dependencies.
-Flashing requires separately installed goflash and matching RAM-loader materials on the hardware backend;
-see [flashing components](docs/HARDWARE_EXTENSIONS.md#独立安装刷机组件).
+Install the complete application on a Linux board controller; other computers only
+need a browser. Windows standalone hosts are also supported. Starting with 1.10.0,
+complete builds include flashing tools and RAM loaders, plus the Windows USB driver.
+Historical 1.9.0 packages require separately installed flashing components.
+See [installation](docs/INSTALL.md), [complete builds](docs/COMPLETE_INSTALL.md),
+and the [image store](docs/IMAGE_STORE.md).
 
 ## Why DeckLab
 
@@ -56,7 +59,7 @@ first (Docker and build-time downloads are required by the default builder):
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.9.0_amd64.deb
+sudo apt install ./dists/seriald_1.10.0_amd64.deb
 ```
 
 For an arm64 host, build on the matching native runner with `--arch arm64` and

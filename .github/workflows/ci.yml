@@ -28,7 +28,7 @@ jobs:
       - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
         run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
       - name: Build the matching Debian architecture package
-        run: python tools/build_deb.py --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
+        run: python tools/build_deb.py --core-only --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
       - name: Fresh install and public MCP without network on Ubuntu 22.04
         run: python tools/test_deb_container.py --image ubuntu:22.04 --package dist/seriald_*_${{ matrix.arch }}.deb
       - name: Fresh install and public MCP without network on Ubuntu 24.04
@@ -81,7 +81,7 @@ jobs:
         run: python -m unittest test_console_visibility test_serial_health
       - run: python -m unittest discover -s tests
       - run: python tools/check_public_docs.py
-      - run: node tests/frontend.test.js
+      - run: node tests/frontend.test.js && node tests/image-store.test.js
       - run: node tests/share.test.js
       - run: node tests/browser-process.test.js
       - run: python -m compileall -q seriald_core serialctl.py seriald_mcp.py seriald.py seriald_demo.py

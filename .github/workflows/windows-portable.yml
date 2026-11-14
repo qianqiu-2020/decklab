@@ -1,6 +1,11 @@
 name: Windows packages
 on:
   workflow_call:
+    secrets:
+      COMPONENTS_WINDOWS_AMD64_URL:
+        required: false
+      COMPONENTS_WINDOWS_AMD64_SHA256:
+        required: false
   pull_request:
   workflow_dispatch:
   push:
@@ -36,6 +41,8 @@ on:
       - 'tools/check_public_docs.py'
       - 'tools/test_windows_mcp.py'
       - 'tools/bundle_manifest.py'
+      - 'tools/install_components.py'
+      - 'tools/fetch_install_components.py'
       - 'tools/windows-launchers/**'
       - 'packaging/seriald-windows.iss'
       - 'packaging/decklab.ico'
@@ -61,10 +68,22 @@ jobs:
       - name: Install installer compiler
         shell: pwsh
         run: .\tools\install_inno_build_tool.ps1
+      - name: Prepare reviewed complete-install inputs
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          DECKLAB_COMPONENTS_URL: ${{ secrets.COMPONENTS_WINDOWS_AMD64_URL }}
+          DECKLAB_COMPONENTS_SHA256: ${{ secrets.COMPONENTS_WINDOWS_AMD64_SHA256 }}
+        run: python tools/fetch_install_components.py --platform windows-amd64
       - name: Build setup EXE and portable ZIP
         shell: pwsh
         # Exercise the replacement-source path with the reviewed upstream archive.
-        run: powershell -ExecutionPolicy Bypass -File .\tools\build_windows.ps1 -ParamikoSource .\packaging\third-party\paramiko-4.0.0\paramiko-4.0.0.tar.gz
+        run: |
+          $arguments = @('-ExecutionPolicy','Bypass','-File','.\tools\build_windows.ps1','-ParamikoSource','.\packaging\third-party\paramiko-4.0.0\paramiko-4.0.0.tar.gz')
+          # Untagged software CI is explicitly a core-only fixture. Tagged
+          # standalone releases must supply the complete component bundle.
+          if (-not $env:GITHUB_REF.StartsWith('refs/tags/')) { $arguments += '-CoreOnly' }
+          & powershell @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'Windows package build failed.' }
       - name: Smoke test portable host
         shell: pwsh
         run: |

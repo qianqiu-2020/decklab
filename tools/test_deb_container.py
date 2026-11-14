@@ -165,6 +165,29 @@ try:
     credentials('check')
     subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:18898'],
                    env=environment, check=True, timeout=30)
+    profile_path = pathlib.Path('/usr/lib/seriald/installation.json')
+    if profile_path.is_file() and json.loads(profile_path.read_text()).get('profile') == 'complete':
+        probe = r"""
+import json, os, pathlib, sys
+sys.path.insert(0, '/usr/lib/seriald')
+from seriald_core.flash_discovery import executor_command
+from seriald_core.flash_loaders import manifest_path
+assert not os.environ.get('SERIALD_FLASH_EXECUTOR') and not os.environ.get('SERIALD_FLASH_LOADERS')
+assert executor_command() == ('/usr/libexec/seriald/decklab-flash',)
+assert manifest_path() == pathlib.Path('/usr/lib/seriald/flash-loaders/manifest.json')
+assert 'k3' in json.loads(manifest_path().read_text())['families']
+print('PASS: complete installation automatically discovers embedded flashing executor and RAM materials')
+"""
+        subprocess.run(['sudo', '-u', 'seriald', '--preserve-env', 'python3', '-c', probe], env=environment, check=True)
+        access_config = pathlib.Path('/tmp/access-fixture.env')
+        access_config.write_text('SERIALD_BASE=/data/seriald-data\nSERIALD_BIND=127.0.0.1\nSERIALD_PORT=18898\n')
+        access = json.loads(subprocess.check_output(['/usr/bin/seriald-access', '--config', str(access_config), '--json'],env=environment,text=True))
+        assert access['urls'] == ['http://127.0.0.1:18898/'], access
+        with urlopen('http://127.0.0.1:18898/api/image-library', timeout=3) as response:
+            assert json.load(response)['artifacts'] == []
+        with urlopen('http://127.0.0.1:18898/static/image-store.js', timeout=3) as response:
+            assert b'SerialdImageStore' in response.read()
+        print('PASS: installed browser access links, image cache API and image-store static route', flush=True)
     worker_users = []
     for process in pathlib.Path('/proc').glob('[0-9]*'):
         try:

@@ -5,8 +5,7 @@
 不需要手动配置 `SERIALD_MCP_PYTHON`。核心服务仍使用系统 Python 3.10+，系统依赖由 apt 处理。
 其他上位机架构可使用源码运行方式，目前不提供对应的预编译 deb。
 
-新安装默认单机，在本机提供主要功能。多机模式由 Linux/Windows 上位机连接专用 Linux 控制机，
-串口、USB 刷机、复位适配与板卡数据集中在控制机；配置见 [部署模式](DISTRIBUTED.md)。
+推荐在持有板卡的 Linux 控制机安装完整 DeckLab，其他电脑直接用浏览器访问，无需安装客户端或配对。Windows 也支持完整单机使用。已有 Web/后端分离部署继续兼容，见 [部署模式](DISTRIBUTED.md)。
 
 统一终端解析需要发行版 `nodejs`（Node 12+）；`apt install ./dist/…deb` 会一并安装。
 如果用 `dpkg -i` 安装且提示缺少依赖，执行一次 `sudo apt -f install`。
@@ -31,22 +30,23 @@ serialctl devices
 `seriald_latest_all.deb` 保留为 amd64 兼容别名，文件内的 `Architecture` 是 `amd64`，
 不能用于 arm64 安装。
 
-## 可选刷机组件
+## 完整安装内容
 
-GitHub 正式包不包含 goflash 执行器、USB 驱动及 RAM 加载材料。
-需要刷机时，在持有板卡 USB 的硬件后端单独安装，见
-[独立安装刷机组件](HARDWARE_EXTENSIONS.md#独立安装刷机组件)。终端、SSH、MCP 及日志功能不依赖这些组件。
+1.10.0 起默认构建完整包，包含主程序、MCP、刷机执行器和匹配的 RAM 加载材料，自动选择包内路径；Linux 的 Node、libusb、udev 等系统依赖由 apt 安装。当前内置 RAM 材料支持 K3；列出 K1 镜像不代表已验证 K1 刷机。
+历史 GitHub 1.9.0 及更早的精简包仍需[单独安装刷机组件](HARDWARE_EXTENSIONS.md#独立安装刷机组件)，升级完整包时保留显式配置的外部组件路径。
+
+镜像商店从[公开站](https://archive.spacemit.com/image/)和[内部 Nexus](https://nexus.bianbu.xyz/service/rest/repository/browse/image/)读取目录，下载保存在控制机。使用见[镜像商店](IMAGE_STORE.md)。
 
 ## 从源码构建安装包
 
 在与目标架构匹配的原生构建机上，先冻结 Ubuntu 22.04 / glibc 2.35 基线的 MCP 运行时，
-再离线组装 deb。默认运行时构建使用 Docker，并下载锁定版本和哈希的构建依赖；
+准备 `build/install-components/linux-amd64/manifest.json` 中经过校验的完整材料，再离线组装 deb。材料清单格式见 [完整包构建](COMPLETE_INSTALL.md)。默认运行时构建使用 Docker，并下载锁定版本和哈希的构建依赖；
 组装步骤不访问网络、不需要 root：
 
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.9.0_amd64.deb
+sudo apt install ./dists/seriald_1.10.0_amd64.deb
 ```
 
 arm64 构建将上述 `amd64` 改为 `arm64`，在对应原生构建机执行。
@@ -60,7 +60,7 @@ arm64 构建将上述 `amd64` 改为 `arm64`，在对应原生构建机执行。
 包安装后自动启动 `seriald-collector.service` 和 `seriald.service`。collector 是唯一串口读者；
 `seriald.service` 是可独立重启的 Web/API 控制面。**同一组串口不可同时运行源码服务和包服务**，切换安装前先停止旧服务。
 默认监听 `0.0.0.0:8898`；浏览器访问 `http://上位机地址:8898`。
-安装脚本会按配置端口打印本机与探测到的局域网 URL；若局域网地址未出现，请检查网卡配置。
+安装后运行 `sudo seriald-access` 可打印本机和局域网访问链接；启用访问密码时使用现有分享授权，有效期内可直接打开。链接仅分享给受信任的使用者。若局域网地址未出现，请检查网卡和防火墙配置。
 
 远程 MCP 使用同一地址的 `/mcp` 路径，AI 客户端只需填写 URL 和网页生成的 Agent 令牌。
 Debian 包的内置 MCP 由 control 自动管理；升级到 1.7.1 后无需另装服务端 SDK。

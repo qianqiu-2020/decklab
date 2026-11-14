@@ -204,6 +204,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.manager is None:
             return self._json(503, {'error': 'collector manager unavailable'})
 
+        if route in ('/api/image-catalog', '/api/image-library'):
+            if self.headers.get('X-Seriald-Actor', 'web') != 'web':
+                return self._json(403, {'error': 'image store requires a human operator'})
+            try:
+                from .image_catalog import catalog, library
+                result = (library(self.manager) if route == '/api/image-library' else
+                          catalog((q.get('source') or ['public'])[0], (q.get('path') or [''])[0],
+                                  (q.get('refresh') or [''])[0] == '1'))
+                return self._json(200, result)
+            except (TaskError, OSError, ValueError) as error:
+                return self._json(getattr(error, 'status', 503), {'error': str(error) if isinstance(error, TaskError) else '镜像商店暂不可用'})
+
         if route == '/api/device-preferences':
             try:
                 from .device_preferences import snapshot
@@ -473,7 +485,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         actor = str(payload.get('actor') or 'web')[:80]
         if route == '/api/image-download':
             from .image_download import ImageDownloads
-            device = None if payload.get('target_id') else self._dev({'key': [str(payload.get('key') or '')],
+            device = None if payload.get('target_id') or not payload.get('key') else self._dev({'key': [str(payload.get('key') or '')],
                 'serial': [str(payload.get('serial') or '')]})
             result = ImageDownloads(self.manager).start(payload, device, actor)
             return self._json(result.status, result.payload)

@@ -4,9 +4,7 @@
 
 DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统一提供网页终端、SSH、历史日志和 Agent 接口。支持 Ubuntu 服务安装及 Windows 上位机。底层项目、命令与服务名保留 `seriald`。
 
-主要支持两种[部署模式](docs/DISTRIBUTED.md)：Linux/Windows 单机提供本机主要功能；
-多机由 Linux/Windows 上位机连接一台专用 Linux 控制机，板卡操作与数据集中在控制机。
-Windows 单机重点验证串口和刷机，自动复位在 Linux 控制机侧按适配器验证。
+推荐在 Linux 控制机安装完整 DeckLab，其他电脑直接通过浏览器使用，无需客户端和节点配对。Windows 也支持完整单机使用；有明确需求时可采用[高级分离部署](docs/DISTRIBUTED.md)。
 
 [最新发布](https://github.com/qianqiu-2020/decklab/releases/latest) ·
 [Windows 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald-windows-x64-setup.exe) ·
@@ -17,8 +15,7 @@ Windows 单机重点验证串口和刷机，自动复位在 Linux 控制机侧�
 
 真实应用界面，使用模拟设备，无需接入硬件。Demo 中的设备不代表对应版型已经实测支持。
 
-正式包内置主程序、终端运行时和服务端 MCP 依赖。刷机执行器与匹配的 RAM 材料
-需在硬件后端单独安装，见[刷机组件安装](docs/HARDWARE_EXTENSIONS.md#独立安装刷机组件)。
+1.10.0 起默认构建[完整安装包](docs/COMPLETE_INSTALL.md)，包含主程序、终端运行时、MCP、刷机执行器和 RAM 材料；Windows 同时提供 USB 驱动安装入口。历史 1.9.0 精简包仍需另装刷机组件。新增[镜像商店](docs/IMAGE_STORE.md)，可从公开站和内部 Nexus 选择镜像下载到控制机。
 
 ## 为什么使用 DeckLab
 
@@ -66,7 +63,7 @@ Windows 单机重点验证串口和刷机，自动复位在 Linux 控制机侧�
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.9.0_amd64.deb
+sudo apt install ./dists/seriald_1.10.0_amd64.deb
 ```
 
 默认运行时构建需要 Docker 和构建时下载；运行时准备后，deb 组装不访问网络。

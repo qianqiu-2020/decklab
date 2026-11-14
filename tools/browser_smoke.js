@@ -223,6 +223,11 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/api/agent-grants') return json({grants: []});
   if (u.pathname === '/api/probe-settings') return json(probeSettings);
   if (u.pathname === '/api/flash-discover') return json({available:true,targets:flashUsbTargets});
+  if (u.pathname === '/api/image-catalog') {
+    if(u.searchParams.get('source') === 'internal') {res.statusCode=502;return json({error:'内部镜像源暂不可访问（模拟）'});}
+    return json({entries:u.searchParams.get('path') ? [{name:'模拟固件.img',path:'k3/模拟固件.img',kind:'disk-image',size:1024,url:'https://example.test/fixture.img'}] : [{name:'k3',path:'k3/',kind:'directory'}]});
+  }
+  if (u.pathname === '/api/image-library') return json({artifacts:[flashArtifact],tasks:[]});
   if (u.pathname === '/api/flash-capabilities') return json({supported:true,board_serial:fixtures[1].serial,
     binding_revision:7,profile:'模拟 K3 · 浏览器测试夹具',control:{provider:'manual'},
     console:null,executor:{provider:'goflash',node:'local',endpoint:'fixture-usb-4'},
@@ -233,7 +238,7 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/api/task' && flashRecords.length) return json({task:flashRecords[0]});
   if (u.pathname === '/api/tasks') return json({tasks:flashRecords});
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, route)));
 });
@@ -261,6 +266,22 @@ let chrome, ws;
   const out=path.join(root,'dist');fs.mkdirSync(out,{recursive:true});
   const overviewShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-overview.png'),Buffer.from(overviewShot.data,'base64'));
+  await evaluate('document.querySelector("#b-image-store").click()');
+  for(let n=0;n<30 && !await evaluate('document.querySelectorAll("#is-list .is-row").length === 1');n++)await delay(50);
+  await evaluate('document.querySelector("#is-list button").click()');
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#is-list").textContent.includes("模拟固件.img")');n++)await delay(50);
+  assert.ok(await evaluate('document.querySelector("#is-list").textContent.includes("下载到控制机")'));
+  const storeShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-image-store-fixture.png'),Buffer.from(storeShot.data,'base64'));
+  await evaluate('document.querySelector("#is-source").value="internal";document.querySelector("#is-source").dispatchEvent(new Event("change"))');
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#is-status").textContent.includes("内部镜像源暂不可访问")');n++)await delay(50);
+  assert.equal(await evaluate('document.querySelectorAll("#is-list .is-row").length'),0);
+  await evaluate('document.querySelector("#is-source").value="local";document.querySelector("#is-source").dispatchEvent(new Event("change"))');
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#is-list").textContent.includes("fixture.img")');n++)await delay(50);
+  assert.ok(await evaluate('document.querySelector("#is-list").textContent.includes("删除")'));
+  assert.equal(await evaluate('Array.from(document.querySelectorAll("#is-list button")).some(b=>b.textContent==="使用")'),false);
+  await evaluate('document.querySelector("#is-close").click()');
+  assert.deepEqual(posts,[], 'browsing image repositories must not submit a download or flash');
   await evaluate('window.OriginalTerminal=Terminal; window.Terminal=class extends OriginalTerminal {constructor(...args){super(...args);window.testTerm=this;}}');
   await evaluate('document.querySelector(\'[data-key="milkv"]\').click()');
   await delay(300);

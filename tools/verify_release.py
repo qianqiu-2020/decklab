@@ -15,6 +15,34 @@ sys.path.insert(0, str(ROOT))
 from tools.bundle_manifest import verify as verify_bundle
 from tools.collect_windows_notices import verify as verify_notices
 from tools.collect_linux_mcp_notices import verify as verify_linux_notices
+from tools.install_components import executor_metadata, tree_inventory
+from tools.package_flash_loaders import publish as inspect_loaders
+
+
+def inspect_complete_install(root, platform):
+    root = Path(root)
+    windows = platform == 'windows-amd64'
+    code = root if windows else root / 'usr/lib/seriald'
+    info = json.loads((code / 'installation.json').read_text())
+    if info.get('profile') != 'complete':
+        raise ValueError('release requires a complete standalone installation')
+    executor = root / ('_internal/decklab-flash.exe' if windows else 'usr/libexec/seriald/decklab-flash')
+    actual = executor_metadata(executor, platform)
+    pinned = info if windows else json.loads((root / 'usr/share/doc/seriald/flash-executor.json').read_text())
+    if any(actual[key] != pinned.get(key) for key in ('sha256', 'size')):
+        raise ValueError('installed flash executor checksum mismatch')
+    loaders = root / ('_internal/flash-loaders' if windows else 'usr/lib/seriald/flash-loaders')
+    with tempfile.TemporaryDirectory() as temporary:
+        inspect_loaders(loaders, temporary)
+    notices = root / ('flash-third-party' if windows else 'usr/share/doc/seriald/flash-third-party')
+    tree_inventory(notices)
+    if windows:
+        driver = root / 'usb-driver'
+        if tree_inventory(driver) != info.get('driver_files'):
+            raise ValueError('installed USB driver inventory mismatch')
+        for name in ('spacemit_usb.inf', 'WinUSB/spacemit_amd64.cat', 'driverinstall.exe'):
+            if not (driver / name).is_file(): raise ValueError('installed USB driver is incomplete')
+    return info
 
 
 def checksums(directory, manifest, expected, source_prefix=''):
@@ -163,6 +191,8 @@ def inspect_release(directory, version):
             with tempfile.TemporaryDirectory(prefix='decklab-debian-inspection-') as temporary:
                 subprocess.run(['dpkg-deb', '--extract', str(directory / deb), temporary], check=True)
                 code = Path(temporary) / 'usr/lib/seriald'
+                if release_version >= (1, 10, 0):
+                    inspect_complete_install(Path(temporary), 'linux-' + architecture)
                 runtime = inspect_linux_runtime(code / 'mcp-runtime', architecture)
                 for name in ('seriald_mcp.py', 'serialctl.py'):
                     if hashlib.sha256((code / name).read_bytes()).hexdigest() != runtime['source_files'][name]:
@@ -172,6 +202,8 @@ def inspect_release(directory, version):
     with tempfile.TemporaryDirectory(prefix='decklab-release-inspection-') as temporary:
         bundle = unpack_portable(directory / portable, Path(temporary))
         manifest = verify_bundle(bundle)
+        if release_version >= (1, 10, 0):
+            inspect_complete_install(bundle, 'windows-amd64')
         notices = verify_notices(bundle / 'third-party')
         if (bundle / 'package-version.txt').read_text(encoding='ascii').strip() != version:
             raise ValueError('portable package version mismatch')

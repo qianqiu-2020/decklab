@@ -8,18 +8,18 @@ AI 客户端无需安装脚本或 Python。启动、授权范围和撤销机制�
 共享串口／SSH 的终端状态与实时协议应答由后端统一维护。安装器内置经过摘要校验的
 Node 运行时及其许可证，使用者不用单独安装 Node。构建时自动准备运行时并缓存已校验的下载。
 
-GitHub 正式安装包不包含 goflash、USB 驱动及 RAM 加载材料。
-需要刷机时，在硬件后端按[独立安装刷机组件](HARDWARE_EXTENSIONS.md#独立安装刷机组件)配置；
-这些材料放在安装目录之外，避免随主程序升级覆盖。
+1.10.0 起默认完整包包含 goflash、匹配的 RAM 材料和 USB 驱动，程序自动使用包内路径。驱动安装可能需要 Windows 管理员确认；可在安装向导勾选，或稍后运行 `Install-seriald-USB-Driver.cmd`。普通浏览器使用者无需安装驱动或组件。历史 1.9.0 精简包仍需[独立安装刷机组件](HARDWARE_EXTENSIONS.md#独立安装刷机组件)。
+
+推荐把完整 DeckLab 安装在 Linux 控制机，Windows 电脑直接通过浏览器访问。Windows 单机仍支持本机串口和刷机；无需先部署分离的 Web 节点。
 
 ## 安装与升级
 
 首次安装选择的向导语言也作为网页默认语言，保存在 `data/ui-language.txt`。
 升级保留该文件。网页的中文 / English 切换会保存当前浏览器偏好，优先于安装默认值；
 没有安装默认值时跟随浏览器语言。切换不会重建终端或放弃输入占用。
-桌面快捷方式默认仅本机访问、无密码；开始菜单另有局域网无密码和有密码入口。
+桌面快捷方式默认仅本机访问、无密码；开始菜单另有局域网无密码和有密码入口。有密码入口会打印可直接打开的授权访问链接，远端无需安装客户端；运行窗口应保持打开。
 
-首次运行 `seriald-1.9.0-windows-x64-setup.exe`，选择一个可写的安装目录。默认在安装包所在位置创建可见的 `seriald-installed/`；若安装包位于源码的 `dist/`，默认改用源码目录下的 `seriald-installed/`，与构建目录分开。首次从解压版迁移时，**选择原安装目录**，无需搬运数据。
+首次运行 `seriald-1.10.0-windows-x64-setup.exe`，选择一个可写的安装目录。默认在安装包所在位置创建可见的 `seriald-installed/`；若安装包位于源码的 `dist/`，默认改用源码目录下的 `seriald-installed/`，与构建目录分开。首次从解压版迁移时，**选择原安装目录**，无需搬运数据。
 
 后续双击新版本 Setup，安装器记住上次目录并覆盖程序文件，保留 `data/` 中的日志、设备档案和认证配置。升级前关闭 seriald 窗口以释放 COM 口；安装器也会检测占用的文件并提示关闭程序。安装完成从开始菜单或安装目录重新启动，三种模式任选其一。卸载仅移除安装的程序与快捷方式，保留运行数据。
 
@@ -29,6 +29,7 @@ GitHub 正式安装包不包含 goflash、USB 驱动及 RAM 加载材料。
 
 ```powershell
 winget install --id JRSoftware.InnoSetup -e -s winget -i
+# 先准备 build/install-components/windows-amd64/manifest.json，见 COMPLETE_INSTALL.md
 .\Build-seriald.cmd
 ```
 
@@ -42,7 +43,8 @@ winget install --id JRSoftware.InnoSetup -e -s winget -i
 SHA-256。生成 ZIP 前以及单独构建安装器时都会校验；缺文件、多余旧文件或内容变化均要求重建。
 该清单用于构建完整性检查，不是签名或许可证清单，不适用于包含运行数据的安装目录。
 
-仅需 ZIP 时运行 `.\Build-seriald.cmd -PortableOnly`，无需 Inno Setup。`Install-seriald.cmd` 保留为 **ZIP 安装脚本**：默认装到源码旁的 `seriald-installed/`，保留 `data/`，备份旧程序，替换失败时回滚；也支持 `tools/install_windows.ps1 -InstallDir D:\seriald`。它可复制旧 `%LOCALAPPDATA%\seriald\data`，但不会删除旧目录。IT 可传 `-ExpectedSha256 <批准的程序EXE摘要>` 进行校验。常规用户直接使用 Setup。
+仅需 ZIP 时运行 `# 先准备 build/install-components/windows-amd64/manifest.json，见 COMPLETE_INSTALL.md
+.\Build-seriald.cmd -PortableOnly`，无需 Inno Setup。`Install-seriald.cmd` 保留为 **ZIP 安装脚本**：默认装到源码旁的 `seriald-installed/`，保留 `data/`，备份旧程序，替换失败时回滚；也支持 `tools/install_windows.ps1 -InstallDir D:\seriald`。它可复制旧 `%LOCALAPPDATA%\seriald\data`，但不会删除旧目录。IT 可传 `-ExpectedSha256 <批准的程序EXE摘要>` 进行校验。常规用户直接使用 Setup。
 
 如果 Inno Setup 已安装但无法找到，构建脚本会从 PATH、用户/系统安装注册表及常见目录查找 `ISCC.exe`。也可显式指定实际路径。ZIP 已生成时，仅重跑安装器步骤，无需重新执行 PyInstaller：
 

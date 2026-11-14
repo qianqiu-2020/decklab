@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 param([switch]$UseCurrentPython, [switch]$PortableOnly, [string]$ParamikoSource,
-      [string]$FlashExecutor, [string]$FlashNotices, [string]$FlashLoaders)
+      [string]$FlashExecutor, [string]$FlashNotices, [string]$FlashLoaders,
+      [string]$FlashDriver, [string]$FlashComponents, [switch]$CoreOnly)
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') {
@@ -8,6 +9,21 @@ if ($env:OS -ne 'Windows_NT') {
 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if ($CoreOnly -and ($FlashExecutor -or $FlashNotices -or $FlashLoaders -or $FlashDriver -or $FlashComponents)) {
+    throw 'CoreOnly cannot be combined with flashing components.'
+}
+if (-not $CoreOnly) {
+    if ($FlashExecutor -or $FlashNotices -or $FlashLoaders -or $FlashDriver) {
+        if (-not ($FlashExecutor -and $FlashNotices -and $FlashLoaders -and $FlashDriver) -or $FlashComponents) {
+            throw 'Complete installation requires executor, notices, RAM materials and USB driver together.'
+        }
+    } else {
+        if (-not $FlashComponents) { $FlashComponents = Join-Path $root 'build\install-components\windows-amd64\manifest.json' }
+        if (-not (Test-Path -LiteralPath $FlashComponents -PathType Leaf)) {
+            throw 'Complete standalone installation requires the reviewed component manifest in build\install-components\windows-amd64. CoreOnly is an explicit compatibility/CI build without flashing.'
+        }
+    }
+}
 if ($ParamikoSource) {
     $ParamikoSource = (Resolve-Path -LiteralPath $ParamikoSource).Path
     if (-not (Test-Path -LiteralPath $ParamikoSource -PathType Leaf) -or
@@ -83,7 +99,8 @@ try {
                          'test_flash_discovery_integration.py', 'test_pending_labels.py',
                          'test_web_settings.py', 'test_settings_restart.py', 'test_device_preferences.py',
                          'test_backend_link.py', 'test_collector_lock.py', 'test_windows_entrypoint.py',
-                         'test_image_download.py', 'test_flash_loaders.py',
+                         'test_image_download.py', 'test_image_catalog.py', 'test_access_info.py',
+                         'test_install_components.py', 'test_flash_loaders.py',
                          'test_transfer_artifacts.py', 'test_file_tasks.py',
                          'test_transfer_tasks.py', 'test_input_ownership.py',
                          'test_models.py', 'test_maintenance.py', 'test_agent_grants.py', 'test_board_control.py',
@@ -111,6 +128,8 @@ try {
     if (Get-Command node -ErrorAction SilentlyContinue) {
         & node tests/frontend.test.js
         if ($LASTEXITCODE -ne 0) { throw 'Frontend regression tests failed.' }
+        & node tests/image-store.test.js
+        if ($LASTEXITCODE -ne 0) { throw 'Image store regression tests failed.' }
         & node tests/share.test.js
         if ($LASTEXITCODE -ne 0) { throw 'Agent share UI tests failed.' }
     } else {
@@ -148,14 +167,14 @@ try {
     if ($ParamikoSource) { $noticeArguments += @('--paramiko-source', $ParamikoSource) }
     & $python @noticeArguments
     if ($LASTEXITCODE -ne 0) { throw 'Third-party notice collection failed; refusing to publish incomplete packages.' }
-    if ($FlashExecutor) {
-        if (-not $FlashNotices) { throw 'FlashExecutor requires FlashNotices.' }
-        Copy-Item -LiteralPath $FlashExecutor -Destination (Join-Path $bundle '_internal\decklab-flash.exe')
-        Copy-Item -LiteralPath $FlashNotices -Destination (Join-Path $bundle 'flash-third-party') -Recurse
-    }
-    if ($FlashLoaders) {
-        & $python tools/package_flash_loaders.py $FlashLoaders (Join-Path $bundle '_internal\flash-loaders')
-        if ($LASTEXITCODE -ne 0) { throw 'RAM loader validation failed.' }
+    if (-not $CoreOnly) {
+        $componentArguments = @('tools/install_components.py', '--platform', 'windows-amd64', '--windows-bundle', $bundle)
+        if ($FlashComponents) { $componentArguments += @('--manifest', $FlashComponents) }
+        else { $componentArguments += @('--executor', $FlashExecutor, '--notices', $FlashNotices, '--loaders', $FlashLoaders, '--driver', $FlashDriver) }
+        & $python @componentArguments
+        if ($LASTEXITCODE -ne 0) { throw 'Complete standalone installation inputs failed validation.' }
+    } else {
+        Set-Content -LiteralPath (Join-Path $bundle 'installation.json') -Value '{"profile":"core"}' -Encoding ASCII
     }
 
     $launchers = Join-Path $root 'tools\windows-launchers'

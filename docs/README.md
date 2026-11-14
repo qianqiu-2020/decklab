@@ -36,3 +36,6 @@ Completed implementation plans and historical investigations are retained in Git
 history rather than distributed as current instructions.
 
 [部署模式](DISTRIBUTED.md)：Linux/Windows 单机，或 Linux/Windows 上位机与专用 Linux 控制机。
+
+- [完整包构建](COMPLETE_INSTALL.md)
+- [镜像商店](IMAGE_STORE.md)

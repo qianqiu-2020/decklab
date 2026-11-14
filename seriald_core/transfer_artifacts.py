@@ -119,7 +119,8 @@ class TransferArtifacts:
     def get(self, artifact_id, actor='web', serial=None):
         with self._lock(artifact_id), self.store.lock:
             row = self.store.db.execute('SELECT * FROM transfer_artifacts WHERE id=?', (artifact_id,)).fetchone()
-            if row is None or (actor != 'web' and row['actor'] != actor) or (serial is not None and row['serial'] != serial):
+            shared_upload = row is not None and actor == 'web' and row['serial'] == '' and row['direction'] == 'upload'
+            if row is None or (actor != 'web' and row['actor'] != actor) or (serial is not None and row['serial'] != serial and not shared_upload):
                 raise TaskError('artifact not found', 404)
             return dict(row)
 

@@ -87,8 +87,11 @@
       if (selected) flashing.open(selected, task);
     }
   });
+  var imageStore = window.SerialdImageStore && window.SerialdImageStore.create({byId:$,fetch:fetch,formatBytes:fmt});
+  $('b-image-store').addEventListener('click', function () { if (imageStore) imageStore.open(); });
   var flashing = window.SerialdFlashing && window.SerialdFlashing.create({
-    byId: $, fetch: fetch, formatBytes: fmt
+    byId: $, fetch: fetch, formatBytes: fmt,
+    openImageStore: function (choose) { if (imageStore) imageStore.open(choose); }
   });
   var boardControl = window.SerialdBoardControl && window.SerialdBoardControl.create({
     byId: $, fetch: fetch, getView: function () { return terminalView.current; },

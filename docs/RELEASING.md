@@ -36,35 +36,11 @@ glibc 2.35 为基线，包含私有 Python、MCP SDK 与全部 Python 依赖；�
 与目标架构一致。未传 `--runtime` 时仅查找本机架构的默认目录；缺失或校验失败
 会停止构建，不允许发布缺少 MCP 的薄包。
 
-### 本次公开分发范围
+### 完整单机安装
 
-1.9.0 的 GitHub 正式附件只分发主程序、终端运行时和 MCP 依赖。
-goflash、USB 驱动和 RAM 材料单独安装，公开流水线不传入这些内网构建材料。
-附件验收时同时确认未混入执行器或加载材料；需要刷机的使用者参考
-[组件安装](HARDWARE_EXTENSIONS.md#独立安装刷机组件)。
+1.9.0 历史正式包不包含执行器和 RAM 材料，保持原附件不变。1.10.0 起构建默认要求完整材料，见 [完整包构建](COMPLETE_INSTALL.md)。正式标签流水线按平台下载经过审核、固定摘要的输入 ZIP，缺少输入时停止构建，不能自动生成精简包。公开分发前仍需核对执行器及 RAM 材料的来源和许可。
 
-### 本地刷机测试包
-
-仅供本机安装测试时，可显式包含已经构建的同架构 `decklab-flash` 执行器：
-
-```sh
-python3 tools/build_deb.py --version '1.9.0~local1' \
-  --runtime build/linux-mcp/amd64/runtime \
-  --flash-executor /path/to/decklab-flash \
-  --flash-notices /path/to/executor-license-notices \
-  --flash-loaders /path/to/prepared-ram-loaders --output dists
-```
-
-运行时仍须按本次源码重新生成并通过校验。构建器不执行刷机程序；它核对 ELF 架构，
-将程序安装到 `/usr/libexec/seriald/decklab-flash`，并记录文件摘要、大小和架构于
-`/usr/share/doc/seriald/flash-executor.json`。该测试包增加系统 `libusb-1.0-0` 依赖。
-`--flash-notices` 将执行器依赖声明及构建记录放入
-`/usr/share/doc/seriald/flash-third-party/`，逐文件摘要记入同一元数据。
-不传 `--flash-executor` 的默认构建保持原行为，不包含刷机执行器。
-
-将完整刷机能力纳入正式版时，须先把固定版本的执行器、依赖声明和 RAM 材料接入
-Ubuntu amd64／arm64 与 Windows 的构建及附件验收。前端有刷机入口不代表安装包已包含这些组件；
-仅构建默认包不能作为完整刷机版发布。
+本地完整测试包可显式使用固定材料和版本文件名，直接输出 `dists/`。Windows 在原生构建机生成安装器并验证 USB 驱动签名。普通软件 CI 使用显式 `--core-only` / `-CoreOnly`，其产物不能冒充完整安装包。
 
 包含执行器的安装包启动后会自动发现本机 USB 下载设备；普通手动下载模式刷机
 无需先登记串口序列号或手写板卡配置。单文件 NOR 刷写还需匹配的预装 RAM 材料。

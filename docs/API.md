@@ -541,10 +541,22 @@ primary Web credential; `/api/settings` manages the Web node. The private
 `GET/POST /api/backend-settings` exists only on the authenticated TLS backend
 and is not exposed directly by Web. See [deployment](DISTRIBUTED.md).
 
-`POST /api/image-download` accepts a Web-operated device/USB target scope,
+`GET /api/image-catalog?source=public|internal&path=k3/version/` browses direct
+children of the configured public archive or internal Nexus. Empty `path` lists
+K1/K3. `refresh=1` bypasses the 60-second metadata cache. Responses contain
+`entries` with `name`, `path`, `kind` and, for images, `url`, available size/date
+metadata and `validation: preview-required`. Repository failures return 502;
+no image download or board action occurs. See [image store](IMAGE_STORE.md).
+`GET /api/image-library` returns ready shared uploads and existing active global
+image-download tasks. These catalog/library routes and URL import require a human
+Web operator; Agent grants cannot access them.
+
+`POST /api/image-download` accepts an optional Web-operated device/USB target scope,
 `url`, required stable `request_id`, optional `name` and `sha256`. During prepared
 USB selection, include `task_id` and the original USB scope as described above. It returns
-HTTP 202 and the existing durable task. Poll `/api/task?id=...`, cancel with
+HTTP 202 and the existing durable task. Without a device scope, the ready upload
+is stored in the shared image cache (`serial: ""`), reusable for different boards
+by human operators. An invalid nonempty device scope never becomes a shared import. Poll `/api/task?id=...`, cancel with
 `/api/task-cancel`. Completion returns `result.artifact` (`id`, `name`, `size`,
 `sha256`, `serial`, `state: ready`), usable by `/api/flash-plan`. Reusing an ID
 with identical input retrieves its original task; different input returns 409.

@@ -41,6 +41,9 @@ Name: "chinesesimplified"; MessagesFile: "inno-languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut / 创建桌面快捷方式"; Flags: unchecked
+#if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
+Name: "usbdriver"; Description: "Install USB flashing driver / 安装 USB 刷机驱动（可能需要管理员确认）"
+#endif
 
 [Files]
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Excludes: "data\*"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -48,6 +51,11 @@ Source: "{#BundleDir}\*"; DestDir: "{app}"; Excludes: "data\*"; Flags: ignorever
 [Dirs]
 ; Runtime data belongs to the user: upgrades and uninstall leave it intact.
 Name: "{app}\data"; Flags: uninsneveruninstall
+
+#if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
+[Run]
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Install-seriald-USB-Driver.ps1"""; Tasks: usbdriver; Flags: waituntilterminated runhidden; StatusMsg: "Installing USB flashing driver / 正在安装 USB 刷机驱动"
+#endif
 
 [Icons]
 Name: "{group}\DeckLab - 本机访问"; Filename: "{app}\Start-seriald.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"

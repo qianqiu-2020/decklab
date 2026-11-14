@@ -137,6 +137,7 @@
       $('fl-mode').disabled = busy || submissionUnknown || !!active || !!preparable && !(capabilities.modes || []).includes('full');
       $('fl-files').disabled = busy || submissionUnknown || !!active && !selecting;
       $('fl-upload').disabled = busy || submissionUnknown || !!active && !selecting || !uploadAvailable;
+      $('fl-store').disabled = $('fl-upload').disabled;
       $('fl-download').disabled = busy || uploading || submissionUnknown || !!active && !selecting || !uploadAvailable;
       $('fl-url').disabled = busy || uploading || submissionUnknown || !!active && !selecting;
       $('fl-url-sha256').disabled = busy || uploading || submissionUnknown || !!active && !selecting;
@@ -993,6 +994,17 @@
     $('fl-verify').addEventListener('change', invalidatePlan);
     $('fl-target-storage').addEventListener('change', invalidatePlan);
     $('fl-upload').addEventListener('click', upload); $('fl-plan').addEventListener('click', makePlan);
+    $('fl-store').addEventListener('click', function () {
+      if (!board || $('fl-store').disabled || !options.openImageStore) return;
+      var selected = board, seq = sequence;
+      options.openImageStore(function (artifact) {
+        if (!same(selected, seq) || $('fl-store').disabled) throw new Error('当前设备或任务状态已变化，请重新选择。');
+        artifacts = artifacts.filter(function (item) { return item.id !== artifact.id; }).concat([artifact]);
+        selectPayloadMode(artifact); artifactOptions($('fl-artifact'), artifact.id);
+        renderPartitions(); invalidatePlan();
+        status('已选择控制机缓存中的镜像；请核对写入范围并预览。');
+      });
+    });
     $('fl-download').addEventListener('click', downloadImage);
     $('fl-download-cancel').addEventListener('click', async function () {
       if (!downloadTask) return;

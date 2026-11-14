@@ -251,7 +251,8 @@ class FlashActions:
             artifacts = self.manager.artifacts
             with self.manager.store.lock:
                 rows = self.manager.store.db.execute(
-                    "SELECT id FROM transfer_artifacts WHERE serial=? AND direction='upload' AND state='ready' "
+                    ("SELECT id FROM transfer_artifacts WHERE serial IN (?, '') AND direction='upload' AND state='ready' " if actor == 'web' else
+                     "SELECT id FROM transfer_artifacts WHERE serial=? AND direction='upload' AND state='ready' ")
                     + ('' if actor == 'web' else 'AND actor=? ') + 'ORDER BY updated DESC LIMIT 100',
                     (device.serial,) if actor == 'web' else (device.serial, actor)).fetchall()
             for row in rows:
