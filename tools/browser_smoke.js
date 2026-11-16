@@ -788,7 +788,7 @@ let chrome, ws;
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-artifact").options.length>1');n++)await delay(50);
   assert.equal(await evaluate('document.querySelector("#flash-dialog").open'),true);
   assert.ok(await evaluate('document.querySelector("#fl-board").textContent.includes("riscv-118")'));
-  assert.ok(await evaluate('document.querySelector("#fl-connections").textContent.includes("本次不执行复位")'));
+  assert.ok(await evaluate('document.querySelector("#fl-connections").textContent.includes("未提供刷后自动复位")'));
   assert.equal(flashSubmissions.length,0,'opening capabilities must not start flashing');
   await evaluate('document.querySelector("#fl-artifact").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-artifact").dispatchEvent(new Event("change"));document.querySelector("#fl-mode").value="partitions";document.querySelector("#fl-mode").dispatchEvent(new Event("change"));document.querySelector("#fl-partitions input").checked=true;document.querySelector("#fl-partitions input").dispatchEvent(new Event("change"));document.querySelector("#fl-partitions select").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-plan").click()');
   for(let n=0;n<40 && await evaluate('document.querySelector("#fl-start").disabled');n++)await delay(50);

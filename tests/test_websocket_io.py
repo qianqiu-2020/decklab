@@ -199,6 +199,16 @@ class WebSocketIOTests(unittest.TestCase):
                 ws.recv(.2)
             self.assertEqual(failure.exception.code, 1008)
 
+    def test_select_returning_early_keeps_the_original_deadline(self):
+        with connection() as (ws, client, peer, events, _):
+            with mock.patch.object(module.time, 'monotonic', side_effect=[99, 99.99, 100]), \
+                    mock.patch.object(module.select, 'select', return_value=([], [], [])) as wait:
+                self.assertFalse(ws._wait(True, 100))
+                self.assertEqual(wait.call_count, 2)
+                self.assertEqual(wait.call_args_list[0].args[3], 1)
+                self.assertAlmostEqual(wait.call_args_list[1].args[3], .01)
+            self.assertFalse(ws.closed)
+
     def test_backpressured_socket_write_has_bounded_timeout_and_no_retry(self):
         with connection(max_send=16 * 1024 ** 2, io_timeout=.03) as (ws, client, peer, events, _):
             ws.stream.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)

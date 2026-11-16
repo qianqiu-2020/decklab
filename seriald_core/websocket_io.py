@@ -167,15 +167,19 @@ class WSConnection:
         self._size, self._message_started, self._fragments = 0, None, 0
 
     def _wait(self, reading, deadline):
-        left = deadline - time.monotonic()
-        if left <= 0:
-            return False
-        try:
-            readable, writable, _ = select.select([self.stream] if reading else [],
-                                                 [] if reading else [self.stream], [], left)
-            return bool(readable or writable)
-        except (OSError, ValueError):
-            raise WSClosed() from None
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            try:
+                readable, writable, _ = select.select([self.stream] if reading else [],
+                                                     [] if reading else [self.stream], [], left)
+                if readable or writable:
+                    return True
+                # Some platforms round a select timeout down. Recheck the
+                # absolute deadline instead of reporting an early timeout.
+            except (OSError, ValueError):
+                raise WSClosed() from None
 
     def _write(self, data):
         pending, deadline = memoryview(data), time.monotonic() + self.io_timeout
