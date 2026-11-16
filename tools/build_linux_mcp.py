@@ -290,7 +290,7 @@ def build_docker(output, architecture, image, desktop_runtime=None):
         'set -eu',
         'export DEBIAN_FRONTEND=noninteractive',
         'apt-get update',
-        'apt-get install -y --no-install-recommends software-properties-common binutils ca-certificates',
+        'apt-get install -y --no-install-recommends software-properties-common gpg-agent binutils ca-certificates',
         # Build-only PPA. The installed application retains the stdlib collector
         # and bundles this interpreter; no repository is added on the user's host.
         'add-apt-repository -y ppa:deadsnakes/ppa',
