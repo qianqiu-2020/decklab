@@ -7,11 +7,13 @@ collector and HTTP control service continue to use the distribution's standard
 library Python. The worker only accesses the authenticated HTTP API; its entry
 point never imports the serial collector.
 
-Build a prepared runtime on an amd64 or arm64 Docker host:
+For the 1.14.0 amd64 release, first prepare the fixed public component inputs
+from [the complete-build guide](../docs/COMPLETE_INSTALL.md), then build:
 
 ```sh
-python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
-python3 tools/build_linux_mcp.py --arch arm64 --output build/linux-mcp/arm64/runtime
+python3 tools/build_linux_mcp.py --arch amd64 \
+  --desktop-runtime build/install-components/linux-amd64/desktop-runtime \
+  --output build/linux-mcp/amd64/runtime
 ```
 
 Build each architecture on its native runner. The default command creates an
@@ -33,7 +35,9 @@ build/mcp-env/bin/python -m pip download --only-binary=:all: --require-hashes \
 build/mcp-env/bin/python -m pip install --no-index --find-links build/mcp-wheels \
   --only-binary=:all: --require-hashes -r packaging/linux-mcp-requirements.lock
 build/mcp-env/bin/python tools/build_linux_mcp.py --local --arch amd64 \
-  --wheelhouse build/mcp-wheels --output build/linux-mcp/amd64/runtime
+  --wheelhouse build/mcp-wheels \
+  --desktop-runtime build/install-components/linux-amd64/desktop-runtime \
+  --output build/linux-mcp/amd64/runtime
 ```
 
 `--local` requires Ubuntu 22.04, CPython 3.12 and glibc 2.35. PyInstaller does
@@ -59,7 +63,8 @@ files. Rust source notices are a conservative source dependency set, rather
 than a claim that every source package is present in the executable. Missing
 licenses, source graph entries or unmatched native binaries fail the build.
 
-The reviewed prebuilt runtime architectures are amd64 and arm64. A RISC-V
+Release 1.14.0 builds and validates amd64 only. Historical ARM build code remains,
+but does not establish current ARM desktop/runtime coverage. A RISC-V
 source installation remains a separate supported development path. The builder
 reserves native `--local --arch riscv64` for extending the reviewed inputs and
 validating a native PyInstaller bootloader; it is not a claim that a prebuilt
