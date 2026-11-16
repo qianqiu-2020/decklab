@@ -304,6 +304,8 @@ function fixture(configuration = {}) {
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/discover').length,1);
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/open').length,0,'discovery never logs in');
   setup.$('desktop-services').value='rdp-service'; setup.$('desktop-services').fire('change');
+  assert.strictEqual(setup.$('desktop-trust').checked,true,'new RDP fingerprints default to pinning when the user saves');
+  setup.$('desktop-trust').checked=false;
   setup.$('desktop-password').value='server-only'; setup.$('desktop-connection').fire('submit'); await tick();
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/configure').length,0,'observed pins need explicit human trust');
   setup.$('desktop-trust').checked=true; setup.$('desktop-connection').fire('submit'); await tick(); await tick();

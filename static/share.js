@@ -52,14 +52,15 @@
       deviceShare.hidden = false;
       shareButtons.forEach(function (element) { element.disabled = !canPageShare; });
       deviceShare.title = canPageShare
-        ? '分享链接直接打开当前设备；网页访问授权覆盖整个平台'
+        ? '链接默认打开此设备；网页授权仍可访问全部设备'
         : '当前凭证无权创建网页分享链接';
       // Selecting a board in this URL does not narrow the web credential.
       var shareText = Array.from(deviceShare.childNodes || []).find(function (node) { return node.nodeType === 3 && node.nodeValue.trim(); });
-      if (shareText) shareText.nodeValue = '分享设备（可访问全部设备）';
+      if (shareText) shareText.nodeValue = '此设备链接（全站权限）';
       [topAgent, deviceAgent].forEach(function (element) {
         element.disabled = !access.agent_share_enabled;
-        element.title = access.agent_share_enabled ? '生成可撤销的 Agent 接入令牌'
+        element.title = access.agent_share_enabled ? (element === topAgent
+          ? '默认授权全部设备，可在授权范围中更改' : '默认仅授权此设备，可在授权范围中更改')
           : '当前访问凭证无权生成 Agent 授权';
       });
       if (dialog.open) { renderInstructions(); updateHint(); }

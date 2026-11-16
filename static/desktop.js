@@ -458,7 +458,7 @@
       $('desktop-password').value = '';
       $('desktop-password').placeholder = saved.password_saved ? translate('已保存，留空保留') : '';
       $('desktop-certificate').value = saved.certificate_sha256 || '';
-      $('desktop-trust').checked = false; $('desktop-agent').checked = !!saved.allow_agent;
+      $('desktop-trust').checked = true; $('desktop-agent').checked = !!saved.allow_agent;
       candidateId = ''; $('desktop-services').value = ''; setupFields();
     }
     function setupFields() {
@@ -483,7 +483,7 @@
       if (!value) return;
       var changed = $('desktop-protocol').value !== value.provider || $('desktop-host').value !== value.host || Number($('desktop-port').value) !== value.port;
       $('desktop-protocol').value = value.provider; $('desktop-host').value = value.host; $('desktop-port').value = String(value.port);
-      $('desktop-certificate').value = value.certificate_sha256 || ''; $('desktop-trust').checked = false;
+      $('desktop-certificate').value = value.certificate_sha256 || ''; $('desktop-trust').checked = true;
       if (changed) $('desktop-password').value = ''; setupFields(); connectionMessage(value.error || '');
     }
     function detectServices(manual) {
@@ -521,7 +521,7 @@
       var payload = {key:ctx.key, serial:ctx.serial, client_id:options.clientId || '', revision:setupValue.revision,
         provider:provider, host:host, port:port, username:username,
         certificate_sha256:provider === 'rdp' ? $('desktop-certificate').value.trim() : '',
-        trust_certificate:$('desktop-trust').checked, allow_agent:$('desktop-agent').checked};
+        trust_certificate:provider === 'rdp' && $('desktop-trust').checked, allow_agent:$('desktop-agent').checked};
       if (payload.certificate_sha256 && !payload.trust_certificate && (saved.provider !== provider || saved.host !== host
           || saved.port !== port || (saved.certificate_sha256 || '').toLowerCase() !== payload.certificate_sha256.toLowerCase())) {
         connectionMessage('请核对并确认首次观察到的 RDP 证书指纹'); return;
@@ -597,7 +597,7 @@
       if (id === 'desktop-protocol') $('desktop-port').value = $('desktop-protocol').value === 'rdp' ? '3389' : '5900';
       setupFields();
     }); });
-    $('desktop-certificate').addEventListener('input', function () { candidateId = ''; $('desktop-trust').checked = false; setupFields(); });
+    $('desktop-certificate').addEventListener('input', function () { candidateId = ''; $('desktop-trust').checked = true; setupFields(); });
     $('d-tabs').addEventListener('click', function () { if (visible) hidePanel(); }, true);
     $('desktop-close').addEventListener('click', hidePanel);
     $('desktop-refresh').addEventListener('click', function () {
