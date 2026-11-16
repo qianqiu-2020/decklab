@@ -49,8 +49,20 @@ def _grants_initial(db):
 
 
 def _grants_connections(db):
-    db.execute("ALTER TABLE grants ADD COLUMN key TEXT NOT NULL DEFAULT ''")
-    db.execute("ALTER TABLE grants ADD COLUMN connection_id TEXT NOT NULL DEFAULT ''")
+    columns = {row[1] for row in db.execute('PRAGMA table_info(grants)')}
+    for name in ('key', 'connection_id'):
+        if name not in columns:
+            db.execute('ALTER TABLE grants ADD COLUMN ' + name + " TEXT NOT NULL DEFAULT ''")
+
+
+def _grants_revocations(db):
+    columns = {row[1] for row in db.execute('PRAGMA table_info(grants)')}
+    for name in ('revocation_generation', 'backend_confirmed_generation'):
+        if name not in columns:
+            db.execute('ALTER TABLE grants ADD COLUMN ' + name + ' INTEGER NOT NULL DEFAULT 0')
+    db.execute('UPDATE grants SET revocation_generation=1 WHERE revoked IS NOT NULL AND revocation_generation=0')
+    db.execute('CREATE TABLE IF NOT EXISTS actor_revocations (actor TEXT PRIMARY KEY, '
+               'generation INTEGER NOT NULL, updated REAL NOT NULL)')
 
 
 def _registry_tasks(db):
@@ -143,10 +155,19 @@ def _registry_flash_targets(db):
     db.execute('DROP TABLE flash_plans_before_targets')
 
 
+def _registry_board_input_owners(db):
+    db.execute('CREATE INDEX IF NOT EXISTS flash_request_task ON flash_requests(task_id)')
+    db.execute('CREATE TABLE IF NOT EXISTS board_input_owners ('
+               'serial TEXT PRIMARY KEY REFERENCES boards(serial) ON UPDATE CASCADE, '
+               'id TEXT NOT NULL, actor TEXT NOT NULL, client_id TEXT NOT NULL, generation INTEGER NOT NULL, '
+               'token_hash TEXT NOT NULL, state TEXT NOT NULL, expires REAL NOT NULL, updated REAL NOT NULL)')
+
+
 REGISTRY_MIGRATIONS = (_registry_initial, _registry_history, _registry_tasks, _registry_artifacts,
                        _registry_connections, _registry_probe_settings, _registry_ssh_credentials,
-                       _registry_flashing, _registry_attachment_labels, _registry_flash_targets)
-GRANT_MIGRATIONS = (_grants_initial, _grants_connections)
+                       _registry_flashing, _registry_attachment_labels, _registry_flash_targets,
+                       _registry_board_input_owners)
+GRANT_MIGRATIONS = (_grants_initial, _grants_connections, _grants_revocations)
 _SCHEMAS = {
     'registry': (0x444C5247, REGISTRY_MIGRATIONS, {
         'boards': 'serial label info first_seen last_seen last_path last_dev',
@@ -169,9 +190,12 @@ _SCHEMAS = {
         'attachment_labels': 'port label',
         'flash_targets': 'id generation serial document seen present',
         'task_flash_targets': 'task_id target_id generation',
+        'board_input_owners': 'serial id actor client_id generation token_hash state expires updated',
     }),
     'grants': (0x444C4147, GRANT_MIGRATIONS, {
-        'grants': 'id token_hash actor scope serial created expires revoked key connection_id',
+        'grants': 'id token_hash actor scope serial created expires revoked key connection_id '
+                  'revocation_generation backend_confirmed_generation',
+        'actor_revocations': 'actor generation updated',
     }),
 }
 

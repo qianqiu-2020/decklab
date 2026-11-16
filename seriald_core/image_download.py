@@ -83,7 +83,7 @@ class ImageConnection(http.client.HTTPConnection):
         raise last
 
 
-def fetch_image(artifacts, context, url, serial, name=None, sha256=None):
+def fetch_image(artifacts, context, url, serial, name=None, sha256=None, actor='web'):
     """No retries: partial imports fail; a repeated request finds its original task."""
     original = image_url(url)
     if sha256 is not None and (not isinstance(sha256, str) or not re.fullmatch('[a-f0-9]{64}', sha256)):
@@ -123,7 +123,7 @@ def fetch_image(artifacts, context, url, serial, name=None, sha256=None):
                 if length is not None and not 0 < length <= artifacts.policy.max_file:
                     raise TaskError('image exceeds the configured file size limit', 413)
                 limit = length if length is not None else artifacts.policy.max_file
-                artifact = artifacts.create('upload', filename, limit, 'web', serial, context.id)
+                artifact = artifacts.create('upload', filename, limit, actor, serial, context.id)
                 artifacts._update(artifact['id'], state='writing')
                 received = 0
                 context.progress(0, length or 0, 'image-download')
@@ -136,7 +136,7 @@ def fetch_image(artifacts, context, url, serial, name=None, sha256=None):
                         break
                     if received + len(chunk) > limit:
                         raise TaskError('image exceeds the reserved size', 413)
-                    artifacts.append(artifact['id'], received, chunk, task_id=context.id)
+                    artifacts.append(artifact['id'], received, chunk, actor, serial, task_id=context.id)
                     received += len(chunk)
                     context.progress(received, length or 0, 'image-download')
                 if length is not None and received != length:
@@ -163,8 +163,6 @@ class ImageDownloads:
 
     def start(self, payload, device=None, actor='web'):
         try:
-            if actor != 'web':
-                raise TaskError('image URL imports require a human operator', 403)
             if not isinstance(payload, dict) or set(payload) - {
                     'url', 'name', 'sha256', 'request_id', 'client_id', 'actor', 'key', 'serial',
                     'target_id', 'target_generation', 'connection_id', 'task_id'}:
@@ -193,7 +191,7 @@ class ImageDownloads:
             validate_request(payload.get('request_id'), digest)
             task = self.manager.tasks.start('image-download', actor, payload.get('client_id', ''),
                 [{'serial': serial, 'connection_id': 'image-downloads'}],
-                lambda context: fetch_image(self.manager.artifacts, context, payload['url'], serial, name, checksum),
+                lambda context: fetch_image(self.manager.artifacts, context, payload['url'], serial, name, checksum, actor),
                 request_id=payload.get('request_id'), input_digest=digest)
             return response(202, {'ok': True, 'task': task})
         except (TaskError, ValueError, OSError) as error:

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from tools.bundle_manifest import create
 from tools.collect_windows_notices import inventory, OPENSSL_PROVIDERS
 from tools.verify_release import checksums, unpack_portable, inspect_release, inspect_linux_runtime, ROOT
+from tools.build_linux_mcp import SOURCES
 
 
 class ReleaseVerificationTests(unittest.TestCase):
@@ -166,7 +167,7 @@ class ReleaseVerificationTests(unittest.TestCase):
                     'mcp_version': '2.3.0', 'notices': 'third-party/inventory.json',
                     'requirements_sha256': hashlib.sha256((ROOT / 'packaging/linux-mcp-requirements.lock').read_bytes()).hexdigest(),
                     'source_files': {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
-                                     for name in ('seriald_mcp.py', 'serialctl.py', 'tools/linux_mcp_entrypoint.py')},
+                                     for name in SOURCES},
                     'build_platform': {'os': 'ubuntu', 'version': '22.04', 'glibc': '2.35',
                                        'machine': {'amd64': 'x86_64', 'arm64': 'aarch64'}[architecture]}, 'files': {}}
         for path in runtime.rglob('*'):

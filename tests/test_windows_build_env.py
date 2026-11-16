@@ -1,6 +1,9 @@
 """Packaging environment isolation, without freezing or accessing hardware."""
+import base64
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -11,6 +14,68 @@ from tools.prepare_windows_build import prepare
 
 
 class BuildEnvironmentTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('powershell') or shutil.which('pwsh'), 'requires PowerShell')
+    def test_desktop_alias_reconciliation_precedes_validation_and_stops_on_failure(self):
+        source = Path(__file__).resolve().parents[1] / 'tools/build_windows.ps1'
+        script = r'''
+$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile('__SOURCE__',[ref]$tokens,[ref]$errors)
+if($errors.Count -ne 0){throw 'Builder syntax invalid'}
+$sdk=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.IfStatementAst] -and $node.Extent.Text.Contains('--prune-frozen-aliases')},$true))
+if($sdk.Count -ne 1){throw 'Expected one SDK finalization block'}
+$freeze=$ast.Find({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.CommandElements[0].Extent.Text -eq '$pyinstaller'},$true)
+$notices=$ast.Find({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.Extent.Text.Contains('@noticeArguments')},$true)
+if($freeze.Extent.EndOffset -ge $sdk[0].Extent.StartOffset -or $sdk[0].Extent.EndOffset -ge $notices.Extent.StartOffset){throw 'SDK finalization must be between freeze and notice collection'}
+$body=$sdk[0].Clauses[0].Item2.Extent.Text
+$block=[ScriptBlock]::Create($body.Substring(1,$body.Length-2))
+$DesktopRuntime='fixture-input';$bundle=[IO.Path]::GetTempPath();$python='Invoke-PythonFixture';$desktopManifestHash='fixture-manifest'
+function Invoke-PythonFixture {
+ $script:calls.Add(@($args))
+ $global:LASTEXITCODE=0
+ if($script:failPrune -and $args -contains '--prune-frozen-aliases'){$global:LASTEXITCODE=1}
+}
+function Get-FileHash { param($LiteralPath,$Algorithm) [PSCustomObject]@{Hash='fixture-manifest'} }
+foreach($failPrune in @($false,$true)){
+ $script:failPrune=$failPrune;$script:calls=[Collections.Generic.List[object]]::new()
+ $rejected=$false
+ try { & $block } catch { $rejected=$true }
+ if($failPrune){
+  if(-not $rejected -or $script:calls.Count -ne 1){throw 'Failed reconciliation must stop before validation'}
+ } else {
+  if($rejected -or $script:calls.Count -ne 2){throw 'Successful reconciliation must validate canonical SDK'}
+  if($script:calls[1] -contains '--prune-frozen-aliases'){throw 'Validation must be a separate call'}
+ }
+ if($script:calls[0] -notcontains '--prune-frozen-aliases'){throw 'First operation must reconcile only validated aliases'}
+}
+Write-Output 'SDK reconciliation order and failure gate passed'
+'''.replace('__SOURCE__', str(source).replace("'", "''"))
+        encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+        result = subprocess.run([shutil.which('powershell') or shutil.which('pwsh'),
+            '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('SDK reconciliation order and failure gate passed', result.stdout)
+
+    @unittest.skipUnless(shutil.which('powershell') or shutil.which('pwsh'), 'requires PowerShell')
+    def test_formal_builder_rejects_missing_desktop_sdk_before_preparing_python(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / 'tools'
+            tools.mkdir()
+            script = tools / 'build_windows.ps1'
+            source = Path(__file__).resolve().parents[1] / 'tools/build_windows.ps1'
+            script.write_bytes(source.read_bytes())
+            environment = root / 'build/windows-venv'
+            environment.mkdir(parents=True)
+            marker = environment / 'keep.txt'
+            marker.write_text('must not reset an environment for missing SDK input')
+            result = subprocess.run([shutil.which('powershell') or shutil.which('pwsh'),
+                '-NoProfile', '-NonInteractive', '-File', str(script), '-DesktopRuntime', str(root / 'missing')],
+                env=dict(os.environ, OS='Windows_NT'), capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('prepared desktop SDK runtime-manifest.json is required', result.stdout + result.stderr)
+            self.assertTrue(marker.is_file())
+
     def test_rebuild_removes_extra_packages_and_preserves_development(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

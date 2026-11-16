@@ -17,12 +17,12 @@ sys.path.insert(0, str(ROOT))
 from seriald_core import __version__
 from tools.package_docs import publish as publish_docs
 from tools.package_flash_loaders import publish as publish_flash_loaders
-from tools.build_linux_mcp import MACHINES, validate_runtime
+from tools.build_linux_mcp import DESKTOP_RUNTIME, MACHINES, validate_runtime
 
 
 def collector_build_id(root=ROOT):
     """Hash code and service policy that require replacing the live collector."""
-    excluded = {'admin.py', 'control_server.py', 'mcp_host.py', 'version.py'}
+    excluded = {'admin.py', 'control_server.py', 'desktop_proxy.py', 'mcp_host.py', 'version.py'}
     sources = [path for path in (root / 'seriald_core').glob('*.py')
                if path.name not in excluded]
     sources.append(root / 'packaging/seriald-collector.service')
@@ -31,6 +31,8 @@ def collector_build_id(root=ROOT):
         if source.is_file():
             sources.append(source)
     sources.extend((root / 'vendor/terminal').glob('*.js'))
+    # The collector imports these pinned pure-Python protocol implementations.
+    sources.extend((root / 'vendor/python').glob('*.whl'))
     digest = hashlib.sha256()
     for path in sorted(sources):
         relative = path.relative_to(root).as_posix().encode('utf-8')
@@ -94,6 +96,12 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
                          '--arch <amd64|arm64> first, then pass --runtime PATH.')
     descriptor = validate_runtime(runtime)
     architecture = descriptor['architecture']
+    desktop_runtime = runtime / DESKTOP_RUNTIME
+    if complete and architecture == 'amd64':
+        from tools.package_desktop_runtime import validate
+        if not desktop_runtime.is_dir():
+            raise ValueError('Complete x64 installation requires the prepared desktop SDK in the frozen runtime')
+        validate(desktop_runtime, 'linux-amd64')
     if complete:
         from tools.install_components import load, default_manifest
         explicit = any(value is not None for value in (flash_executor, flash_notices, flash_loaders))
@@ -194,15 +202,16 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             put('packaging/' + name, 'DEBIAN/' + name, 0o755)
         write('DEBIAN/conffiles', '/etc/seriald/seriald.env\n/etc/sudoers.d/seriald-rescue\n')
         flash_dependency = ', libusb-1.0-0, udev' if executor_metadata is not None else ''
-        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency))
+        desktop_dependency = ', libstdc++6, libgcc-s1' if desktop_runtime.is_dir() else ''
+        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s%s\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)
     return artifact
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'dists',
-                        help='package output directory (default: dists/)')
+    parser.add_argument('--output', type=Path, default=ROOT / 'dist',
+                        help='package output directory (default: dist/)')
     parser.add_argument('--version', default=__version__)
     parser.add_argument('--runtime', type=Path, help='prepared architecture-specific MCP runtime')
     parser.add_argument('--components-manifest', type=Path, help='hash-pinned standalone installation input manifest')

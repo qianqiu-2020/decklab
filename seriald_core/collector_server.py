@@ -14,6 +14,7 @@ from .storage import Store
 from . import web
 from .profiles import ProfileBook
 from .collector_lock import CollectorLock
+from .agent_grants import attach_agent_grants
 
 
 def main():
@@ -43,6 +44,7 @@ def main():
         store = Store(os.path.join(BASE, 'registry.sqlite3'))
         store.recover_sessions()
         manager = Manager(store, consume_handoff(HANDOFF), profiles=profiles)
+        grants = attach_agent_grants(manager, os.path.join(BASE, 'agent-grants.sqlite3'))
         httpd.manager = manager
         configure_collector(httpd, SETTINGS)
         scanner = threading.Thread(target=manager.loop, daemon=True)
@@ -61,6 +63,7 @@ def main():
             except OSError as error:
                 print('seriald handoff: %s' % error, flush=True)
             scanner.join(timeout=6)
+            grants.close()
             store.close()
     try:
         os.unlink(args.socket)

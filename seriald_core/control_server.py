@@ -8,11 +8,13 @@ import http.client
 import http.server
 import ipaddress
 import json
+from pathlib import Path
 import os
 import signal
 import re
 import secrets
 import socket
+import sqlite3
 import threading
 import time
 from http.cookies import SimpleCookie
@@ -56,6 +58,79 @@ class UnixHTTPConnection(http.client.HTTPConnection):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(self.timeout)
         self.sock.connect(self.unix_path)
+
+
+def collector_connection(target, link=None, timeout=30):
+    if link is not None:
+        return link.connection(timeout)
+    return (http.client.HTTPConnection(*target, timeout=timeout) if isinstance(target, tuple)
+            else UnixHTTPConnection(target, timeout=timeout))
+
+
+def deliver_revocation(grant_store, connection_factory, grant):
+    """Only an exact backend stop receipt clears the durable pending record."""
+    generation = grant['revocation_generation']
+    body = json.dumps({'actor': grant['actor'], 'revocation_generation': generation}).encode()
+    connection = None
+    try:
+        connection = connection_factory(5)
+        connection.request('POST', '/api/agent-revoke', body=body,
+                           headers={'Content-Type': 'application/json'})
+        response = connection.getresponse()
+        raw = response.read(65537)
+        if response.status != 200 or len(raw) > 65536:
+            return False
+        reply = load_object(raw)
+        if (reply.get('actor') != grant['actor'] or type(reply.get('revocation_generation')) is not int
+                or reply['revocation_generation'] != generation or reply.get('sessions_closed') is not True):
+            return False
+        grant_store.confirm_revocation(grant['id'], generation)
+        return True
+    except (OSError, http.client.HTTPException, ValueError, UnicodeError, sqlite3.Error):
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+class RevocationReconciler:
+    """Retry only durable, idempotent stop notifications, never device actions."""
+    def __init__(self, grant_store, connection_factory, interval=2):
+        self.grant_store, self.connection_factory, self.interval = grant_store, connection_factory, interval
+        self._stop, self._wake, self._delivery = threading.Event(), threading.Event(), threading.Lock()
+        self._thread = threading.Thread(target=self._run, name='agent-revocations', daemon=True)
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def reconcile(self, grant=None):
+        with self._delivery:
+            pending = [grant] if grant is not None else self.grant_store.pending_revocations()
+            confirmed = True
+            for row in pending:
+                if self._stop.is_set():
+                    return False
+                confirmed = deliver_revocation(self.grant_store, self.connection_factory, row) and confirmed
+            return confirmed
+
+    def notify(self):
+        self._wake.set()
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                self.reconcile()
+            except (sqlite3.Error, OSError):
+                pass  # The pending row remains durable; a later pass retries it.
+            self._wake.wait(self.interval)
+            self._wake.clear()
+
+    def close(self):
+        self._stop.set()
+        self._wake.set()
+        if self._thread.is_alive():
+            self._thread.join()
 
 
 def lan_hosts():
@@ -156,9 +231,16 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     share_seconds = SHARE_SECONDS
     default_language = ''
     settings = None
-    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js',
+    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/desktop.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
+    try:
+        _novnc_manifest = json.loads((Path(__file__).resolve().parents[1] / 'vendor/novnc/source.json').read_text())
+        allowed_static |= frozenset('/vendor/novnc/' + name for name in _novnc_manifest['files']
+            if name and not name.startswith('/') and '..' not in name.split('/') and '\\' not in name)
+        allowed_static |= frozenset(('/vendor/novnc/source.json',))
+    except (OSError, ValueError, KeyError, TypeError):
+        pass  # Other services remain usable; packaging verifies the asset set.
     public_agent_files = frozenset(('/serialctl.py', '/seriald_mcp.py', '/requirements-mcp.txt',
                                    '/pyproject.toml', '/skills/seriald-board/SKILL.md'))
     agent_denied_posts = frozenset(('/api/label', '/api/switch-mode', '/api/rescue',
@@ -166,6 +248,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
 
     def guess_type(self, path):
         route = urlparse(self.path).path
+        if route.startswith('/vendor/novnc/') and route.endswith('.js'):
+            return 'text/javascript; charset=utf-8'
         if route == '/skills/seriald-board/SKILL.md':
             return 'text/markdown; charset=utf-8'
         if route in ('/serialctl.py', '/seriald_mcp.py'):
@@ -383,27 +467,17 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return self._json(getattr(error, 'status', 400), {'error': message})
 
     def _collector_connection(self, timeout=30):
-        if self.collector_link is not None:
-            return self.collector_link.connection(timeout)
-        return (http.client.HTTPConnection(*self.collector_socket, timeout=timeout)
-                if isinstance(self.collector_socket, tuple)
-                else UnixHTTPConnection(self.collector_socket, timeout=timeout))
+        return collector_connection(self.collector_socket, self.collector_link, timeout)
 
-    def _close_revoked_sessions(self, actor):
-        body = json.dumps({'actor': actor}).encode()
-        try:
-            connection = self._collector_connection(5)
-            try:
-                connection.request('POST', '/api/agent-revoke', body=body,
-                                   headers={'Content-Type': 'application/json'})
-                response = connection.getresponse()
-                response.read()
-                return response.status == 200
-            finally:
-                connection.close()
-        except (OSError, http.client.HTTPException):
-            # The grant is already revoked; collector restart also closes sessions.
-            return False
+    def _close_revoked_sessions(self, grant):
+        if grant['backend_confirmed_generation'] >= grant['revocation_generation']:
+            return True
+        reconciler = getattr(self.server, 'revocation_reconciler', None)
+        if reconciler is not None:
+            closed = reconciler.reconcile(grant)
+            reconciler.notify()
+            return closed
+        return deliver_revocation(self.grant_store, self._collector_connection, grant)
 
     def _live_connection(self, key, connection_id):
         """Validate the human-selected attachment without opening a serial device."""
@@ -526,10 +600,14 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             if self.headers.get('Authorization', '').startswith('Bearer seriald-ag-') and grant is None:
                 return self._json(401, {'error': 'Agent 授权已撤销或过期', 'code': 'unauthorized'})
             agent_actor = grant['actor'] if grant else self._agent_actor()
-            if agent_actor and route in ('/api/image-download', '/api/image-catalog', '/api/image-library'):
-                return self._json(403, {'error': '镜像 URL 下载需要网页操作者发起'})
-            if agent_actor and route in ('/api/flash-discover', '/api/flash-target'):
-                return self._json(403, {'error': '只有网页操作者可以发现和选择新的刷机设备'})
+            if grant and grant['scope'] == 'connection' and route.startswith('/api/desktop/'):
+                return self._json(403, {'error': '图形操作需要已登记板卡范围的授权'})
+            if grant and grant['scope'] == 'connection' and route in ('/api/image-download', '/api/image-catalog', '/api/image-library'):
+                return self._json(403, {'error': '镜像操作需要设备或全部设备范围的授权'})
+            if grant and grant['scope'] != 'all' and route == '/api/flash-discover':
+                return self._json(403, {'error': '发现 USB 设备需要全部设备范围的授权'})
+            if agent_actor and route == '/api/desktop/configure':
+                return self._json(403, {'error': '只有网页操作者可以配置桌面连接'})
             if agent_actor and route == '/api/probe-settings':
                 return self._json(403, {'error': '只有网页操作者可以管理探测命令'})
             if grant and self.command == 'POST' and route in self.agent_denied_posts:
@@ -556,11 +634,11 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 if ('association' in payload and (route == '/api/identify'
                         or route == '/api/task-start')):
                     return self._json(403, {'error': 'Agent 令牌不能确认关联历史档案'})
-                if payload.get('target_id'):
-                    return self._json(403, {'error': '自动发现的刷机目标只允许网页操作者访问'})
+                if grant and grant['scope'] == 'connection' and payload.get('target_id'):
+                    return self._json(403, {'error': 'USB 刷机需要设备或全部设备范围的授权'})
                 if grant and grant['scope'] == 'device':
-                    if not payload.get('key'):
-                        return self._json(403, {'error': '此令牌需要指定设备 key'})
+                    if not payload.get('key') and not payload.get('target_id') and route not in ('/api/task-cancel', '/api/artifact-append', '/api/artifact-seal', '/api/artifact-delete'):
+                        return self._json(403, {'error': '此令牌需要指定设备 key 或已核实的 USB 目标'})
                     payload['serial'] = grant['serial']
                 if grant and grant['scope'] == 'connection':
                     if route in ('/api/flash-plan', '/api/flash-selection') or (route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup')):
@@ -593,8 +671,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                         return self._json(403, {'error': '此令牌只能比较同一授权设备的启动日志'})
                 else:
                     if (not any(name == 'key' and value for name, value in query)
-                            and not (grant['scope'] == 'connection' and route in (
-                                '/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download'))):
+                            and not (route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download',
+                                              '/api/image-catalog', '/api/image-library')
+                                     or grant['scope'] == 'device' and any(name == 'target_id' and value for name, value in query))):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
                     query = [(name, value) for name, value in query if name not in ('serial', 'connection_id')]
                     if grant['scope'] == 'device':
@@ -605,10 +684,12 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
             if agent_actor or route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware',
-                                       '/api/flash-capabilities', '/api/flash-events'):
+                                       '/api/flash-capabilities', '/api/flash-events', '/api/image-catalog', '/api/image-library'):
                 headers['X-Seriald-Actor'] = agent_actor or 'web'
             if grant and grant['scope'] == 'connection':
                 headers['X-Seriald-Connection'] = grant['connection_id']
+            if grant:
+                headers['X-Seriald-Grant-Generation'] = str(grant['revocation_generation'])
             events = self.command == 'GET' and urlparse(self.path).path == '/api/session-events'
             if events and self.headers.get('Last-Event-ID'):
                 headers['Last-Event-ID'] = self.headers['Last-Event-ID']
@@ -625,6 +706,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 '/api/file-transfer/finish', '/api/file-transfer/abort', '/api/artifact-seal', '/api/flash-plan',
                 '/api/flash-selection', '/api/flash-target')
             timeout = 300 if slow else 30
+            if grant and self._agent_grant() is None:
+                return self._json(401, {'error': 'Agent 授权已撤销或过期', 'code': 'unauthorized'})
             connection = self._collector_connection(timeout)
             connection.request(self.command, target_path, body=body, headers=headers)
             response = connection.getresponse()
@@ -699,6 +782,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return super().do_GET()
         if self._require_auth():
             return
+        if route == '/api/desktop/stream':
+            from .desktop_proxy import proxy
+            return proxy(self)
         if route == '/api/settings':
             return self._settings_request()
         if route == '/api/device-preferences':
@@ -708,7 +794,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         if route == '/api/settings-health':
             return self._json(404, {'error': 'not found'})
         if route == '/api/access':
-            return self._json(200, {'share_enabled': bool(self.auth_token and self._owner_authorized()),
+            return self._json(200, {'version': __version__,
+                                    'share_enabled': bool(self.auth_token and self._owner_authorized()),
+                                    'board_recovery_authorized': self._owner_authorized(),
                                     'settings_enabled': bool(self.settings and self._owner_authorized()),
                                     'agent_share_enabled': bool(self._agent_share_authorized() and self.grant_store),
                                     'open_access': not bool(self.auth_token),
@@ -776,12 +864,14 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             grant_id = payload.get('id')
             if not isinstance(grant_id, str) or not re.fullmatch(r'[0-9a-f]{16}', grant_id):
                 return self._json(400, {'error': '无效的授权 ID'})
-            actor = self.grant_store.revoke(grant_id)
-            if not actor:
-                return self._json(404, {'error': '授权不存在或已撤销'})
-            sessions_closed = self._close_revoked_sessions(actor)
+            grant = self.grant_store.revoke_request(grant_id)
+            if not grant:
+                return self._json(404, {'error': '授权不存在'})
+            sessions_closed = self._close_revoked_sessions(grant)
             return self._json(200, {'ok': True, 'id': grant_id,
-                                    'sessions_closed': sessions_closed})
+                                    'revocation_generation': grant['revocation_generation'],
+                                    'sessions_closed': sessions_closed,
+                                    'revocation_pending': not sessions_closed})
         if route == '/api/share-link':
             if not self.auth_token:
                 return self._json(400, {'error': '当前服务未启用密码'})
@@ -807,8 +897,10 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         return os.path.join(self.static_root, *route.split('/'))
 
     def end_headers(self):
+        if urlparse(self.path).path.startswith('/vendor/novnc/'):
+            self.send_header('Cache-Control', 'no-cache, must-revalidate')
         if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
-                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
+                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()
 
@@ -851,6 +943,10 @@ def main():
         parser.error('invalid SERIALD_AGENT_TOKENS_FILE or missing SERIALD_AUTH_TOKEN')
     try:
         with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as server:
+            reconciler = RevocationReconciler(ControlHandler.grant_store,
+                lambda timeout: collector_connection(ControlHandler.collector_socket,
+                    ControlHandler.collector_link, timeout)).start()
+            server.revocation_reconciler = reconciler
             if ControlHandler.collector_link is None:
                 configure_control(server, SETTINGS, SOCKET,
                                   lambda target: UnixHTTPConnection(target, timeout=5))
@@ -867,6 +963,8 @@ def main():
                 except KeyboardInterrupt:
                     pass
     finally:
+        if 'reconciler' in locals():
+            reconciler.close()
         ControlHandler.grant_store.close()
     if server.restart_requested:
         reexecute(LAUNCH_ENVIRONMENT, role='web' if ControlHandler.collector_link else None)

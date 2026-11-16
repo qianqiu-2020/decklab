@@ -1,13 +1,20 @@
 {
   "schema": 1,
-  "scope": "Linux-MCP-additional-source-notices-not-exact-binary-SBOM",
+  "scope": "Additional native source notices shared by Linux and Windows; not an exact binary SBOM",
   "files": {
     "portable-atomic-1.14.0/LICENSE-APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
     "portable-atomic-1.14.0/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
     "rust-1.91.1/LICENSE-MIT": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
     "rust-1.91.1/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
     "rust-1.91.1/COPYRIGHT": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
-    "rust-1.91.1/COPYRIGHT-library.html": "3aa41caccecaeddad6fcf2f36ce14146ab7baae57064b05b12ecc6b52d5e917f"
+    "rust-1.91.1/COPYRIGHT-library.html": "3aa41caccecaeddad6fcf2f36ce14146ab7baae57064b05b12ecc6b52d5e917f",
+    "autocfg-1.5.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "autocfg-1.5.1/LICENSE-MIT": "27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac",
+    "portable-atomic-1.15.0/LICENSE-APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+    "portable-atomic-1.15.0/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "rustversion-1.0.23/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "rustversion-1.0.23/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "source-locks/aardwolf-Cargo.lock": "7a8ea26bf21cf94a4573f82519cf06b2c58546df9ac200a9aae7aa5142c0f2eb"
   },
   "crates": [
     {
@@ -30,6 +37,39 @@
       ],
       "license_expression": "Apache-2.0 OR MIT",
       "graph_scope": "complete-committed-source-lock-superset-including-build-test-and-non-Linux-nodes"
+    },
+    {
+      "name": "autocfg",
+      "version": "1.5.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53",
+      "url": "https://static.crates.io/crates/autocfg/autocfg-1.5.1.crate",
+      "notices": [
+        "autocfg-1.5.1/LICENSE-APACHE",
+        "autocfg-1.5.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "portable-atomic",
+      "version": "1.15.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85",
+      "url": "https://static.crates.io/crates/portable-atomic/portable-atomic-1.15.0.crate",
+      "notices": [
+        "portable-atomic-1.15.0/LICENSE-APACHE",
+        "portable-atomic-1.15.0/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "rustversion",
+      "version": "1.0.23",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f",
+      "url": "https://static.crates.io/crates/rustversion/rustversion-1.0.23.crate",
+      "notices": [
+        "rustversion-1.0.23/LICENSE-APACHE",
+        "rustversion-1.0.23/LICENSE-MIT"
+      ]
     }
   ],
   "rust_toolchains": [
@@ -70,5 +110,14 @@
   "limitations": [
     "Source notices cover exact source releases and complete committed Rust source locks, including build, test and non-Linux nodes.",
     "Compiler notice collection identifies an observed compiler release, not native wheel build features or an exact binary SBOM."
-  ]
+  ],
+  "providers": {
+    "_internal/aardwolf/_bulk.pyd": "93c6e2dbca0aff3446e7e69a84c194e7ba468beee2a15e3d222612f707a184e8",
+    "_internal/aardwolf/_rle.pyd": "45331900b05fd40f6581583426b830f1b4596a53503d66423eac4ff9440d6130"
+  },
+  "desktop_wheel": {
+    "filename": "aardwolf-0.2.17-cp311-abi3-win_amd64.whl",
+    "sha256": "4bb4f16f2acc3292a507197a35923a89763f7a173538c46d089e242b8f106910",
+    "url": "https://files.pythonhosted.org/packages/0c/9e/b8d7b3cbd9b3f10d453c212069cfb53cd13f8025034b14bf07ac9bcb15e1/aardwolf-0.2.17-cp311-abi3-win_amd64.whl"
+  }
 }

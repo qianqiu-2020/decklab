@@ -11,6 +11,7 @@ from seriald_core.device import Device
 from seriald_core.actions import DeviceActions
 from seriald_core.transactions import TransactionError
 from seriald_core import web
+from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
 
 
 class InputOwnershipTests(unittest.TestCase):
@@ -110,6 +111,12 @@ class InputOwnershipTests(unittest.TestCase):
             self.assertEqual(self.transactions.claim('agent')['id'], owner['id'])
 
     def test_http_claim_and_agent_revocation_release_reservation(self):
+        grants = AgentGrantStore(':memory:')
+        self.addCleanup(grants.close)
+        attach_agent_grants(self.manager, grants)
+        self.device.manager = self.manager
+        _, grant = grants.issue('all')
+        actor = grant['actor']
         self.manager.resolve = lambda key: self.device
         self.manager.all_devices = lambda: [self.device]
 
@@ -123,13 +130,15 @@ class InputOwnershipTests(unittest.TestCase):
                 handler.do_POST()
             return handler.send_response.call_args.args[0], json.loads(handler.wfile.getvalue())
 
-        status, result = post('input-claim', {'key': self.device.key, 'actor': 'shared-agent/test'})
+        status, result = post('input-claim', {'key': self.device.key, 'actor': actor})
         self.assertEqual(status, 200)
-        self.assertEqual(result['input_owner']['actor'], 'shared-agent/test')
-        status, _ = post('agent-revoke', {'actor': 'shared-agent/test'})
+        self.assertEqual(result['input_owner']['actor'], actor)
+        status, _ = post('agent-revoke', {'actor': actor})
         self.assertEqual(status, 200)
         self.assertIsNone(self.transactions.ownership())
-        self.transactions.claim('shared-agent/test')
+        _, second = grants.issue('all')
+        actor = second['actor']
+        self.transactions.claim(actor)
         release = self.transactions.release
 
         def intervening_takeover(ownership_id, actor):
@@ -137,7 +146,7 @@ class InputOwnershipTests(unittest.TestCase):
             release(ownership_id, actor)
 
         with mock.patch.object(self.transactions, 'release', side_effect=intervening_takeover):
-            status, _ = post('agent-revoke', {'actor': 'shared-agent/test'})
+            status, _ = post('agent-revoke', {'actor': actor})
         self.assertEqual(status, 200)
         self.assertEqual(self.transactions.ownership()['actor'], 'web')
 

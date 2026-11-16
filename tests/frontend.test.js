@@ -72,7 +72,7 @@ function harness(options = {}) {
     }
     return elements.get(id);
   };
-  const requests = [], terminals = [], streams = [], timers = new Map(), intervals = [];
+  const requests = [], terminals = [], streams = [], timers = new Map(), intervals = [], dialogs = [];
   let nextTimer = 0;
   class Terminal {
     constructor(options = {}) {
@@ -172,7 +172,14 @@ function harness(options = {}) {
   // modules expose the same globals here as they do in a real page.
   sandbox.window = sandbox;
   sandbox.addEventListener = function () {};
-  sandbox.prompt = () => '新编号';
+  sandbox.confirm = text => {
+    dialogs.push({kind: 'confirm', text});
+    return typeof options.confirm === 'function' ? options.confirm(text) : options.confirm === true;
+  };
+  sandbox.prompt = (text, value) => {
+    dialogs.push({kind: 'prompt', text});
+    return options.prompt ? options.prompt(text, value) : '新编号';
+  };
   vm.runInNewContext(script, sandbox, { filename: 'index.html' });
   const flashCalls = []; let taskOptions;
   if (options.flashCapture) {
@@ -196,7 +203,7 @@ function harness(options = {}) {
   };
   const timer = delay => [...timers.entries()].find(([, t]) => t.delay === delay);
   const fire = id => { const t = timers.get(id); timers.delete(id); assert.ok(t); t.fn(); };
-  return { get, document, requests, terminals, streams, timers, intervals, take, sends, select, timer, fire,
+  return { get, document, requests, terminals, streams, timers, intervals, dialogs, take, sends, select, timer, fire,
     clientId: sandbox.SerialdUI.clientId, transfer: sandbox.SerialdFileTransfer, taskOptions, flashCalls };
 }
 
@@ -219,6 +226,15 @@ function chooseSSH(h, sid = 'ssh1') {
 
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
+
+test('header shows the running Web version from the existing access response', async () => {
+  const h=harness();h.take('/api/access').resolve({version:'1.13.7',board_recovery_authorized:true});await drain();
+  assert.equal(h.get('decklab-version').textContent,'v1.13.7');
+  assert.equal(h.get('decklab-version').dataset.i18nIgnore,'');
+  const unknown=harness();unknown.get('decklab-version').textContent='版本未知';
+  unknown.take('/api/access').resolve({version:'<img src=x onerror=bad()>'});await drain();
+  assert.equal(unknown.get('decklab-version').textContent,'版本未知');
+});
 
 test('low log-disk space is visible without disabling terminal access', async () => {
   const h = harness();
@@ -326,6 +342,137 @@ test('late input ownership response cannot affect a newly selected device or lea
   assert.equal(h.get('b-input-owner').disabled, false);
 });
 
+async function boardReservation(options = {}) {
+  const h = harness(Object.assign({confirm: true, prompt: () => '核对原执行进程已停止'}, options));
+  h.take('/api/access').resolve(options.access || {board_recovery_authorized: true});
+  const owner = {id: 'board-claim', scope: 'board', serial: 'SN-A', actor: 'web', client_id: h.clientId,
+    generation: 7, state: 'recovery', expires: 100};
+  h.take('/api/devices').resolve({devices: [
+    {key: 'A', label: 'A', serial: 'SN-A', connection_id: 'old-uart', alive: true, input_owner: owner},
+    {key: 'B', label: 'B', serial: 'SN-B', connection_id: 'other-uart', alive: true}
+  ]});
+  await drain();
+  const terminal = h.select('A');
+  return {h, owner, terminal};
+}
+
+test('board reservation stays read-only and recovery confirms the freshly queried generation', async () => {
+  const {h, owner, terminal} = await boardReservation();
+  terminal.data('must-not-write');
+  assert.equal(h.sends().length, 0, 'matching web actor/page does not provide the board lease proof');
+  assert.equal(h.get('d-in').disabled, true);
+  assert.equal(h.get('input-owner-label').textContent, '恢复执行占用');
+  h.get('b-input-owner').click();
+  const query = h.take('/api/input-owner');
+  assert.ok(query.url.includes('serial=SN-A'));
+  assert.ok(!query.url.includes('connection_id='), 'board recovery survives UART re-enumeration');
+  assert.equal(h.requests.filter(r => r.url === '/api/input-release').length, 0);
+  query.resolve({input_owner: owner, execution_scope: 'collector', cross_platform_exclusive: false});
+  await drain();
+  const recovery = h.take('/api/input-release');
+  assert.deepEqual(recovery.body, {key: 'A', serial: 'SN-A', actor: 'web', scope: 'board',
+    expected_generation: 7, process_stopped_confirmed: true, reason: '核对原执行进程已停止', client_id: h.clientId});
+  assert.equal(h.dialogs[0].kind, 'confirm');
+  assert.ok(h.dialogs[0].text.includes('web') && h.dialogs[0].text.includes('7') && h.dialogs[0].text.includes('待恢复'));
+  assert.equal(h.requests.filter(r => r.url === '/api/input-claim').length, 0, 'recovery never silently takes over');
+  recovery.resolve({ok: true, input_owner: null}); await drain();
+  assert.equal(h.get('d-in').disabled, false);
+  assert.equal(h.get('input-owner-label').textContent, '占用输入');
+  assert.match(h.get('d-status').textContent, /原任务结果保持不变/);
+});
+
+test('board recovery is unavailable without explicit primary-access authorization', async () => {
+  for (const access of [{}, {board_recovery_authorized: false, agent_share_enabled: true, open_access: true}]) {
+    const {h} = await boardReservation({access});
+    assert.equal(h.get('b-input-owner').disabled, true);
+    assert.equal(h.get('d-in').disabled, true);
+    h.get('b-input-owner').click();
+    assert.equal(h.requests.filter(r => r.url.startsWith('/api/input-owner')).length, 0);
+    assert.equal(h.requests.filter(r => r.url === '/api/input-release').length, 0);
+  }
+});
+
+test('board recovery requires stop confirmation and a nonempty reason before any POST', async () => {
+  for (const options of [{confirm: false}, {prompt: () => null}, {prompt: () => '   '}]) {
+    const {h, owner} = await boardReservation(options);
+    h.get('b-input-owner').click();
+    h.take('/api/input-owner').resolve({input_owner: owner}); await drain();
+    assert.equal(h.requests.filter(r => r.url === '/api/input-release').length, 0);
+    assert.equal(h.requests.filter(r => r.url === '/api/input-claim').length, 0);
+    assert.equal(h.get('d-in').disabled, true);
+    assert.equal(h.get('b-input-owner').disabled, false);
+    assert.match(h.get('d-status').textContent, /占用仍保留/);
+  }
+});
+
+test('changed board reservation requires a new click instead of reusing recovery intent', async () => {
+  for (const changed of [{id: 'new-owner'}, {generation: 8}]) {
+    const {h, owner} = await boardReservation();
+    const fresh = Object.assign({}, owner, changed);
+    h.get('b-input-owner').click();
+    h.take('/api/input-owner').resolve({input_owner: fresh}); await drain();
+    assert.equal(h.dialogs.length, 0);
+    assert.equal(h.requests.filter(r => r.url === '/api/input-release').length, 0);
+    assert.match(h.get('d-status').textContent, /执行占用已变化/);
+    assert.equal(h.get('d-in').disabled, true);
+    h.get('b-input-owner').click();
+    h.take('/api/input-owner').resolve({input_owner: fresh}); await drain();
+    assert.equal(h.take('/api/input-release').body.expected_generation, fresh.generation);
+  }
+});
+
+test('busy, forbidden and lost board recovery receipts retain the read-only reservation', async () => {
+  for (const failure of ['busy', 'forbidden', 'lost']) {
+    const {h, owner} = await boardReservation();
+    h.get('b-input-owner').click();
+    h.take('/api/input-owner').resolve({input_owner: owner}); await drain();
+    const recovery = h.take('/api/input-release');
+    if (failure === 'lost') recovery.reject(new Error('connection lost'));
+    else recovery.resolve({ok: false, error: failure, code: failure}, failure === 'busy' ? 423 : 403);
+    await drain();
+    assert.equal(h.get('d-in').disabled, true, failure);
+    assert.equal(h.get('input-owner-label').textContent, '恢复执行占用', failure);
+    assert.equal(h.get('b-input-owner').disabled, false, failure);
+    assert.match(h.get('d-status').textContent, /占用仍保留/, failure);
+    assert.equal(h.requests.filter(r => r.url === '/api/input-release').length, 1, 'no automatic replay');
+    assert.equal(h.requests.filter(r => r.url === '/api/input-claim').length, 0);
+  }
+});
+
+test('stale board recovery GET cannot prompt or POST after switching the selected device', async () => {
+  const {h, owner} = await boardReservation();
+  h.get('b-input-owner').click();
+  const query = h.take('/api/input-owner');
+  h.select('B');
+  query.resolve({input_owner: owner}); await drain();
+  assert.equal(h.dialogs.length, 0);
+  assert.equal(h.requests.filter(r => r.url === '/api/input-release').length, 0);
+  assert.equal(h.get('input-owner-label').textContent, '占用输入');
+  assert.equal(h.get('b-input-owner').disabled, false);
+});
+
+test('stale board recovery POST cannot update another selected device', async () => {
+  const {h, owner} = await boardReservation();
+  h.get('b-input-owner').click();
+  h.take('/api/input-owner').resolve({input_owner: owner}); await drain();
+  const recovery = h.take('/api/input-release');
+  h.select('B');
+  recovery.resolve({ok: true, input_owner: null}); await drain();
+  assert.equal(h.get('input-owner-label').textContent, '占用输入');
+  assert.equal(h.get('b-input-owner').disabled, false);
+  assert.ok(!h.get('d-status').textContent.includes('已人工恢复'));
+});
+
+test('missing or invalid current board ownership never reuses a stale generation', async () => {
+  for (const invalid of [null, {scope: 'board', serial: 'SN-A', id: 'board-claim', generation: true, state: 'recovery'}]) {
+    const {h} = await boardReservation();
+    h.get('b-input-owner').click();
+    h.take('/api/input-owner').resolve({input_owner: invalid}); await drain();
+    assert.equal(h.requests.filter(r => r.url === '/api/input-release').length, 0);
+    assert.equal(h.dialogs.length, 0);
+  }
+});
+
 test('device share bookmarks select the stable serial even after a label change', async () => {
   const h = harness({ hash: '#device=SN%20A' });
   h.take('/api/devices').resolve({ devices: [{ key: 'renamed', label: 'renamed', serial: 'SN A',
@@ -420,12 +567,12 @@ test('late session, log and identify responses stay with their original device',
 
 test('provisional identity is labeled as a candidate and warns about archive promotion', async () => {
   const h = harness();
-  h.take('/api/devices').resolve({ devices: [{ key: 'milkv2', label: 'milkv2', serial: '0059D968E583C49A',
-    alive: true, dev: '/mock/ttyUSB1', info: { serial: '0059D968E583C49A',
+  h.take('/api/devices').resolve({ devices: [{ key: 'milkv2', label: 'milkv2', serial: '0061020304050607',
+    alive: true, dev: '/mock/ttyUSB1', info: { serial: '0061020304050607',
       serial_source: 'soc-sysfs', identity_status: 'provisional' } }] });
   await drain(); h.select('milkv2');
   const rows = h.get('d-info').children.map(row => row.children.map(x => x.textContent).join('='));
-  assert.ok(rows.includes('候选身份编号=0059D968E583C49A'));
+  assert.ok(rows.includes('候选身份编号=0061020304050607'));
   assert.ok(rows.some(row => row.startsWith('身份状态=待确认（直接读取 EEPROM')));
   const cardText = h.get('grid').children[0].children.map(x => x.textContent).join(' ');
   assert.ok(cardText.includes('尚未正式确认'));
@@ -481,14 +628,14 @@ test('pending view follows its promoted board after collector restart', async ()
   await drain(); const old = h.select('unprovisioned-path');
   h.intervals.find(interval => interval.delay === 3000).fn();
   h.take('/api/devices').resolve({ devices: [{
-    key: 'milkv', label: 'milkv', serial: 'MJM10004000001', state: 'online',
+    key: 'milkv', label: 'milkv', serial: 'SAMPLE-K1-000001', state: 'online',
     connection_id: 'new-connection', by_path: 'usb-port-1', alive: true, dev: '/mock/ttyUSB2',
-    info: { serial: 'MJM10004000001', serial_source: 'eeprom-onie', identity_status: 'confirmed' },
+    info: { serial: 'SAMPLE-K1-000001', serial_source: 'eeprom-onie', identity_status: 'confirmed' },
   }] });
   await drain();
   assert.equal(old.disposed, true);
   assert.equal(h.get('d-name').textContent, 'milkv');
-  assert.equal(h.get('d-key').textContent, 'SN MJM10004000001');
+  assert.equal(h.get('d-key').textContent, 'SN SAMPLE-K1-000001');
   assert.ok(h.requests.filter(r => r.url.startsWith('/api/session?')).at(-1).url.includes('key=milkv'));
 });
 
@@ -791,7 +938,7 @@ test('late rename and SSH close responses cannot mutate another device', async (
   h.take('/api/sessions').resolve({ key: 'A', sessions: [
     { sid: 'serial', kind: 'serial' }, { sid: 'ssh1', kind: 'ssh' },
   ] }); await drain();
-  h.get('b-rename').click(); const rename = h.take('/api/label');
+  h.get('d-name').click(); const rename = h.take('/api/label');
   h.get('d-tabs').children.find(child => child.textContent === '×').click();
   const close = h.take('/api/session-close');
   h.select('B');
@@ -814,7 +961,7 @@ test('pending serial labels update display without rekeying identity or replacin
     connection_id: 'pending-generation', by_path: 'usb-port-1', alive: true, info: {}}] });
   await drain();
   const terminal = h.select(key);
-  h.get('b-rename').click();
+  h.get('d-name').click();
   const request = h.take('/api/label');
   assert.equal(request.body.key, key);
   assert.equal(request.body.serial, '');
@@ -1046,6 +1193,46 @@ test('multiple archived logs open as cached read-only terminal tabs', async () =
   assert.equal(cached.parsed, 'new log');
   assert.equal(h.requests.filter(r => r.url.startsWith('/api/log?')).length, 2,
     'switching back must use the cached archive snapshot');
+});
+
+test('unidentified attachment captures have separate selectors, URLs and cached tabs', async () => {
+  const h = await setup(); h.select('A');
+  const captures = [{id: 'new', started: '2026-11-16 11:00:00', current: true, size: 20},
+    {id: 'old', started: '2026-11-16 10:00:00', current: false, size: 10}];
+  const result = connection => ({key: 'A', serial: '', archive_connection: connection, connections: captures,
+    files: [{name: 'serial-20261116.log', date: '2026-11-16', kind: 'serial', size: 10}]});
+  h.take('/api/logs').resolve(result('new')); await drain();
+  assert.equal(h.get('archive-connections').hidden, false);
+  const picker = h.get('archive-connections').children[0];
+  assert.equal(picker.value, 'new');
+  assert.ok(picker.children[1].textContent.includes('历史连接'));
+  picker.value = 'old'; picker.emit('change');
+  const oldRequest = h.take('/api/logs');
+  assert.ok(oldRequest.url.includes('archive_connection=old'));
+  oldRequest.resolve(result('old')); await drain();
+  let row = h.get('d-logs').children.find(item => item.className === 'log-row');
+  assert.ok(row.children[3].href.includes('archive_connection=old'));
+  row.children[1].click();
+  const previous = h.terminals.at(-1);
+  let log = h.take('/api/log'); assert.ok(log.url.includes('archive_connection=old'));
+  log.resolve({data: 'previous', off: 8, start_off: 0, size: 8});
+  h.take('/api/logs').resolve(result('old')); await drain(); previous.flush();
+  assert.equal(previous.parsed, 'previous');
+  const oldPicker = h.get('archive-connections').children[0];
+  oldPicker.value = 'new'; oldPicker.emit('change');
+  h.take('/api/logs').resolve(result('new')); await drain();
+  row = h.get('d-logs').children.find(item => item.className === 'log-row'); row.children[1].click();
+  const current = h.terminals.at(-1);
+  log = h.take('/api/log'); assert.ok(log.url.includes('archive_connection=new'));
+  log.resolve({data: 'current', off: 7, start_off: 0, size: 7}); await drain(); current.flush();
+  assert.equal(current.parsed, 'current');
+  assert.equal(h.sends().length, 0);
+  const stale = h.take('/api/logs');
+  h.select('B'); oldPicker.value = 'old'; oldPicker.emit('change');
+  assert.equal(h.get('archive-connections').hidden, true);
+  h.take('/api/logs', r => r.url.includes('key=B')).resolve({key: 'B', serial: 'SN-B', files: []}); await drain();
+  stale.resolve(result('new')); await drain();
+  assert.equal(h.get('archive-connections').hidden, true);
 });
 
 test('daily logs are downloadable and detected boot epochs open in terminal tabs', async () => {

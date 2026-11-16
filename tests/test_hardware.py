@@ -114,11 +114,14 @@ class HardwareTaskTests(unittest.TestCase):
             phases.append('released')
             yield {'resume': True}
             phases.append('resumed')
-        def run(argv, timeout, check, cleanup_failed):
+        def run(argv, timeout, check, cleanup_failed, outcome=None):
             check()
             self.assertEqual(phases, ['released'])
             self.assertTrue(callable(cleanup_failed))
             phases.append('cleaned')
+            if outcome is not None:
+                outcome('issued')
+                outcome('acknowledged')
             return {'exit_code': 0, 'duration_ms': 1}
         with mock.patch.object(self.manager, 'exclusive_serial', side_effect=handoff), \
                 mock.patch('seriald_core.hardware.run_command', side_effect=run):
@@ -133,6 +136,7 @@ class HardwareTaskTests(unittest.TestCase):
         self.device.dev = 'literal; do not execute'
         task = self.finish(self.start('agent'))
         self.assertEqual(task['state'], 'completed', task)
+        self.assertEqual(task['outcome'], 'acknowledged')
         self.assertEqual(json.loads(output.read_text()), [self.device.serial, self.device.dev, self.device.by_path])
         self.assertEqual(task['result']['action'], 'reset')
         self.assertNotIn('secret', json.dumps(task))
@@ -169,9 +173,40 @@ class HardwareTaskTests(unittest.TestCase):
             self.configure(code, timeout=timeout)
             task = self.finish(self.start())
             self.assertEqual(task['state'], 'failed', task)
+            self.assertEqual(task['outcome'], 'unknown')
             self.assertIn('partial', task['error'])
             self.assertIsNone(self.device.transactions.snapshot())
             self.assertFalse(self.device.stop.is_set())
+
+    def test_request_id_replay_returns_original_hardware_task_without_second_process(self):
+        counter = self.root / 'counter'
+        self.configure('from pathlib import Path\np=Path(%r)\np.write_text(p.read_text()+"x" if p.exists() else "x")\n' % str(counter))
+        first = self.finish(self.start(request_id='hardware-replay-001'))
+        repeated = self.start(request_id='hardware-replay-001')
+        self.assertEqual(repeated.status, 202, repeated.payload)
+        self.assertEqual(repeated.payload['task']['id'], first['id'])
+        self.assertEqual(first['outcome'], 'acknowledged')
+        self.assertEqual(counter.read_text(), 'x')
+        self.assertEqual(len(self.manager.tasks.store.list()), 1)
+        changed = self.start(request_id='hardware-replay-001', serial='changed')
+        self.assertEqual(changed.status, 409)
+        self.assertEqual(counter.read_text(), 'x')
+
+    def test_unconfirmed_process_cleanup_retains_recovery_after_worker_exits(self):
+        self.configure('pass')
+        process = mock.Mock(returncode=0)
+        process.poll.return_value = 0
+        process.close.side_effect = OSError('process stop not confirmed')
+        with mock.patch('seriald_core.hardware.helper_process', return_value=process):
+            task = self.finish(self.start('web', request_id='failed-cleanup-001'))
+        self.assertEqual(task['state'], 'failed')
+        self.assertEqual(task['outcome'], 'unknown')
+        self.assertFalse(task['result']['cleanup_confirmed'])
+        self.assertFalse(self.manager.tasks.actor_stopped('web'))
+        hold = self.store.db.execute('SELECT * FROM flash_resource_holds WHERE resource=?',
+                                     ('board:' + self.device.serial,)).fetchone()
+        self.assertEqual((hold['task_id'], hold['state']), (task['id'], 'recovery'))
+        self.assertEqual(self.start().status, 423)
 
     def test_cancelled_helper_cleans_up_without_disabling_another_board(self):
         self.configure('import time\nfrom pathlib import Path\nPath(%r).touch()\ntime.sleep(60)' % str(self.root / 'ready'))
@@ -209,7 +244,7 @@ class HardwareTaskTests(unittest.TestCase):
         credentials.chmod(0o600)
         with bmc_fixture() as (origin, state):
             self.manager.hardware = HardwareBook({'boards': {offline.serial: {'control': {
-                'provider': 'bmc', 'url': origin, 'board': 'sub23-1', 'module_index': 47,
+                'provider': 'bmc', 'url': origin, 'board': 'test-board-b', 'module_index': 47,
                 'usb_port': '1-8.3', 'credentials_file': str(credentials), 'actions': ['reset']}}}})
             with mock.patch.object(self.manager, 'exclusive_serial', side_effect=AssertionError('no reader handoff')):
                 task = self.finish(self.actions.start({'kind': 'hardware-reset',

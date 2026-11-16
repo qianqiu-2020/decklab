@@ -24,12 +24,15 @@ import time
 
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 LOCK = ROOT / 'packaging/linux-mcp-requirements.lock'
 WHEELS = ROOT / 'packaging/linux-mcp-wheels.json'
 MACHINES = {'amd64': ('x86_64', 62), 'arm64': ('aarch64', 183),
             'riscv64': ('riscv64', 243)}
-SOURCES = ('seriald_mcp.py', 'serialctl.py', 'tools/linux_mcp_entrypoint.py')
+SOURCES = ('seriald_mcp.py', 'serialctl.py', 'seriald_core/desktop_providers.py', 'seriald_core/desktop_errors.py',
+           'seriald_core/desktop_freerdp.py', 'tools/linux_mcp_entrypoint.py')
 EXECUTABLE = 'seriald-mcp-worker'
+DESKTOP_RUNTIME = Path('_internal/desktop-runtime/freerdp')
 
 
 def sha256(path):
@@ -89,7 +92,7 @@ def validate_runtime(directory, architecture=None):
     if baseline.get('machine') != MACHINES[arch][0]:
         raise ValueError('runtime build machine mismatch')
     if (manifest.get('mcp_version') != '2.3.0'
-            or not str(manifest.get('python_version', '')).startswith('3.10.')
+            or not str(manifest.get('python_version', '')).startswith('3.12.')
             or manifest.get('elf_machine') != expected_machine
             or manifest.get('executable') != EXECUTABLE):
         raise ValueError('runtime Python, MCP version or executable mismatch')
@@ -117,6 +120,10 @@ def validate_runtime(directory, architecture=None):
             magic = stream.read(4)
         if magic == b'\x7fELF' and elf_machine(path) != expected_machine:
             raise ValueError('native library architecture mismatch: ' + name)
+    desktop = directory / DESKTOP_RUNTIME
+    if desktop.exists() or desktop.is_symlink():
+        from tools.package_desktop_runtime import validate
+        validate(desktop, 'linux-' + arch)
     if manifest.get('notices') != 'third-party/inventory.json':
         raise ValueError('runtime notices inventory is missing')
     notice_module().verify(directory / 'third-party', bundle=directory)
@@ -133,8 +140,8 @@ def check_local(architecture):
     if (sys.platform != 'linux' or platform.machine() != machine
             or release.get('ID') != 'ubuntu' or release.get('VERSION_ID') != '22.04'
             or platform.libc_ver() != ('glibc', '2.35')
-            or sys.version_info[:2] != (3, 10)):
-        raise ValueError('freeze on native Ubuntu 22.04 / Python 3.10 / glibc 2.35; use the default Docker build')
+            or sys.version_info[:2] != (3, 12)):
+        raise ValueError('freeze on native Ubuntu 22.04 / Python 3.12 / glibc 2.35; use the default Docker build')
     for name, version in re.findall(r'^([A-Za-z0-9_.-]+)==([^\s]+)', LOCK.read_text(), re.M):
         if metadata.version(name) != version:
             raise ValueError('build environment differs from the hash lock: ' + name)
@@ -197,16 +204,32 @@ def smoke_worker(bundle):
                         child.wait(timeout=5)
 
 
-def build_local(output, architecture, wheelhouse):
+def desktop_runtime_source(architecture, source=None):
+    if source is None and architecture != 'amd64':
+        return None
+    from tools.package_desktop_runtime import validate
+    source = Path(source or ROOT / 'build/desktop-runtime' / ('linux-' + architecture)).absolute()
+    validate(source, 'linux-' + architecture)
+    return source.resolve()
+
+
+def build_local(output, architecture, wheelhouse, desktop_runtime=None):
     check_local(architecture)
     output, wheelhouse = Path(output).resolve(), Path(wheelhouse).resolve()
     if output.exists():
         raise ValueError('runtime output already exists; choose a fresh output directory')
     if not wheelhouse.is_dir():
         raise ValueError('a hash-checked build wheelhouse is required')
+    desktop_runtime = desktop_runtime_source(architecture, desktop_runtime)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.linux-mcp-', dir=output.parent) as temporary:
         temporary = Path(temporary)
+        source_hashes = {name: sha256(ROOT / name) for name in SOURCES}
+        desktop_manifest = None
+        if desktop_runtime is not None:
+            from tools.package_desktop_runtime import publish
+            desktop_snapshot = temporary / 'desktop-runtime/freerdp'
+            desktop_manifest = publish(desktop_runtime, desktop_snapshot, 'linux-' + architecture)
         command = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir',
                    '--name', EXECUTABLE, '--distpath', str(temporary / 'dist'),
                    '--workpath', str(temporary / 'work'), '--specpath', str(temporary / 'spec'),
@@ -214,12 +237,28 @@ def build_local(output, architecture, wheelhouse):
                    '--hidden-import', 'seriald_mcp']
         for module in ('mcp.server', 'mcp.shared', 'mcp.client'):
             command += ['--collect-submodules', module]
+        command += ['--hidden-import', 'seriald_core.desktop_providers', '--collect-all', 'vncdotool']
+        command += ['--hidden-import', 'seriald_core.desktop_freerdp']
+        if desktop_manifest is not None:
+            command += ['--add-data', str(desktop_snapshot) + os.pathsep + 'desktop-runtime/freerdp']
+        command += ['--collect-all', 'aardwolf']
+        # Enumerating this backend imports it in the wrong initialization order
+        # and skips it after a circular-import error. Analyze its package
+        # explicitly; its four cipher imports are then discovered statically.
+        command += ['--hidden-import', 'unicrypto.backends.pycryptodomex', '--collect-all', 'Cryptodome']
         command += ['--collect-data', 'mcp', '--collect-data', 'mcp_types',
                     '--collect-all', 'uvicorn', '--recursive-copy-metadata', 'mcp',
                     str(ROOT / 'tools/linux_mcp_entrypoint.py')]
         subprocess.run(command, cwd=temporary, check=True)
+        if source_hashes != {name: sha256(ROOT / name) for name in SOURCES}:
+            raise ValueError('runtime source changed while freezing; preserve this build log and rebuild from a fixed input')
         bundle = temporary / 'dist' / EXECUTABLE
         flatten_symlinks(bundle)
+        if desktop_manifest is not None:
+            from tools.package_desktop_runtime import prune_frozen_aliases, validate
+            if validate(bundle / DESKTOP_RUNTIME, 'linux-' + architecture) != desktop_manifest:
+                raise ValueError('desktop runtime changed while freezing')
+            prune_frozen_aliases(bundle, 'linux-' + architecture)
         notice_module().collect(bundle, bundle / 'third-party', wheelhouse, LOCK)
         manifest = {'schema': 1, 'architecture': architecture,
                     'elf_machine': MACHINES[architecture][1], 'executable': EXECUTABLE,
@@ -227,34 +266,46 @@ def build_local(output, architecture, wheelhouse):
                     'build_platform': {'os': 'ubuntu', 'version': '22.04', 'glibc': '2.35',
                                        'machine': platform.machine()},
                     'requirements_sha256': sha256(LOCK),
-                    'source_files': {name: sha256(ROOT / name) for name in SOURCES},
+                    'source_files': source_hashes,
                     'notices': 'third-party/inventory.json', 'files': runtime_files(bundle)}
         (bundle / 'runtime-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
         validate_runtime(bundle, architecture)
         smoke_worker(bundle)
+        if desktop_manifest is not None:
+            subprocess.run([sys.executable, str(ROOT / 'tools/test_desktop_security.py'),
+                            '--executable', str(bundle / EXECUTABLE)], check=True)
         bundle.rename(output)
     return output
 
 
-def build_docker(output, architecture, image):
+def build_docker(output, architecture, image, desktop_runtime=None):
     if architecture not in ('amd64', 'arm64'):
         raise ValueError('riscv64 requires a native --local build and a validated PyInstaller bootloader')
     output = Path(output).resolve()
     if output.exists():
         raise ValueError('runtime output already exists; choose a fresh output directory')
+    desktop_runtime = desktop_runtime_source(architecture, desktop_runtime)
     output.parent.mkdir(parents=True, exist_ok=True)
     shell = '\n'.join([
         'set -eu',
         'export DEBIAN_FRONTEND=noninteractive',
         'apt-get update',
-        'apt-get install -y --no-install-recommends python3 python3-venv python3-dev binutils ca-certificates',
-        'python3 -m venv /tmp/mcp-build',
+        'apt-get install -y --no-install-recommends software-properties-common binutils ca-certificates',
+        # Build-only PPA. The installed application retains the stdlib collector
+        # and bundles this interpreter; no repository is added on the user's host.
+        'add-apt-repository -y ppa:deadsnakes/ppa',
+        'apt-get install -y --no-install-recommends python3.12 python3.12-venv python3.12-dev',
+        'python3.12 -m venv /tmp/mcp-build',
         '/tmp/mcp-build/bin/python -m pip download --disable-pip-version-check --index-url https://pypi.org/simple --only-binary=:all: --require-hashes -r /source/packaging/linux-mcp-requirements.lock -d /tmp/wheelhouse',
         '/tmp/mcp-build/bin/python -m pip install --disable-pip-version-check --no-index --find-links /tmp/wheelhouse --only-binary=:all: --require-hashes -r /source/packaging/linux-mcp-requirements.lock',
-        '/tmp/mcp-build/bin/python /source/tools/build_linux_mcp.py --local --arch "$MCP_ARCH" --wheelhouse /tmp/wheelhouse --output "$MCP_OUTPUT"',
+        '/tmp/mcp-build/bin/python /source/tools/build_linux_mcp.py --local --arch "$MCP_ARCH" --wheelhouse /tmp/wheelhouse --output "$MCP_OUTPUT"'
+        + (' --desktop-runtime /desktop-runtime' if desktop_runtime is not None else ''),
         'chown -R "$MCP_UID:$MCP_GID" "$MCP_OUTPUT"'])
-    subprocess.run(['docker', 'run', '--rm', '--platform', 'linux/' + architecture,
-                    '-v', str(ROOT) + ':/source:ro', '-v', str(output.parent) + ':/output',
+    command = ['docker', 'run', '--rm', '--platform', 'linux/' + architecture,
+                    '-v', str(ROOT) + ':/source:ro', '-v', str(output.parent) + ':/output']
+    if desktop_runtime is not None:
+        command += ['-v', str(desktop_runtime) + ':/desktop-runtime:ro']
+    subprocess.run(command + [
                     '-e', 'MCP_ARCH=' + architecture, '-e', 'MCP_OUTPUT=/output/' + output.name,
                     '-e', 'MCP_UID=' + str(os.getuid()), '-e', 'MCP_GID=' + str(os.getgid()),
                     image, 'bash', '-c', shell], check=True)
@@ -265,8 +316,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--arch', choices=tuple(MACHINES), default={'x86_64': 'amd64', 'aarch64': 'arm64', 'riscv64': 'riscv64'}.get(platform.machine(), 'amd64'))
     parser.add_argument('--output', type=Path)
-    parser.add_argument('--local', action='store_true', help='freeze in a prepared native Ubuntu 22.04 Python 3.10 build environment')
+    parser.add_argument('--local', action='store_true', help='freeze in a prepared native Ubuntu 22.04 Python 3.12 build environment')
     parser.add_argument('--wheelhouse', type=Path, help='hash-locked wheels used to prepare the local environment')
+    parser.add_argument('--desktop-runtime', type=Path,
+                        help='prepared FreeRDP SDK (default for amd64: build/desktop-runtime/linux-amd64)')
     parser.add_argument('--image', default='ubuntu:22.04')
     parser.add_argument('--verify', action='store_true', help='only verify the existing runtime offline')
     args = parser.parse_args()
@@ -277,9 +330,9 @@ def main():
         elif args.local:
             if args.wheelhouse is None:
                 parser.error('--local requires --wheelhouse')
-            build_local(output, args.arch, args.wheelhouse)
+            build_local(output, args.arch, args.wheelhouse, args.desktop_runtime)
         else:
-            build_docker(output, args.arch, args.image)
+            build_docker(output, args.arch, args.image, args.desktop_runtime)
     except (OSError, ValueError, subprocess.CalledProcessError, metadata.PackageNotFoundError) as error:
         parser.exit(1, 'Linux MCP runtime: %s\n' % error)
     print(output)

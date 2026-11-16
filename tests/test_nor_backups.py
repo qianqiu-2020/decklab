@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.nor_backups import publish_backup
+from seriald_core.nor_backups import compare_payloads, publish_backup
 from seriald_core.storage import Store
 from seriald_core.tasks import TaskCancelled, TaskError, TaskStore
 from seriald_core.transfer_artifacts import ArtifactPolicy, TransferArtifacts
@@ -53,6 +53,7 @@ class NORBackupTests(unittest.TestCase):
         self.assertEqual(backup['partitions'][2]['content']['version_state'], 'not-applicable')
         self.assertNotIn('private-value', json.dumps(backup))
         self.assertNotIn(str(self.workspace), json.dumps(backup))
+        self.assertEqual(backup['partitions'][0]['content']['sha256_scope'], 'partition')
         with self.artifacts.open(backup['artifact']['id'], 'web', 'NOR-1') as source:
             self.assertEqual(source.read(), self.data)
             if os.name == 'posix':
@@ -60,6 +61,92 @@ class NORBackupTests(unittest.TestCase):
         for actor, serial in [('agent-one', 'NOR-1'), ('web', 'other-board')]:
             with self.assertRaises(TaskError):
                 self.artifacts.get(backup['artifact']['id'], actor, serial)
+
+    def test_after_readback_compares_exact_payload_length_without_trimming_erase_fill(self):
+        payload = b'bootinfo-payload\x00\xff'
+        self.data[:len(payload)] = payload
+        path = self.workspace / ('nor-%s-%s-after.bin' % (self.task, self.attempt))
+        path.write_bytes(self.data)
+        snapshot = copy.deepcopy(self.snapshot)
+        snapshot.update(path=str(path), sha256=hashlib.sha256(self.data).hexdigest())
+        snapshot['partitions'][0]['sha256'] = hashlib.sha256(self.data[:128 << 10]).hexdigest()
+        digest = hashlib.sha256(payload).hexdigest()
+        write = {'storage': 'active', 'partition': 'bootinfo', 'kind': 'partition',
+                 'offset': 0, 'size': len(payload), 'sha256': digest}
+        backup = publish_backup(self.artifacts, snapshot, self.workspace, self.task, self.attempt,
+                                'NOR-1', phase='after', writes=[write])
+        content = backup['partitions'][0]['content']
+        self.assertNotEqual(content['sha256'], digest)
+        self.assertEqual(content['size'], 128 << 10)
+        self.assertEqual(content['payload_comparison'], {'size': len(payload), 'sha256': digest,
+            'expected_sha256': digest, 'matches': True})
+        self.assertNotIn('payload_comparison', backup['partitions'][1]['content'])
+
+    def test_mismatched_payload_is_reported_without_changing_the_whole_partition_digest(self):
+        path = self.workspace / ('nor-%s-%s-after.bin' % (self.task, self.attempt))
+        path.write_bytes(self.data)
+        snapshot = dict(self.snapshot, path=str(path))
+        backup = publish_backup(self.artifacts, snapshot, self.workspace, self.task, self.attempt,
+            'NOR-1', phase='after', writes=[{'storage': 'active', 'partition': 'bootinfo',
+                'kind': 'partition', 'size': 80, 'sha256': '0' * 64}])
+        content = backup['partitions'][0]['content']
+        self.assertFalse(content['payload_comparison']['matches'])
+        self.assertEqual(content['payload_comparison']['sha256'], hashlib.sha256(self.data[:80]).hexdigest())
+        self.assertEqual(content['sha256'], self.snapshot['partitions'][0]['sha256'])
+
+    def test_payload_comparison_never_uses_other_storage_or_out_of_partition_ranges(self):
+        path = self.workspace / ('nor-%s-%s-after.bin' % (self.task, self.attempt))
+        path.write_bytes(self.data)
+        writes = [{'storage': 'scsi:0', 'partition': 'bootinfo', 'kind': 'partition', 'size': 80, 'sha256': '0' * 64},
+                  {'storage': 'active', 'partition': 'fsbl', 'kind': 'partition', 'size': (512 << 10) + 1, 'sha256': '0' * 64},
+                  {'storage': 'active', 'partition': 'env', 'kind': 'partition', 'offset': 0, 'size': 80, 'sha256': '0' * 64}]
+        backup = publish_backup(self.artifacts, dict(self.snapshot, path=str(path)), self.workspace,
+                                self.task, self.attempt, 'NOR-1', phase='after', writes=writes)
+        self.assertTrue(all('payload_comparison' not in part['content'] for part in backup['partitions']))
+
+    def test_before_preview_compares_exact_file_length_and_keeps_original_snapshot(self):
+        backup = self.publish()
+        original = copy.deepcopy(backup)
+        payload = bytes(self.data[131072:131072 + 29])  # Includes NUL and 0xff; never trim fill.
+        digest = hashlib.sha256(payload).hexdigest()
+        metadata = [{'storage': 'active', 'partition': 'fsbl', 'sha256': expected,
+                     'content': {'size': len(payload), 'sha256': expected}} for expected in (digest, '0' * 64)]
+        compared = compare_payloads(self.artifacts, backup, metadata, serial='NOR-1')
+        same, different = [item['board_comparison'] for item in compared]
+        self.assertEqual((same['size'], same['sha256'], same['matches']), (29, digest, True))
+        self.assertEqual(same['backup_id'], backup['artifact']['id'])
+        self.assertEqual(same['phase'], 'before')
+        self.assertFalse(different['matches'])
+        self.assertEqual(different['sha256'], digest)
+        self.assertNotEqual(backup['partitions'][1]['content']['sha256'], digest)
+        self.assertEqual(backup, original)
+        self.assertTrue(all('board_comparison' not in item for item in metadata))
+
+    def test_before_comparison_rejects_tampered_backup_and_respects_owner_and_cancellation(self):
+        backup = self.publish()
+        metadata = [{'storage': 'active', 'partition': 'fsbl', 'sha256': '0' * 64,
+                     'content': {'size': 29, 'sha256': '0' * 64}}]
+        for kwargs in ({'actor': 'other-agent'}, {'serial': 'other-board'}):
+            with self.assertRaises(TaskError):
+                compare_payloads(self.artifacts, backup, metadata, **dict({'serial': 'NOR-1'}, **kwargs))
+        with self.assertRaises(TaskCancelled):
+            compare_payloads(self.artifacts, backup, metadata, serial='NOR-1',
+                check=lambda: (_ for _ in ()).throw(TaskCancelled('cancelled')))
+        path = self.artifacts._path(backup['artifact']['id'], '.bin')
+        # Tamper outside the selected prefix; the complete backup must still verify.
+        with path.open('r+b') as source:
+            source.seek(len(self.data) - 1)
+            source.write(b'\0')
+        with self.assertRaisesRegex(TaskError, 'checksum changed'):
+            compare_payloads(self.artifacts, backup, metadata, serial='NOR-1')
+
+    def test_before_comparison_never_treats_other_media_or_oversized_files_as_equal(self):
+        backup = self.publish()
+        metadata = [{'storage': storage, 'partition': part, 'sha256': '0' * 64,
+                     'content': {'size': size, 'sha256': '0' * 64}} for storage, part, size in
+                    [('scsi:0', 'fsbl', 29), ('active', 'fsbl', (512 << 10) + 1), ('active', 'unknown', 29)]]
+        with mock.patch.object(self.artifacts, 'open', side_effect=AssertionError('no comparable NOR payload')):
+            self.assertEqual(compare_payloads(self.artifacts, backup, metadata), metadata)
 
     def test_foreign_or_linked_paths_and_changed_partition_extents_are_rejected(self):
         for changes in ({'path': str(self.root / 'other.bin')}, {'size': (8 << 20) - 1},

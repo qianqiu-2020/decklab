@@ -420,21 +420,21 @@ def _os_release(raw):
     return fields
 
 
-def _kernel_release(fs, path):
+def _kernel_release(fs, path, max_bytes=MAX_KERNEL_BYTES):
     """Linux banner from an Image, gzip Image or EFI zboot payload."""
     size = fs.size(path)
-    if not size or size > MAX_KERNEL_BYTES:
+    if not size or size > max_bytes:
         return None
-    data = fs.read(path, MAX_KERNEL_BYTES)
+    data = fs.read(path, max_bytes)
     if data[:2] == b'MZ' and data[4:8] == b'zimg':
         start, length = struct.unpack_from('<II', data, 8)
         method = _text(data[24:32])
         payload = data[start:start + length]
         try:
             if method == 'gzip':
-                data = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(payload, MAX_KERNEL_BYTES)
+                data = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(payload, max_bytes)
             elif method in ('lzma', 'xz'):
-                data = lzma.LZMADecompressor().decompress(payload, MAX_KERNEL_BYTES)
+                data = lzma.LZMADecompressor().decompress(payload, max_bytes)
             else:
                 return None
         except (zlib.error, lzma.LZMAError):
@@ -453,7 +453,7 @@ def _kernel_release(fs, path):
         return None
     elif data[:2] == b'\x1f\x8b':
         try:
-            data = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(data, MAX_KERNEL_BYTES)
+            data = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(data, max_bytes)
         except zlib.error:
             return None
     match = _BANNER.search(data)
@@ -499,7 +499,7 @@ _BOOT_CONFIGS = ('extlinux/extlinux.conf', 'boot/extlinux/extlinux.conf', 'boot/
                  'grub/grub.cfg', 'EFI/BOOT/grub.cfg', 'EFI/debian/grub.cfg', 'EFI/ubuntu/grub.cfg')
 
 
-def _inspect_fs(fs):
+def _inspect_fs(fs, metadata_only=False):
     result = {'filesystem': {'type': fs.kind}}
     if fs.label:
         result['filesystem']['label'] = fs.label
@@ -526,7 +526,7 @@ def _inspect_fs(fs):
         names = sorted(name for name, is_dir in fs.listdir(directory) if not is_dir and _KERNEL_NAME.fullmatch(name))
         for name in names[-3:]:
             path = (directory + '/' + name).strip('/')
-            release = _kernel_release(fs, path)
+            release = _kernel_release(fs, path, 1024 * 1024 if metadata_only else MAX_KERNEL_BYTES)
             if release and release not in [item['release'] for item in kernels]:
                 kernels.append({'release': release, 'file': '/' + path, 'source': 'kernel-banner'})
     modules = sorted({name for directory in ('usr/lib/modules', 'lib/modules')
@@ -564,7 +564,7 @@ def _inspect_fs(fs):
     if efi:
         boot['efi'] = efi[:8]
         for path in efi[:4]:
-            raw = fs.read(path.lstrip('/'), 16 * 1024 ** 2)
+            raw = fs.read(path.lstrip('/'), (1 if metadata_only else 16) * 1024 ** 2)
             loader = raw and _bootloader(raw)
             if loader:
                 boot['loader'] = loader
@@ -582,10 +582,10 @@ _FAULTS = (ImageError, struct.error, ValueError, IndexError, KeyError, ZeroDivis
            RecursionError, OverflowError, UnicodeError)
 
 
-def _safe_inspect(fs):
+def _safe_inspect(fs, metadata_only=False):
     """Corrupt metadata degrades to an unreadable result; only budget exhaustion propagates."""
     try:
-        return _inspect_fs(fs)
+        return _inspect_fs(fs, metadata_only)
     except _FAULTS as error:
         if isinstance(error, ImageError) and 'budget' in str(error):
             raise
@@ -639,9 +639,9 @@ def _partitions(dev):
     return ('mbr', found) if found else (None, [])
 
 
-def image_content(source, size, partition='', kind='partition'):
+def image_content(source, size, partition='', kind='partition', metadata_only=False, read_budget=None):
     """Describe an OS payload file; raises ImageError only for budget/IO faults."""
-    budget = _Budget()
+    budget = _Budget(read_budget)
     dev = _File(source, size, budget)
     result = {'size': size, 'format': 'raw', 'version': None, 'version_state': 'unknown', 'versions': []}
     if size >= 28 and struct.unpack('<I', dev.read(0, 4))[0] == _Sparse.MAGIC:
@@ -661,7 +661,7 @@ def image_content(source, size, partition='', kind='partition'):
     fs = _filesystem(dev)
     if fs:
         result['format'] = fs.kind
-        result.update(_safe_inspect(fs))
+        result.update(_safe_inspect(fs, metadata_only))
     else:
         try:
             table, parts = _partitions(dev)
@@ -685,7 +685,7 @@ def image_content(source, size, partition='', kind='partition'):
                             item['content'] = {key: content[key] for key in ('format', 'version', 'version_state', 'description', 'built_at') if key in content}
                             versions.extend(dict(value, source='firmware', partition=part['name']) for value in content['versions'][:1])
                         if inner:
-                            item.update(_safe_inspect(inner))
+                            item.update(_safe_inspect(inner, metadata_only))
                             versions.extend(item['versions'])
                     except _FAULTS as error:
                         if isinstance(error, ImageError) and 'budget' in str(error):

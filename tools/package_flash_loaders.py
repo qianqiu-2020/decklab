@@ -17,7 +17,7 @@ def publish(source, destination):
         raise ValueError('invalid RAM loader families')
     files = {'manifest.json'}
     for family, material in document['families'].items():
-        if material.get('protocol') not in ('stock', 'decklab-nor-v1'):
+        if material.get('protocol') not in ('stock', 'spacemit-ram-v1'):
             raise ValueError('unsupported RAM loader protocol')
         for name in ('fsbl', 'uboot'):
             entry = material[name]

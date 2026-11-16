@@ -145,8 +145,8 @@ class BoundCommand:
     command: HardwareCommand
     argv: list
 
-    def run(self, check, cleanup_failed=None):
-        return run_command(self.argv, self.command.timeout, check, cleanup_failed)
+    def run(self, check, cleanup_failed=None, outcome=None):
+        return run_command(self.argv, self.command.timeout, check, cleanup_failed, outcome)
 
 
 class HardwareBook:
@@ -204,10 +204,12 @@ class HardwareBook:
                               if actor == 'web' or command.allow_agent}}
 
 
-def run_command(argv, timeout, check, cleanup_failed=None):
+def run_command(argv, timeout, check, cleanup_failed=None, outcome=None):
     """Bound execution and terminate the whole owned group, including descendants."""
     check()
     started = time.monotonic()
+    if outcome is not None:
+        outcome('issued')
     process = helper_process(argv)
     try:
         while process.poll() is None:
@@ -218,6 +220,10 @@ def run_command(argv, timeout, check, cleanup_failed=None):
         check()
         if process.returncode:
             raise TaskError('hardware helper exited with status %s; operation may be partial' % process.returncode, 502)
+        if outcome is not None:
+            # Exit zero acknowledges only the configured helper's completion;
+            # it cannot establish board startup or content verification.
+            outcome('acknowledged')
         return {'exit_code': process.returncode, 'duration_ms': round((time.monotonic() - started) * 1000)}
     finally:
         try:
@@ -253,6 +259,12 @@ class HardwareOperation:
             if current is not None and current is not device and current.present:
                 raise TaskError('hardware target has a new connection', 409)
             transactions.check_owner(self.actor, self.client_id)
+        def outcome(value):
+            if value == 'issued':
+                check()
+                context.issued()
+            else:
+                context.mark_outcome(value)
         with transactions.actor_scope(self.actor, self.client_id), \
                 transactions.task_scope(context.cancelled, self.connection, self.stop), \
                 transactions.begin('hardware-' + self.action, self.command.timeout + 1, require_open=False) as lease:
@@ -263,8 +275,12 @@ class HardwareOperation:
                 handoff = (self.manager.exclusive_serial(device, check)
                            if self.command.exclusive_serial else nullcontext())
                 with handoff as permit:
+                    def cleanup_failed():
+                        if permit is not None:
+                            permit.update(resume=False)
+                        context.retain_cleanup_failure(self.serial)
                     result = self.bound.run(check,
-                        (lambda: permit.update(resume=False)) if permit is not None else None)
+                        cleanup_failed, outcome)
                 check()
                 self.manager.store.event(self.serial, self.actor, 'hardware-complete', self.action)
                 context.progress(1, 1, self.action)

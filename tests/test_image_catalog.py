@@ -1,5 +1,6 @@
 """Real directory formats, bounded metadata, shared cache, no board activity."""
 import json
+import os
 import unittest
 from unittest import mock
 
@@ -10,6 +11,37 @@ from seriald_core.image_download import ImageDownloads
 
 
 class CatalogTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, {
+            'SERIALD_IMAGE_INTERNAL_BROWSE': 'https://images.example.test/service/rest/repository/browse/image/',
+            'SERIALD_IMAGE_INTERNAL_DOWNLOAD': 'https://images.example.test/repository/image/'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_organization_source_is_opt_in_and_requires_safe_paired_urls(self):
+        self.assertEqual(list(catalog.configured_sources({})), ['public'])
+        for url in ('http://images.example.test/', 'https://[broken/', 'https://user:password@images.example.test/',
+                    'https://images.example.test/?token=private', 'https://images.example.test'):
+            with self.subTest(url=url), self.assertRaises(TaskError):
+                catalog.configured_sources({'SERIALD_IMAGE_INTERNAL_BROWSE': url,
+                                            'SERIALD_IMAGE_INTERNAL_DOWNLOAD': url})
+        with mock.patch.dict(os.environ, {'SERIALD_IMAGE_INTERNAL_BROWSE': '', 'SERIALD_IMAGE_INTERNAL_DOWNLOAD': ''}):
+            with self.assertRaisesRegex(TaskError, '尚未配置'):
+                catalog.catalog('internal')
+
+    def test_library_keeps_global_and_device_images_without_name_replacement(self):
+        with fixture() as (manager, _):
+            ids = []
+            for serial in ('', 'BOARD-A', 'BOARD-B'):
+                row = manager.artifacts.create('upload', 'same.tar.gz', len(DATA), 'web', serial)
+                manager.artifacts.append(row['id'], 0, DATA, 'web', serial)
+                manager.artifacts.seal(row['id'], 'web', serial)
+                ids.append(row['id'])
+            rows = catalog.library(manager)['artifacts']
+            self.assertEqual({row['id'] for row in rows}, set(ids))
+            self.assertEqual({row['serial'] for row in rows}, {'', 'BOARD-A', 'BOARD-B'})
+            self.assertEqual(catalog.library(manager, 'agent')['artifacts'], [])
+
     def test_public_index_is_direct_sorted_and_escapes_cannot_select_other_hosts(self):
         raw = '''<a href="../">parent</a><a href="k3/">K3</a><a href="k1/">K1</a>
         <a href="scripts/">scripts</a><a href="https://evil.test/k1/">bad</a>
@@ -28,14 +60,14 @@ class CatalogTests(unittest.TestCase):
 
     def test_nexus_download_uses_repository_url_and_row_metadata(self):
         raw = '''<table><tr><td><a href="daily/">daily</a></td></tr>
-<tr><td><a href="https://nexus.bianbu.xyz/repository/image/k3/opensbi.itb">opensbi.itb</a></td>
+<tr><td><a href="https://images.example.test/repository/image/k3/opensbi.itb">opensbi.itb</a></td>
 <td>2026-11-14 12:00</td><td>1024</td></tr>
 <tr><td><a href="__probe__/">probe</a></td></tr></table>'''
         result = catalog.parse_index('internal', 'k3/', raw)
         self.assertEqual([r['kind'] for r in result], ['directory', 'partition-file'])
         self.assertEqual(result[1]['size'], 1024)
         self.assertEqual(result[1]['modified'], '2026-11-14 12:00')
-        self.assertEqual(result[1]['url'], 'https://nexus.bianbu.xyz/repository/image/k3/opensbi.itb')
+        self.assertEqual(result[1]['url'], 'https://images.example.test/repository/image/k3/opensbi.itb')
 
     def test_paths_and_unknown_sources_are_rejected_before_network(self):
         for path in ('../', '/k3/', 'k3//dir', 'k3/../', 'k3/%2f', 'k3/?x', 'scripts/', 'k3/\\x', 'k3/\n'):
@@ -69,6 +101,7 @@ class CatalogTests(unittest.TestCase):
                 self.assertEqual(stream.read(), DATA)
             with self.assertRaises(TaskError): manager.artifacts.get(row['id'], 'agent', 'SN-OTHER')
             manager.artifacts.claim(row['id'], task['id'], 'web', 'SN-OTHER')
+            self.assertEqual(catalog.library(manager)['artifacts'][0]['state'], 'claimed')
             with self.assertRaises(TaskError): manager.artifacts.remove(row['id'])
             manager.artifacts.finish_claim(row['id'], task['id'])
             manager.artifacts.remove(row['id'])
@@ -85,11 +118,12 @@ class CatalogTests(unittest.TestCase):
         with protected_connection() as fixture, mock.patch.object(catalog, 'catalog', return_value={'entries':[]}) as fetch:
             code, data = api_request(fixture.url,'/api/image-catalog',fixture.owner_token)
             self.assertEqual((code,data),(200,{'entries':[]}))
-            for token in (fixture.token, fixture.grant_store.issue('all')[0]):
-                for route in ('/api/image-catalog','/api/image-library'):
-                    code, data = api_request(fixture.url,route,token)
-                    self.assertEqual(code,403,(route,data))
-            fetch.assert_called_once()
+            for route in ('/api/image-catalog','/api/image-library'):
+                code, data = api_request(fixture.url,route,fixture.token)
+                self.assertEqual(code,403,(route,data))
+                code, data = api_request(fixture.url,route,fixture.grant_store.issue('all')[0])
+                self.assertEqual(code,200,(route,data))
+            self.assertEqual(fetch.call_count, 2)
             code, data = api_request(fixture.url,'/api/image-library',fixture.owner_token)
             self.assertEqual(code,200,data)
             self.assertEqual(data['artifacts'],[])

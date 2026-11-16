@@ -15,7 +15,7 @@ There is no build step or package manager configuration. The backend uses Python
 - `bash -n rescue.sh` — check shell syntax without executing recovery.
 - `git diff --check` — catch whitespace errors before submitting.
 
-Local Debian packages go directly in `dists/`, using versioned filenames such as
+Local Debian packages go directly in `dist/`, using versioned filenames such as
 `seriald_1.7.5~web8_amd64.deb`; do not create a per-build delivery subdirectory.
 Keep build inputs and diagnostic records separate from the delivered packages.
 

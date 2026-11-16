@@ -2,7 +2,7 @@
 """Build a private K3 RAM-only download environment, without accessing a board.
 
 Input FSBL is checksum-pinned and reused solely for RAM staging. U-Boot is built
-from an archived source revision with the reviewed non-writing NOR adapter patch.
+from an unmodified archived source revision using native Fastboot/UUU commands.
 """
 import argparse
 import hashlib
@@ -36,10 +36,10 @@ def main():
     if args.output.exists():
         parser.error('output directory already exists; use a new versioned build directory')
     commit = subprocess.check_output(['git', '-C', str(args.source), 'rev-parse', args.commit], text=True).strip()
-    patch = ROOT / 'packaging/flash-loaders/k3-ram-only-nor.patch'
     args.output.mkdir(parents=True)
     (args.output / 'BUILD-INPUT.json').write_text(json.dumps({
-        'uboot_commit': commit, 'patch_sha256': digest(patch),
+        'uboot_commit': commit, 'source_patches': [],
+        'default_env_sha256': digest(ROOT / 'packaging/flash-loaders/k3-ram.env'),
         'fsbl_sha256': args.fsbl_sha256, 'cross_compile': args.cross_compile,
         'configuration': 'k3_defconfig', 'ram_only': True,
         'ddr_training_persistence': False, 'target': 'u-boot.bin', 'jobs': args.jobs
@@ -53,25 +53,51 @@ def main():
                 subprocess.run(['git', '-C', str(args.source), 'archive', commit], stdout=output, check=True)
             with tarfile.open(work / 'source.tar') as archive:
                 archive.extractall(source)
-            subprocess.run(['git', 'apply', '--unidiff-zero', str(patch)], cwd=source, check=True)
             with (args.output / 'build.log.txt').open('w') as log:
                 command = ['make', 'O=' + str(build), 'CROSS_COMPILE=' + args.cross_compile]
                 subprocess.run(command + ['k3_defconfig'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
-                subprocess.run([str(source / 'scripts/config'), '--file', str(build / '.config'),
-                    '-e', 'DECKLAB_RAM_ONLY_LOADER'], check=True)
+                # Native Kconfig only. Skipping board_late_init avoids EEPROM
+                # provisioning, DDR persistence, boot scripts and auto-flashing.
+                configure = [str(source / 'scripts/config'), '--file', str(build / '.config')]
+                for symbol in ('BOARD_LATE_INIT', 'ENV_IS_IN_MMC', 'ENV_IS_IN_UFS',
+                               'ENV_IS_IN_MTD', 'ESPI', 'RT7451_RETIMER',
+                               'HWMON_SENSORS_CTF2301', 'AUTOBOOT_KEYED',
+                               'CROS_EC', 'CROS_EC_ESPI', 'I2C_CROS_EC_TUNNEL',
+                               'PWM_CROS_EC', 'CROS_EC_KEYB'):
+                    configure += ['-d', symbol]
+                for symbol in ('ENV_IS_NOWHERE', 'CMD_NVME', 'CMD_SCSI', 'USE_DEFAULT_ENV_FILE'):
+                    configure += ['-e', symbol]
+                configure += ['--set-str', 'DEFAULT_ENV_FILE', str(ROOT / 'packaging/flash-loaders/k3-ram.env'),
+                              '--set-str', 'LOCALVERSION', '-seriald-ram',
+                              '--set-val', 'BOOTDELAY', '-2']
+                subprocess.run(configure, check=True)
                 subprocess.run(command + ['olddefconfig'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
                 configuration = (build / '.config').read_text()
                 (args.output / 'CONFIGURATION.txt').write_text(configuration)
-                if 'CONFIG_DECKLAB_RAM_ONLY_LOADER=y\n' not in configuration:
-                    raise RuntimeError('RAM-only configuration was not applied')
+                for expected in ('# CONFIG_BOARD_LATE_INIT is not set',
+                                 '# CONFIG_ENV_IS_IN_MMC is not set',
+                                 '# CONFIG_ENV_IS_IN_UFS is not set',
+                                 '# CONFIG_ENV_IS_IN_MTD is not set',
+                                 'CONFIG_ENV_IS_NOWHERE=y', 'CONFIG_USE_DEFAULT_ENV_FILE=y',
+                                 'CONFIG_FASTBOOT_UUU_SUPPORT=y',
+                                 'CONFIG_BOOTDELAY=-2',
+):
+                    if expected not in configuration:
+                        raise RuntimeError('required stock RAM configuration missing: ' + expected)
                 subprocess.run(command + ['-j%d' % args.jobs, 'u-boot.bin'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
-                disassembly = subprocess.check_output([args.cross_compile + 'objdump', '-d',
-                    '--disassemble=board_late_init', str(build / 'u-boot')], text=True)
-                if 'run_command' not in disassembly or any(name in disassembly for name in (
-                        'set_dev_serial_no', 'set_env_ethaddr', 'save_ddr_training_info',
-                        'try_flash_image_from_card', 'try_boot_from_udisk', 'flush_tlvinfo')):
-                    raise RuntimeError('compiled late initialization is not download-only')
-                (args.output / 'SAFETY-CHECK.txt').write_text(disassembly)
+                elf = (build / 'u-boot').read_bytes()
+                if b'bootcmd=while true; do fastboot 0; done\x00' not in elf or b'bootcmd=run autoboot' in elf:
+                    raise RuntimeError('compiled default environment is not Fastboot-only')
+                shutil.copyfile(build / 'u-boot', args.output / 'u-boot.elf')
+                symbols = subprocess.check_output([args.cross_compile + 'nm', '--defined-only',
+                    str(build / 'u-boot')], text=True)
+                if any(name in symbols for name in ('board_late_init', 'save_ddr_training_info',
+                        'set_dev_serial_no', 'fastboot_decklab_')):
+                    raise RuntimeError('unexpected provisioning/custom loader symbol in stock RAM build')
+                (args.output / 'SAFETY-CHECK.txt').write_text(
+                    'Unmodified source archive. Native Kconfig disables board late-init and persistent env.\n'
+                    'Compiled symbols exclude board late-init, DDR persistence and serial provisioning.\n')
+
                 (fit / 'configs').mkdir(parents=True)
                 (fit / 'dtb').mkdir()
                 shutil.copyfile(source / 'board/spacemit/k3/configs/uboot_fdt.its', fit / 'configs/uboot_fdt.its')
@@ -85,18 +111,19 @@ def main():
                 subprocess.run([str(build / 'tools/mkimage'), '-f', str(fit / 'configs/uboot_fdt.its'),
                     str(args.output / 'k3/u-boot.itb')], check=True, stdout=log, stderr=subprocess.STDOUT)
             shutil.copyfile(args.fsbl, args.output / 'k3/FSBL.bin')
+            shutil.copyfile(ROOT / 'packaging/flash-loaders/k3-ram.env', args.output / 'RAM-ENV.txt')
             shutil.copyfile(source / 'Licenses/gpl-2.0.txt', args.output / 'COPYING.txt')
-            shutil.copyfile(patch, args.output / patch.name)
-            materials = {'protocol': 'decklab-nor-v1'}
+            materials = {'protocol': 'spacemit-ram-v1'}
             for kind, name in (('fsbl', 'k3/FSBL.bin'), ('uboot', 'k3/u-boot.itb')):
                 materials[kind] = {'file': name, 'sha256': digest(args.output / name)}
             (args.output / 'manifest.json').write_text(json.dumps({'version': 1, 'families': {'k3': materials}}, indent=2) + '\n')
             (args.output / 'BUILD-INFO.txt').write_text('DeckLab K3 RAM-only download environment\n' +
-                'U-Boot source commit: ' + commit + '\nPatch SHA-256: ' + digest(patch) + '\n' +
+                'U-Boot source commit: ' + commit + '\nSource patches: none\n' +
                 'FSBL SHA-256: ' + args.fsbl_sha256 + '\nToolchain prefix: ' + args.cross_compile + '\n' +
-                'Build: k3_defconfig + DECKLAB_RAM_ONLY_LOADER=y, u-boot.bin, compressed multi-DTB FIT\n' +
-                'DDR training policy: normal choice retained; persistence excluded by the RAM-only late-init loop.\n' +
+                'Build: k3_defconfig + native RAM configuration, u-boot.bin, compressed multi-DTB FIT\n' +
+                'DDR training policy: normal choice retained; board_late_init disabled.\n' +
                 'Loaders are RAM-only, never partition payloads. NOR map selection does not save env or write storage.\n' +
+                'EEPROM: native commands; host restricts TLV 0x83 and verifies physical readback.\n' +
                 'Compiled/offline checked; no physical-board acceptance implied.\n')
         print(args.output)
     except BaseException:

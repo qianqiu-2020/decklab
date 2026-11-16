@@ -20,7 +20,7 @@ def node_snapshot(settings, role, secrets=False):
     result['fields'] = [field for field in result['fields'] if field['name'] in allowed]
     result['configuration']['environment'] = {key: value for key, value in
         result['configuration']['environment'].items() if key in allowed}
-    documents = {'agent_tokens'} if role == 'web' else {'profiles', 'hardware', 'flash'}
+    documents = {'agent_tokens'} if role == 'web' else {'profiles', 'hardware', 'flash', 'desktop'}
     result['configuration']['documents'] = {key: value for key, value in
         result['configuration']['documents'].items() if key in documents}
     result['document_names'] = sorted(documents)

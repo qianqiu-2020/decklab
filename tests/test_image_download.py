@@ -131,10 +131,10 @@ class ImageDownloadTests(unittest.TestCase):
             manager.artifacts.recover()
             self.assertEqual(manager.tasks.store.get(task_id)['state'], 'interrupted')
 
-    def test_only_human_can_import_and_request_id_required(self):
+    def test_import_requires_request_id_for_both_agents_and_humans(self):
         with fixture() as (manager, url):
             actions = ImageDownloads(manager)
-            self.assertEqual(actions.start({'url': url}, SimpleNamespace(serial=''), 'agent').status, 403)
+            self.assertEqual(actions.start({'url': url}, SimpleNamespace(serial=''), 'agent').status, 400)
             self.assertEqual(actions.start({'url': url}, SimpleNamespace(serial='')).status, 400)
 
     def test_url_and_dns_policy_allows_lan_repositories_without_host_local_access(self):
@@ -146,8 +146,8 @@ class ImageDownloadTests(unittest.TestCase):
                     (socket.AF_INET, socket.SOCK_STREAM, 6, '', (address, 80))]), self.assertRaises(TaskError):
                 _addresses('example.test', 80)
         with mock.patch('socket.getaddrinfo', return_value=[
-                (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('10.0.90.10', 80))]):
-            self.assertEqual(_addresses('repo.lan', 80)[0][3][0], '10.0.90.10')
+                (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('10.23.45.10', 80))]):
+            self.assertEqual(_addresses('repo.lan', 80)[0][3][0], '10.23.45.10')
 
     def test_windows_tls_uses_native_store_without_global_ssl_injection(self):
         import ssl

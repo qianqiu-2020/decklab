@@ -267,9 +267,16 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(ctl.main(['--device', 'board', 'task', 'task-id']), 0)
             client.get.assert_called_with('/api/task', id='task-id')
             client.post.return_value = {'ok': True, 'task': {'id': 'task-id'}}
+            client.submit_task.return_value = {'ok': True, 'task': {'id': 'task-id'}}
             client.connection_id = 'connection'
             self.assertEqual(ctl.main(['--device', 'board', 'task-start', 'identify']), 0)
-            client.post.assert_called_with('/api/task-start', kind='identify', connection_id='connection')
+            client.submit_task.assert_called_with('identify', None, connection_id='connection')
+            self.assertEqual(ctl.main(['--device', 'board', 'task-start', 'identify',
+                                       '--request-id', 'platform-attempt-one']), 0)
+            client.submit_task.assert_called_with('identify', 'platform-attempt-one', connection_id='connection')
+            client.task_by_request.return_value = {'task': {'id': 'task-id'}}
+            self.assertEqual(ctl.main(['task-request', 'platform-attempt-one']), 0)
+            client.task_by_request.assert_called_with('platform-attempt-one')
             self.assertEqual(ctl.main(['--device', 'board', 'task-cancel', 'task-id']), 0)
             client.post.assert_called_with('/api/task-cancel', id='task-id')
 

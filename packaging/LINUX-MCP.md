@@ -21,11 +21,13 @@ needs host emulation; it is not required by the native CI jobs. Container networ
 access is needed during the build, and is not needed by package installation.
 The output directory must not already exist.
 
-For a prepared native Ubuntu 22.04 build runner:
+For a prepared native Ubuntu 22.04 build runner with the Python 3.12 runtime and
+development headers already installed (the default Docker builder prepares
+these from deadsnakes; package installation never adds that source):
 
 ```sh
-sudo apt-get install python3.10-venv python3.10-dev binutils ca-certificates
-/usr/bin/python3.10 -m venv build/mcp-env
+sudo apt-get install python3.12-venv python3.12-dev binutils ca-certificates
+/usr/bin/python3.12 -m venv build/mcp-env
 build/mcp-env/bin/python -m pip download --only-binary=:all: --require-hashes \
   -r packaging/linux-mcp-requirements.lock -d build/mcp-wheels
 build/mcp-env/bin/python -m pip install --no-index --find-links build/mcp-wheels \
@@ -34,7 +36,7 @@ build/mcp-env/bin/python tools/build_linux_mcp.py --local --arch amd64 \
   --wheelhouse build/mcp-wheels --output build/linux-mcp/amd64/runtime
 ```
 
-`--local` requires Ubuntu 22.04, CPython 3.10 and glibc 2.35. PyInstaller does
+`--local` requires Ubuntu 22.04, CPython 3.12 and glibc 2.35. PyInstaller does
 not bundle glibc, so freezing on a newer distribution would invalidate the
 Ubuntu 22.04 compatibility baseline. See the
 [PyInstaller Linux compatibility guidance](https://pyinstaller.org/en/stable/usage.html#making-gnu-linux-apps-forward-compatible).

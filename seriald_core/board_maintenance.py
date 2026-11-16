@@ -65,6 +65,8 @@ class BoardMaintenance:
     def check(self, serial):
         if not serial:
             return
+        from .board_ownership import ownership_for
+        ownership_for(self.manager).check(serial)
         if self.holds(serial):
             raise TransactionError('board-maintenance', '开发板正在刷机或等待恢复；仍可查看输出', 423)
 
@@ -83,7 +85,7 @@ class BoardMaintenance:
         board = getattr(self.manager, 'boards', {}).get(serial)
         if board is None:
             raise TaskError('flash board is not registered', 404)
-        device = board.connection
+        device = board.connection or getattr(board, 'history', None)
         if device is None:
             return
         transactions = getattr(device, 'transactions', None)
@@ -108,6 +110,8 @@ class BoardMaintenance:
         """Hold while atomically registering a task and its durable holds."""
         selected = self.resources(serial, resources)
         with self._lock:
+            from .board_ownership import ownership_for
+            ownership_for(self.manager).check(serial, actor, client_id)
             self._check_resources(selected)
             self._check_attachment(serial, actor, client_id)
             yield selected
@@ -131,10 +135,11 @@ class BoardMaintenance:
     @contextmanager
     def target_admission(self, target_id, generation, serial='', resources=(), actor='web', client_id=''):
         """Reserve a download attachment without inventing a board or UART."""
-        if actor != 'web':
-            raise TaskError('automatic flash targets require a human operator', 403)
         selected = self.target_resources(target_id, serial, resources)
         with self._lock:
+            if serial:
+                from .board_ownership import ownership_for
+                ownership_for(self.manager).check(serial, actor, client_id)
             self._check_resources(selected)
             with self.store.lock:
                 row = self.store.db.execute('SELECT generation,serial,present FROM flash_targets WHERE id=?',
@@ -172,7 +177,7 @@ class BoardMaintenance:
                                          actor='web', client_id='', *, attempt_id, details=None):
         from .flash_store import encode_document
         from .tasks import TaskStore
-        if actor != 'web' or not isinstance(attempt_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', attempt_id):
+        if not isinstance(attempt_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', attempt_id):
             raise TaskError('invalid flash target inspection recovery')
         selected = self.target_resources(target_id, serial, resources)
         document = dict(details or {}, target_id=target_id, target_generation=generation,
@@ -202,7 +207,7 @@ class BoardMaintenance:
                                           client_id='', *, attempt_id, details=None):
         from .flash_store import encode_document
         from .tasks import TaskStore
-        if actor != 'web' or not isinstance(attempt_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', attempt_id):
+        if not isinstance(attempt_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', attempt_id):
             raise TaskError('invalid flash target preparation recovery')
         self.target_resources(target_id, serial)
         document = dict(details or {}, target_id=target_id, target_generation=generation,
@@ -289,6 +294,43 @@ class BoardMaintenance:
         if row is not None:
             raise TaskError('flash image cache is waiting for recovery of task ' + row['task_id'], 423)
 
+    def recover_operation(self, task_id, actor, expected_updated, stopped, reason):
+        """Append human cleanup confirmation without rewriting the original result."""
+        import json
+        from .tasks import TaskStore
+        if actor != 'web':
+            raise TaskError('only the human owner may confirm operation recovery', 403)
+        if (type(expected_updated) not in (int, float) or stopped is not True
+                or not isinstance(reason, str) or not reason.strip() or len(reason.encode()) > 2048
+                or any(ord(value) < 32 for value in reason)):
+            raise TaskError('recovery requires the observed task revision, stopped confirmation and reason')
+        tasks = TaskStore(self.store)
+        with self.manager.tasks._lock, self._lock, self.store.lock, self.store.db:
+            task = tasks.get(task_id)
+            row = self.store.db.execute('SELECT result FROM tasks WHERE id=?', (task_id,)).fetchone()
+            document = json.loads(row['result'] or '{}')
+            previous = document.get('recovery_confirmation', {})
+            if previous.get('previous_updated') == expected_updated and previous.get('reason') == reason.strip():
+                return task
+            if (task['updated'] != expected_updated or task['state'] in ('queued', 'running')
+                    or task_id in self.manager.tasks._active):
+                raise TaskError('operation changed or its worker has not stopped', 409)
+            if not task['kind'].startswith('hardware-') or document.get('cleanup_confirmed') is not False:
+                raise TaskError('task has no configured-helper cleanup recovery', 409)
+            holds = self.store.db.execute('SELECT * FROM flash_resource_holds WHERE task_id=?', (task_id,)).fetchall()
+            if not holds or any(value['state'] != 'recovery' or not value['resource'].startswith('board:') for value in holds):
+                raise TaskError('operation recovery resources changed', 409)
+            now = time.time()
+            document['recovery_confirmation'] = {'confirmed_stopped': True, 'actor': actor,
+                'reason': reason.strip(), 'confirmed_at': now, 'previous_updated': expected_updated}
+            self.store.db.execute('UPDATE tasks SET result=?,updated=? WHERE id=?',
+                                  (json.dumps(document, ensure_ascii=False, allow_nan=False), now, task_id))
+            self.store.db.execute('DELETE FROM flash_resource_holds WHERE task_id=?', (task_id,))
+            for hold in holds:
+                self.store.db.execute('INSERT INTO events(serial,ts,actor,action,detail) VALUES(?,?,?,?,?)',
+                    (hold['resource'][6:], now, actor, 'operation-recovery-confirmed', task_id + ': ' + reason.strip()))
+            return tasks.get(task_id)
+
     def retain_preparation_failure(self, serial, actor='web', client_id='', *, attempt_id, details=None):
         """Pin only the shared cache pool when an image-preparation writer is unknown.
 
@@ -317,7 +359,7 @@ class BoardMaintenance:
         return tasks.get(task_id)
 
     @contextmanager
-    def operation(self, serial):
+    def operation(self, serial, allow_parallel=False):
         """Existing UART operations register before any active board IO."""
         if not serial:
             yield
@@ -331,7 +373,7 @@ class BoardMaintenance:
             return
         with self._lock:
             self.check(serial)
-            if self._active.get(resource, 0):
+            if not allow_parallel and self._active.get(resource, 0):
                 raise TransactionError('busy', '开发板检查进行中，请稍后重试')
             self._active[resource] = self._active.get(resource, 0) + 1
             owned.add(resource)

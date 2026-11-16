@@ -2,6 +2,7 @@
 from html.parser import HTMLParser
 import json
 import http.client
+import os
 import re
 import ssl
 import threading
@@ -14,11 +15,27 @@ from .tasks import TaskError
 SOURCES = {
     'public': {'name': '公开镜像', 'browse': 'https://archive.spacemit.com/image/',
                'download': 'https://archive.spacemit.com/image/'},
-    'internal': {'name': '内部镜像', 'browse': 'https://nexus.bianbu.xyz/service/rest/repository/browse/image/',
-                 'download': 'https://nexus.bianbu.xyz/repository/image/'},
 }
 MAX_PAGE = 2 * 1024 ** 2
 _CACHE, _LOCK = {}, threading.Lock()
+
+
+def configured_sources(environment=None):
+    environment = os.environ if environment is None else environment
+    result = dict(SOURCES)
+    browse = environment.get('SERIALD_IMAGE_INTERNAL_BROWSE', '').strip()
+    download = environment.get('SERIALD_IMAGE_INTERNAL_DOWNLOAD', '').strip()
+    if browse or download:
+        for value in (browse, download):
+            try:
+                url = urlsplit(value)
+            except ValueError:
+                raise TaskError('组织镜像源必须是有效的 HTTPS 目录地址') from None
+            if (not value or len(value) > 2048 or url.scheme != 'https' or not url.hostname
+                    or url.username or url.password or url.query or url.fragment or not value.endswith('/')):
+                raise TaskError('组织镜像源必须配置两个无凭据、以 / 结尾的 HTTPS 目录地址')
+        result['internal'] = {'name': '组织镜像', 'browse': browse, 'download': download}
+    return result
 
 
 def catalog_path(value):
@@ -71,7 +88,7 @@ def _format(name):
 
 
 def parse_index(source, path, raw):
-    spec = SOURCES[source]
+    spec = configured_sources()[source]
     browse = spec['browse'] + quote(path, safe='/')
     entries, seen = [], set()
     for row in _Index(raw).entries[:4096]:
@@ -142,37 +159,49 @@ def _fetch(url):
 
 
 def catalog(source='public', path='', refresh=False):
-    if not isinstance(source, str) or source not in SOURCES:
+    sources = configured_sources()
+    if source == 'internal' and source not in sources:
+        raise TaskError('组织镜像源尚未配置', 503)
+    if not isinstance(source, str) or source not in sources:
         raise TaskError('unknown image source')
     path = catalog_path(path)
-    key = (source, path)
+    key = (source, path, sources[source]['browse'], sources[source]['download'])
     with _LOCK:
         cached = _CACHE.get(key)
         if cached and not refresh and time.monotonic() - cached[0] < 60:
             return json.loads(json.dumps(cached[1]))
     try:
-        entries = parse_index(source, path, _fetch(SOURCES[source]['browse'] + quote(path, safe='/')))
+        entries = parse_index(source, path, _fetch(sources[source]['browse'] + quote(path, safe='/')))
     except ssl.SSLCertVerificationError:
         raise TaskError('镜像源 HTTPS 证书不受信任，请由管理员在控制机配置组织 CA 或更新系统证书', 502) from None
     except (OSError, ValueError, UnicodeError, http.client.HTTPException):
         raise TaskError('内部镜像源暂不可访问，请检查控制机内网连接' if source == 'internal'
                         else '公开镜像源暂不可访问，请检查控制机网络', 502) from None
-    result = {'source': source, 'source_name': SOURCES[source]['name'], 'path': path,
+    result = {'source': source, 'source_name': sources[source]['name'], 'path': path,
               'entries': entries, 'checked_at': time.time(),
-              'sources': [{'id': k, 'name': v['name']} for k, v in SOURCES.items()]}
+              'sources': [{'id': k, 'name': v['name']} for k, v in sources.items()]}
     with _LOCK:
         if len(_CACHE) >= 128: _CACHE.pop(next(iter(_CACHE)))
         _CACHE[key] = (time.monotonic(), result)
     return json.loads(json.dumps(result))
 
 
-def library(manager):
+def library(manager, actor='web', serial=None):
+    artifact_scope, task_scope, arguments = "1=1", "1=1", ()
+    if actor != 'web':
+        artifact_scope, task_scope, arguments = 'actor=?', 't.actor=?', (actor,)
+        if serial is not None:
+            artifact_scope += ' AND serial=?'
+            task_scope += ' AND s.serial=?'
+            arguments += (serial,)
     with manager.store.lock:
         ids = [row[0] for row in manager.store.db.execute(
-            "SELECT id FROM transfer_artifacts WHERE serial='' AND direction='upload' AND state='ready' ORDER BY updated DESC LIMIT 100")]
+            "SELECT id FROM transfer_artifacts WHERE " + artifact_scope +
+            " AND direction='upload' AND state IN ('ready','claimed') ORDER BY updated DESC LIMIT 100", arguments)]
         active = [row[0] for row in manager.store.db.execute(
-            "SELECT t.id FROM tasks t JOIN task_targets s ON s.task_id=t.id WHERE t.actor='web' AND t.kind='image-download' "
-            "AND s.serial='' AND s.connection_id='image-downloads' AND t.state IN ('queued','running') ORDER BY t.created DESC LIMIT 10")]
-    return {'artifacts': [{k: row[k] for k in ('id', 'name', 'size', 'sha256', 'updated')}
-                          for row in (manager.artifacts.get(i) for i in ids)],
+            "SELECT t.id FROM tasks t JOIN task_targets s ON s.task_id=t.id WHERE " + task_scope +
+            " AND t.kind='image-download' AND s.connection_id='image-downloads' "
+            "AND t.state IN ('queued','running') ORDER BY t.created DESC LIMIT 10", arguments)]
+    return {'artifacts': [{k: row[k] for k in ('id', 'name', 'size', 'sha256', 'updated', 'serial', 'state')}
+                          for row in (manager.artifacts.get(i, actor, serial) for i in ids)],
             'tasks': [manager.tasks.store.get(i) for i in active]}

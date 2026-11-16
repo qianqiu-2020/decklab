@@ -23,11 +23,11 @@ def main():
                 del os.environ[key]
         from seriald_core import web
         from seriald_core.config import STATIC
-        from seriald_core.control_server import ControlHandler
+        from seriald_core.control_server import ControlHandler, RevocationReconciler, collector_connection
         from seriald_core.demo import DemoManager
         from seriald_core.httpd import BoundedThreadingTCPServer
         from seriald_core.storage import Store
-        from seriald_core.agent_grants import AgentGrantStore
+        from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
         from seriald_core.mcp_host import MCPHost
 
         with BoundedThreadingTCPServer(('127.0.0.1', args.port), ControlHandler) as control, \
@@ -37,13 +37,18 @@ def main():
                 store = Store(os.path.join(temporary, 'registry.sqlite3'))
                 grants = AgentGrantStore(os.path.join(temporary, 'agent-grants.sqlite3'))
                 manager = DemoManager(store)
+                attach_agent_grants(manager, grants)
                 collector.manager = manager
                 ControlHandler.collector_socket = collector.server_address
+                ControlHandler.collector_link = None
                 ControlHandler.static_root = STATIC
                 ControlHandler.auth_token = ''
                 ControlHandler.grant_store = grants
                 worker = threading.Thread(target=collector.serve_forever, daemon=True)
                 worker.start()
+                reconciler = RevocationReconciler(grants,
+                    lambda timeout: collector_connection(collector.server_address, timeout=timeout)).start()
+                control.revocation_reconciler = reconciler
                 signal.signal(signal.SIGTERM, lambda *_:
                               threading.Thread(target=control.shutdown, daemon=True).start())
                 print('DeckLab DEMO: http://127.0.0.1:%d/ (simulated boards; temporary data)' %
@@ -54,6 +59,7 @@ def main():
                     pass
                 finally:
                     mcp.close()
+                    reconciler.close()
                     manager.close()
                     collector.shutdown()
                     worker.join(timeout=6)

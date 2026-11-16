@@ -17,6 +17,8 @@ from tools.collect_windows_notices import verify as verify_notices
 from tools.collect_linux_mcp_notices import verify as verify_linux_notices
 from tools.install_components import executor_metadata, tree_inventory
 from tools.package_flash_loaders import publish as inspect_loaders
+from tools.build_linux_mcp import DESKTOP_RUNTIME, SOURCES
+from tools.package_desktop_runtime import validate as inspect_desktop_runtime
 
 
 def inspect_complete_install(root, platform):
@@ -107,9 +109,8 @@ def inspect_linux_runtime(runtime, architecture):
     if manifest.get('requirements_sha256') != hashlib.sha256(
             (ROOT / 'packaging/linux-mcp-requirements.lock').read_bytes()).hexdigest():
         raise ValueError('Debian MCP runtime requirements differ from the reviewed hash lock')
-    sources = ('seriald_mcp.py', 'serialctl.py', 'tools/linux_mcp_entrypoint.py')
     if manifest.get('source_files') != {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
-                                      for name in sources}:
+                                      for name in SOURCES}:
         raise ValueError('Debian MCP runtime adapter differs from the checked-out release')
     files = manifest.get('files')
     if not isinstance(files, dict) or not files:
@@ -157,7 +158,8 @@ def inspect_release(directory, version):
         raise ValueError('invalid package version')
     directory = Path(directory)
     release_version = tuple(map(int, version.split('.')))
-    architectures = ('amd64', 'arm64') if release_version >= (1, 7, 1) else ('all',)
+    architectures = ('amd64',) if release_version >= (1, 14, 0) else (
+        ('amd64', 'arm64') if release_version >= (1, 7, 1) else ('all',))
     debs = {architecture: 'seriald_%s_%s.deb' % (version, architecture)
             for architecture in architectures}
     setup = 'seriald-%s-windows-x64-setup.exe' % version
@@ -193,6 +195,8 @@ def inspect_release(directory, version):
                 code = Path(temporary) / 'usr/lib/seriald'
                 if release_version >= (1, 10, 0):
                     inspect_complete_install(Path(temporary), 'linux-' + architecture)
+                if release_version >= (1, 12, 2) and architecture == 'amd64':
+                    inspect_desktop_runtime(code / 'mcp-runtime' / DESKTOP_RUNTIME, 'linux-amd64')
                 runtime = inspect_linux_runtime(code / 'mcp-runtime', architecture)
                 for name in ('seriald_mcp.py', 'serialctl.py'):
                     if hashlib.sha256((code / name).read_bytes()).hexdigest() != runtime['source_files'][name]:
@@ -204,6 +208,8 @@ def inspect_release(directory, version):
         manifest = verify_bundle(bundle)
         if release_version >= (1, 10, 0):
             inspect_complete_install(bundle, 'windows-amd64')
+        if release_version >= (1, 12, 2):
+            inspect_desktop_runtime(bundle / DESKTOP_RUNTIME, 'windows-amd64')
         notices = verify_notices(bundle / 'third-party')
         if (bundle / 'package-version.txt').read_text(encoding='ascii').strip() != version:
             raise ValueError('portable package version mismatch')

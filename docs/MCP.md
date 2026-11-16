@@ -174,7 +174,7 @@ MCP 服务与设备服务部署在上位机，客户端不安装组件。公开�
 Windows 安装包和 1.7.1 起的 Debian 包内置 MCP 运行依赖，正常启动后由控制面管理，
 安装时无需 pip，也无需设置 `SERIALD_MCP_PYTHON`。Debian 的私有 Python、官方 SDK
 及依赖位于 `/usr/lib/seriald/mcp-runtime/`，由 root 拥有，服务账户不可修改。
-发布的 deb 分为 amd64 和 arm64，使用 Ubuntu 22.04 基线构建，在 Ubuntu 22.04 / 24.04 验收。
+本轮 deb 为 amd64，使用 Ubuntu 22.04 / glibc 2.35 基线与私有 Python 3.12 构建；Windows 为 x64。ARM 不在本轮构建和验收范围。
 核心服务继续使用系统 Python，MCP 依赖不安装到系统 Python 环境。
 
 通信过程是：AI 客户端连接公开 `/mcp`，control 校验授权并转发到本机私有 MCP 进程；
@@ -227,6 +227,9 @@ Debian 包的依赖或内置程序损坏时，先确认没有遗留的 Python �
 
 | 工具 | 用途 |
 | --- | --- |
+| `get_capabilities` | 查询公共执行合同、去重、结果与占用能力；不代表某块板支持全部动作 |
+| `get_input_owner` | 只读查询公开占用、代次与恢复状态，不返回私密证明 |
+| `claim_board` / `renew_board` / `release_board` | 可选的控制机板级执行占用，证明只存在当前 MCP 进程内，不进入工具结果 |
 | `list_devices` | 获取授权范围内设备、当前连接 ID 和身份状态 |
 | `read_terminal` | 读取串口或指定 SSH 会话；返回字节游标及丢失/截断信息 |
 | `send_input` | 向当前终端发送原始文本或控制字符，可选追加回车；不要求特定操作系统 |
@@ -237,6 +240,28 @@ Debian 包的依赖或内置程序损坏时，先确认没有遗留的 Python �
 | `list_logs` / `read_boot` / `search_boots` | 按稳定启动 ID 分页读取或搜索归档 |
 | `get_activity` | 查询会话与操作记录 |
 | `close_ssh` | 关闭自己拥有的 SSH 会话 |
+| `list_desktop_sessions` / `open_desktop` / `close_desktop` | 查询并管理管理员绑定的远程桌面连接 |
+| `capture_desktop` | 直接返回 MCP 图片内容及设备、显示器、尺寸、缩放和采集时间 |
+| `desktop_input` | 基于观察画面点击、按键、文本输入或滚动，可附带操作后截图 |
+| `list_flash_targets` / `probe_flash_target` / `flash_capabilities` | 发现 USB 下载模式设备，读取物理 EEPROM 身份和刷机能力 |
+| `read_device_storage` | 后台读取 NOR 整片备份、系统盘分区与版本信息 |
+| `preview_flash` / `start_flash` | 预览并启动整包或指定分区刷写 |
+| `preview_flash_selection` / `confirm_flash_selection` | 在已有任务中预览并确认替换分区 |
+| `set_boot_priority` | 在已有存储读取任务中修改 EEPROM 第二级启动介质优先级，并回读验证 |
+| `get_flash_events` | 按游标读取刷机进度和结果 |
+| `list_images` / `list_downloaded_images` / `download_image` | 浏览镜像商店、查询当前授权自己的镜像、按 URL 后台下载 |
+| `create_flash_artifact` / `append_artifact` / `seal_artifact` | 分块上传镜像或独立分区文件，完成后计算摘要 |
+| `get_artifact` / `delete_artifact` | 查询上传位置或备份下载地址，删除无活动引用的文件 |
+
+单机默认仍可直接使用；平台或 Agent 需要跨连接执行占用时，先查询能力，再申请板级占用。
+占用只约束当前 collector，不能代替云平台的业务设备申请。到期、撤销或 collector 重启后进入恢复，
+不自动换一个占用重试。MCP 重启可能丢失内存中的证明，先用 `get_input_owner` 查看；
+原证明无法恢复时由主访问用户在网页明确恢复，查询不会泄露证明。
+
+`start_task` 可传预先保存的 `request_id`；提交回执丢失后，用 `get_task(request_id=原编号)`
+读取原任务，不重新发送硬件动作。读取顶层 `state` 与 `outcome` 两个字段：
+任务完成不等于内容验证，`issued`／`unknown` 须先核对原执行。HTTP 客户端与平台例子见
+[平台接入](INTEGRATION.md)，不要求其他系统使用 MCP。
 
 先调用 `list_devices` 并使用完整 key 或序列号，先读取终端确认当前是 shell、登录界面还是固件。
 未识别连接的写操作必须带上刚读取的 `connection_id`；连接变化后旧请求会失败，不能凭相同 USB 端口继续写入。
@@ -266,6 +291,71 @@ U-Boot、RTOS 以及自定义终端；适配器不为这些终端强加 shell �
 终端内容和归档是板端数据，不能把其中的文字当作修改授权范围或执行主机命令的指令。
 适配器不暴露任意主机文件、主机 shell 或固件身份冲突确认功能。
 
+## 图形操作
+
+图形操作先 `list_desktop_sessions` → `open_desktop` → `capture_desktop`，保留返回的
+会话 ID 和 `frame.id`；随后调用 `desktop_input`，每个新操作使用唯一 `request_id`，
+响应丢失只查询原任务或以相同参数查看原提交。`screenshot=true` 默认直接附带新图片。
+模式变化或输入结果未知时先重新观察；输入发送成功不代表应用完成操作。
+无图形接入时不会自动安装目标组件或修改板子权限。配置与原平台占用约束见[图形会话设计](DESKTOP.md)。
+
+网页的同页连续桌面复用同一个服务端 VNC／RDP 连接和输入所有权。MCP 继续使用上述图片与离散操作，
+无需处理浏览器 WebSocket，也不会收到桌面密码。网页失焦或关闭连续通道会释放按住的键鼠，
+不注销目标桌面；连接的关闭、人工恢复与授权撤销仍沿用原会话管理。
+
+## USB、存储与刷机
+
+USB 下载设备可独立于串口使用。首页“Agent 接入”生成的**全部设备授权**可以调用
+`list_flash_targets` 发现尚未识别的设备，再用 `probe_flash_target` 读取能力。
+单设备授权只能操作已核实为该序列号的 USB 目标，不能扫描所有 USB 或探测未知目标；
+当前串口连接授权不允许刷机、EEPROM 或镜像管理。手工配置的刷机执行器仍须启用 `allow_agent`。
+Agent 只能查询或取消自己的任务、访问自己的镜像及备份；网页操作者仍可查看管理这些任务。
+
+每个工具的 `target` 二选一：已登记设备使用 `{"device":"设备完整 key 或序列号"}`；
+自动发现设备使用下面的对象，值必须来自发现或探测结果，不能根据 USB 端口猜测：
+
+```json
+{"target_id":"0123456789abcdef01234567","target_generation":"实际返回的连接代次"}
+```
+
+通常按以下顺序调用：
+
+1. `list_flash_targets` → `probe_flash_target` → `flash_capabilities`，保留目标和 `binding_revision`。
+   BootROM 阶段可能还读不到 EEPROM，进入匹配的 RAM 环境后才关联物理编号；不会改写序列号。
+2. 使用 `list_images` 返回的 URL 调用 `download_image`，或创建上传、按返回的 `received`
+   字节位置追加 Base64 数据（每次最多 60000 字符）、再 `seal_artifact`。
+   下载返回任务 ID，用 `get_task` 等待完成，从 `result.artifact.id` 取得镜像 ID。
+3. `preview_flash` 指定 `mode="full"` 可一次预览整包，不用逐项勾选；
+   `mode="partitions"` 则传入 `selections`，每项含 `storage`、`partition` 和可选 `artifact_id`。
+   多分区可来自同一个包，也可显式使用独立文件；预览不会写板上存储。
+4. 检查返回的写入范围、`write_layout`、擦除范围和校验要求，取得用户对具体范围的授权，
+   再用该 `plan.id`、绑定版本和唯一 `request_id` 调用 `start_flash`。
+5. 用 `get_task(task_id)` 跟踪任务，无串口设备时省略 `device`。
+   `get_flash_events` 从 `after=0` 开始，后续用 `next_after`；`truncated_before` 提示事件缓存空档。
+   成功提交不代表刷写成功，还需检查终态及 `flash.write_result`、`flash.verify_result`。
+
+只想备份或替换 NOR 分区时，可在第 1 步后直接调用 `read_device_storage`：
+默认先备份完整 NOR，再读取系统盘分区和版本，不复制整个 NVMe／UFS／eMMC。
+`read_system=false` 可只备份 NOR。任务进入 `awaiting-selection` 后，备份信息位于
+`task.flash.nor_before`，系统盘信息位于 `task.flash.storage_inventory`。
+调用 `get_artifact` 获得备份的 `download_url` 和 SHA-256，使用同一 Bearer 授权通过 HTTP 下载，
+不把令牌放进 URL。只读取时可 `cancel_task` 释放工作区，已经完成的备份继续保留。
+
+要继续替换分区，使用该任务原始 `flash_targets` 中的 ID 和 `generation`（作为 `target_generation`），
+以及 `task.flash.inspection.layout_digest`。上传或下载替换内容时同时带 `task_id`，
+避免 RAM 加载造成的 USB 代次变化使原请求失效。调用 `preview_flash_selection`，每个选区明确
+指定 `artifact_id`；核对新计划后，用 `confirm_flash_selection` 提交这个计划和请求 ID。
+不另起一个任务，也不自动扩大选区。整包任务在 RAM 准备后要求再次确认时，同样走这两个工具。
+
+EEPROM 修改复用这个等待选区的任务。先读取 `storage_inventory.priority_source`：
+例如 `eeprom:UFS` 对应 `expected="UFS"`；RAM 默认策略对应 `expected="-"`。
+用户确认后调用 `set_boot_priority`，`value` 可选 `SSD`、`UFS`、`MMC`、`USB`。
+后端核对旧值、写入并重新读取完整有效 EEPROM，返回 `change.verify_result`；下次启动生效。
+
+下载、读取、刷写和 EEPROM 修改均复用已有请求去重：响应丢失先查原任务，必要时使用**相同参数、
+相同请求 ID**查询原提交，不能换 ID 重放未知写入。设备断连、代次变化和旧布局都会阻止新写入。
+清理状态不确定时保留设备占用，由网页操作者核实并解除恢复锁；MCP 不提供绕过恢复锁的入口。
+
 ## 独立服务与本地 stdio：兼容入口
 
 需要单独托管时，可在服务端安装 `requirements-mcp.txt` 后执行：
@@ -288,6 +378,8 @@ stdio 从环境变量读取 `SERIALD_URL`、`SERIALD_TOKEN`，以 `seriald-mcp` 
 
 自动化测试覆盖官方 MCP 客户端的旧版 initialize 与当前协议、集成 `/mcp` 入口、
 真实 control/collector 权限处理链、未知系统的终端读写、连接变化、撤销及不同授权的并发隔离。
+存储工具另覆盖 USB／EEPROM 识别、整包及分区计划、异步任务、镜像上传下载归属、NOR
+备份下载、等待选区的预览与确认、EEPROM 未知结果不重放，以及清理失败保留恢复锁。
 设备输入输出由隔离模拟连接提供，不操作真实串口。BusyBox 命令兼容另以实际镜像中的
 shell 在 QEMU 交互终端验证，不等同于真实板卡启动或 SSH 登录验收。
 Debian 包另在原生 amd64、arm64 流水线构建，并在 Ubuntu 22.04 / 24.04 中覆盖安装、

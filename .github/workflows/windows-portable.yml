@@ -9,6 +9,7 @@ on:
   pull_request:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - '.gitattributes'
       - 'seriald_windows.py'
@@ -69,19 +70,15 @@ jobs:
         shell: pwsh
         run: .\tools\install_inno_build_tool.ps1
       - name: Prepare reviewed complete-install inputs
-        if: startsWith(github.ref, 'refs/tags/')
         env:
-          DECKLAB_COMPONENTS_URL: ${{ secrets.COMPONENTS_WINDOWS_AMD64_URL }}
-          DECKLAB_COMPONENTS_SHA256: ${{ secrets.COMPONENTS_WINDOWS_AMD64_SHA256 }}
+          DECKLAB_COMPONENTS_URL: ${{ vars.COMPONENTS_WINDOWS_AMD64_URL || secrets.COMPONENTS_WINDOWS_AMD64_URL || 'https://github.com/qianqiu-2020/decklab/releases/download/components-1.14.0/decklab-components-1.14.0-windows-amd64.zip' }}
+          DECKLAB_COMPONENTS_SHA256: ${{ vars.COMPONENTS_WINDOWS_AMD64_SHA256 || secrets.COMPONENTS_WINDOWS_AMD64_SHA256 || '41389f7c9b17a1a0054b154aad27fc183f0454cd7fd289b410d27e16cf5ad08d' }}
         run: python tools/fetch_install_components.py --platform windows-amd64
       - name: Build setup EXE and portable ZIP
         shell: pwsh
         # Exercise the replacement-source path with the reviewed upstream archive.
         run: |
-          $arguments = @('-ExecutionPolicy','Bypass','-File','.\tools\build_windows.ps1','-ParamikoSource','.\packaging\third-party\paramiko-4.0.0\paramiko-4.0.0.tar.gz')
-          # Untagged software CI is explicitly a core-only fixture. Tagged
-          # standalone releases must supply the complete component bundle.
-          if (-not $env:GITHUB_REF.StartsWith('refs/tags/')) { $arguments += '-CoreOnly' }
+          $arguments = @('-ExecutionPolicy','Bypass','-File','.\tools\build_windows.ps1','-DesktopRuntime','.\build\install-components\windows-amd64\desktop-runtime','-ParamikoSource','.\packaging\third-party\paramiko-4.0.0\paramiko-4.0.0.tar.gz')
           & powershell @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Windows package build failed.' }
       - name: Smoke test portable host

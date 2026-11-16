@@ -673,7 +673,7 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(len([call for call in fixture.executor.discoveries if call['probe']]), before)
             self.assertEqual(fixture.executor.executions, [])
 
-    def test_discovery_and_automatic_targets_are_not_exposed_to_agent_grants(self):
+    def test_all_device_grants_can_discover_and_prepare_automatic_targets(self):
         with automatic_flashing() as fixture:
             target = self.discover(fixture)[0]
             code, issued = self.request(fixture, '/api/agent-share', {'scope': 'all'})
@@ -686,7 +686,8 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
                     ('/api/artifact-create', dict(self.scope(target), name='image.img', size=1), None)):
                 with self.subTest(route=route):
                     code, result = self.request(fixture, route, payload, query, token)
-                    self.assertEqual(code, 403, result)
+                    self.assertEqual(code, 200, result)
+            self.assertEqual(fixture.executor.executions, [])
             code, result = self.request(fixture, '/api/flash-discover', token='invalid-owner-token')
             self.assertEqual(code, 401, result)
 

@@ -21,12 +21,15 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 SOURCE_CATALOG = ROOT / 'packaging/third-party/native-source-notices'
 SOURCE_CATALOG_SHA256 = 'a20d92f7de96c8ac7a30fa7f352e2444f0da9bbc4f90e11d63eeb76cd3ae0273'
 ADDITIONAL_SOURCE_CATALOG = ROOT / 'packaging/third-party/linux-mcp-native-notices'
-ADDITIONAL_SOURCE_CATALOG_SHA256 = '239c4ff44450693401c2f617d1e75c79079ed6ccb7b8fa3dbf9a02f58ebafec6'
+ADDITIONAL_SOURCE_CATALOG_SHA256 = 'ae6aeefe705de7d76c4283f88063acc133910c60812703c639aaf7f1c285651f'
 NATIVE_VERSIONS = {'cryptography': '50.0.2', 'cffi': '2.1.1',
-                   'pydantic-core': '2.50.4', 'rpds-py': '0.30.0'}
+                   'pydantic-core': '2.50.4', 'rpds-py': '0.30.0', 'aardwolf': '0.2.17',
+                   'arc4': '0.5.0', 'bitstruct': '8.24.0', 'pillow': '13.0.0',
+                   'pycryptodomex': '3.24.2', 'zope-interface': '8.7'}
 OPENSSL_LICENSE_SHA256 = '7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a'
 
 
@@ -106,7 +109,8 @@ def wheel_index(wheelhouse, requirements, catalog=None):
         checksum = digest(data)
         with zipfile.ZipFile(path) as archive:
             names = archive.namelist()
-            manifests = [name for name in names if name.endswith('.dist-info/METADATA')]
+            manifests = [name for name in names if name.endswith('.dist-info/METADATA')
+                         and len(PurePosixPath(name).parts) == 2]
             if len(manifests) != 1:
                 raise ValueError('wheel has ambiguous metadata: ' + path.name)
             info = BytesParser().parsebytes(archive.read(manifests[0]))
@@ -179,7 +183,7 @@ def dpkg_provider(binary):
     raise ValueError('native provider has no reviewed wheel or identical dpkg file: ' + str(binary))
 
 
-def native_providers(bundle, destination, wheel_native):
+def native_providers(bundle, destination, wheel_native, desktop_runtime=None):
     rows, notices = [], {}
     for binary in sorted(Path(bundle).rglob('*')):
         if not binary.is_file() or not re.search(r'\.so(?:\.|$)', binary.name):
@@ -189,7 +193,11 @@ def native_providers(bundle, destination, wheel_native):
         data = binary.read_bytes()
         row = {'binary': relative, 'sha256': digest(data), 'size': len(data)}
         matches = wheel_native.get(row['sha256'], [])
-        if matches:
+        if desktop_runtime and relative in desktop_runtime['providers']:
+            if row['sha256'] != desktop_runtime['providers'][relative]:
+                raise ValueError('desktop runtime native provider changed during collection')
+            row.update(kind='desktop-sdk')
+        elif matches:
             row.update(kind='pypi-wheel', wheel=matches[0],
                        rustc_commits=sorted({item.decode('ascii') for item in
                            re.findall(rb'/rustc/([0-9a-f]{40})/', data)}))
@@ -280,7 +288,7 @@ def source_notices(destination, wheelhouse, catalog, providers):
               for row in reviewed['crates'] + additional.get('crates', [])}
     entries, source_locks = [], []
     artifacts = {normalized(row['name']): row for row in catalog.get('sources', [])}
-    for name in ('cryptography', 'pydantic-core', 'rpds-py'):
+    for name in ('cryptography', 'pydantic-core', 'rpds-py', 'aardwolf'):
         artifact = artifacts.get(name)
         if not artifact or artifact['version'] != NATIVE_VERSIONS[name]:
             raise ValueError('missing pinned source artifact: ' + name)
@@ -346,7 +354,9 @@ def collect(bundle, destination, wheelhouse, requirements, distributions=None, c
             raise ValueError('installed distributions do not cover the complete hash lock: '
                              + str(sorted(set(locked) - installed)))
         rows = distribution_notices(distributions, temporary)
-        providers, system_notices = native_providers(bundle, temporary, native)
+        from tools.package_desktop_runtime import notice_inventory
+        desktop = notice_inventory(bundle, 'linux-amd64', temporary)
+        providers, system_notices = native_providers(bundle, temporary, native, desktop)
         source_entries, source_locks, toolchains = source_notices(temporary, wheelhouse, catalog, providers)
         manifest = {'schema': 1, 'scope': 'Linux-frozen-worker-with-build-environment-notice-superset',
                     'python_version': sys.version.split()[0], 'distributions': rows,
@@ -355,6 +365,8 @@ def collect(bundle, destination, wheelhouse, requirements, distributions=None, c
                     'notices': system_notices + source_entries,
                     'limitations': ['Rust source notices cover complete upstream source locks; selected wheel build features are not attested.',
                                     'Distribution notices include build tools and may exceed the frozen module set.']}
+        if desktop is not None:
+            manifest['desktop_runtime'] = desktop
         (temporary / 'inventory.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
         (temporary / 'README.txt').write_text(__doc__ + '\n', encoding='utf-8')
         verify(temporary, bundle)
@@ -371,7 +383,13 @@ def verify(destination, bundle=None):
     manifest = json.loads((destination / 'inventory.json').read_text(encoding='utf-8'))
     if manifest.get('schema') != 1 or not manifest.get('native_providers'):
         raise ValueError('unsupported or empty Linux native notice inventory')
+    from tools.package_desktop_runtime import notice_inventory
+    desktop = notice_inventory(bundle, 'linux-amd64')
+    if desktop != manifest.get('desktop_runtime'):
+        raise ValueError('desktop runtime source/notice association mismatch')
     entries = list(manifest['notices'])
+    if desktop is not None:
+        entries.extend(desktop['notice_files'])
     seen = set()
     for row in manifest['distributions']:
         name = normalized(row['name'])
@@ -396,7 +414,12 @@ def verify(destination, bundle=None):
         data = safe_path(bundle, relative).read_bytes()
         if digest(data) != row['sha256'] or len(data) != row['size']:
             raise ValueError('native provider checksum mismatch: ' + relative)
-        if row['kind'] == 'pypi-wheel':
+        if desktop and relative in desktop['providers']:
+            if row['kind'] != 'desktop-sdk' or desktop['providers'][relative] != row['sha256']:
+                raise ValueError('desktop runtime native provider provenance missing')
+        elif row['kind'] == 'desktop-sdk':
+            raise ValueError('desktop runtime native provider provenance missing')
+        elif row['kind'] == 'pypi-wheel':
             if row['wheel'] not in manifest['wheel_artifacts'] and not any(
                     all(row['wheel'].get(key) == wheel.get(key) for key in
                         ('name', 'version', 'filename', 'sha256', 'source'))

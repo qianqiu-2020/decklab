@@ -9,6 +9,8 @@ import ipaddress
 import json
 from pathlib import Path
 import shlex
+import time
+from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from .web_settings import WebSettings
@@ -61,15 +63,37 @@ def links(environment, opener=None):
     return {'urls': urls, 'expires_in': expires, 'browser_only': True}
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=Path('/etc/seriald/seriald.env'))
     parser.add_argument('--json', action='store_true')
-    args = parser.parse_args()
+    parser.add_argument('--wait', type=float, default=0, metavar='SECONDS',
+                        help='wait up to 60 seconds for the installed Web service')
+    args = parser.parse_args(argv)
+    if not 0 <= args.wait <= 60:
+        parser.error('--wait must be between 0 and 60 seconds')
     try:
-        result = links(read_environment(args.config))
-    except (OSError, ValueError, http.client.HTTPException):
-        parser.exit(1, 'DeckLab 尚未就绪或凭证不可读取；服务启动后重新运行 seriald-access。\n')
+        environment = read_environment(args.config)
+    except (OSError, ValueError):
+        parser.exit(1, '无法读取 DeckLab 配置；请使用 sudo seriald-access。\n')
+    deadline = time.monotonic() + args.wait
+    while True:
+        try:
+            result = links(environment)
+            break
+        except HTTPError as error:
+            if error.code in (401, 403):
+                parser.exit(1, 'DeckLab 访问凭证与运行服务不一致；请核对服务配置。\n')
+            if error.code < 500:
+                parser.exit(1, 'DeckLab 访问地址请求失败；请核对服务配置。\n')
+        except ValueError:
+            parser.exit(1, 'DeckLab 访问配置或响应无效；请核对服务配置。\n')
+        except (OSError, http.client.HTTPException):
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            parser.exit(1, 'DeckLab 服务未就绪；请查看 systemctl status seriald 和 journalctl -u seriald。\n')
+        time.sleep(min(.25, remaining))
     if args.json:
         print(json.dumps(result))
     else:

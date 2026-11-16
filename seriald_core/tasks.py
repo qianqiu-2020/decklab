@@ -3,11 +3,25 @@
 Only one TaskManager owns a collector's task execution. Restart never replays
 commands: queued/running records become interrupted, keeping partial progress.
 """
+import hashlib
+import hmac
 import json
+import os
+from pathlib import Path
 import re
 import secrets
+import stat
+import tempfile
 import threading
 import time
+
+from .api_contract import OUTCOMES
+
+
+_OUTCOME_FIELD = '_task_outcome'
+DISCRETE_TASK_KINDS = ('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload',
+                       'file-download', 'hardware-reset', 'hardware-power-on',
+                       'hardware-power-off', 'hardware-enter-download', 'hardware-flash')
 
 
 class TaskError(ValueError):
@@ -37,6 +51,86 @@ class TaskStore:
     def __init__(self, store):
         self.store = store
 
+    def request_digest(self, document):
+        """Compare private request inputs without storing credentials or bare password hashes.
+
+        The random HMAC key is separate from SQLite and must accompany a private
+        runtime backup. Losing it with existing discrete requests fails closed.
+        """
+        try:
+            raw = json.dumps(document, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+        except (ValueError, TypeError, UnicodeError):
+            raise TaskError('invalid task request input') from None
+        if len(raw) > 65536:
+            raise TaskError('task request input too large', 413)
+        with self.store.lock:
+            key = getattr(self.store, '_task_request_hmac_key', None)
+            if key is None:
+                key = self._request_key()
+                self.store._task_request_hmac_key = key
+        return hmac.new(key, raw, hashlib.sha256).hexdigest()
+
+    def _request_key(self):
+        if self.store.path == ':memory:':
+            return secrets.token_bytes(32)
+        path = Path(self.store.path).with_name('.task-request-hmac.key')
+        if not path.exists():
+            placeholders = ','.join('?' for _ in DISCRETE_TASK_KINDS)
+            if self.store.db.execute('SELECT 1 FROM flash_requests r JOIN tasks t ON t.id=r.task_id '
+                                     'WHERE t.kind IN (' + placeholders + ') LIMIT 1',
+                                     DISCRETE_TASK_KINDS).fetchone():
+                raise TaskError('private task request key is missing; restore the original runtime key', 503)
+            temporary = None
+            try:
+                fd, temporary = tempfile.mkstemp(prefix='.task-request-key-', dir=path.parent)
+                with os.fdopen(fd, 'wb') as target:
+                    target.write(secrets.token_bytes(32))
+                    target.flush()
+                    os.fsync(target.fileno())
+                try:
+                    # Publish a fully written owner-only key without replacing a
+                    # concurrent initializer's key. A symlink is never followed.
+                    os.link(temporary, path)
+                except FileExistsError:
+                    pass
+                if os.name == 'posix':
+                    directory = os.open(path.parent, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+            except OSError:
+                raise TaskError('private task request key could not be initialized', 503) from None
+            finally:
+                if temporary is not None:
+                    try:
+                        os.unlink(temporary)
+                    except FileNotFoundError:
+                        pass
+        try:
+            fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+            with os.fdopen(fd, 'rb') as source:
+                info = os.fstat(source.fileno())
+                if (not stat.S_ISREG(info.st_mode) or info.st_size != 32
+                        or os.name == 'posix' and (info.st_uid != os.geteuid() or info.st_mode & 0o077)):
+                    raise ValueError()
+                key = source.read(33)
+                if len(key) != 32:
+                    raise ValueError()
+                return key
+        except (OSError, ValueError):
+            raise TaskError('private task request key is unavailable or not owner-only', 503) from None
+
+    def find_request(self, actor, request_id, input_digest=None):
+        from .flash_store import validate_request
+        validate_request(request_id, input_digest if input_digest is not None else '0' * 64)
+        with self.store.lock:
+            row = self.store.db.execute('SELECT input_digest,task_id FROM flash_requests '
+                                        'WHERE actor=? AND request_id=?', (actor, request_id)).fetchone()
+        if row is not None and input_digest is not None and not hmac.compare_digest(row['input_digest'], input_digest):
+            raise TaskError('task request ID was already used with different input', 409)
+        return row['task_id'] if row else None
+
     def create(self, kind, actor, client_id, targets, request_id=None, input_digest=None):
         if not all(isinstance(value, str) and value and len(value) <= 80 for value in (kind, actor)):
             raise TaskError('invalid task kind or actor')
@@ -60,7 +154,7 @@ class TaskStore:
                 validate_request(request_id, input_digest)
             self.store.db.execute('INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                                   (task_id, kind, actor, client_id if actor == 'web' else '',
-                                   'queued', '{}', None, '', now, now, 0))
+                                   'queued', '{}', json.dumps({_OUTCOME_FIELD: 'not-issued'}), '', now, now, 0))
             self.store.db.executemany('INSERT INTO task_targets VALUES (?,?,?)',
                                      [(task_id, serial, connection) for serial, connection in normalized])
             if request_id is not None:
@@ -81,9 +175,9 @@ class TaskStore:
         if not isinstance(serial, str) or len(serial.encode()) > 100 or not (serial or target_id):
             raise TaskError('invalid board task serial')
         if target_id is not None:
-            if (actor != 'web' or not isinstance(target_id, str) or not target_id or len(target_id) > 80
+            if (not isinstance(target_id, str) or not target_id or len(target_id) > 80
                     or not isinstance(target_generation, str) or not target_generation or len(target_generation) > 80):
-                raise TaskError('automatic flash targets require a human and a USB generation', 403)
+                raise TaskError('automatic flash targets require a valid target and USB generation')
         elif target_generation is not None:
             raise TaskError('USB generation requires a flash target')
         if not serial and connection_id is not None:
@@ -107,7 +201,8 @@ class TaskStore:
                         or (target['serial'] or '') != serial or not target['present'])):
                     raise TaskError('flash USB target generation or identity changed', 409)
             self.store.db.execute('INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                (task_id, kind, actor, client_id if actor == 'web' else '', initial_state, '{}', None, error, now, now, 0))
+                (task_id, kind, actor, client_id if actor == 'web' else '', initial_state, '{}',
+                 json.dumps({_OUTCOME_FIELD: 'not-issued' if initial_state == 'queued' else 'unknown'}), error, now, now, 0))
             if serial:
                 self.store.db.execute('INSERT INTO task_board_targets VALUES(?,?)', (task_id, serial))
             if target_id:
@@ -130,6 +225,9 @@ class TaskStore:
             if row is None:
                 raise TaskError('task not found', 404)
             record = dict(row)
+            request = self.store.db.execute('SELECT request_id FROM flash_requests WHERE task_id=?',
+                                            (task_id,)).fetchone()
+            record['request_id'] = request[0] if request else None
             record['targets'] = [dict(target) for target in self.store.db.execute(
                 'SELECT t.serial,t.connection_id,c.serial AS resolved_serial FROM task_targets t '
                 'LEFT JOIN connection_identities c ON c.connection_id=t.connection_id '
@@ -153,6 +251,12 @@ class TaskStore:
                 del target['resolved_serial']
         record['progress'] = json.loads(record['progress'])
         record['result'] = json.loads(record['result']) if record['result'] is not None else None
+        if isinstance(record['result'], dict):
+            record['outcome'] = record['result'].pop(_OUTCOME_FIELD, 'unknown')
+            if not record['result']:
+                record['result'] = None
+        else:
+            record['outcome'] = 'not-issued' if record['state'] == 'queued' else 'unknown'
         record['cancel_requested'] = bool(record['cancel_requested'])
         return record
 
@@ -221,7 +325,7 @@ class TaskStore:
             return task['kind'] == 'identify' and (task.get('result') or {}).get('serial') == serial
         return all(target.get('resolved_serial', target['serial']) == serial for target in targets)
 
-    def update(self, task_id, state=None, progress=None, result=None, error=''):
+    def update(self, task_id, state=None, progress=None, result=None, error='', outcome=None):
         if state is not None and state not in ('running', 'completed', 'failed', 'cancelled'):
             raise TaskError('invalid task state')
         if progress is not None:
@@ -232,19 +336,38 @@ class TaskStore:
                     raise TaskError('invalid task progress count')
             if 'phase' in progress and (not isinstance(progress['phase'], str) or len(progress['phase']) > 160):
                 raise TaskError('invalid task phase')
+        if outcome is not None and outcome not in OUTCOMES:
+            raise TaskError('invalid physical outcome')
+        if isinstance(result, dict) and _OUTCOME_FIELD in result:
+            raise TaskError('reserved task result field')
         encoded = json.dumps(result, allow_nan=False) if result is not None else None
         if encoded and len(encoded.encode()) > 65536:
             raise TaskError('task result too large')
         if encoded:
             _check_result_fields(json.loads(encoded))
-        assignments, values = ['updated=?'], [time.time()]
-        for field, value in (('state', state), ('progress', json.dumps(progress) if progress is not None else None),
-                             ('result', encoded)):
-            if value is not None:
-                assignments.append(field + '=?'); values.append(value)
-        if state in ('failed', 'cancelled'):
-            assignments.append('error=?'); values.append(str(error)[:2048])
         with self.store.lock, self.store.db:
+            row = self.store.db.execute('SELECT result FROM tasks WHERE id=?', (task_id,)).fetchone()
+            if row is None:
+                return False
+            old = json.loads(row['result']) if row['result'] is not None else {}
+            old_outcome = old.get(_OUTCOME_FIELD, 'unknown') if isinstance(old, dict) else 'unknown'
+            if outcome is not None or encoded is not None:
+                # Keep physical outcome independent of the adapter's business
+                # result, including when failure metadata is written later.
+                merged = json.loads(encoded) if encoded is not None else old
+                if not isinstance(merged, dict):
+                    raise TaskError('task result must be an object')
+                merged[_OUTCOME_FIELD] = outcome if outcome is not None else old_outcome
+                encoded = json.dumps(merged, allow_nan=False)
+                if len(encoded.encode()) > 65536:
+                    raise TaskError('task result too large')
+            assignments, values = ['updated=?'], [time.time()]
+            for field, value in (('state', state), ('progress', json.dumps(progress) if progress is not None else None),
+                                 ('result', encoded)):
+                if value is not None:
+                    assignments.append(field + '=?'); values.append(value)
+            if state in ('failed', 'cancelled'):
+                assignments.append('error=?'); values.append(str(error)[:2048])
             return bool(self.store.db.execute(
                 'UPDATE tasks SET ' + ','.join(assignments) + " WHERE id=? AND state IN ('queued','running')",
                 (*values, task_id)).rowcount)
@@ -256,8 +379,40 @@ class TaskStore:
                 "UPDATE tasks SET cancel_requested=1,updated=? WHERE id=? AND state IN ('queued','running')",
                 (time.time(), task_id)).rowcount)
 
+    def retain_cleanup_failure(self, task_id, serial):
+        """Retain the existing board resource when process shutdown is unproven.
+
+        No flash details or synthetic flash task are created. Human recovery may
+        append a recovery_confirmation later; the failed cleanup fact remains.
+        """
+        if not isinstance(serial, str) or not serial or len(serial.encode()) > 100:
+            raise TaskError('cleanup recovery requires a board serial')
+        with self.store.lock, self.store.db:
+            row = self.store.db.execute('SELECT result FROM tasks WHERE id=?', (task_id,)).fetchone()
+            if row is None:
+                raise TaskError('task not found', 404)
+            result = json.loads(row['result']) if row['result'] else {}
+            if not isinstance(result, dict):
+                result = {}
+            result.update(cleanup_confirmed=False, **{_OUTCOME_FIELD: 'unknown'})
+            now = time.time()
+            self.store.db.execute('UPDATE tasks SET result=?,updated=? WHERE id=?',
+                                  (json.dumps(result), now, task_id))
+            # Never steal a resource retained by another operation. Its hold
+            # still blocks the board; this task's cleanup flag independently
+            # prevents a false actor-stopped acknowledgement.
+            self.store.db.execute('INSERT OR IGNORE INTO flash_resource_holds VALUES(?,?,?,?)',
+                                  ('board:' + serial, task_id, 'recovery', now))
+
     def recover(self):
         with self.store.lock, self.store.db:
+            for row in self.store.db.execute("SELECT id,result FROM tasks WHERE state IN ('queued','running')").fetchall():
+                result = json.loads(row['result']) if row['result'] else {}
+                if not isinstance(result, dict):
+                    result = {}
+                if result.get(_OUTCOME_FIELD) != 'not-issued':
+                    result[_OUTCOME_FIELD] = 'unknown'
+                self.store.db.execute('UPDATE tasks SET result=? WHERE id=?', (json.dumps(result), row['id']))
             count = self.store.db.execute(
                 "UPDATE tasks SET state='interrupted',updated=?,error=? WHERE state IN ('queued','running')",
                 (time.time(), 'collector restarted; execution outcome may be partial; not automatically replayed')).rowcount
@@ -267,14 +422,28 @@ class TaskStore:
 
 
 class TaskContext:
-    def __init__(self, task_id, store):
+    def __init__(self, task_id, store, actor_check=None, tracks_outcome=False):
         self.id, self.store = task_id, store
+        self.actor_check, self.tracks_outcome = actor_check, tracks_outcome
         self.cancelled = threading.Event()
         self._lock, self._hooks = threading.Lock(), []
 
     def check(self):
         if self.cancelled.is_set():
             raise TaskCancelled('task cancelled')
+        if self.actor_check is not None:
+            self.actor_check()
+
+    def mark_outcome(self, outcome):
+        self.store.update(self.id, outcome=outcome)
+
+    def issued(self):
+        """Persist before entering a transport: loss of receipt must remain unknown."""
+        self.check()
+        self.mark_outcome('issued')
+
+    def retain_cleanup_failure(self, serial):
+        self.store.retain_cleanup_failure(self.id, serial)
 
     def progress(self, done, total, phase=''):
         self.check()
@@ -307,12 +476,24 @@ class TaskManager:
         self.store, self.max_active = TaskStore(store), max_active
         self._lock, self._active = threading.RLock(), {}
         self._closing = False
+        self.agent_grants = None
         self.store.recover()
 
-    def start(self, kind, actor, client_id, targets, run, *, request_id=None, input_digest=None):
+    def _check_actor(self, actor):
+        if self.agent_grants is not None:
+            self.agent_grants.check_actor(actor)
+
+    def _execution_runner(self, run, actor, client_id):
+        """Hook for the existing execution coordinator to capture request context."""
+        hook = getattr(self, 'execution_runner', None)
+        return hook(run, actor, client_id) if hook is not None else run
+
+    def start(self, kind, actor, client_id, targets, run, *, request_id=None, input_digest=None,
+              tracks_outcome=False):
         if not callable(run):
             raise TaskError('task runner must be callable')
         with self._lock:
+            self._check_actor(actor)
             if request_id is not None:
                 from .flash_store import FlashStore
                 previous = FlashStore(self.store.store).find_request(actor, request_id, input_digest)
@@ -322,8 +503,9 @@ class TaskManager:
                 raise TaskError('collector is stopping', 503)
             if len(self._active) >= self.max_active:
                 raise TaskError('too many active tasks', 429)
+            run = self._execution_runner(run, actor, client_id)
             task_id = self.store.create(kind, actor, client_id, targets, request_id, input_digest)
-            context = TaskContext(task_id, self.store)
+            context = TaskContext(task_id, self.store, lambda: self._check_actor(actor), tracks_outcome)
             worker = threading.Thread(target=self._run, args=(context, run), daemon=True)
             self._active[task_id] = (context, worker)
             try:
@@ -342,6 +524,7 @@ class TaskManager:
             raise TaskError('board task requires a runner and maintenance coordinator')
         flashes = FlashStore(self.store.store)
         with self._lock:
+            self._check_actor(actor)
             previous = flashes.find_request(actor, request_id, input_digest)
             if previous is not None:
                 return self.store.get(previous)
@@ -349,13 +532,14 @@ class TaskManager:
                 raise TaskError('collector is stopping', 503)
             if len(self._active) >= self.max_active:
                 raise TaskError('too many active tasks', 429)
+            run = self._execution_runner(run, actor, client_id)
             admission = (maintenance.target_admission(target_id, target_generation, serial, resources, actor, client_id)
                          if target_id is not None else maintenance.admission(serial, resources, actor, client_id))
             with admission as selected:
                 task_id = self.store.create_board(kind, actor, client_id, serial, request_id, input_digest,
                     details if details is not None else {}, selected, connection_id,
                     target_id=target_id, target_generation=target_generation)
-            context = TaskContext(task_id, self.store)
+            context = TaskContext(task_id, self.store, lambda: self._check_actor(actor))
             worker = threading.Thread(target=self._run_board, args=(context, run, maintenance), daemon=True)
             self._active[task_id] = (context, worker)
             try:
@@ -369,6 +553,7 @@ class TaskManager:
 
     def _run_board(self, context, run, maintenance):
         entered = False
+        context.defer_active_release = True
         def invoke(current):
             nonlocal entered
             entered = True
@@ -378,23 +563,53 @@ class TaskManager:
         finally:
             # Cancellation before the worker enters the adapter has no external
             # side effects. Once entered, only the adapter can confirm cleanup.
-            if not entered:
-                maintenance.release(context.id, confirmed=True)
+            try:
+                if not entered:
+                    maintenance.release(context.id, confirmed=True)
+            finally:
+                with self._lock:
+                    self._active.pop(context.id, None)
 
     def _run(self, context, run):
         try:
             context.check()
             self.store.update(context.id, state='running')
+            if not context.tracks_outcome:
+                context.issued()
             result = run(context)
+            if self.store.get(context.id)['outcome'] == 'issued':
+                context.mark_outcome('acknowledged')
             # Cancellation is a request, not rollback. A completed command can win a race.
             self.store.update(context.id, state='completed', result=result)
         except TaskCancelled as error:
-            self.store.update(context.id, state='cancelled', error=str(error))
+            self.store.update(context.id, state='cancelled', error=str(error),
+                              outcome=self._failed_outcome(context.id))
         except Exception as error:
-            self.store.update(context.id, state='failed', error=str(error))
+            state = 'cancelled' if getattr(error, 'code', '') in ('cancelled', 'authorization-revoked') else 'failed'
+            self.store.update(context.id, state=state, error=str(error),
+                              outcome=self._failed_outcome(context.id))
         finally:
-            with self._lock:
-                self._active.pop(context.id, None)
+            if not getattr(context, 'defer_active_release', False):
+                with self._lock:
+                    self._active.pop(context.id, None)
+
+    def _failed_outcome(self, task_id):
+        return 'not-issued' if self.store.get(task_id)['outcome'] == 'not-issued' else 'unknown'
+
+    def actor_stopped(self, actor):
+        """Do not acknowledge revoke while any actor worker/cleanup remains active."""
+        with self._lock:
+            if any(self.store.get(task_id)['actor'] == actor for task_id in self._active):
+                return False
+            with self.store.store.lock:
+                held = self.store.store.db.execute(
+                    'SELECT 1 FROM flash_resource_holds h JOIN tasks t ON t.id=h.task_id '
+                    "WHERE t.actor=? AND h.state IN ('active','recovery') LIMIT 1", (actor,)).fetchone()
+                pending_cleanup = self.store.store.db.execute(
+                    "SELECT 1 FROM tasks WHERE actor=? AND json_extract(result,'$.cleanup_confirmed')=0 "
+                    "AND COALESCE(json_extract(result,'$.recovery_confirmation.confirmed_stopped'),0)!=1 LIMIT 1",
+                    (actor,)).fetchone()
+                return held is None and pending_cleanup is None
 
     def cancel(self, task_id, actor):
         record = self.store.get(task_id)

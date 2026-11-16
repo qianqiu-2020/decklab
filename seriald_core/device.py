@@ -1,5 +1,6 @@
 """One board connection: console stream, probe transactions and SSH sessions."""
 from dataclasses import asdict, replace
+from contextlib import nullcontext
 import hashlib
 import os
 import re
@@ -27,6 +28,7 @@ from .storage import IdentityConfirmationRequired, IdentityError, Store
 from .identity import eeprom_serial, hardware_serial, usable_serial
 from .boot_marker import init_command, marker_serial
 from .log_archive import boot_epochs
+from .archive_io import open_archive
 from .file_transfer import SerialFileTransfer
 from .profiles import ProfileBook, validate_probe_settings
 from .models import Board, SessionRegistry
@@ -273,8 +275,38 @@ class Device:
             self.buf.clear()
             self.cv.notify_all()
 
-    def log_files(self):
-        root = self.stable_dir()
+    def archive_connections(self):
+        """List separate captures on this attachment, without inferring board identity."""
+        if self.serial:
+            return []
+        root = os.path.join(os.path.realpath(LOG_ROOT), '_unprovisioned', self.temporary_id)
+        if os.path.realpath(root) != root or not os.path.isdir(root):
+            return []
+        connections = []
+        for entry in os.scandir(root):
+            if not re.fullmatch(r'[0-9a-f]{24}', entry.name) or not entry.is_dir(follow_symlinks=False):
+                continue
+            try:
+                files = self.log_files(directory=entry.path)
+                if not files:
+                    continue
+                first = min(files, key=lambda item: (item['date'], item['mtime'], item['name']))
+                with open_archive(os.path.join(entry.path, first['name'])) as source:
+                    stamp = source.read(21).decode('ascii', 'replace')
+            except OSError:
+                continue  # One unavailable old capture must not hide the live connection.
+            started = stamp[:19] if re.fullmatch(r'\d{4}-\d\d-\d\d \d\d:\d\d:\d\d  ', stamp) else ''
+            connections.append({'id': entry.name, 'started': started,
+                'last_seen': max(item['mtime'] for item in files),
+                'size': sum(item['size'] for item in files), 'current': entry.name == self.connection_id})
+        if not any(item['current'] for item in connections):
+            connections.append({'id': self.connection_id,
+                'started': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.started)),
+                'last_seen': self.started, 'size': 0, 'current': True})
+        return sorted(connections, key=lambda item: (item['started'], item['last_seen'], item['id']), reverse=True)
+
+    def log_files(self, directory=None):
+        root = directory if directory is not None else self.stable_dir()
         files = []
         for name in os.listdir(root):
             path = os.path.join(root, name)
@@ -291,10 +323,11 @@ class Device:
         files.sort(key=lambda item: (item['date'], item['mtime'], item['name']), reverse=True)
         return files
 
-    def boot_epochs(self, files=None):
+    def boot_epochs(self, files=None, directory=None):
         with self.boot_index_lock:
-            selected = files if files is not None else self.log_files()
-            result = boot_epochs(self.stable_dir(), selected, cache=self.boot_index_cache)
+            root = directory if directory is not None else self.stable_dir()
+            selected = files if files is not None else self.log_files(directory=root)
+            result = boot_epochs(root, selected, cache=self.boot_index_cache)
             names = {entry['name'] for entry in selected if entry.get('kind') == 'serial'}
             for name in set(self.boot_index_cache) - names:
                 del self.boot_index_cache[name]
@@ -382,6 +415,18 @@ class Device:
             self._protocol_reply(reply, connection)
 
     def _protocol_reply(self, text, connection=None):
+        from .board_maintenance import maintenance_for
+        maintenance = maintenance_for(self.manager)
+        try:
+            # Fixed terminal replies can accompany an active console operation,
+            # but are still writes: board execution ownership and flash holds
+            # must fence the collector's automatic input as well.
+            with maintenance.operation(self.serial, allow_parallel=True) if maintenance else nullcontext():
+                return self._protocol_reply_locked(text, connection)
+        except TransactionError:
+            return False
+
+    def _protocol_reply_locked(self, text, connection=None):
         # System replies use the same write lock and pinned connection, but do
         # not claim user input, change termios or become command-history entries.
         with self.write_lock:
@@ -626,6 +671,9 @@ class Device:
         没有 IP 就先识别一次 —— 这正是"识别设备"存在的意义:串口负责拿到
         IP/序列号/sshd 状态,SSH 会话负责后续高效操作。两者并存、各记各的日志。
         """
+        grants = getattr(self.manager, 'agent_grants', None)
+        if grants is not None:
+            grants.check_actor(actor)
         self.transactions.check_context()
         origin = self.stop
         connection_id = self.connection_id
@@ -736,6 +784,8 @@ class Device:
             session.ssh_credentials_saved = bool(stored and not explicit)
             session.ssh_credentials_note = ''
             session.actor, session.title = actor, title
+            session.agent_grants = grants
+            session._board_device = self
             control_session(session, actor, self.transactions.client_id)
             session.persistent = persistent
             if self.manager and self.serial:
@@ -786,8 +836,11 @@ class Device:
                             # errors may contain SQL values, including passwords.
                             session.ssh_credentials_saved = False
                             session.ssh_credentials_note = 'SSH 已连接，但凭据保存失败，请检查服务端存储'
-                with self.sessions_lock:
-                    self.ssh_sessions[sid] = session
+                with grants.lock if grants is not None else nullcontext():
+                    if grants is not None:
+                        grants.check_actor(actor)
+                    with self.sessions_lock:
+                        self.ssh_sessions[sid] = session
             return session, ''
         except TransactionError:
             if session:

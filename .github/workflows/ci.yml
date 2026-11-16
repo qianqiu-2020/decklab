@@ -1,6 +1,7 @@
 name: Linux regression
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -15,9 +16,6 @@ jobs:
           - arch: amd64
             runner: ubuntu-22.04
             archive_hosts: archive.ubuntu.com security.ubuntu.com
-          - arch: arm64
-            runner: ubuntu-22.04-arm
-            archive_hosts: ports.ubuntu.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,10 +23,15 @@ jobs:
           python-version: '3.12'
       - name: Verify Ubuntu archive DNS on the temporary runner
         run: python tools/ci_ubuntu_network.py --repair --hosts ${{ matrix.archive_hosts }}
+      - name: Prepare reviewed complete-install inputs
+        env:
+          DECKLAB_COMPONENTS_URL: ${{ vars.COMPONENTS_LINUX_AMD64_URL || secrets.COMPONENTS_LINUX_AMD64_URL || 'https://github.com/qianqiu-2020/decklab/releases/download/components-1.14.0/decklab-components-1.14.0-linux-amd64.zip' }}
+          DECKLAB_COMPONENTS_SHA256: ${{ vars.COMPONENTS_LINUX_AMD64_SHA256 || secrets.COMPONENTS_LINUX_AMD64_SHA256 || '804be4bc200ddefbc99a614e676ba829670100556d6da405bb3597cfb667127c' }}
+        run: python tools/fetch_install_components.py --platform linux-amd64
       - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
-        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
+        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
       - name: Build the matching Debian architecture package
-        run: python tools/build_deb.py --core-only --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
+        run: python tools/build_deb.py --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
       - name: Fresh install and public MCP without network on Ubuntu 22.04
         run: python tools/test_deb_container.py --image ubuntu:22.04 --package dist/seriald_*_${{ matrix.arch }}.deb
       - name: Fresh install and public MCP without network on Ubuntu 24.04

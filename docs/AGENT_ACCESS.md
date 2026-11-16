@@ -8,6 +8,11 @@ URL 和 Bearer 令牌配置，客户端无需安装 Python 或脚本；令牌不
 未识别的串口也可授权：权限只覆盖当前连接代次，拔插、准备换板后需要重新生成。
 探测失败或操作系统不受支持，不影响原始终端读取、输入和当前连接分享。
 
+MCP 也提供 USB 发现、EEPROM 身份、NOR 备份和系统盘信息、镜像商店与上传下载、
+整包／分区刷写以及 EEPROM 启动介质配置，见 [MCP 存储与刷机](MCP.md#usb存储与刷机)。
+未知 USB 发现需要全部设备授权；单设备授权只能访问已核实归属的目标，当前串口连接授权
+不扩展为刷机权限。写入沿用预览、确认、任务去重与回读流程。
+
 使用 [中文 skill](../skills/seriald-board/SKILL.zh-CN.md) 或
 [English skill](../skills/seriald-board/SKILL.md)，也可直接调用 `serialctl`。
 源码环境用 `python3 <源码目录>/serialctl.py` 替代命令名。客户端只需 Python 3 标准库；

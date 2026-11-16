@@ -19,6 +19,12 @@ function setup(request){
   return {ids,store,buttons,watches,consent:value=>{consent=value;},source:async value=>{ids['is-source'].value=value;ids['is-source'].fire('change');await flush();}};
 }
 (async()=>{
+  const organization=setup(()=>Promise.resolve({sources:[{id:'public'}],entries:[]}));
+  const option=new Element();option.value='internal';organization.ids['is-source'].appendChild(option);
+  organization.store.open();await flush();assert.equal(option.disabled,true);
+  const configured=setup(()=>Promise.resolve({sources:[{id:'public'},{id:'internal'}],entries:[]}));
+  const configuredOption=new Element();configuredOption.value='internal';configuredOption.disabled=true;configured.ids['is-source'].appendChild(configuredOption);
+  configured.store.open();await flush();assert.equal(configuredOption.disabled,false);
   let resolvePublic;
   const stale=setup(url=> url.startsWith('/api/image-library')?Promise.resolve({artifacts:[{id:'ready',name:'cached.img',size:1}],tasks:[]}):new Promise(resolve=>{resolvePublic=resolve;}));
   stale.store.open();await stale.source('local');resolvePublic({entries:[{name:'stale.img',kind:'disk-image',url:'https://old'}]});await flush();
@@ -69,5 +75,11 @@ function setup(request){
   changed.watches[0].resolve({artifact:{id:'changed',name:'image.img'}});await flush();
   assert.equal(changed.ids['image-store-dialog'].open,true);assert.equal(changed.ids['is-status'].textContent,'target changed');
   assert.ok(!changed.ids['is-downloads'].textContent.includes('已返回当前选择'));
-  console.log('10 image-store tests passed: filtering, direct use, stale dialogs, changed targets, latest selection and existing task safety.');
+  const initial=[];
+  const sourced=setup(url=>{initial.push(url);return Promise.resolve(url.startsWith('/api/image-library')?{artifacts:[],tasks:[]}:{entries:[]});});
+  sourced.store.open(()=>{},{source:'local'});await flush();assert.equal(sourced.ids['is-source'].value,'local');
+  assert.equal(initial[0],'/api/image-library');
+  sourced.store.open(()=>{},{source:'public'});await flush();assert.equal(sourced.ids['is-source'].value,'public');
+  assert.ok(initial[1].startsWith('/api/image-catalog?source=public'));
+  console.log('13 image-store tests passed: configured catalogs, filtering, direct use, source entry, stale dialogs, changed targets, latest selection and existing task safety.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

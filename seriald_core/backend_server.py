@@ -20,6 +20,7 @@ from .request_json import load_object
 from .settings_restart import configure_collector, reexecute
 from .storage import Store
 from .web_settings import SettingsError
+from .agent_grants import attach_agent_grants
 
 
 class BackendHandler(web.Handler):
@@ -141,6 +142,7 @@ def main():
                 manager = DemoManager(store)
             else:
                 manager = Manager(store, consume_handoff(HANDOFF), profiles=ProfileBook.from_env())
+            grants = attach_agent_grants(manager, os.path.join(BASE, 'agent-grants.sqlite3'))
             server.manager, server.host_settings = manager, SETTINGS
             configure_collector(server, SETTINGS)
             def preflight(proposed):
@@ -168,6 +170,7 @@ def main():
                 except OSError:
                     pass
                 scanner.join(timeout=6)
+                grants.close()
     if server.restart_requested:
         reexecute(LAUNCH_ENVIRONMENT, role='backend')
 

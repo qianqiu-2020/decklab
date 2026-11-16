@@ -81,7 +81,7 @@ def _profile(value):
         raise TaskError('automatic board profile is not a supported executor template', 502)
     if set(value) - {'id', 'identity', 'storages', 'chip_family', 'bootrom_identity', 'ram_loader_protocol'}:
         raise TaskError('automatic board profile contains unsupported capabilities', 502)
-    if value.get('ram_loader_protocol') and (value['ram_loader_protocol'] != 'decklab-nor-v1'
+    if value.get('ram_loader_protocol') and (value['ram_loader_protocol'] != 'spacemit-ram-v1'
             or value['id'] != 'auto-spacemit-gpt-v1' or value.get('chip_family') != 'k3'
             or value.get('bootrom_identity')):
         raise TaskError('unsupported live RAM loader capability', 502)
@@ -114,9 +114,11 @@ def _profile(value):
 def _strong_serial(candidate):
     serial = candidate.get('serial')
     identity = candidate.get('identity')
-    if (candidate.get('strong_serial') is not True or candidate.get('serial_source') != 'fastboot'
+    if (candidate.get('strong_serial') is not True or candidate.get('serial_source') not in ('fastboot', 'eeprom')
             or not isinstance(identity, dict) or identity.get('serialno') != serial
             or not isinstance(serial, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{3,99}', serial)):
+        return ''
+    if candidate.get('serial_source') == 'eeprom' and identity.get('eeprom-serial') != serial:
         return ''
     compact = serial.lower().replace('-', '').replace(':', '')
     if (compact in ('unknown', 'unknow', 'default', 'serial', 'serialno', '0123456789', '123456789',
@@ -300,7 +302,7 @@ class FlashDiscovery:
                     raise TaskError('conflicting USB board identity; resolve the duplicate before flashing', 409)
                 record = self.store.get(serial)
                 if record is None:
-                    info = {'serial': serial, 'serial_source': 'fastboot', 'identity_status': 'confirmed',
+                    info = {'serial': serial, 'serial_source': candidate.get('serial_source', 'fastboot'), 'identity_status': 'confirmed',
                             'hostname': candidate.get('identity', {}).get('product', '')}
                     record = self.store.bind(info, '', '')
                 with self.manager.lock:
@@ -363,3 +365,53 @@ class FlashDiscovery:
             row['document'] = data
             self._save(row)
             return row['generation']
+
+    def accept_eeprom_identity(self, target_id, generation, identity, task_id, attempt_id):
+        """Associate a checked RAM identity while extending the same board lease.
+
+        Original request/artifact scopes stay immutable. The resolved serial is
+        additional task visibility, never an inferred USB descriptor identity.
+        """
+        serial = identity.get('serialno') if isinstance(identity, dict) and identity.get('eeprom-serial') == identity.get('serialno') else ''
+        if not serial:
+            return ''
+        if not _strong_serial({'serial': serial, 'serial_source': 'eeprom',
+                'strong_serial': True, 'identity': identity}):
+            raise TaskError('invalid EEPROM board identity', 409)
+        maintenance = maintenance_for(self.manager)
+        with maintenance._lock, self.lock:
+            row = self.get(target_id, generation)
+            with self.store.lock:
+                task = self.store.db.execute('SELECT state,actor,client_id FROM tasks WHERE id=?', (task_id,)).fetchone()
+                details = self.store.db.execute('SELECT document FROM flash_details WHERE task_id=?', (task_id,)).fetchone()
+            holds = maintenance.target_holds(target_id)
+            if (task is None or task['state'] != 'running' or details is None
+                    or json.loads(details['document']).get('attempt_id') != attempt_id
+                    or not holds or any(h['task_id'] != task_id or h['state'] != 'active' for h in holds)):
+                raise TaskError('EEPROM identity does not belong to the active flash task', 409)
+            if row.get('serial') and row['serial'] != serial:
+                raise TaskError('EEPROM board identity differs from the selected board', 409)
+            if self.store.has_conflict(serial) or any(other['id'] != target_id and other['present']
+                    and other['serial'] == serial for other in self._rows()):
+                self.store.mark_conflict(serial)
+                raise TaskError('conflicting EEPROM board identity', 409)
+            record = self.store.get(serial)
+            if record is None:
+                record = self.store.bind({'serial': serial, 'serial_source': 'eeprom',
+                    'identity_status': 'confirmed', 'hostname': identity.get('product', '')}, '', '')
+            with self.manager.lock:
+                if serial not in self.manager.boards:
+                    self.manager.boards[serial] = Board(record)
+            board_holds = maintenance.holds(serial)
+            if not board_holds:
+                maintenance.reserve(serial, task_id, actor=task['actor'], client_id=task['client_id'])
+            elif any(h['task_id'] != task_id or h['state'] != 'active' for h in board_holds):
+                raise TaskError('identified board is reserved by another task', 423)
+            with self.store.lock, self.store.db:
+                self.store.db.execute('INSERT OR IGNORE INTO task_board_targets VALUES(?,?)', (task_id, serial))
+            row['serial'] = serial
+            row['document']['identity'] = dict(identity)
+            row['document']['label'] = record.get('label') or serial
+            self._save(row)
+        self.manager.refresh_flash_presence()
+        return serial

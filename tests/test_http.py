@@ -15,7 +15,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 from seriald_core import web as sd
 from seriald_core.devices import Manager
 from seriald_core import control_server as control
-from seriald_core.agent_grants import AgentGrantStore
+from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
 from seriald_core import transport as tr
 from seriald_core.models import Board
 
@@ -626,8 +626,12 @@ class HandlerTests(unittest.TestCase):
                     self.assertEqual(self.result(handler)[0], 403)
 
     def test_revoking_grant_closes_matching_live_ssh_sessions(self):
-        actor = 'shared-agent/abcdef0123456789'
-        matching = mock.Mock(actor=actor)
+        grants = AgentGrantStore(':memory:')
+        self.addCleanup(grants.close)
+        attach_agent_grants(self.manager, grants)
+        _, grant = grants.issue('all')
+        actor = grant['actor']
+        matching = mock.Mock(actor=actor, _thread=None)
         other = mock.Mock(actor='another-agent')
         self.device.sessions_lock = threading.RLock()
         self.device.ssh_sessions = {'ssh1': matching, 'ssh2': other}

@@ -80,8 +80,10 @@ class FlashTargetFoundationTests(unittest.TestCase):
         self.assertEqual(self.flashes.get_plan(plan['plan_id'], serial='', target_id='111111111111111111111111')['serial'], '')
         with self.assertRaises(TaskError):
             self.flashes.get_plan(plan['plan_id'], target_id='333333333333333333333333')
+        agent_plan = self.flashes.put_plan(dict(document, actor='shared-agent/example'))
+        self.assertEqual(self.flashes.get_plan(agent_plan['plan_id'], 'shared-agent/example')['plan_id'], agent_plan['plan_id'])
         with self.assertRaises(TaskError):
-            self.flashes.put_plan(dict(document, actor='shared-agent/example'))
+            self.flashes.get_plan(agent_plan['plan_id'], 'shared-agent/other')
         with self.store.lock, self.store.db:
             self.store.db.execute('UPDATE flash_targets SET generation=? WHERE id=?', ('replacement', '111111111111111111111111'))
         with self.assertRaisesRegex(TaskError, 'generation'):
@@ -135,14 +137,10 @@ class FlashTargetFoundationTests(unittest.TestCase):
         # Legacy tasks without an endpoint snapshot retain their previous behavior.
         self.assertTrue(self.tasks.store.visible_serial({'targets': [], 'kind': 'legacy'}, 'REAL-BOARD'))
 
-    def test_stale_or_absent_target_creates_no_task_and_agents_are_rejected(self):
+    def test_stale_or_absent_target_creates_no_task(self):
         for generation in ('stale', ''):
             with self.subTest(generation=generation), self.assertRaises(TaskError):
                 self.start(lambda context: {}, generation=generation)
-        with self.assertRaises(TaskError):
-            self.tasks.start_board('flash', 'shared-agent/example', '', '', lambda context: {},
-                request_id='agent-request', input_digest='a' * 64, maintenance=self.maintenance,
-                target_id='111111111111111111111111', target_generation='generation-one')
         with self.store.lock, self.store.db:
             self.store.db.execute('UPDATE flash_targets SET present=0 WHERE id=?', ('111111111111111111111111',))
         with self.assertRaises(TaskError):

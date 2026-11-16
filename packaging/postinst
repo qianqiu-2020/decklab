@@ -36,12 +36,12 @@ case "$1" in
       # Keep the administrator-selected node role during upgrades. Remote Web
       # upgrades must never enable a local hardware collector.
       if systemctl is-enabled --quiet seriald-web.service; then
-        deb-systemd-invoke restart seriald-web.service || true
+        deb-systemd-invoke restart seriald-web.service || echo "seriald: Web service restart failed; check journalctl -u seriald-web" >&2
       elif systemctl is-enabled --quiet seriald-backend.service; then
         if systemctl is-active --quiet seriald-backend.service && [ ! -e "$restart_marker" ]; then
           echo "seriald: hardware backend kept running (code unchanged)"
         else
-          deb-systemd-invoke restart seriald-backend.service || true
+          deb-systemd-invoke restart seriald-backend.service || echo "seriald: backend restart failed; check journalctl -u seriald-backend" >&2
         fi
       else
         deb-systemd-helper enable seriald-collector.service >/dev/null
@@ -65,7 +65,7 @@ case "$1" in
             echo "seriald: collector start failed" >&2
           fi
         fi
-        deb-systemd-invoke restart seriald.service || true
+        deb-systemd-invoke restart seriald.service || echo "seriald: Web service restart failed; check journalctl -u seriald" >&2
       fi
       rm -f "$restart_marker"
     fi
@@ -96,7 +96,7 @@ PY
     # Reuse the running service's existing share-link/cookie protocol. No node
     # enrollment, collector restart, key copying or extra client installation.
     if [ -d /run/systemd/system ] && ! systemctl is-enabled --quiet seriald-backend.service; then
-      /usr/bin/seriald-access || true
+      /usr/bin/seriald-access --wait 20 || true
     fi
     ;;
 esac

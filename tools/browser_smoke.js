@@ -33,9 +33,9 @@ let probeSettings = {mode: 'linux', command: '', default_command: "printf 'HOST=
 let serialPayload = null;
 const serialLiveChunks = [];
 const fixtures = [
-  { key: 'musepi2', serial: '5b9d4a0a6f5e25a8', state: 'online', alive: true, dev: '/dev/ttyUSB0', hostname: 'bianbu-k3' },
+  { key: 'musepi2', serial: 'a1b2c3d4e5f60101', state: 'online', alive: true, dev: '/dev/ttyUSB0', hostname: 'bianbu-k3' },
   { key: 'riscv-118', serial: '26abd51e5bc2dbe1', state: 'offline', alive: false, last_dev: '/dev/ttyUSB4' },
-  { key: 'milkv2', serial: '0059D968E583C49A', state: 'online', alive: true, dev: '/dev/ttyUSB2', hostname: 'bianbu' },
+  { key: 'milkv2', serial: '0061020304050607', state: 'online', alive: true, dev: '/dev/ttyUSB2', hostname: 'bianbu' },
   { key: 'milkv', serial: 'boot-0e9badc5-706a-4421-93a7-50e76cc240a6', state: 'online', alive: true, dev: '/dev/ttyUSB1', hostname: 'k1' },
   { key: 'unprovisioned-demo', serial: '', state: 'pending', alive: true, dev: '/dev/ttyUSB3', by_path: 'pci-usb-0:4.2.3' },
 ].map(d => ({ ...d, label: d.key, connection_id: 'test-' + d.key,
@@ -194,13 +194,13 @@ const server = http.createServer((req, res) => {
       ...(typeof chunk === 'object' ? {terminal_initial_geometry: chunk.geometry, terminal_geometry: chunk.geometry} : {}) });
   }
   if (u.pathname === '/api/sessions') return json({ sessions: [
-    { sid: 'serial', kind: 'serial' }, { sid: 'ssh123abc', kind: 'ssh', actor: 'claude-code', ip: '10.0.90.42' },
+    { sid: 'serial', kind: 'serial' }, { sid: 'ssh123abc', kind: 'ssh', actor: 'claude-code', ip: '192.0.2.42' },
     ...fixtureSshSessions] });
   if (u.pathname === '/api/activity') return json({ next_offset: 2, sessions: [
     { sid: 'ssh123abc', actor: 'claude-code', title: 'dmesg | tail -50', status: 'active', started: Date.now()/1000, exit_code: null },
     { sid: 'ssh456def', actor: 'codex/diagnosis', title: 'uname -a', status: 'completed', started: Date.now()/1000-300, exit_code: 0 },
   ] });
-  if (u.pathname === '/api/logs') return json({ serial: '0059D968E583C49A', label: 'milkv2', files: [
+  if (u.pathname === '/api/logs') return json({ serial: '0061020304050607', label: 'milkv2', files: [
     { name: 'ssh-ssh456def-20260919.log', size: log.length },
     { name: 'serial-20260921.log', kind: 'serial', date: '2026-09-21', size: 8192 },
     { name: 'serial-20260920.log', kind: 'serial', date: '2026-09-20', size: 4096 }],
@@ -1019,13 +1019,13 @@ let chrome, ws;
   await evaluate('document.querySelector("#b-board-control").click()');
   assert.equal(await evaluate('document.querySelector("#board-control-dialog").open'),true);
   assert.equal(hardwarePosts.length,0,'control confirmation never submits by opening');
-  assert.equal(await evaluate('document.querySelector("#board-control-target").textContent'),'0059D968E583C49A');
+  assert.equal(await evaluate('document.querySelector("#board-control-target").textContent'),'0061020304050607');
   await evaluate('document.querySelector("#board-control-title").textContent="板卡控制 · 模拟界面验收"');
   const controlShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-board-control-fixture.png'),Buffer.from(controlShot.data,'base64'));
   await evaluate('document.querySelector("#board-control-submit").click();document.querySelector("#board-control-submit").click()');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#board-control-status").textContent.includes("控制请求已确认")');n++)await delay(50);
-  assert.equal(hardwarePosts.length,1);assert.equal(hardwarePosts[0].serial,'0059D968E583C49A');
+  assert.equal(hardwarePosts.length,1);assert.equal(hardwarePosts[0].serial,'0061020304050607');
   await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert.ok(await evaluate('(()=>{const d=document.querySelector("#board-control-dialog"),r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&d.scrollWidth<=d.clientWidth+1;})()'));
   assert.deepEqual(errors,[]);

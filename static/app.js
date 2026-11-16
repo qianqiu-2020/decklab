@@ -2,7 +2,16 @@
   'use strict';
   var UI = window.SerialdUI, $ = UI.byId, fmt = UI.formatBytes, ago = UI.age, copyText = UI.copyText;
   var fetch = UI.fetch;
-  function ownsInput(owner) { return owner && owner.actor === 'web' && owner.client_id === UI.clientId; }
+  function ownsInput(owner) { return owner && owner.scope !== 'board' && owner.actor === 'web' && owner.client_id === UI.clientId; }
+  var boardRecoveryAuthorized = false;
+  fetch('/api/access', {cache: 'no-store'}).then(function (response) { return response.json(); }).then(function (access) {
+    if (typeof access.version === 'string' && /^[0-9][A-Za-z0-9.+~_-]{0,79}$/.test(access.version)) {
+      $('decklab-version').textContent = 'v' + access.version;
+      $('decklab-version').dataset.i18nIgnore = '';
+    }
+    boardRecoveryAuthorized = access.board_recovery_authorized === true;
+    if (terminalView && isCurrent(terminalView.current)) setInputMode(terminalView.current);
+  }).catch(function () { /* Missing authorization never enables recovery. */ });
   var curSid = 'serial';              // serial、sshN 或本地只读 log:* 标签
   var sessions = [{ sid: 'serial', kind: 'serial' }];
   var sessionPage = 0, eventPage = 0;
@@ -97,6 +106,8 @@
     byId: $, fetch: fetch, getView: function () { return terminalView.current; },
     onTask: function () { taskUI.refresh(); }
   });
+  var desktop = window.SerialdDesktop && window.SerialdDesktop.create({byId:$,fetch:fetch,
+    clientId:UI.clientId,copyText:copyText,getView:function () { return terminalView.current; }});
   window.SerialdShareSelection = function () {
     return deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0] || null;
   };
@@ -108,11 +119,15 @@
     $('slow-paste-option').hidden = ctx.sid !== 'serial';
     $('b-takeover').hidden = !ctx.canTakeover;
     $('b-input-owner').hidden = ctx.sid !== 'serial';
-    $('b-input-owner').disabled = !!ctx.ownerPending;
     var owner = ctx.inputOwner;
-    $('input-owner-label').textContent = !owner ? '占用输入' : ownsInput(owner) ? '释放输入' : '接管输入';
+    var boardOwner = owner && owner.scope === 'board';
+    $('b-input-owner').disabled = !!ctx.ownerPending || !!boardOwner && !boardRecoveryAuthorized;
+    $('input-owner-label').textContent = boardOwner ? '恢复执行占用' : !owner ? '占用输入' : ownsInput(owner) ? '释放输入' : '接管输入';
     var ownerName = owner && owner.actor === 'web' ? ownsInput(owner) ? '当前页面' : '另一网页客户端' : owner && owner.actor;
-    $('b-input-owner').title = owner ? '串口输入由 ' + ownerName + ' 占用；输出仍可共享查看' : '可选占用串口输入，其他人仍可查看输出';
+    $('b-input-owner').title = boardOwner ? boardRecoveryAuthorized
+      ? '板级执行占用；核实原操作已停止后才能人工恢复'
+      : '需要主访问身份恢复执行占用；输出仍可查看'
+      : owner ? '串口输入由 ' + ownerName + ' 占用；输出仍可共享查看' : '可选占用串口输入，其他人仍可查看输出';
   }
 
   function updateInputOwner(ctx, owner) {
@@ -127,8 +142,11 @@
     }
     if (ctx.term) ctx.term.options.cursorBlink = !ctx.readonly;
     setInputMode(ctx);
-    if ((previous && previous.id || '') !== (owner && owner.id || '')) {
+    if ((previous && previous.id || '') !== (owner && owner.id || '')
+        || (previous && previous.generation) !== (owner && owner.generation)
+        || (previous && previous.state) !== (owner && owner.state)) {
       $('d-status').textContent = !owner ? '已恢复共享串口输入'
+        : owner.scope === 'board' ? '开发板执行输入已占用；核对原操作后再恢复，输出仍可查看'
         : ownsInput(owner) ? '当前页面已占用串口输入' : '另一客户端已占用串口输入；输出仍可查看';
     }
   }
@@ -772,7 +790,7 @@
         if (isCurrent(ctx)) $('d-status').textContent = ' 介入失败：' + error.message;
       });
   });
-  $('b-rename').addEventListener('click', function () {
+  $('d-name').addEventListener('click', function () {
     var ctx = terminalView.current;
     if (!isCurrent(ctx)) return;
     var cur = $('d-name').textContent;
@@ -817,10 +835,85 @@
   });
   $('b-rescue').addEventListener('click', function () { doRescue(); });
 
+  function recoverBoardInput(ctx) {
+    if (!boardRecoveryAuthorized || !ctx.serial || ctx.ownerPending) return;
+    var serial = ctx.serial;
+    var expectedOwner = ctx.inputOwner;
+    function current() { return isCurrent(ctx) && ctx.sid === 'serial' && ctx.serial === serial; }
+    function message(text) { return window.SerialdI18n ? window.SerialdI18n.translate(text) : text; }
+    ctx.ownerPending = true;
+    deviceDirectory.advanceOwnership();
+    setInputMode(ctx);
+    fetch('/api/input-owner?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(serial), {cache: 'no-store'})
+      .then(function (response) { return response.json().then(function (result) {
+        if (!response.ok || !Object.prototype.hasOwnProperty.call(result, 'input_owner')) {
+          throw new Error(result.error || '无法核对当前执行占用；原占用仍保留');
+        }
+        return result;
+      }); }).then(function (result) {
+        if (!current()) return;
+        var owner = result.input_owner;
+        if (!owner || owner.scope !== 'board') {
+          updateInputOwner(ctx, owner);
+          var board = deviceDirectory.find(ctx.key);
+          if (board) board.input_owner = owner;
+          $('d-status').textContent = '执行占用已变化，请核对当前状态后再操作';
+          return;
+        }
+        if (owner.serial !== serial || typeof owner.id !== 'string' || !owner.id
+            || !Number.isSafeInteger(owner.generation) || owner.generation < 1
+            || ['active', 'recovery'].indexOf(owner.state) < 0) {
+          throw new Error('执行占用回执无效；原占用仍保留');
+        }
+        updateInputOwner(ctx, owner);
+        var board = deviceDirectory.find(ctx.key);
+        if (board) board.input_owner = owner;
+        if (!expectedOwner || expectedOwner.id !== owner.id || expectedOwner.generation !== owner.generation) {
+          $('d-status').textContent = '执行占用已变化，请核对当前状态后再操作';
+          return;
+        }
+        var confirmation = message('仅在已独立确认原任务和外部执行进程停止后恢复。恢复不代表操作成功，也不会回滚板卡改动。是否确认已停止？')
+          + '\n' + message('占用者：') + owner.actor + '\n' + message('状态：')
+          + message(owner.state === 'recovery' ? '待恢复' : '活动占用') + '\n' + message('占用代次：') + owner.generation;
+        if (!window.confirm(confirmation)) {
+          $('d-status').textContent = '未确认原执行停止，执行占用仍保留';
+          return;
+        }
+        var reason = window.prompt(message('填写已确认原执行停止的核查说明（必填）'), '');
+        if (!current()) return;
+        if (typeof reason !== 'string' || !reason.trim()) {
+          $('d-status').textContent = '未填写停止核查说明，执行占用仍保留';
+          return;
+        }
+        return fetch('/api/input-release', {method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({key: ctx.key, serial: serial, actor: 'web', scope: 'board',
+            expected_generation: owner.generation, process_stopped_confirmed: true, reason: reason.trim()})})
+          .then(function (response) { return response.json().then(function (released) {
+            if (!current()) return;
+            if (!response.ok || !released.ok || released.input_owner !== null) {
+              if (response.status === 403) throw new Error('需要主访问身份恢复执行占用；当前占用仍保留');
+              throw new Error((released.error || '恢复尚未确认') + '；执行占用仍保留');
+            }
+            deviceDirectory.advanceOwnership();
+            updateInputOwner(ctx, null);
+            var board = deviceDirectory.find(ctx.key);
+            if (board) board.input_owner = null;
+            $('d-status').textContent = '已人工恢复执行占用；原任务结果保持不变';
+          }); });
+      }).catch(function (error) {
+        if (current()) $('d-status').textContent = error.message
+          + (error.message.indexOf('占用仍保留') >= 0 ? '' : '；执行占用仍保留') + '；请先查询原操作，不重复恢复';
+      }).finally(function () {
+        ctx.ownerPending = false;
+        if (current()) setInputMode(ctx);
+      });
+  }
+
   $('b-input-owner').addEventListener('click', function () {
     var ctx = terminalView.current;
     if (!isCurrent(ctx) || ctx.sid !== 'serial') return;
     var owner = ctx.inputOwner;
+    if (owner && owner.scope === 'board') { recoverBoardInput(ctx); return; }
     var release = ownsInput(owner);
     var payload = { key: ctx.key, serial: ctx.serial, actor: 'web' };
     if (release) payload.id = owner.id;
@@ -943,6 +1036,7 @@
   });
   function renderInfo(info) {
     if (boardControl) boardControl.refresh(terminalView.current);
+    if (desktop) desktop.refresh(terminalView.current);
     var box = $('d-info');
     if (!info || (!info.serial && !info.hostname && !(info.ips || []).length && !info.raw)) {
       box.hidden = true; $('b-info').disabled = true; return;
@@ -1090,6 +1184,7 @@
   $('d-term').addEventListener('click', function () { if (terminalView.current) terminalView.current.term.focus(); });
   $('b-close').addEventListener('click', function () {
     if (boardControl) boardControl.close();
+    if (desktop) desktop.close();
     closeIdentityAssociation(); closeSshCredentials();
     disposeView(); deviceDirectory.selectionChanged(null); $('detail').hidden = true;
     $('workspace').classList.toggle('selected', false);

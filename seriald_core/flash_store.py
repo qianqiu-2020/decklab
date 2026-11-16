@@ -44,8 +44,6 @@ class FlashStore:
             raise TaskError('flash plan requires actor and a board or USB target')
         if target_id is not None and (not isinstance(target_id, str) or not target_id or len(target_id) > 80):
             raise TaskError('invalid flash plan target')
-        if target_id and actor != 'web':
-            raise TaskError('automatic flash targets require a human operator', 403)
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         plan_id = secrets.token_hex(12)
         with self.store.lock, self.store.db:
@@ -73,7 +71,10 @@ class FlashStore:
                         and task['kind'] == 'flash' and task['actor'] == actor and task['state'] == 'running'
                         and snapshot is not None and snapshot['generation'] == document.get('target_generation')
                         and hold is not None and hold['task_id'] == task_id and hold['state'] == 'active'
-                        and boards == ([serial] if serial else [])
+                        and (boards == ([serial] if serial else [])
+                             or not serial and details.get('request_serial') == ''
+                             and details.get('resolved_serial') == (target['serial'] or '')
+                             and boards == [details.get('resolved_serial')])
                         and target['generation'] == details.get('allowed_final_generation')
                         and details.get('execution_device') is not None
                         and json.loads(target['document']).get('device') == details['execution_device']

@@ -1,5 +1,8 @@
 """Durable tasks use real temporary SQLite and controlled workers, never boards."""
 from pathlib import Path
+import hashlib
+import json
+import os
 import threading
 import tempfile
 import unittest
@@ -22,6 +25,178 @@ class TaskTests(unittest.TestCase):
 
     def wait(self, event):
         self.assertTrue(event.wait(2), 'controlled worker did not respond')
+
+    def test_private_request_digest_deduplicates_before_capacity_and_survives_reopen(self):
+        document = {'kind': 'ssh-connect', 'connection_id': 'one', 'ssh_password': 'low-entropy-secret'}
+        digest = self.tasks.store.request_digest(document)
+        ready, release = threading.Event(), threading.Event()
+        calls = []
+        def run(context):
+            calls.append(context.id)
+            ready.set(); release.wait(2)
+            return {'ok': True}
+        task = self.tasks.start('ssh-connect', 'agent', '', [TARGET], run,
+                                request_id='ssh-request-001', input_digest=digest)
+        self.wait(ready)
+        same = self.tasks.start('ssh-connect', 'agent', '', [TARGET], run,
+                                request_id='ssh-request-001', input_digest=digest)
+        self.assertEqual(same['id'], task['id'])
+        changed = self.tasks.store.request_digest(dict(document, ssh_password='different-secret'))
+        with self.assertRaises(TaskError) as failure:
+            self.tasks.start('ssh-connect', 'agent', '', [TARGET], run,
+                             request_id='ssh-request-001', input_digest=changed)
+        self.assertEqual(failure.exception.status, 409)
+        self.assertEqual(calls, [task['id']])
+        release.set(); self.assertTrue(self.tasks.close())
+        reopened = Store(self.path)
+        try:
+            history = TaskStore(reopened)
+            self.assertEqual(history.request_digest(document), digest)
+            self.assertEqual(history.find_request('agent', 'ssh-request-001', digest), task['id'])
+            self.assertIsNone(history.find_request('other', 'ssh-request-001'))
+            self.assertEqual(history.get(task['id'])['request_id'], 'ssh-request-001')
+            private = '\n'.join(reopened.db.iterdump())
+            for secret in ('low-entropy-secret', 'different-secret', hashlib.sha256(b'low-entropy-secret').hexdigest()):
+                self.assertNotIn(secret, private)
+            self.assertNotIn('input_digest', json.dumps(history.get(task['id'])))
+        finally:
+            reopened.close()
+
+    def test_missing_or_public_request_key_fails_closed_without_replacement(self):
+        digest = self.tasks.store.request_digest({'ssh_password': 'private'})
+        self.tasks.store.create('ssh-connect', 'agent', '', [TARGET], 'private-key-request', digest)
+        key = Path(self.tmp.name) / '.task-request-hmac.key'
+        original = key.read_bytes()
+        if os.name == 'posix':
+            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+            key.chmod(0o644)
+            reopened = Store(self.path)
+            try:
+                with self.assertRaises(TaskError):
+                    TaskStore(reopened).request_digest({'ssh_password': 'private'})
+                self.assertEqual(key.read_bytes(), original)
+            finally:
+                reopened.close()
+            key.chmod(0o600)
+        key.unlink()
+        reopened = Store(self.path)
+        try:
+            with self.assertRaises(TaskError) as failure:
+                TaskStore(reopened).request_digest({'ssh_password': 'private'})
+            self.assertEqual(failure.exception.status, 503)
+            self.assertFalse(key.exists())
+        finally:
+            reopened.close()
+
+    def test_concurrent_request_key_initialization_publishes_one_complete_key(self):
+        barrier = threading.Barrier(2)
+        values, failures = [], []
+        def initialize():
+            connection = Store(self.path)
+            try:
+                barrier.wait(2)
+                values.append(TaskStore(connection).request_digest({'ssh_password': 'private'}))
+            except Exception as error:
+                failures.append(error)
+            finally:
+                connection.close()
+        workers = [threading.Thread(target=initialize) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(3)
+            self.assertFalse(worker.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(len(values), 2)
+        self.assertEqual(values[0], values[1])
+        self.assertEqual(len((Path(self.tmp.name) / '.task-request-hmac.key').read_bytes()), 32)
+
+    def test_outcome_is_independent_of_lifecycle_and_internal_metadata_is_hidden(self):
+        def run(context):
+            context.issued()
+            context.mark_outcome('observed')
+            return {'ok': True}
+        task = self.tasks.start('identify', 'agent', '', [TARGET], run, tracks_outcome=True)
+        self.assertTrue(self.tasks.close())
+        record = self.tasks.store.get(task['id'])
+        self.assertEqual((record['state'], record['outcome']), ('completed', 'observed'))
+        self.assertEqual(record['result'], {'ok': True})
+        self.assertNotIn('_task_outcome', json.dumps(record))
+        with self.assertRaises(TaskError):
+            self.tasks.store.update(task['id'], outcome='success')
+        with self.assertRaises(TaskError):
+            self.tasks.store.update(task['id'], result={'_task_outcome': 'verified'})
+
+    def test_restart_keeps_unissued_but_marks_issued_outcome_unknown(self):
+        waiting = self.tasks.store.create('identify', 'agent', '', [TARGET])
+        issued = self.tasks.store.create('hardware-reset', 'agent', '', [TARGET])
+        self.tasks.store.update(issued, state='running', outcome='issued')
+        self.tasks.store.recover()
+        self.assertEqual(self.tasks.store.get(waiting)['outcome'], 'not-issued')
+        self.assertEqual(self.tasks.store.get(issued)['outcome'], 'unknown')
+        self.assertEqual(self.tasks.store.get(issued)['state'], 'interrupted')
+
+    def test_revoke_check_precedes_replay_and_actor_stopped_waits_for_cleanup(self):
+        ready, cleanup, release = threading.Event(), threading.Event(), threading.Event()
+        def run(context):
+            context.issued()
+            ready.set()
+            try:
+                context.cancelled.wait(2)
+                context.check()
+            finally:
+                cleanup.set(); release.wait(2)
+        digest = self.tasks.store.request_digest({'kind': 'identify'})
+        task = self.tasks.start('identify', 'agent', '', [TARGET], run,
+                                request_id='revoke-request-001', input_digest=digest, tracks_outcome=True)
+        self.wait(ready)
+        self.tasks.cancel_actor('agent'); self.wait(cleanup)
+        self.assertFalse(self.tasks.actor_stopped('agent'))
+        class Revoked:
+            def check_actor(self, actor):
+                raise TaskError('actor revoked', 403)
+        self.tasks.agent_grants = Revoked()
+        with self.assertRaises(TaskError) as failure:
+            self.tasks.start('identify', 'agent', '', [TARGET], run,
+                             request_id='revoke-request-001', input_digest=digest)
+        self.assertEqual(failure.exception.status, 403)
+        release.set(); self.assertTrue(self.tasks.close())
+        self.assertTrue(self.tasks.actor_stopped('agent'))
+        self.assertEqual(self.tasks.store.get(task['id'])['outcome'], 'unknown')
+
+    def test_failed_cleanup_retains_board_and_prevents_false_stopped_receipt_after_worker_exit(self):
+        task_id = self.tasks.store.create('hardware-reset', 'agent', '', [TARGET])
+        self.tasks.store.update(task_id, state='running', outcome='issued')
+        self.tasks.store.retain_cleanup_failure(task_id, TARGET['serial'])
+        self.tasks.store.update(task_id, state='failed', error='process stop not confirmed')
+        record = self.tasks.store.get(task_id)
+        self.assertEqual(record['result'], {'cleanup_confirmed': False})
+        self.assertEqual(record['outcome'], 'unknown')
+        self.assertFalse(self.tasks.actor_stopped('agent'))
+        self.assertEqual(self.store.db.execute('SELECT state FROM flash_resource_holds WHERE task_id=?',
+                                              (task_id,)).fetchone()[0], 'recovery')
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM flash_details WHERE task_id=?',
+                                              (task_id,)).fetchone()[0], 0)
+        # A hold disappearing alone is not proof that a failed cleanup ended.
+        with self.store.lock, self.store.db:
+            self.store.db.execute('DELETE FROM flash_resource_holds WHERE task_id=?', (task_id,))
+        self.assertFalse(self.tasks.actor_stopped('agent'))
+        # The human recovery path adds evidence without rewriting old failure.
+        with self.store.lock, self.store.db:
+            self.store.db.execute("UPDATE tasks SET result=json_set(result,'$.recovery_confirmation',json(?)) WHERE id=?",
+                (json.dumps({'confirmed_stopped': True, 'actor': 'web'}), task_id))
+        self.assertTrue(self.tasks.actor_stopped('agent'))
+        self.assertFalse(self.tasks.store.get(task_id)['result']['cleanup_confirmed'])
+
+    @unittest.skipUnless(os.name == 'posix', 'symlink and owner mode protection uses POSIX')
+    def test_request_key_symlink_is_never_followed(self):
+        target = Path(self.tmp.name) / 'not-a-task-key'
+        target.write_bytes(b'x' * 32)
+        target.chmod(0o600)
+        (Path(self.tmp.name) / '.task-request-hmac.key').symlink_to(target)
+        with self.assertRaises(TaskError):
+            self.tasks.store.request_digest({'ssh_password': 'private'})
+        self.assertEqual(target.read_bytes(), b'x' * 32)
 
     def test_progress_and_result_survive_reopening_registry(self):
         ready, release = threading.Event(), threading.Event()

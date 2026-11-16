@@ -2,14 +2,14 @@
 
 [简体中文](README.zh-CN.md) · [Documentation](docs/README.md) · [Installation](docs/INSTALL.md) · [Windows](docs/WINDOWS.md) · [Agent access](docs/AGENT_ACCESS.md)
 
-A shared development-board workbench for OS and BSP developers. Capture serial
+A development-board device manager for people and AI agents, usable on its own
+or through an existing platform's [execution interfaces](docs/INTEGRATION.md). Capture serial
 output continuously, access boards through a browser or agent, and keep boot
 history attached to a stable board identity rather than a changing tty number.
 
 [Latest release](https://github.com/qianqiu-2020/decklab/releases/latest) ·
 [Windows installer](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald-windows-x64-setup.exe) ·
-[Ubuntu amd64](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb) ·
-[Ubuntu arm64](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_arm64.deb)
+[Ubuntu amd64](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb)
 
 ![DeckLab demo: shared terminal, board list and boot archives](docs/decklab-demo.png?v=ui-1.5.2)
 
@@ -26,6 +26,7 @@ and the [image store](docs/IMAGE_STORE.md).
 ## Why DeckLab
 
 - Share serial and SSH terminals with colleagues and agents, with visible session history.
+- Use a continuous VNC/RDP desktop beside board sessions, with server-held credentials and the same input ownership as agent tools.
 - Keep per-board logs across reconnects and USB serial renumbering.
 - Browse logs by date or boot and compare boots to investigate BSP regressions.
 - Transfer files over serial when networking is unavailable, including board-to-board copies.
@@ -52,18 +53,17 @@ Try without hardware: `python3 seriald_demo.py`, then open
 boot comparison, SSH and file transfers.
 
 Download the package matching the host architecture from the links above.
-Ubuntu 22.04 / 24.04 packages are available for amd64 and arm64. To build an
+The 1.14.0 complete packages support Ubuntu 22.04 / 24.04 amd64 and Windows x64. To build an
 amd64 package from source, prepare its MCP runtime on the Ubuntu 22.04 baseline
-first (Docker and build-time downloads are required by the default builder):
+first. Prepare the [reviewed component inputs](docs/COMPLETE_INSTALL.md) before these commands (Docker and build-time downloads are required):
 
 ```sh
-python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
+python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.10.1_amd64.deb
+sudo apt install ./dist/seriald_1.14.0_amd64.deb
 ```
 
-For an arm64 host, build on the matching native runner with `--arch arm64` and
-the corresponding runtime/output paths. Debian assembly is offline once the
+Historical ARM build code remains, but ARM packages are not built or validated for 1.14.0. Debian assembly is offline once the
 runtime is prepared; a missing or invalid runtime stops the build. See the
 [installation guide](docs/INSTALL.md) for details and source use on other
 architectures. The legacy `seriald_latest_all.deb` download remains an amd64

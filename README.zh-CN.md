@@ -2,20 +2,19 @@
 
 [English](README.md) · [文档目录](docs/README.md) · [贡献指南](CONTRIBUTING.md) · [HTTP 接口](docs/API.md)
 
-DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统一提供网页终端、SSH、历史日志和 Agent 接口。支持 Ubuntu 服务安装及 Windows 上位机。底层项目、命令与服务名保留 `seriald`。
+DeckLab 是面向人和 AI 的开发板设备管理器：持续采集串口，统一提供网页终端、SSH、连续远程桌面、历史日志、刷机和 Agent 接口。既可独立使用，也可通过[执行接口接入现有平台](docs/INTEGRATION.md)。支持 Ubuntu 服务安装及 Windows 上位机。底层项目、命令与服务名保留 `seriald`。
 
 推荐在 Linux 控制机安装完整 DeckLab，其他电脑直接通过浏览器使用，无需客户端和节点配对。Windows 也支持完整单机使用；有明确需求时可采用[高级分离部署](docs/DISTRIBUTED.md)。
 
 [最新发布](https://github.com/qianqiu-2020/decklab/releases/latest) ·
 [Windows 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald-windows-x64-setup.exe) ·
-[Ubuntu amd64 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb) ·
-[Ubuntu arm64 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_arm64.deb)
+[Ubuntu amd64 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb)
 
 ![DeckLab Demo：共享终端、设备列表与启动日志归档](docs/decklab-demo-zh.png?v=ui-1.5.2)
 
 真实应用界面，使用模拟设备，无需接入硬件。Demo 中的设备不代表对应版型已经实测支持。
 
-1.10.0 起默认构建[完整安装包](docs/COMPLETE_INSTALL.md)，包含主程序、终端运行时、MCP、刷机执行器和 RAM 材料；Windows 同时提供 USB 驱动安装入口。历史 1.9.0 精简包仍需另装刷机组件。新增[镜像商店](docs/IMAGE_STORE.md)，可从公开站和内部 Nexus 选择镜像下载到控制机。
+1.10.0 起默认构建[完整安装包](docs/COMPLETE_INSTALL.md)，包含主程序、终端运行时、MCP、刷机执行器和 RAM 材料；Windows 同时提供 USB 驱动安装入口。历史 1.9.0 精简包仍需另装刷机组件。新增[镜像商店](docs/IMAGE_STORE.md)，默认从公开站选择镜像，也可由管理员配置组织镜像源，下载保存在控制机。
 
 ## 为什么使用 DeckLab
 
@@ -56,18 +55,18 @@ DeckLab是面向 OS/BSP 开发的开发板工作台：持续采集串口，统�
 不会访问真实硬件或执行主机命令。Windows 安装包可运行 `seriald.exe demo`。
 详见 [Demo 使用说明](docs/DEMO.md)。
 
-从上方固定地址下载与上位机架构匹配的安装包，支持 Ubuntu 22.04 / 24.04 的 amd64 和 arm64。
+从上方固定地址下载与上位机架构匹配的安装包，1.14.0 完整包支持 Ubuntu 22.04 / 24.04 amd64 和 Windows x64。
 1.7.1 起，deb 内置 MCP 服务所需的私有 Python 和依赖；安装时无需执行 pip 或配置
-`SERIALD_MCP_PYTHON`。从源码构建 amd64 包时，先准备 Ubuntu 22.04 基线的运行时：
+`SERIALD_MCP_PYTHON`。从源码构建 amd64 包时，先按[完整包说明](docs/COMPLETE_INSTALL.md)准备组件输入，再冻结 Ubuntu 22.04 基线的运行时：
 
 ```sh
-python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
+python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.10.1_amd64.deb
+sudo apt install ./dist/seriald_1.14.0_amd64.deb
 ```
 
 默认运行时构建需要 Docker 和构建时下载；运行时准备后，deb 组装不访问网络。
-arm64 包在对应原生构建机使用 `--arch arm64` 及对应目录。旧链接
+历史 ARM 构建代码保留，本轮不构建或验收 ARM 包。旧链接
 `seriald_latest_all.deb` 保留为 amd64 兼容别名，包内架构并非 `all`；
 其他上位机架构请参考源码运行说明，目前不提供对应的预编译 deb。
 
@@ -80,7 +79,7 @@ arm64 包在对应原生构建机使用 `--arch arm64` 及对应目录。旧链�
 · [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
 
 Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。安装构建依赖后，
-双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.9.0-windows-x64-setup.exe`：
+双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.14.0-windows-x64-setup.exe`：
 首次选择安装目录，后续升级记住原目录，保留 `data/`，无需手动解压覆盖。首次从便携版迁移时选中原目录。
 开始菜单提供本机、局域网无密码、局域网有密码三个入口。详见 [Windows 构建与安装](docs/WINDOWS.md)。
 也支持 Windows Docker 容器构建；IT 可按 EXE SHA-256 审批防火墙规则，升级后需重新审批。
@@ -128,7 +127,7 @@ node tests/frontend.test.js
 node tools/browser_smoke.js
 python3 -m compileall -q seriald_core seriald.py serialctl.py
 bash -n rescue.sh
-python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
+python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
 ```
 

@@ -204,12 +204,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.manager is None:
             return self._json(503, {'error': 'collector manager unavailable'})
 
+        if route == '/api/desktop/stream':
+            device = self._dev(q)
+            if device is None:
+                return self._json(404, {'error': 'no such device'})
+            from .desktop_stream import serve
+            from .websocket_io import WSHandshakeError
+            try:
+                return serve(self, device, (q.get('sid') or [''])[0],
+                             self.headers.get('X-Seriald-Actor', 'web'), (q.get('client_id') or [''])[0])
+            except (TaskError, TransactionError, WSHandshakeError) as error:
+                code = getattr(error, 'code', 'desktop-stream-rejected')
+                return self._json(getattr(error, 'status', 400), {'error': str(error),
+                    'code': code if isinstance(code, str) else 'desktop-stream-rejected'})
+
         if route in ('/api/image-catalog', '/api/image-library'):
-            if self.headers.get('X-Seriald-Actor', 'web') != 'web':
-                return self._json(403, {'error': 'image store requires a human operator'})
             try:
                 from .image_catalog import catalog, library
-                result = (library(self.manager) if route == '/api/image-library' else
+                result = (library(self.manager, self.headers.get('X-Seriald-Actor', 'web'), (q.get('serial') or [None])[0]) if route == '/api/image-library' else
                           catalog((q.get('source') or ['public'])[0], (q.get('path') or [''])[0],
                                   (q.get('refresh') or [''])[0] == '1'))
                 return self._json(200, result)
@@ -257,15 +269,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 offset = int((q.get('offset') or ['0'])[0])
             except ValueError:
                 return self._json(400, {'error': 'invalid task pagination'})
-            task_id = (q.get('id') or [''])[0] if route == '/api/task' else None
-            if route == '/api/task' and not task_id:
-                return self._json(400, {'error': 'task id required'})
-            result = TaskActions(self.manager).query(task_id, self.headers.get('X-Seriald-Actor', 'web'),
+            task_id = (q.get('id') or [None])[0] if route == '/api/task' else None
+            request_id = (q.get('request_id') or [None])[0] if route == '/api/task' else None
+            if route == '/api/task' and (bool(task_id) == bool(request_id)):
+                return self._json(400, {'error': 'specify one task id or request_id'})
+            actor = self.headers.get('X-Seriald-Actor', 'web')
+            if request_id and actor == 'web':
+                actor = (q.get('lookup_actor') or ['web'])[0]
+                if not actor or len(actor) > 80:
+                    return self._json(400, {'error': 'invalid lookup_actor'})
+            result = TaskActions(self.manager).query(task_id, actor,
                                            (q.get('serial') or [None])[0], limit, offset,
                                            (q.get('connection_id') or [None])[0],
                                            (q.get('target_serial') or [None])[0],
-                                           (q.get('target_id') or [None])[0])
+                                           (q.get('target_id') or [None])[0], request_id=request_id)
             return self._json(result.status, result.payload)
+
+        if route == '/api/input-owner':
+            device = self._dev(q)
+            if not device:
+                return self._json(404, {'error': 'no such device'})
+            from .board_ownership import ownership_for
+            ownership = ownership_for(self.manager)
+            return self._json(200, {'input_owner': ownership.current(device.serial) if ownership else None,
+                                   'execution_scope': 'collector', 'cross_platform_exclusive': False})
 
         if route == '/api/health':
             storage = disk_status(LOG_ROOT, self.manager.maintenance.policy)
@@ -301,6 +328,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     'storage': disk_status(LOG_ROOT, self.manager.maintenance.policy),
                                     'server_time': time.time()})
 
+        if route in ('/api/desktop/sessions', '/api/desktop/frame'):
+            device = self._dev(q)
+            if not device:
+                return self._json(404, {'error': 'no such device'})
+            result = self.manager.desktop.execute(route.rsplit('/', 1)[1], device,
+                self.headers.get('X-Seriald-Actor') or 'web', {k: v[0] for k, v in q.items()})
+            return self._json(result.status, result.payload)
         if route == '/api/hardware':
             device = self._dev(q)
             if not device:
@@ -320,7 +354,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._read_guard = None
             result = FlashActions(self.manager).capabilities(
                 device, self.headers.get('X-Seriald-Actor') or 'web', target_id,
-                (q.get('target_generation') or [None])[0])
+                (q.get('target_generation') or [None])[0], (q.get('serial') or [None])[0])
             return self._json(result.status, result.payload)
 
         if route == '/api/flash-events':
@@ -367,7 +401,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not device:
                 return self._json(404, {'error': 'no such device'})
             result = self._archives().execute(route.removeprefix('/api/'),
-                                               {key: values[0] for key, values in q.items()}, device)
+                {key: values[0] for key, values in q.items()}, device,
+                allow_connection_history=not bool(self.headers.get('X-Seriald-Connection')))
             if isinstance(result, ArchiveDownload):
                 return self._download_log(result.path, result.name)
             return self._json(result.status, result.payload)
@@ -435,6 +470,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(408, {'error': 'request body timed out'})
         if self.manager is None:
             return self._json(503, {'error': 'collector manager unavailable'})
+        if route == '/api/agent-revoke':
+            from .agent_grants import revoke_backend_actor
+            try:
+                return self._json(200, revoke_backend_actor(self.manager, payload.get('actor'),
+                                                           payload.get('revocation_generation', 1)))
+            except (ValueError, TransactionError) as error:
+                return self._json(getattr(error, 'status', 400), {'error': str(error)})
+        actor = str(payload.get('actor') or 'web')[:80]
+        from .agent_grants import actor_request, GrantRevoked
+        from .board_ownership import ownership_for
+        from contextlib import nullcontext
+        ownership = ownership_for(self.manager)
+        try:
+            generation = self.headers.get('X-Seriald-Grant-Generation')
+            if generation is not None:
+                if not generation.isascii() or not generation.isdecimal() or len(generation) > 18:
+                    return self._json(400, {'error': 'invalid grant generation'})
+                grants = getattr(self.manager, 'agent_grants', None)
+                if grants is not None:
+                    grants.check_actor(actor, int(generation))
+            with actor_request(self.manager, actor), (ownership.scope(actor, payload.get('client_id', ''),
+                    payload.get('execution_lease')) if ownership else nullcontext()):
+                request = dict(payload)
+                if route not in ('/api/input-claim', '/api/input-renew', '/api/input-release'):
+                    request.pop('execution_lease', None)
+                return self._post_payload(route, request)
+        except (TransactionError, GrantRevoked) as error:
+            return self._json(error.status, {'ok': False, 'error': str(error), 'code': error.code})
+
+    def _post_payload(self, route, payload):
+        if route == '/api/task-recovery':
+            from .board_maintenance import maintenance_for
+            try:
+                task = maintenance_for(self.manager).recover_operation(payload.get('id'),
+                    payload.get('actor') or 'web', payload.get('expected_updated'),
+                    payload.get('process_stopped_confirmed'), payload.get('reason'))
+                return self._json(200, {'ok': True, 'task': task})
+            except TaskError as error:
+                return self._json(error.status, {'ok': False, 'error': str(error)})
         if route == '/api/device-preferences':
             try:
                 from .device_preferences import apply
@@ -448,31 +522,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(getattr(error, 'status', 400), {'error': str(error)})
             except (sqlite3.Error, OSError):
                 return self._json(503, {'error': '设备偏好保存失败，事务已回滚'})
-        if route == '/api/agent-revoke':
-            actor = payload.get('actor')
-            if not isinstance(actor, str) or not actor.startswith('shared-agent/'):
-                return self._json(400, {'error': 'invalid agent actor'})
-            closed = 0
-            tasks = getattr(self.manager, 'tasks', None)
-            if tasks is not None:
-                tasks.cancel_actor(actor)
-            for device in self.manager.all_devices():
-                transactions = transactions_for(device)
-                owner = transactions.ownership()
-                if owner and owner['actor'] == actor:
-                    try:
-                        transactions.release(owner['id'], actor)
-                    except TransactionError as error:
-                        if error.code != 'not-found':
-                            raise
-                with device.sessions_lock:
-                    ids = [sid for sid, session in device.ssh_sessions.items()
-                           if session.actor == actor]
-                for sid in ids:
-                    closed += bool(device.close_session(sid))
-                if (ids or owner and owner['actor'] == actor) and device.serial:
-                    self.manager.store.event(device.serial, 'service', 'agent-revoke', actor)
-            return self._json(200, {'ok': True, 'closed_sessions': closed})
         if route == '/api/task-cancel':
             result = TaskActions(self.manager).cancel(str(payload.get('id') or ''),
                                             str(payload.get('actor') or 'web'), payload.get('serial'),
@@ -518,6 +567,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(404, {'error': 'no such device'})
 
         actor = str(payload.get('actor') or 'web')[:80]
+        if (route in ('/api/input-claim', '/api/input-release') and payload.get('scope') == 'board'
+                or route == '/api/input-renew'):
+            return self._input_lease_post(route, payload, d, actor)
+        if route.startswith('/api/desktop/'):
+            result = self.manager.desktop.execute(route.rsplit('/', 1)[1], d, actor, payload)
+            return self._json(result.status, result.payload)
         if route == '/api/artifact-create':
             result = ArtifactActions(self.manager).execute('create', payload, actor, d)
             return self._json(result.status, result.payload)
@@ -534,6 +589,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
             result = TaskActions(self.manager).start(payload, d, actor)
             return self._json(result.status, result.payload)
         return self._device_post(route, payload, d, actor)
+
+    def _input_lease_post(self, route, payload, device, actor):
+        from .board_ownership import ownership_for
+        ownership = ownership_for(self.manager)
+        if ownership is None:
+            return self._json(503, {'error': 'persistent input ownership unavailable'})
+        client = payload.get('client_id', '') if actor == 'web' else ''
+        try:
+            if not isinstance(client, str) or len(client) > 80:
+                raise TransactionError('invalid-lease', 'invalid client_id', 400)
+            if route == '/api/input-claim':
+                if 'request_id' in payload:
+                    raise TransactionError('invalid-lease', 'claim is not replayable; query input-owner after timeout', 400)
+                result = ownership.claim(device.serial, actor, client, payload.get('ttl', 300))
+            elif route == '/api/input-renew':
+                result = ownership.renew(device.serial, actor, client, payload.get('execution_lease'), payload.get('ttl', 300))
+            elif payload.get('execution_lease') is not None:
+                result = ownership.release(device.serial, actor, client, payload['execution_lease'],
+                    stopped=payload.get('process_stopped_confirmed', False), reason=payload.get('reason', ''))
+            else:
+                result = ownership.recover(device.serial, actor, payload.get('expected_generation'),
+                    stopped=payload.get('process_stopped_confirmed', False), reason=payload.get('reason', ''))
+            return self._json(200, result)
+        except TransactionError as error:
+            return self._json(error.status, {'ok': False, 'error': str(error), 'code': error.code})
 
     def _device_post(self, route, payload, d, actor):
         actions = DeviceActions(self.manager, recover=try_rescue, recovery_binary=RESCUE_BIN)

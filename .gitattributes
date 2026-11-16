@@ -4,3 +4,7 @@ packaging/third-party/** -text
 packaging/third-party/native-source-notices/** -whitespace
 packaging/third-party/linux-mcp-native-notices/** -whitespace
 vendor/terminal/** -text
+# noVNC source and notices are verified against their upstream byte hashes.
+vendor/novnc/** -text -whitespace
+# The prepared desktop SDK records these source bytes on both build hosts.
+native/freerdp/** text eol=lf

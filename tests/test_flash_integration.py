@@ -220,6 +220,52 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             time.sleep(.02)
         self.fail('fake flash task did not finish')
 
+    def test_cached_nor_catalogue_uses_its_sealed_execution_profile(self):
+        from seriald_core.flash_tasks import FlashActions
+        with protected_flashing() as fixture:
+            actions = FlashActions(fixture.manager)
+            binding = SimpleNamespace(target_id='')
+            sealed = {'ram_loader_protocol':'spacemit-ram-v1', 'storages':[
+                {'id':'active','package_tables':['partition_nor.json']}]}
+            prepared = {'intent':{'selections':[]}, 'workspace':'/managed/plan',
+                        'execution_profile':sealed, 'executor_plan':{'writes':[]}}
+            checked = SimpleNamespace(profile_data=sealed)
+            executor = SimpleNamespace(execution_binding=mock.Mock(return_value=checked),
+                                       check_plan=mock.Mock(return_value={'plan':{'writes':[]}}))
+            with mock.patch.object(actions, '_store_plan', return_value='stored'):
+                result = actions._make_plan(binding, executor, {'selections':[]}, 'web', 'FLASH-A', prepared=prepared)
+            self.assertEqual(result, 'stored')
+            self.assertEqual(executor.execution_binding.call_args.args[:3], (binding, sealed, '/managed/plan'))
+            self.assertIs(executor.check_plan.call_args.args[0], checked)
+
+    def test_reset_and_optional_readback_survive_preview_and_are_not_replayed(self):
+        with protected_flashing() as fixture:
+            image = self.image(fixture)
+            code, refused = self.request(fixture, '/api/flash-plan', {
+                'key':'offline-board', 'serial':'FLASH-A', 'artifact_id':image['id'],
+                'mode':'full', 'reset_after':True})
+            self.assertEqual(code, 400, refused)
+            fixture.executor.supports_reset_after = True
+            plan = self.plan(fixture, image, verify='none', reset_after=True)
+            self.assertTrue(plan['reset_after'])
+            self.assertEqual(plan['verify'], 'none')
+            original = fixture.executor.execute
+            resets = []
+            def execute(*args, reset_after=False, **kwargs):
+                resets.append(reset_after)
+                result = original(*args, **kwargs)
+                result.update(boot_result='reset-command-acknowledged', verify_result='not-requested')
+                return result
+            with mock.patch.object(fixture.executor, 'execute', side_effect=execute):
+                code, started = self.start(fixture, plan)
+                self.assertEqual(code, 202, started)
+                task = self.terminal(fixture, started['task']['id'])
+                self.assertEqual(task['state'], 'completed', task)
+                code, repeated = self.start(fixture, plan)
+                self.assertEqual(repeated['task']['id'], task['id'])
+            self.assertEqual(resets, [True])
+            self.assertEqual(task['result']['boot_result'], 'reset-command-acknowledged')
+
     def test_offline_board_full_flash_has_real_board_target_and_never_exposes_host_paths(self):
         with protected_flashing() as fixture:
             image = self.image(fixture)

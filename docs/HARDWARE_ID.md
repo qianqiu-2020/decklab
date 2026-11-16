@@ -67,7 +67,7 @@ serialctl --device 返回的device_key rename --label milkv
 SpacemiT K3 Deb1 的 Bianbu 4.0.7 / `6.18.3-generic` 已提供 `at24` 和 NVMEM，EEPROM 为
 `atmel,24c02`、256 字节。设备树含 `onie,tlv-layout`，但内核配置为
 `# CONFIG_NVMEM_LAYOUT_ONIE_TLV is not set`，因此没有 `cells/serial-number@*`。
-EEPROM 原始 ONIE 表中的 `0x23` 为 `5b9d4a0a6f5e25a8`，CRC 有效，DT serial 也是同一值。
+EEPROM 原始 ONIE 表中的 `0x23` 为 `a1b2c3d4e5f60101`，CRC 有效，DT serial 也是同一值。
 服务可从原始 NVMEM 得到稳定身份；vendor 内核启用该配置后即可与 upstream 使用相同 cell 路径。
 
 ## 修复重复后解除冲突

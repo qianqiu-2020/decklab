@@ -13,6 +13,8 @@ import shlex
 import sys
 import tempfile
 import hashlib
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 import time
 from urllib.error import HTTPError, URLError
@@ -32,6 +34,58 @@ class ClientError(Exception):
         self.code = code
 
 
+class SubmissionUnconfirmed(ClientError):
+    """A write may have been accepted; callers must query, never invent a new ID."""
+    def __init__(self, request_id, error, task_id=None):
+        super().__init__('Request %s is unconfirmed: %s; query the original request before any new submission'
+                         % (request_id, error), code='submission-unconfirmed')
+        self.request_id = request_id
+        self.task_id = task_id
+        self.outcome = 'unknown'
+
+
+class TaskOutcome(str, Enum):
+    NOT_ISSUED = 'not-issued'
+    ISSUED = 'issued'
+    ACKNOWLEDGED = 'acknowledged'
+    OBSERVED = 'observed'
+    VERIFIED = 'verified'
+    UNKNOWN = 'unknown'
+
+
+@dataclass(frozen=True)
+class TaskReceipt:
+    """Lifecycle and physical outcome are independent; neither implies test acceptance."""
+    task_id: str
+    request_id: str
+    state: str
+    outcome: TaskOutcome
+    cancel_requested: bool
+
+    @classmethod
+    def from_response(cls, response, request_id=None):
+        task = response.get('task') if isinstance(response, dict) else None
+        if (not isinstance(task, dict) or not isinstance(task.get('id'), str) or not task['id']
+                or task.get('state') not in ('queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted')
+                or not isinstance(task.get('request_id'), str)
+                or request_id is not None and task['request_id'] != request_id
+                or type(task.get('cancel_requested', False)) is not bool):
+            raise ClientError('Invalid task receipt or request identity', code='invalid-task-receipt')
+        try:
+            outcome = TaskOutcome(task.get('outcome'))
+        except (ValueError, TypeError):
+            # Additive protocol revisions may name a new result. It is never a
+            # reason to assume non-execution or verified content.
+            outcome = TaskOutcome.UNKNOWN
+        return cls(task['id'], task['request_id'], task['state'], outcome, task.get('cancel_requested', False))
+
+
+def validate_request_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', value):
+        raise ClientError('request_id must contain 8–100 ASCII letters, digits, underscores or hyphens')
+    return value
+
+
 class Client:
     def __init__(self, url, timeout=180, token=''):
         parsed = urlsplit(url)
@@ -47,13 +101,21 @@ class Client:
         self.ssh_user = None
         self.ssh_password = None
         self.token = token
+        self.execution_lease = None
+        self.platform_device_id = None
+        self.contract = None
 
     def request(self, route, payload=None, query=None, timeout=None):
-        board_scoped = route in ('/api/flash-capabilities', '/api/flash-plan', '/api/flash-selection',
+        board_scoped = route.startswith('/api/desktop/') or route in ('/api/input-owner', '/api/input-renew',
+                                '/api/flash-capabilities', '/api/flash-plan', '/api/flash-selection',
                                 '/api/flash-recovery', '/api/flash-events') or (
-            route == '/api/task-start' and isinstance(payload, dict) and payload.get('kind') == 'flash')
+            route == '/api/input-release' and isinstance(payload, dict) and payload.get('scope') == 'board') or (
+            route == '/api/task-start' and isinstance(payload, dict) and payload.get('kind') in ('flash', 'nor-backup'))
         if payload is not None:
             payload = dict(payload, actor=self.actor)
+            if self.execution_lease and route not in ('/api/input-claim', '/api/input-renew', '/api/input-release',
+                                                      '/api/agent-revoke'):
+                payload.setdefault('execution_lease', dict(self.execution_lease))
             if self.serial and payload.get('key') and route != '/api/task-cancel':
                 payload['serial'] = self.serial
             if self.connection_id and payload.get('key') and route != '/api/task-cancel' and not board_scoped:
@@ -78,7 +140,7 @@ class Client:
                 result = json.load(response)
         except HTTPError as error:
             with error:
-                detail = error.read(4096).decode('utf-8', 'replace')
+                detail = error.read(256 * 1024 if route.startswith('/api/desktop/') else 4096).decode('utf-8', 'replace')
             try:
                 failure = json.loads(detail)
                 code = failure.get('code') if isinstance(failure, dict) else None
@@ -104,6 +166,164 @@ class Client:
         self.serial = matches[0].get('serial')
         self.connection_id = matches[0].get('connection_id')
         return matches[0]
+
+    def negotiate(self, kind=None):
+        """Require the advertised durable HTTP contract before a platform submission."""
+        capability = self.request('/api/capabilities')
+        contract, tasks = capability.get('contract'), capability.get('tasks')
+        if (capability.get('api_version') != 1 or not isinstance(contract, dict)
+                or contract.get('name') != 'decklab-execution'
+                or type(contract.get('revision')) is not int or contract['revision'] < 1
+                or not isinstance(tasks, dict)):
+            raise ClientError('Server does not advertise the DeckLab execution contract', code='unsupported-contract')
+        dedup, lookup, outcome = (tasks.get(name) for name in ('request_dedup', 'request_lookup', 'outcome'))
+        if (not isinstance(dedup, dict) or dedup.get('supported') is not True
+                or dedup.get('persistent') is not True or dedup.get('parameter') != 'request_id'
+                or dedup.get('scope') != ['actor', 'request_id']
+                or not isinstance(lookup, dict) or lookup.get('supported') is not True
+                or lookup.get('endpoint') != '/api/task' or lookup.get('parameter') != 'request_id'
+                or not isinstance(outcome, dict) or outcome.get('field') != 'outcome'
+                or outcome.get('independent_of_state') is not True
+                or not isinstance(outcome.get('values'), list)
+                or not all(isinstance(value, str) for value in outcome['values'])
+                or not {item.value for item in TaskOutcome}.issubset(outcome['values'])
+                or not isinstance(dedup.get('kinds'), list)
+                or kind is not None and kind not in dedup['kinds']):
+            raise ClientError('Server lacks durable request lookup or typed outcomes for this operation',
+                              code='unsupported-contract')
+        self.contract = capability
+        return capability
+
+    def select_mapping(self, mapping):
+        """Resolve a platform record by exact board identity and saved connection generation."""
+        self.key, self.serial, self.connection_id, self.platform_device_id = None, None, None, None
+        if (not isinstance(mapping, dict) or any(not isinstance(mapping.get(name), str) or not mapping[name]
+                for name in ('platform_device_id', 'serial', 'connection_id'))):
+            raise ClientError('Mapping requires platform_device_id, serial and connection_id', code='invalid-mapping')
+        devices = self.request('/api/devices').get('devices')
+        matches = [device for device in devices or [] if isinstance(device, dict)
+                   and device.get('serial') == mapping['serial']]
+        if (len(matches) != 1 or matches[0].get('connection_id') != mapping['connection_id']
+                or not isinstance(matches[0].get('key'), str) or not matches[0]['key']):
+            raise ClientError('Platform mapping is missing, ambiguous or its connection changed', code='stale-mapping')
+        self.key, self.serial, self.connection_id = (matches[0][name] for name in ('key', 'serial', 'connection_id'))
+        self.platform_device_id = mapping['platform_device_id']
+        return matches[0]
+
+    def task_by_request(self, request_id):
+        request_id = validate_request_id(request_id)
+        # Control ignores this override for Agent grants and pins their actor.
+        # The owner may use it to query the actor saved by its earlier POST.
+        result = self.get('/api/task', request_id=request_id, lookup_actor=self.actor)
+        TaskReceipt.from_response(result, request_id)
+        return result
+
+    def submit_task(self, kind, request_id=None, **payload):
+        """POST once. A lost response is reconciled by GET using the same request ID."""
+        request_id = validate_request_id(request_id if request_id is not None else secrets.token_hex(16))
+        self.negotiate(kind)
+        try:
+            result = self.post('/api/task-start', kind=kind, request_id=request_id, **payload)
+        except ClientError as error:
+            if error.status is not None and error.status < 500 and error.status != 408:
+                raise
+            try:
+                return self.task_by_request(request_id)
+            except ClientError as lookup_error:
+                raise SubmissionUnconfirmed(request_id, lookup_error) from error
+        try:
+            TaskReceipt.from_response(result, request_id)
+        except ClientError as error:
+            task = result.get('task')
+            raise SubmissionUnconfirmed(request_id, error,
+                task.get('id') if isinstance(task, dict) else None) from error
+        return result
+
+    def input_owner(self):
+        """Observe public ownership; a public snapshot can never restore a lost secret."""
+        return self.get('/api/input-owner')
+
+    def _remember_lease(self, response):
+        owner, proof = response.get('input_owner'), response.get('execution_lease')
+        if (not isinstance(owner, dict) or owner.get('scope') != 'board'
+                or not isinstance(proof, dict) or set(proof) != {'id', 'generation', 'token'}
+                or not isinstance(proof.get('id'), str) or not proof['id']
+                or not isinstance(proof.get('token'), str) or not proof['token']
+                or type(proof.get('generation')) is not int or proof['generation'] < 1
+                or proof.get('generation') != owner.get('generation')
+                or proof['id'] != owner.get('id') or owner.get('serial') != self.serial
+                or self.execution_lease is not None and any(
+                    proof[field] != self.execution_lease[field] for field in ('id', 'generation'))):
+            error = ClientError('Invalid board lease receipt; inspect ownership before another claim',
+                                code='lease-unconfirmed')
+            error.outcome = 'unknown'
+            raise error
+        self.execution_lease = dict(proof)
+        # Return only the public receipt. Tokens are used for writes, never printed.
+        return {key: value for key, value in response.items() if key != 'execution_lease'}
+
+    def claim_board(self, ttl=300):
+        if not self.serial or not self.connection_id:
+            raise ClientError('Select an identified board and connection before claiming it')
+        if type(ttl) is not int or not 30 <= ttl <= 3600:
+            raise ClientError('Board lease ttl must be an integer from 30 to 3600 seconds')
+        if self.execution_lease:
+            raise ClientError('This client already holds a board lease; renew or release it')
+        lease = self.negotiate().get('execution_lease')
+        if (not isinstance(lease, dict) or lease.get('supported') is not True
+                or lease.get('resource') != 'board' or lease.get('scope') != 'collector'):
+            raise ClientError('Server does not advertise board execution leases', code='unsupported-contract')
+        try:
+            return self._remember_lease(self.post('/api/input-claim', scope='board', ttl=ttl))
+        except ClientError as error:
+            if error.status is not None and error.status < 500 and error.status != 408:
+                raise
+            failure = ClientError('Board lease claim is unconfirmed; inspect input-owner, do not claim again',
+                                  code='lease-unconfirmed')
+            failure.outcome = 'unknown'
+            raise failure from error
+
+    def renew_board(self, ttl=300):
+        if not self.execution_lease:
+            raise ClientError('This client has no board lease proof')
+        if type(ttl) is not int or not 30 <= ttl <= 3600:
+            raise ClientError('Board lease ttl must be an integer from 30 to 3600 seconds')
+        return self._remember_lease(self._lease_request('/api/input-renew', ttl=ttl,
+                                                        execution_lease=dict(self.execution_lease)))
+
+    def _lease_request(self, route, **payload):
+        try:
+            return self.post(route, **payload)
+        except ClientError as error:
+            if error.status is None or error.status >= 500 or error.status == 408:
+                failure = ClientError('Lease update is unconfirmed; inspect input-owner before further writes',
+                                      code='lease-unconfirmed')
+                failure.outcome = 'unknown'
+                raise failure from error
+            raise
+
+    def release_board(self, process_stopped_confirmed=False, reason=''):
+        if not self.execution_lease:
+            raise ClientError('This client has no board lease proof')
+        if type(process_stopped_confirmed) is not bool:
+            raise ClientError('process_stopped_confirmed must be a boolean')
+        if process_stopped_confirmed and (not isinstance(reason, str) or not reason.strip()
+                                          or len(reason.encode('utf-8')) > 2048):
+            raise ClientError('Recovery release requires a nonempty reason of at most 2048 UTF-8 bytes')
+        payload = {'scope': 'board', 'execution_lease': dict(self.execution_lease)}
+        if process_stopped_confirmed:
+            payload.update(process_stopped_confirmed=True, reason=reason)
+        result = self._lease_request('/api/input-release', **payload)
+        if 'input_owner' not in result or result['input_owner'] is not None:
+            failure = ClientError('Lease release was not confirmed; retain the original proof', code='lease-unconfirmed')
+            failure.outcome = 'unknown'
+            raise failure
+        self.execution_lease = None
+        return result
+
+    def revoke_grant(self, grant_id):
+        """Owner operation; preserve denial and backend-stop receipts independently."""
+        return self.request('/api/agent-revoke', payload={'id': grant_id})
 
     def get(self, route, **query):
         return self.request(route, query=dict(query, key=self.key))
@@ -529,6 +749,8 @@ def parser():
     tasks.add_argument('--offset', type=nonnegative, default=0)
     task = commands.add_parser('task', help='read a durable task by ID')
     task.add_argument('id')
+    task_request = commands.add_parser('task-request', help='query an original durable submission without resending it')
+    task_request.add_argument('request_id')
     task_cancel = commands.add_parser('task-cancel', help='request cancellation of a durable task')
     task_cancel.add_argument('id')
     fetch_file = commands.add_parser('file-fetch', help='save a completed download task with size/SHA-256 verification')
@@ -538,6 +760,7 @@ def parser():
     task_start = commands.add_parser('task-start', help='start a background device operation')
     task_start.add_argument('kind', choices=('identify', 'ssh-enable', 'ssh-connect',
         'hardware-power-on', 'hardware-power-off', 'hardware-reset', 'hardware-enter-download', 'hardware-flash'))
+    task_start.add_argument('--request-id', help='stable platform attempt ID; generated once if omitted')
     commands.add_parser('operation', help='show the active serial operation and cancellation ID')
     cancel = commands.add_parser('operation-cancel', help='cancel your active serial operation by ID')
     cancel.add_argument('id', help='operation ID returned by operation')
@@ -618,7 +841,7 @@ def main(argv=None):
         client.ssh_user, client.ssh_password = args.ssh_user, args.ssh_password
         if args.action in ('devices', 'health', 'capabilities', 'diagnostics'):
             result = client.request('/api/' + args.action)
-        elif args.action in ('tasks', 'task', 'task-cancel', 'file-fetch'):
+        elif args.action in ('tasks', 'task', 'task-request', 'task-cancel', 'file-fetch'):
             if args.device:
                 client.select(args.device)
             if args.action == 'file-fetch':
@@ -630,6 +853,8 @@ def main(argv=None):
                 result = client.get('/api/tasks', **query)
             elif args.action == 'task':
                 result = client.get('/api/task', id=args.id)
+            elif args.action == 'task-request':
+                result = client.task_by_request(args.request_id)
             else:
                 result = client.post('/api/task-cancel', id=args.id)
         else:
@@ -637,7 +862,7 @@ def main(argv=None):
                 raise ClientError('--device is required; run devices to find the full key')
             client.select(args.device)
             if args.action == 'task-start':
-                result = client.post('/api/task-start', kind=args.kind, connection_id=client.connection_id)
+                result = client.submit_task(args.kind, args.request_id, connection_id=client.connection_id)
             elif args.action == 'flash-capabilities':
                 result = client.get('/api/flash-capabilities')
             elif args.action == 'flash-upload':
@@ -745,7 +970,12 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result.get('ok', True) else 1
     except (ClientError, OSError, ValueError, KeyboardInterrupt) as error:
-        print(json.dumps({'ok': False, 'error': str(error) or 'Interrupted'}, ensure_ascii=False))
+        result = {'ok': False, 'error': str(error) or 'Interrupted'}
+        for name in ('code', 'status', 'request_id', 'task_id', 'outcome'):
+            value = getattr(error, name, None)
+            if value is not None:
+                result[name] = value
+        print(json.dumps(result, ensure_ascii=False))
         return 1
 
 

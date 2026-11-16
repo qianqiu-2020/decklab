@@ -46,6 +46,12 @@ class FakeAPI(BaseHTTPRequestHandler):
         self.server.calls.append((token, path.path, payload))
         if token not in self.server.active:
             return self.reply(401, {'error': 'invalid grant', 'code': 'unauthorized'})
+        if path.path == '/api/capabilities':
+            from seriald_core.actions import capabilities
+            return self.reply(200, capabilities().payload)
+        if path.path == '/api/task' and payload.get('request_id'):
+            return self.reply(200, {'task': {'id': 'original-task', 'request_id': payload['request_id'],
+                                           'state': 'running', 'outcome': 'issued'}})
         key = 'raw-A' if token == TOKEN_A else 'board-B'
         cid = self.server.connection_a if token == TOKEN_A else 'connection-B'
         if path.path == '/api/devices':
@@ -66,9 +72,12 @@ class FakeAPI(BaseHTTPRequestHandler):
             return self.reply(200, {'id': payload['id'], 'data': data.decode(),
                                    'data_b64': base64.b64encode(data).decode(), 'size': len(data)})
         if path.path == '/api/task-start':
-            return self.reply(200, {'task': {'id': 'task1', 'state': 'running', 'kind': payload['kind']}})
+            return self.reply(200, {'task': {'id': 'task1', 'state': 'running', 'kind': payload['kind'],
+                'request_id': payload.get('request_id'), 'outcome': 'issued'}})
         if path.path in ('/api/task', '/api/task-cancel'):
-            return self.reply(200, {'task': {'id': payload['id'], 'state': 'cancelled' if self.command == 'POST' else 'running'}})
+            return self.reply(200, {'task': {'id': payload.get('id', 'original-task'),
+                'request_id': payload.get('request_id'),
+                'state': 'cancelled' if self.command == 'POST' else 'running'}})
         self.reply(200, {'ok': True, 'key': key, 'tasks': [], 'files': [], 'boots': []})
 
     def reply(self, status, value):
@@ -98,6 +107,63 @@ class APICase(unittest.TestCase):
 
 
 class AdapterTests(APICase):
+    def test_capabilities_never_selects_or_touches_a_device(self):
+        result = self.adapter.capabilities()
+        self.assertEqual(result['contract']['name'], 'decklab-execution')
+        self.assertEqual(result['scope']['authorization'], 'not-a-grant')
+        self.assertEqual([(path, payload) for _, path, payload in self.api.calls],
+                         [('/api/capabilities', {})])
+
+    def test_execution_lease_only_reaches_its_invocation_and_is_not_returned(self):
+        proof = {'id': 'lease-A', 'generation': 1, 'token': 'private-proof-A'}
+        with self.adapter.execution_scope(proof):
+            result = self.adapter.send('raw-A', 'help', connection_id='connection-A')
+        self.assertEqual(self.api.calls[-1][2]['execution_lease'], proof)
+        self.assertNotIn(proof['token'], json.dumps(result))
+        self.adapter.send('raw-A', 'next', connection_id='connection-A')
+        self.assertNotIn('execution_lease', self.api.calls[-1][2])
+        calls = len(self.api.calls)
+        with self.assertRaises(ClientError):
+            with self.adapter.execution_scope(dict(proof, generation=True)):
+                self.adapter.send('raw-A', 'invalid', connection_id='connection-A')
+        self.assertEqual(len(self.api.calls), calls)
+
+    def test_concurrent_invocations_do_not_share_execution_lease_secrets(self):
+        barrier, failures = threading.Barrier(2), []
+        def send(token, device, connection, generation):
+            try:
+                with self.adapter.execution_scope({'id': 'lease-' + device, 'generation': generation,
+                                                   'token': 'proof-' + device}):
+                    barrier.wait(timeout=2)
+                    self.adapter.send(device, 'help', connection_id=connection, token=token)
+            except Exception as error:
+                failures.append(error)
+        workers = [threading.Thread(target=send, args=values) for values in (
+            (TOKEN_A, 'raw-A', 'connection-A', 1), (TOKEN_B, 'board-B', 'connection-B', 2))]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=3)
+            self.assertFalse(worker.is_alive())
+        self.assertEqual(failures, [])
+        writes = {token: body for token, route, body in self.api.calls if route == '/api/session-send'}
+        self.assertEqual(writes[TOKEN_A]['execution_lease']['token'], 'proof-raw-A')
+        self.assertEqual(writes[TOKEN_B]['execution_lease']['token'], 'proof-board-B')
+        self.assertIsNone(self.adapter.client().execution_lease)
+
+    def test_task_request_id_is_forwarded_and_can_query_original_without_submission(self):
+        self.adapter.start_task('raw-A', 'identify', connection_id='connection-A', request_id='identify-001')
+        self.assertEqual(self.api.calls[-1][2]['request_id'], 'identify-001')
+        before = len(self.api.calls)
+        result = self.adapter.task('', request_id='identify-001')
+        self.assertEqual(result['task']['request_id'], 'identify-001')
+        queried = self.api.calls[before:]
+        self.assertEqual(len(queried), 1)
+        self.assertEqual(queried[0][1], '/api/task')
+        self.assertEqual(queried[0][2]['request_id'], 'identify-001')
+        with self.assertRaises(ClientError):
+            self.adapter.task('', task_id='task1', request_id='identify-001')
+
     def test_unknown_os_read_send_and_exact_connection(self):
         selected = self.adapter.devices()['devices'][0]
         self.assertIsNone(selected['serial'])
@@ -192,8 +258,23 @@ class MCPTransportTests(APICase):
             async with MCPClient(params, mode=mode) as client:
                 tools = await client.list_tools()
                 names = {tool.name for tool in tools.tools}
-                self.assertTrue({'list_devices', 'read_terminal', 'send_input', 'execute_command', 'start_task',
+                self.assertTrue({'get_capabilities', 'get_input_owner', 'claim_board', 'renew_board', 'release_board',
+                                 'list_devices', 'read_terminal', 'send_input', 'execute_command', 'start_task',
                                  'get_task', 'cancel_task', 'read_boot', 'hardware_actions'}.issubset(names))
+                schemas = {tool.name: tool.input_schema['properties'] for tool in tools.tools}
+                for name in ('send_input', 'execute_command', 'start_task', 'desktop_input',
+                             'start_flash', 'confirm_flash_selection', 'set_boot_priority'):
+                    self.assertIn('execution_lease', schemas[name])
+                self.assertIn('discover', schemas['list_desktop_sessions'])
+                for preview in ('preview_flash', 'preview_flash_selection'):
+                    self.assertIn('none', schemas[preview]['verify']['enum'])
+                    self.assertEqual(schemas[preview]['reset_after']['default'], False)
+                self.assertIn('request_id', schemas['start_task'])
+                self.assertIn('request_id', schemas['get_task'])
+                self.assertNotIn('execution_lease', schemas['get_capabilities'])
+                protocol = await client.call_tool('get_capabilities', {})
+                self.assertEqual(protocol.structured_content['contract']['revision'], 1)
+                self.assertFalse(protocol.structured_content['scope']['cross_platform_exclusive'])
                 capabilities = await client.call_tool('hardware_actions', {'device': 'raw-A'})
                 self.assertTrue(capabilities.structured_content['ok'])
                 raw = await client.call_tool('list_devices', {})

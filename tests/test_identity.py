@@ -14,7 +14,7 @@ from seriald_core.protocol import parse_onie_serial, parse_probe
 from seriald_core.storage import IdentityError, Store
 
 
-def info(serial='0123456789ABCDEF', soc='0059D968E583C49A'):
+def info(serial='0123456789ABCDEF', soc='0061020304050607'):
     return {'serial': serial, 'soc_serial': soc, 'soc_family': 'spacemit socs', 'soc_id': 'K1-6370'}
 
 
@@ -59,18 +59,18 @@ class IdentityTests(unittest.TestCase):
         self.assertNotIn(raw, result['raw'])
 
     def test_eeprom_serial_precedes_a_different_soc_id(self):
-        fields = info(soc='0059D968E583C49A')
+        fields = info(soc='0061020304050607')
         fields['eeprom_serial'] = 'MVJ-K1-000003'
         result = select_identity(fields)
         self.assertEqual(result['serial'], 'MVJ-K1-000003')
         self.assertEqual(result['serial_source'], 'eeprom-onie')
 
     def test_uboot_provenance_confirms_dt_serial_without_format_matching(self):
-        fields = info('MJM10004000001', '0059D968E583CA22')
+        fields = info('SAMPLE-K1-000001', '0061020304050608')
         fields['model'] = 'Milk-V Jupiter'
         fields['uboot_version'] = 'U-Boot 2024.10'
         result = select_identity(fields)
-        self.assertEqual(result['serial'], 'MJM10004000001')
+        self.assertEqual(result['serial'], 'SAMPLE-K1-000001')
         self.assertEqual(result['serial_source'], 'uboot-injected')
         self.assertEqual(result['identity_status'], 'confirmed')
         arbitrary = dict(fields, serial='board-production-serial-42')
@@ -80,46 +80,46 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(conflicted['identity_status'], 'provisional')
 
     def test_dt_serial_without_uboot_provenance_is_confirmed(self):
-        fields = info('MJM10004000001', '0059D968E583CA22')
+        fields = info('SAMPLE-K1-000001', '0061020304050608')
         fields['model'] = 'Milk-V Jupiter'
         result = select_identity(fields)
         self.assertEqual(result['serial_source'], 'device-tree')
         self.assertEqual(result['identity_status'], 'confirmed')
 
     def test_k3_pico_dt_serial_is_the_onie_identity(self):
-        result = select_identity({'serial': 'HW3MPK3321280183', 'model': 'SpacemiT K3 Pico ITX'})
-        self.assertEqual(result['serial'], 'HW3MPK3321280183')
+        result = select_identity({'serial': 'SAMPLE-K3-000001', 'model': 'SpacemiT K3 Pico ITX'})
+        self.assertEqual(result['serial'], 'SAMPLE-K3-000001')
         self.assertEqual(result['serial_source'], 'device-tree')
         self.assertEqual(result['identity_status'], 'confirmed')
 
     def test_valid_board_serial_is_preserved(self):
-        result = select_identity(info('5b9d4a0a6f5e25a8'))
-        self.assertEqual(result['serial'], '5b9d4a0a6f5e25a8')
+        result = select_identity(info('a1b2c3d4e5f60101'))
+        self.assertEqual(result['serial'], 'a1b2c3d4e5f60101')
         self.assertEqual(result['serial_source'], 'device-tree')
 
     def test_placeholder_or_missing_board_serial_uses_hardware_id(self):
         for placeholder in ('0123456789ABCDEF', '0123456789abcdef', '', 'unknown', '0' * 16, 'F' * 16):
             with self.subTest(placeholder=placeholder):
-                result = select_identity(info(placeholder, '0059d968e583c49a'))
-                self.assertEqual(result['serial'], '0059D968E583C49A')
+                result = select_identity(info(placeholder, '0061020304050607'))
+                self.assertEqual(result['serial'], '0061020304050607')
                 self.assertEqual(result['reported_serial'], placeholder)
                 self.assertEqual(result['serial_source'], 'soc-sysfs')
 
     def test_previously_conflicting_serial_requires_an_independent_hardware_id(self):
         result = select_identity(info('factory-duplicate'), conflicted=True)
-        self.assertEqual(result['serial'], '0059D968E583C49A')
+        self.assertEqual(result['serial'], '0061020304050607')
         with self.assertRaises(IdentityError):
-            select_identity(info('0059D968E583C49A'), conflicted=True)
+            select_identity(info('0061020304050607'), conflicted=True)
 
     def test_established_hardware_identity_survives_firmware_serial_changes(self):
         result = select_identity(info('new-firmware-serial'), known_soc=True)
         self.assertEqual(result['serial'], 'new-firmware-serial')
         self.assertEqual(result['reported_serial'], 'new-firmware-serial')
-        self.assertEqual(select_identity(info('0059D968E583C49A'), known_soc=True)['serial'], '0059D968E583C49A')
+        self.assertEqual(select_identity(info('0061020304050607'), known_soc=True)['serial'], '0061020304050607')
 
     def test_invalid_efuse_values_never_become_directory_keys(self):
         for value in ('', '0' * 16, 'F' * 16, '007FFFFFFFFFFFFF', '0080000000000000',
-                      '0123456789ABCDEF', '../oops', 'invalid', '0059D968E583C49A\nother'):
+                      '0123456789ABCDEF', '../oops', 'invalid', '0061020304050607\nother'):
             with self.subTest(value=value), self.assertRaises(IdentityError):
                 select_identity(info(soc=value))
 
@@ -129,8 +129,8 @@ class IdentityTests(unittest.TestCase):
 
     def test_probe_preserves_hardware_fields_and_rejects_ambiguous_values(self):
         raw = ('HOST=board\nSERIAL=0123456789ABCDEF\nMODEL=Milk-V Jupiter\nSSHD=active\n'
-               'SOC_SERIAL=0059D968E583C49A\nSOC_FAMILY=spacemit socs\nSOC_ID=K1-6370\n')
-        self.assertEqual(select_identity(parse_probe(raw))['serial'], '0059D968E583C49A')
+               'SOC_SERIAL=0061020304050607\nSOC_FAMILY=spacemit socs\nSOC_ID=K1-6370\n')
+        self.assertEqual(select_identity(parse_probe(raw))['serial'], '0061020304050607')
         for key in ('SOC_SERIAL', 'SOC_FAMILY', 'SOC_ID'):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 parse_probe(raw + key + '=duplicate\n')
@@ -143,7 +143,7 @@ class IdentityCorrectionTests(unittest.TestCase):
         self.base = Path(self.tmp.name)
         self.store = Store(str(self.base / 'registry.sqlite3'))
         self.addCleanup(self.store.close)
-        self.old, self.new = '0123456789ABCDEF', '0059D968E583C49A'
+        self.old, self.new = '0123456789ABCDEF', '0061020304050607'
         self.store.bind({'serial': self.old}, 'usb-old', 'tty-old', 'milkv2')
         self.store.mark_conflict(self.old)
         self.store.open_session('ssh123', self.old, 'agent', 'uname -a', '192.0.2.1')
@@ -211,7 +211,7 @@ class ConflictResolutionTests(unittest.TestCase):
         self.base = Path(self.tmp.name)
         self.store = Store(self.base / 'registry.sqlite3')
         self.addCleanup(self.store.close)
-        self.serial = '7c2b63fd4b46'
+        self.serial = 'a1b2c3d4e501'
         self.reason = '已核实两板编号不同，原档案属于保留编号的板子'
         self.store.bind({'serial': self.serial, 'serial_source': 'eeprom-onie'},
                         'COM5', 'COM5', 'debian')

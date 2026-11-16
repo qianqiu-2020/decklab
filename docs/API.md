@@ -6,10 +6,65 @@ private loopback collector. Both expose the following operations through control
 The standalone `serialctl.py` is the reference client; run its `--help` for CLI
 options. API version and optional features come from `GET /api/capabilities`.
 
+## Capability and compatibility contract
+
+`GET /api/capabilities` is a read-only protocol manifest. It does not resolve a
+board, open a port, test an executor or grant permission to operate a device.
+`features.* = true` means the interface exists; the current credential, board
+configuration and connection still determine availability. Query
+`/api/hardware`, `/api/desktop/sessions` or `/api/flash-capabilities` for the
+actual target. NOR backup and storage inventory additionally require the
+corresponding `nor_workspace_supported` / `storage_inventory_supported` flags.
+
+The response retains `api_version: 1` and adds
+`contract: {name: "decklab-execution", revision: 1, compatibility: ...}`.
+Clients must support the advertised API major and required contract revision,
+then inspect the specific capability they need. Ignore unknown response fields;
+treat absent capabilities as unsupported and unknown physical outcomes as
+unknown. Additive fields can appear without an API major change; a breaking
+change requires a new `api_version`. The software `version` is separate from
+these interface versions.
+
+`scope` describes one collector as the executor. Serial/USB use its host;
+configured SSH, desktop and BMC endpoints can be remote. Independent remote
+executor nodes are not advertised. The manifest explicitly reports
+`cross_platform_exclusive: false`, `fleet_scheduling: false` and
+`high_availability: false`. Local admission and input ownership do not reserve
+hardware against BMC, Studio or another service that can bypass this collector.
+`execution_lease.supported` separately advertises the optional board lease
+interface; clients must check it before using lease operations.
+
+`tasks.kinds` lists accepted `/api/task-start` submission kinds.
+`tasks.produced_kinds` also includes tasks produced by other endpoints:
+`desktop-input`, `image-download` and internal `flash-inspect` records.
+`nor-backup` is a submission kind whose durable task kind is `flash`; use its
+flash details to distinguish the NOR workspace. `tasks.submission` maps the
+submission endpoints. MCP has dedicated tools for some operations rather than
+accepting every HTTP kind through `start_task`; `get_capabilities` returns this
+same HTTP manifest without selecting a device.
+
+`tasks.request_dedup` declares which kinds accept a `request_id`, which require
+one, and the persistent scope `actor + request_id`. For the same normalized
+input, the same ID returns the original task; changed input returns HTTP 409.
+Authorization and target visibility still apply. After a lost response, query
+`GET /api/task?request_id=...` under the same actor instead of creating another
+operation. Requests without an ID retain legacy submission semantics. Continuous
+terminal input is not replayed or deduplicated as a task. MCP `start_task` accepts
+an optional `request_id`; `get_task` accepts either `task_id` or `request_id`.
+
+Task lifecycle `state` and physical `outcome` are independent. The advertised
+outcomes are `not-issued`, `issued`, `acknowledged`, `observed`, `verified` and
+`unknown`. A provider acknowledgement does not prove a successful boot, and a
+completed task does not imply content verification. Inspect the operation's
+result, flash write/verify/boot details and evidence before acceptance. Restart
+interrupts unfinished tasks without replaying commands. Cancellation requests
+cooperative stopping; neither the request nor a cancelled lifecycle is proof of
+rollback or of an external operation having stopped.
+
 ## Owner configuration API
 
 `GET /api/settings` returns `configuration` (version 1, unprefixed host keys in
-`environment`, optional `profiles`, `hardware`, `flash`, `agent_tokens` objects
+`environment`, optional `profiles`, `hardware`, `flash`, `desktop`, `agent_tokens` objects
 in `documents`), `revision`, `active_revision`, field metadata, restart
 availability and activation state. Secrets are hidden. Only the primary
 credential can access it; Agent tokens and webpage-share credentials cannot.
@@ -204,8 +259,9 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | `/api/session-close` | `sid` |
 | `/api/session-result` | `sid`, `completed`, `exit_code`; records command outcome |
 | `/api/session-takeover` | `sid`; take control of shared SSH input and dimensions |
-| `/api/input-claim` | Optional human `takeover=true`; returns ownership ID |
-| `/api/input-release` | Ownership `id` |
+| `/api/input-claim` | Default: optional human `takeover=true` for console ownership. `scope="board"`, optional `ttl=300` (30–3600) claims collector-scoped execution ownership |
+| `/api/input-renew` | `ttl` and `execution_lease={id,generation,token}` for an existing board lease |
+| `/api/input-release` | Console ownership `id`, or the original board `execution_lease`; recovery additionally requires `process_stopped_confirmed=true` and a reason |
 | `/api/operation-cancel` | Active operation `id` |
 | `/api/identify` | Optional `init_boot_marker=true` or web-only `association={nonce,serial,reason}`; active shell probe, may log in |
 | `/api/probe` | Sends CR to request a prompt; this writes to the shared console |
@@ -213,6 +269,25 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | `/api/label` | `label`; rename without moving archives. Pending serial attachments also require expected `serial=""` and `connection_id`; their display label does not change the API key or create a board identity. |
 | `/api/switch-mode` | Prepare this physical attachment for another board |
 | `/api/rescue` | Explicit host USB recovery where supported |
+
+`GET /api/input-owner` returns public ownership including scope, board identity,
+integer generation, state and expiry; it never returns the proof token. Board
+claim/renew additionally return `execution_lease={id,generation,token}` once to
+the caller. Keep that proof private and attach it to subsequent writes. An
+expired, restarted or revoked board owner enters recovery instead of becoming
+available for another caller. A primary human credential can recover a lost
+proof with `/api/input-release`, `scope="board"`, `expected_generation`,
+`process_stopped_confirmed=true` and a reason after verifying the original
+execution stopped. This does not prove the board's final contents or boot state.
+
+MCP exposes `claim_board`, `renew_board`, `release_board` and `get_input_owner`.
+Its bounded in-memory credential cache is keyed by the authenticated Bearer and
+selected board serial; tools return only public ownership. Normal writes use
+the cached proof or a per-call `execution_lease`. Unconfirmed lease changes
+retain the proof but block subsequent writes pending explicit reconciliation.
+Expiry removes a known expired secret. Restarting MCP loses the cache: inspect
+public ownership and recover the original lease; do not claim again to replace
+missing proof. The collector remains the sole lease authority.
 
 Pending attachment labels use the existing label format (1–64 ASCII letters,
 digits, dots, underscores or hyphens). They persist by the serial attachment's
@@ -320,9 +395,9 @@ not the flash target. Other connection-bound operations keep their existing guar
 | GET `/api/flash-discover` | Human-only USB download-device discovery; returns candidate target IDs and observed target generations, without resetting or writing storage |
 | POST `/api/flash-target` | Human-only target selection with `target_id` and expected `target_generation`; reads supported device identity/layout information and rejects a changed or ambiguous target |
 | GET `/api/flash-capabilities` | `key`, expected `serial`; configured execution location, supported modes and ready artifacts; no reset or storage write |
-| POST `/api/flash-plan` | `key`, `serial`, `artifact_id`, `mode` (`full` or `partitions`), `binding_revision`, `verify` (`if-supported` or `required`), optional `selections` and optional full-disk `target_storage`; returns an immutable plan preview |
+| POST `/api/flash-plan` | `key`, `serial`, `artifact_id`, `mode` (`full` or `partitions`), `binding_revision`, `verify` (`none`, `if-supported` or `required`), optional boolean `reset_after` (default false), optional `selections` and optional full-disk `target_storage`; returns an immutable plan preview |
 | GET `/api/flash-events` | `key`, `serial`, task `id` and nonnegative `after` event cursor; bounded events and flash details |
-| POST `/api/flash-selection` | For the same task in `awaiting-selection`, `id`, `layout_digest` and `selections` with `preview=true` return a preview; submit its `plan_id` and unique `request_id` to continue |
+| POST `/api/flash-selection` | For the same task in `awaiting-selection`, `id`, `layout_digest` and `selections` with `preview=true` return a preview; optional boolean `reset_after` is sealed with this preview; a storage workspace can also choose `verify=none|if-supported|required`; submit its `plan_id` and unique `request_id` to continue |
 | POST `/api/flash-recovery` | Human-only recovery receipt: `key`, `serial`, task `id`, expected `attempt_id`, nonempty `reason` and `confirm_stopped=true`; releases recovery resources after the operator verifies the original executor stopped |
 | POST `/api/task-start`, `kind=flash` | `key`, `serial`, `plan_id`, `binding_revision` and unique `request_id`; creates or retrieves the same durable task |
 | POST `/api/task-start`, `kind=nor-backup` | Human-only K3 NOR workspace: `target_id`, `target_generation`, `binding_revision` and unique `request_id`; no image or write scope. Loads pinned RAM materials, backs up the entire NOR, then waits for selection in the same `flash` task |
@@ -433,16 +508,28 @@ and command examples; do not call the collector's internal revocation endpoint.
 
 | Control route | Payload / response |
 | --- | --- |
-| GET `/api/access` | `share_enabled`, `agent_share_enabled`, `open_access`, `loopback_open`, `lan_hosts`, `default_language` (`en`, `zh-CN` or empty), `mcp_enabled`, `mcp_url`, `mcp_error`; UI capability hints and host language default |
+| GET `/api/access` | `share_enabled`, `agent_share_enabled`, `board_recovery_authorized`, `open_access`, `loopback_open`, `lan_hosts`, `default_language` (`en`, `zh-CN` or empty), `mcp_enabled`, `mcp_url`, `mcp_error`; UI capability hints and host language default |
 | GET `/api/agent-grants` | `grants` metadata, at most 200 newest rows; includes revoked rows and never returns token secrets |
 | POST `/api/agent-share` | `scope=all`, `device`, or `connection`; device scope requires nonempty `serial` (at most 128 characters); connection scope requires live `key` and expected `connection_id`; returns `token` once and `grant` metadata |
-| POST `/api/agent-revoke` | Grant `id` (16 lowercase hex characters); returns revoked `id` and `sessions_closed` cleanup confirmation |
+| POST `/api/agent-revoke` | Grant `id` (16 lowercase hex characters); returns `id`, `revocation_generation`, `sessions_closed` and `revocation_pending`; repeat calls query/reconcile the same revocation |
 | POST `/api/share-link` | No payload required; primary credential only; returns relative `path` and `expires_in` |
 
 Control grant JSON bodies are limited to 64 KiB. Public grant creation does not
 accept a lifetime: it creates non-expiring revocable grants. Revocation rejects
 new authenticated operations immediately; `sessions_closed=false` means collector
 cleanup could not be confirmed, rather than that the grant remains valid.
+Pending notifications survive control restart and retry the original actor and
+generation after reconnection. The backend persists the actor fence before
+cancelling work. Confirmation waits for admitted synchronous requests, workers,
+sessions and recovery resources; it never proves an interrupted write was undone.
+
+`POST /api/task-recovery` is human-owner only for a configured helper whose
+process-tree cleanup was not confirmed. Submit task `id`, observed
+`expected_updated`, `process_stopped_confirmed:true`, and a nonempty `reason`.
+The service checks the terminal task and original recovery resources, appends
+`result.recovery_confirmation`, and releases those resources. The original
+state, outcome and `cleanup_confirmed:false` remain as recorded. Flash recovery
+continues through its existing `/api/flash-recovery` attempt-bound contract.
 
 ## Agent grant restrictions
 
@@ -542,7 +629,7 @@ primary Web credential; `/api/settings` manages the Web node. The private
 and is not exposed directly by Web. See [deployment](DISTRIBUTED.md).
 
 `GET /api/image-catalog?source=public|internal&path=k3/version/` browses direct
-children of the configured public archive or internal Nexus. Empty `path` lists
+children of the configured public archive or administrator-provided organization catalog. Empty `path` lists
 K1/K3. `refresh=1` bypasses the 60-second metadata cache. Responses contain
 `entries` with `name`, `path`, `kind` and, for images, `url`, available size/date
 metadata and `validation: preview-required`. Repository failures return 502;
@@ -562,3 +649,51 @@ by human operators. An invalid nonempty device scope never becomes a shared impo
 with identical input retrieves its original task; different input returns 409.
 No client token/cookie is forwarded to image servers. URL imports are denied
 to Agent tokens. Downloading never prepares or writes a board.
+
+## Desktop sessions
+
+`GET /api/desktop/sessions?key=...&serial=...` reports configured support, display and managed sessions. Owner responses also include redacted connection metadata and the existing settings revision for the device connection form. `POST /api/desktop/discover` identifies VNC/RDP on at most four known board IPs and fixed ports, without authentication or graphical input. The human owner may instead supply one explicit `host`, `port`, and `provider`; Agent grants cannot choose arbitrary targets. `POST /api/desktop/configure` is owner-only and saves the selected device into the existing private desktop settings document with revision checking, preserving other devices and original reservation constraints. It applies that binding without restarting the collector; an active graphical session must first be explicitly closed. Newly observed RDP pins require explicit confirmation. Passwords and credential-bearing URLs are never returned. `POST /api/desktop/open` uses the same board selector and opens one server-managed native connection. `GET /api/desktop/frame` adds `sid` and the Web `client_id`, and returns PNG plus frame ID, dimensions, scale, display kind and capture time. Connection-scoped Agent grants are denied.
+
+`POST /api/desktop/input` requires `sid`, `frame_id`, `request_id`, `action` and its parameters: click `{x,y,button}`, scroll `{x,y,steps}` (positive down), key `{keys}`, or text `{text}`. It returns 202 and the original task. Poll `/api/task`; input delivery does not prove application effect. Mode/attachment changes invalidate observations; uncertain input requires a new observation, never a new write request. Typed text/images are not stored in task history.
+
+`POST /api/desktop/close` closes the attachment and releases its input ownership. Human Web access may explicitly set `takeover:true` to disconnect the exact old session after reviewing its board/display; Agent access cannot close another grant's session. Browser JSON POSTs use the common per-page `client_id`; frame GETs pass that ID explicitly.
+
+### Continuous browser desktop
+
+`GET /api/desktop/stream?key=...&serial=...&sid=...&client_id=...` upgrades an
+existing native VNC/RDP session using WebSocket subprotocol `decklab-desktop-v1`.
+Normal control authentication, exact same-origin Host/Origin validation, device
+authorization and the original session owner/client apply. Connection-scoped
+grants are denied. The browser receives neither target credentials nor a target
+TCP socket. The helper provider does not implement this stream.
+
+The server sends `ready` with capabilities and incremental `frame` messages:
+`sequence`, `frame_id`, `generation`, `width`, `height`, `x`, `y`, `rect_width`,
+`rect_height`, `mime:"image/png"`, `png_base64`, `reset` and `source_updated_at`.
+A reset contains the complete new display. The browser acknowledges only a
+frame it has drawn with `{type:"observed",frame_id,sequence}`. The heartbeat may
+renew that same observation while visible; it does not capture another image.
+Retired observations cannot authorize input. A new mode or attachment needs a
+fresh observation. PNG is a wire field here, not the MCP image representation.
+
+An input is `{type:"input",seq,frame_id,event}` with monotonically increasing
+`seq`. Event shapes are `pointer {x,y,buttons}`, `key {keysym,code,down}`,
+`wheel {x,y,steps}`, `text {text}`, `clipboard {text}` and `clipboard-read {}`;
+each event also includes its `type`. Pointer buttons use the native RFB mask
+left=1, middle=2, right=4; positive wheel steps mean down. Text is limited to
+1024 Unicode characters and clipboard text to 32 KiB. VNC clipboard supports
+Latin-1; its ordinary text-input path supports Unicode. Capabilities report the
+provider's support and clipboard encoding.
+
+Only one input may await its `ack`; no keyboard/pointer replay or automatic
+reconnection is supported. `release_all {seq}` releases held inputs and forces
+a fresh complete display/observation. Explicit `clipboard-read` additionally
+returns `{type:"clipboard",available,text?,encoding}`; spontaneous remote
+clipboard contents are never pushed. The client sends `heartbeat` while active.
+An optional `bind {execution_lease}` supplies the original board proof, never in
+the URL. All input checks use existing board ownership and maintenance guards.
+Continuous events do not create a durable task per keystroke and are not part
+of request-ID replay. Disconnect/revocation releases input; unconfirmed input
+or cleanup closes the native connection. Summaries omit keys, text and images.
+
+Managed external devices query the **original console**, not DeckLab, at `GET /api/ops/v1/devices`; activity updates go to that console's `/api/ops/v1/devices/<device>/reservations/<lease>`. These are integration dependencies, not additional DeckLab public routes. See [desktop configuration and reservation boundaries](DESKTOP.md).

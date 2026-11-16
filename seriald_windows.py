@@ -57,8 +57,9 @@ if SETTINGS.effective()['environment'].get('BACKEND_URL'):
     from seriald_core.control_server import main as remote_main
     raise SystemExit(remote_main())
 from seriald_core.settings_restart import configure_collector, preflight_listener, preflight_storage, reexecute
-from seriald_core.control_server import ControlHandler, configured_agent_tokens
-from seriald_core.agent_grants import AgentGrantStore
+from seriald_core.control_server import (ControlHandler, configured_agent_tokens,
+                                         RevocationReconciler, collector_connection)
+from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
 from seriald_core.collector_lock import CollectorLock
 from seriald_core.handoff import consume as consume_handoff, write as write_handoff
 from seriald_core.httpd import BoundedThreadingTCPServer
@@ -96,6 +97,7 @@ def main():
         try:
             with BoundedThreadingTCPServer(('127.0.0.1', 0), web.Handler) as collector:
                 manager = WindowsManager(store, consume_handoff(HANDOFF), profiles=profiles)
+                attach_agent_grants(manager, grants)
                 collector.manager = manager
                 configure_collector(collector, SETTINGS)
                 control.settings_revision = collector.settings_revision
@@ -132,6 +134,9 @@ def main():
                 scanner.start()
                 worker = threading.Thread(target=collector.serve_forever, daemon=True)
                 worker.start()
+                reconciler = RevocationReconciler(grants,
+                    lambda timeout: collector_connection(collector.server_address, timeout=timeout)).start()
+                control.revocation_reconciler = reconciler
                 url = 'http://127.0.0.1:%d/' % args.port
                 print('seriald Windows COM host: %s' % url, flush=True)
                 if not args.no_browser:
@@ -142,6 +147,7 @@ def main():
                     pass
                 finally:
                     mcp.close()
+                    reconciler.close()
                     connections = manager.close()
                     write_handoff(HANDOFF, connections)
                     collector.shutdown()

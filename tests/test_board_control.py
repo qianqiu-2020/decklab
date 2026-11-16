@@ -38,7 +38,7 @@ def bmc_fixture():
             if self.path.endswith('/login'):
                 result = {'code': 0, 'data': {'access_token': 'private-token'}}
             elif self.path.startswith('/api/v1/devices/name/'):
-                result = {'code': 0, 'data': {'name': 'sub23-1', 'module_index': state['mapping'], 'adb_port': 'usb:1-8.3'}}
+                result = {'code': 0, 'data': {'name': 'test-board-b', 'module_index': state['mapping'], 'adb_port': 'usb:1-8.3'}}
             else:
                 result = {'code': 1 if state['reject'] else 0, 'message': 'private-token private-password'}
                 if state['broken']:
@@ -68,7 +68,7 @@ class BoardControlTests(unittest.TestCase):
         self.credentials = Path(self.tmp.name) / 'credentials.json'
         self.credentials.write_text(json.dumps({'username': 'tester', 'password': 'private-password'}))
         self.credentials.chmod(0o600)
-        self.config = {'provider': 'bmc', 'url': 'http://127.0.0.1:1', 'board': 'sub23-1',
+        self.config = {'provider': 'bmc', 'url': 'http://127.0.0.1:1', 'board': 'test-board-b',
                        'module_index': 47, 'usb_port': '1-8.3', 'credentials_file': str(self.credentials),
                        'actions': ['reset', 'power-on', 'power-off', 'enter-download']}
 
@@ -115,7 +115,7 @@ class BoardControlTests(unittest.TestCase):
                     result = actions[action].bind(mock.Mock()).run(lambda: None)
                 self.assertEqual(result['control_result'], 'acknowledged')
                 self.assertEqual(len(state['requests']), 3)
-                self.assertEqual(state['requests'][-1], ('/api/v1/openbmc/devices/sub23-1/' + suffix, body, 'Bearer private-token'))
+                self.assertEqual(state['requests'][-1], ('/api/v1/openbmc/devices/test-board-b/' + suffix, body, 'Bearer private-token'))
                 self.assertNotIn('private', json.dumps(result))
 
     def test_mapping_change_and_redirect_prevent_mutation(self):
@@ -137,11 +137,26 @@ class BoardControlTests(unittest.TestCase):
             for change in ('broken', 'reject'):
                 state[change] = True
                 state['requests'].clear()
+                outcomes = []
                 with self.assertRaisesRegex(TaskError, 'outcome unknown') as failure:
-                    action.run(lambda: None)
+                    action.run(lambda: None, outcome=outcomes.append)
+                self.assertEqual(outcomes, ['issued', 'unknown'])
                 self.assertEqual(len(state['requests']), 3)
                 self.assertNotIn('private', str(failure.exception))
                 state[change] = False
+
+    def test_outcome_callback_is_after_preflight_and_acknowledges_only_the_control_receipt(self):
+        with bmc_fixture() as (origin, state):
+            action = control_actions(dict(self.config, url=origin))['reset']
+            outcomes = []
+            state['mapping'] = 48
+            with self.assertRaises(TaskError):
+                action.run(lambda: None, outcome=outcomes.append)
+            self.assertEqual(outcomes, [])
+            state['mapping'] = 47
+            action.run(lambda: None, outcome=outcomes.append)
+            self.assertEqual(outcomes, ['issued', 'acknowledged'])
+            self.assertNotIn('verified', outcomes)
 
     def test_cancellation_before_and_after_submission(self):
         with bmc_fixture() as (origin, state):

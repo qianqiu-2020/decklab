@@ -19,35 +19,15 @@ checked NOR offsets/capacities in the same task. The running RAM environment may
 also import a package without restaging. Missing safe loaders must ask for a
 backend upgrade, never tell a single-partition caller to choose full recovery.
 
-Single-file partition flashing uses preinstalled RAM-only FSBL/U-Boot rather
-than requiring another firmware package. The separate `decklab-nor-v1` RAM
-adapter selects a declared standard NOR map without `flash:mtd` or env save,
-then checks target-reported offsets/sizes before binding a selected payload.
-It never adds layout or other-partition writes to that plan. Show the source of
-the standard map and selected-partition erase risk; this adapter does not make
-the old stock full-recovery namespace operation safe for single partitions.
-The K3 loader patch/build recipe and simulated execution tests are source and
-build evidence, not physical-board acceptance.
-The [BMC single-board field record](docs/audits/2026-11-14-bmc-sub23-1.md)
-covers real BS01DCMA NOR partition writing, independent whole-NOR readback and
-serial handoff. Its boot recovery and verification limits remain explicit;
-this does not establish acceptance for other boards or built-in readback.
-The dedicated RAM build must enter fastboot before normal board provisioning,
-DDR-training persistence or SD/USB auto-flash. Its build recipe checks the
-configuration and late-init disassembly. When installed, the same RAM environment
-also prepares full firmware packages without changing their write catalogue.
-
-The NOR workspace changes add bounded whole-NOR snapshots and
-readback verification to the safe RAM partition path. Backups use the existing
-artifact ownership/quota service, with opaque env contents. Comparison checks
-exact padded payload bytes and every byte outside selected partition capacities;
-it does not invent erased-tail contents. A separate current-code field run on
-sub23-1 verified the complete Web backup, selected opensbi write, and automatic
-whole-NOR readback; before/after bytes matched. This remains a single-board,
-original-content rewrite, not different-version or multi-partition acceptance.
-Single-file previews accept a null executor package catalogue as empty, while
-required readback checks must use the proven RAM NOR reader capability.
-Current workflow and validation limits: [NOR workspace](docs/FLASH_WORKSPACE.md).
+U-Boot remains unmodified. The RAM builder uses native Kconfig to disable
+board late-init and persistent environment storage, and boot directly into
+Fastboot. Host-side fixed commands reuse UCmd, MTD, I2C, OEM read and upload;
+there are no DeckLab firmware opcodes or getvars. EEPROM write confirmation
+requires fresh physical readback, not the native command's OKAY alone.
+NOR partition writes retain whole-chip backup, explicit erase/write scope,
+and whole-chip readback checking bytes outside selected partitions.
+See [storage workspace design](docs/FLASH_WORKSPACE.md) for the native protocol,
+source/build constraints and hardware validation limits.
 
 Single-host deployments support Linux and Windows. Split deployments use a
 Windows/Linux Web host and one authenticated HTTPS Linux hardware owner.

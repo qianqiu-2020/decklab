@@ -65,6 +65,12 @@ class SerialTransactions:
         return self._owner
 
     def ownership(self):
+        from .board_ownership import ownership_for
+        board_owner = ownership_for(getattr(self.device, 'manager', None))
+        if board_owner is not None:
+            current = board_owner.current(self.device.serial)
+            if current is not None:
+                return current
         with self._state_lock:
             owner = self._owner_locked()
             return dict(owner) if owner else None
@@ -81,9 +87,23 @@ class SerialTransactions:
     def _same(owner, actor, client_id):
         return owner['actor'] == actor and (actor != 'web' or owner.get('client_id', '') == client_id)
 
+    def _check_actor(self, actor):
+        from .agent_grants import GrantRevoked
+        grants = getattr(getattr(self.device, 'manager', None), 'agent_grants', None)
+        if grants is not None:
+            try:
+                grants.check_actor(actor)
+            except GrantRevoked as error:
+                raise TransactionError(error.code, str(error), error.status) from None
+
     def check_owner(self, actor, client_id=None):
+        self._check_actor(actor)
         self.check_maintenance()
         client_id = self.client_id if client_id is None else client_id
+        from .board_ownership import ownership_for
+        board_owner = ownership_for(getattr(self.device, 'manager', None))
+        if board_owner is not None:
+            board_owner.check(self.device.serial, actor, client_id)
         with self._state_lock:
             owner = self._owner_locked()
             if owner and not self._same(owner, actor, client_id):
@@ -96,6 +116,17 @@ class SerialTransactions:
             maintenance.check(self.device.serial)
 
     def claim(self, actor, takeover=False):
+        from .board_maintenance import maintenance_for
+        maintenance = maintenance_for(getattr(self.device, 'manager', None))
+        if maintenance is not None:
+            # Serialize old connection claims with board claims. The device
+            # operation lock below is nonblocking; human takeover remains able
+            # to cancel a currently waiting console operation.
+            with maintenance._lock:
+                return self._claim(actor, takeover)
+        return self._claim(actor, takeover)
+
+    def _claim(self, actor, takeover=False):
         self.check_maintenance()
         client_id = self.client_id if actor == 'web' else ''
         if takeover and actor != 'web':
@@ -173,6 +204,7 @@ class SerialTransactions:
     def check_context(self):
         """Recheck a request/task attachment immediately before starting device work."""
         self.check_maintenance()
+        self._check_actor(self.source_actor)
         task = getattr(self._local, 'task', None)
         if task is not None:
             if task[0].is_set():

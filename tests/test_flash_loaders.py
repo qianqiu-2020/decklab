@@ -41,7 +41,7 @@ class FlashLoaderTests(unittest.TestCase):
 
     def bundle(self, root):
         root.mkdir()
-        family = {'protocol': 'decklab-nor-v1'}
+        family = {'protocol': 'spacemit-ram-v1'}
         for key in ('fsbl', 'uboot'):
             payload = ('RAM only ' + key).encode()
             (root / (key + '.bin')).write_bytes(payload)

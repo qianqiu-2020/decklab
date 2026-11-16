@@ -44,6 +44,9 @@ def reexecute(environment, role=None):
 
 def configure_collector(server, settings):
     server.settings_revision = settings.snapshot()['revision']
+    desktop = getattr(server.manager, 'desktop', None)
+    if desktop is not None:
+        desktop.setup.settings = settings
     server.configuration_gate = threading.RLock()
     server.configuration_posts = 0
     server.restart_requested = False

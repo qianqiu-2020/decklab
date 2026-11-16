@@ -7,9 +7,12 @@
     ['串口与探测', ['BAUD', 'DATA_BITS', 'PARITY', 'STOP_BITS', 'FLOW_CONTROL', 'NEWLINE', 'PROBE', 'PROBE_COMMAND', 'AUTO_CONFIGURE_SSH']],
     ['登录默认值', ['SSH_USER', 'SSH_PASSWORD', 'CONSOLE_USER', 'CONSOLE_PASSWORD']],
     ['日志与传输', ['LOG_RETENTION_DAYS', 'DISK_MIN_FREE_MB', 'DISK_MIN_FREE_PERCENT', 'TRANSFER_MAX_FILES', 'TRANSFER_MAX_FILE_BYTES', 'TRANSFER_MAX_TOTAL_BYTES', 'TRANSFER_MIN_FREE_BYTES', 'TRANSFER_IDLE_SECONDS', 'TRANSFER_RETENTION_SECONDS', 'SCROLLBACK', 'SSH_LIMIT', 'SSH_IDLE']],
-    ['服务路径', ['BASE', 'STATIC', 'SOCKET', 'HANDOFF', 'BY_PATH', 'RESCUE_BIN', 'AGENT_TOKENS_FILE', 'PROFILES', 'HARDWARE', 'FLASH', 'FLASH_EXECUTOR', 'FLASH_LOADERS']]
+    ['镜像商店', ['IMAGE_INTERNAL_BROWSE', 'IMAGE_INTERNAL_DOWNLOAD']],
+    ['服务路径', ['BASE', 'STATIC', 'SOCKET', 'HANDOFF', 'BY_PATH', 'RESCUE_BIN', 'AGENT_TOKENS_FILE', 'PROFILES', 'HARDWARE', 'FLASH', 'DESKTOP', 'FLASH_EXECUTOR', 'FLASH_LOADERS']]
   ];
   var labels = {
+    IMAGE_INTERNAL_BROWSE: '组织镜像目录 HTTPS 地址', IMAGE_INTERNAL_DOWNLOAD: '组织镜像下载 HTTPS 地址',
+    DESKTOP: '图形接入配置文件',
     BACKEND_URL: '后端 HTTPS 地址', BACKEND_TOKEN: '节点间访问密钥', BACKEND_CA: '后端 CA 证书文件',
     BACKEND_BIND: '后端监听地址', BACKEND_PORT: '后端监听端口', BACKEND_CERT: '后端 TLS 证书文件', BACKEND_KEY: '后端 TLS 私钥文件',
     FLASH_LOADERS: '预备刷机环境清单',
@@ -26,7 +29,7 @@
     BY_PATH: '串口发现目录（Linux）', RESCUE_BIN: 'USB 恢复工具', AGENT_TOKENS_FILE: 'Agent 令牌文件',
     PROFILES: '板卡配置文件', HARDWARE: '硬件动作文件', FLASH: '刷机配置文件', FLASH_EXECUTOR: '自动刷机执行器'
   };
-  var docs = {profiles: '板卡配置与分配', hardware: '硬件动作', flash: '刷机绑定', agent_tokens: '固定 Agent 令牌'};
+  var docs = {profiles: '板卡配置与分配', hardware: '硬件动作', flash: '刷机绑定', desktop: '图形接入', agent_tokens: '固定 Agent 令牌'};
   var snapshot, inputs = {}, editors = {}, original, previewText = '', pendingBrowser = null;
   var dialog, status, preview, save, activate, browserBox;
   var openGeneration = 0, settingsTarget = 'web', remoteBackendAvailable = false;

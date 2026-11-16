@@ -14,7 +14,7 @@ class Element {
   setAttribute(name, value) { (this.attributes ||= {})[name] = value; }
   removeAttribute(name) { if (this.attributes) delete this.attributes[name]; }
   addEventListener(type, fn) { (this.events[type] ||= []).push(fn); }
-  emit(type) { for (const fn of this.events[type] || []) fn(); }
+  emit(type, event = {}) { for (const fn of this.events[type] || []) fn(event); }
   click() { if (!this.disabled) this.emit('click'); }
   show() { this.open = true; }
   close() { this.open = false; }
@@ -56,6 +56,60 @@ async function open(h) {
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
+test('full package is directly previewed without opening or submitting storage backup', async () => {
+  const h=harness(),pkg={id:'full-firmware',name:'Firmware.tar.gz',size:1024};
+  h.api.open({target_id:'direct-full',target_generation:'direct-generation'});
+  h.take('/api/tasks').resolve({tasks:[]});await drain();
+  h.take('/api/flash-target').resolve({capabilities:{...capabilities,nor_workspace_supported:true,
+    storage_inventory_supported:true,reset_after_supported:true,modes:['full','partitions']}});await drain();
+  assert.equal(h.get('fl-mode').value,'full');assert.equal(h.get('fl-storage-details').open,false);
+  h.get('fl-cache').click();h.chooseImage(pkg);assert.equal(h.get('fl-plan').disabled,false);
+  h.get('fl-plan').click();const preview=h.take('/api/flash-plan');assert.equal(preview.payload.mode,'full');
+  assert.equal(preview.payload.artifact_id,pkg.id);assert.deepEqual(preview.payload.selections,[]);
+  preview.resolve({plan:{id:'direct-full-plan',writes:[{storage:'active',partition:'fsbl',size:32}]}});await drain();
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+  h.get('fl-start').click();const start=h.take('/api/task-start');
+  assert.equal(start.payload.kind,'flash');assert.equal(start.payload.plan_id,'direct-full-plan');
+  assert.equal(h.requests.some(r=>r.payload && r.payload.kind==='nor-backup'),false);
+});
+
+test('selection timeout has a persistent recovery entry which only detects devices', async () => {
+  const h=harness(),expired={...norReady,state:'failed',error:'flash partition selection timed out; storage was not written'};
+  h.api.open(norTarget,expired);await drain();
+  assert.equal(h.get('fl-expired').hidden,false);assert.equal(h.get('fl-restart').disabled,false);
+  assert.match(h.get('fl-task-status').textContent,/确认已超时.*未开始写入.*重新检测/);
+  h.get('fl-mode').value='partitions';h.get('fl-mode').emit('change');
+  assert.equal(h.get('fl-expired').hidden,false);assert.match(h.get('fl-task-status').textContent,/确认已超时/);
+  h.get('fl-restart').click();const detect=h.take('/api/flash-discover');
+  assert.equal(detect.payload,undefined);assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+  detect.resolve({targets:[]});await drain();
+  h.api.open(norTarget,{...expired,flash:{...expired.flash,recovery_required:true}});await drain();
+  assert.equal(h.get('fl-restart').disabled,true);
+});
+
+test('selection confirmation shows remaining time before expiry', async () => {
+  const h=harness();h.api.open(norTarget,{...norReady,flash:{...norReady.flash,selection_deadline:Date.now()/1000+90}});await drain();
+  assert.match(h.get('fl-task-status').textContent,/确认剩余.*1:[23][09]/);
+  assert.equal(h.get('fl-expired').hidden,true);
+});
+
+test('optional readback and explicit reset are sealed by a fresh preview', async () => {
+  const h=harness();h.api.open(board);
+  h.take('/api/flash-capabilities').resolve({...capabilities,reset_after_supported:true});await drain();
+  h.take('/api/tasks').resolve({tasks:[]});await drain();
+  h.get('fl-artifact').value=artifact.id;h.get('fl-artifact').emit('change');
+  h.get('fl-verify').value='none';h.get('fl-verify').emit('change');
+  h.get('fl-reset-after').checked=true;h.get('fl-reset-after').emit('change');
+  h.get('fl-plan').click();const plan=h.take('/api/flash-plan');
+  assert.equal(plan.payload.verify,'none');assert.equal(plan.payload.reset_after,true);
+  plan.resolve({plan:{id:'reset-plan',binding_revision:7,verify:'none',reset_after:true,writes:[{storage:'disk-a',partition:'rootfs-a',size:32}]}});await drain();
+  assert.match(h.get('fl-preview').textContent,/回读校验：不执行.*刷后复位：自动复位/);
+  h.get('fl-reset-after').checked=false;h.get('fl-reset-after').emit('change');
+  assert.equal(h.get('fl-start').disabled,true);
+  h.api.open({...board,key:'other',serial:'SN-OTHER'});
+  assert.equal(h.get('fl-reset-after').checked,false);
+});
+
 test('image store selection only prepares current board and stale choices cannot cross devices', async () => {
   const h=harness();await open(h);h.get('fl-store').click();
   h.chooseImage({id:'global-image',name:'opensbi.itb',size:32,sha256:'b'.repeat(64)});
@@ -64,6 +118,118 @@ test('image store selection only prepares current board and stale choices cannot
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
   h.api.open({...board,key:'board-2',serial:'SN-2'});
   assert.throws(()=>h.chooseImage(artifact),/当前设备或任务状态已变化/);
+});
+
+test('cached image selection explains the required NOR read instead of promising a disabled preview', async () => {
+  const h=harness();h.api.open(norTarget);h.take('/api/tasks').resolve({tasks:[]});await drain();
+  h.take('/api/flash-target').resolve({target:norTarget,capabilities:{...capabilities,
+    nor_workspace_supported:true,preparable:true,modes:['partitions'],storages:[]}});await drain();
+  h.get('fl-cache').click();h.chooseImage({id:'os-package',name:'os.tar.gz',size:1024});
+  assert.equal(h.get('fl-plan').disabled,true);
+  assert.match(h.get('fl-status').textContent,/先读取设备存储/);
+  assert.equal(h.get('fl-read-nor').disabled,false);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('OS package in a read workspace compares system partitions and previews all referenced targets without NOR checks', async () => {
+  const h=harness();h.api.open(norTarget,norReady);await drain();
+  h.get('fl-cache').click();h.chooseImage({id:'os-package',name:'os.tar.gz',size:1024});
+  const inspect=h.take('/api/flash-selection');assert.equal(inspect.payload.mode,'partitions');
+  assert.match(h.get('fl-progress-text').textContent, /解析镜像包/);
+  assert.equal(inspect.payload.artifact_id,'os-package');assert.deepEqual(inspect.payload.selections,[]);
+  const os={layout_digest:'os-gpt',storages:[{id:'active',physical_device:'scsi:0',label:'System disk scsi:0',partitions:[
+    {name:'ESP',offset:1048576,size:272629760},{name:'rootfs',offset:273678336,size:12884901888}]}]};
+  const candidates=['ESP','rootfs'].map(partition=>({artifact_id:'os-package',storage:'active',partition}));
+  inspect.resolve({plan:{id:'catalogue-os',verify:'if-supported',ready:false,writes:[],catalogue:[
+    {name:'partition_universal.json',selected:true,referenced:true,partitions:[{name:'ESP',payload:'esp.vfat'},{name:'rootfs',payload:'rootfs.ext4'}]},
+    {name:'partition_nor.json',selected:false,referenced:false,partitions:[{name:'uboot',payload:'edk2.itb'}]}]},inspection:os,payload_candidates:candidates});await drain();
+  assert.equal(h.get('fl-mode').disabled,false);assert.equal(h.get('fl-mode').value,'full');
+  assert.equal(h.get('fl-target-storage').disabled,false);assert.equal(h.get('fl-verify').disabled,false);
+  assert.equal(h.get('fl-partitions').children.length,2);assert.equal(h.get('fl-partitions-field').hidden,false);
+  assert.match(h.get('fl-package-contents').textContent,/不在本次刷机配置/);
+  assert.match(h.get('fl-nor-current').textContent,/NOR · 本次保留/);
+  assert.match(h.get('fl-nor-current').textContent,/opensbi/);
+  assert.equal(h.get('fl-partitions').children.some(row=>row.checkbox.checked),false);
+  const poll=[...h.timers.values()][0];poll();h.take('/api/task?id=').resolve({task:JSON.parse(JSON.stringify(norReady))});await drain();
+  assert.equal(h.get('fl-mode').value,'full');assert.equal(h.get('fl-partitions').children[0].partitionId,'ESP');
+  h.get('fl-select').click();const preview=h.take('/api/flash-selection');
+  assert.equal(preview.payload.plan_id,'catalogue-os');assert.equal(preview.payload.layout_digest,'nor-live');
+  assert.deepEqual(preview.payload.selections.map(item=>item.partition),['ESP','rootfs']);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+  preview.resolve({plan:{id:'write-os',writes:[{storage:'active',partition:'ESP',size:2},{storage:'active',partition:'rootfs',size:3}]}});await drain();
+  assert.match(h.get('fl-select').textContent,/确认包内全部/);
+  h.get('fl-select').click();const commit=h.take('/api/flash-selection');assert.equal(commit.payload.plan_id,'write-os');
+  assert.equal(commit.payload.preview,undefined);assert.equal(commit.payload.artifact_id,undefined);
+});
+
+test('NOR Firmware verification changes never inherit the default UFS system disk', async () => {
+  const h=harness(),pkg={id:'firmware',name:'Debian-13-Firmware-K3-202611161333.tar.gz',size:3153902};
+  const ready={...norReady,flash:{...norReady.flash,storage_inventory:{default_storage:'scsi:0',
+    priority_source:'eeprom:UFS',storages:[{id:'scsi:0',size:128*1024**3,partitions:[]}]}}};
+  const result={plan:{id:'nor-catalogue',verify:'if-supported',writes:[],catalogue:[{format:'mtd',selected:true,partitions:[]}]},
+    inspection:norReady.flash.inspection,payload_candidates:['opensbi','env'].map(partition=>({storage:'active',partition,artifact_id:pkg.id}))};
+  h.api.open(norTarget,ready);await drain();h.get('fl-cache').click();h.chooseImage(pkg);
+  h.take('/api/flash-selection').resolve(result);await drain();
+  assert.equal(h.get('fl-target-storage-field').hidden,true);assert.equal(h.get('fl-target-storage').value,'');
+  h.get('fl-verify').value='none';h.get('fl-verify').emit('change');
+  const inspect=h.take('/api/flash-selection');assert.equal(inspect.payload.verify,'none');
+  assert.equal('target_storage' in inspect.payload,false);assert.equal(h.get('fl-target-storage-field').hidden,true);
+  inspect.resolve({...result,plan:{...result.plan,id:'nor-no-readback',verify:'none'}});await drain();
+  assert.equal(h.get('fl-select').disabled,false);assert.equal(h.get('fl-verify').value,'none');
+  h.get('fl-select').click();const preview=h.take('/api/flash-selection');
+  assert.equal('target_storage' in preview.payload,false);assert.equal(preview.payload.verify,'none');
+  assert.deepEqual(preview.payload.selections.map(x=>x.partition),['opensbi','env']);
+});
+
+test('missing package catalogue can be explicitly reparsed and previewed without a disabled dead end', async () => {
+  const h=harness(),pkg={id:'firmware-retry',name:'Firmware.tar.gz',size:1024};
+  h.api.open(norTarget,norReady);await drain();
+  h.get('fl-cache').click();h.chooseImage(pkg);
+  h.take('/api/flash-selection').resolve({error:'fixture import response lost'},502);await drain();
+  assert.match(h.get('fl-status').textContent,/fixture import/);
+  // Editing an option cleared the old error, leaving only the deadline and a
+  // disabled preview in the former implementation.
+  h.get('fl-reset-after').checked=true;h.get('fl-reset-after').emit('change');
+  assert.equal(h.get('fl-select').disabled,false);
+  assert.match(h.get('fl-select').textContent,/解析镜像并预览/);
+  h.get('fl-select').click();const retry=h.take('/api/flash-selection');
+  assert.equal(retry.payload.preview,true);assert.deepEqual(retry.payload.selections,[]);
+  assert.equal(h.get('fl-select').disabled,true);
+  retry.resolve({plan:{id:'retry-catalogue',verify:'if-supported',writes:[]},
+    inspection:norReady.flash.inspection,payload_candidates:['opensbi','env'].map(partition=>({
+      storage:'active',partition,artifact_id:pkg.id}))});await drain();
+  const preview=h.take('/api/flash-selection');
+  assert.equal(preview.payload.preview,true);assert.equal(preview.payload.plan_id,'retry-catalogue');
+  assert.equal(preview.payload.reset_after,true);
+  assert.deepEqual(preview.payload.selections.map(x=>x.partition),['opensbi','env']);
+  preview.resolve({plan:{id:'retry-write-preview',reset_after:true,writes:[{storage:'active',partition:'opensbi',size:32}]}});await drain();
+  assert.match(h.get('fl-select').textContent,/确认包内全部/);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'||r.payload && r.url==='/api/flash-selection' && !r.payload.preview),false);
+});
+
+test('failed catalogue retries remain actionable and switching devices prevents follow-on preview', async () => {
+  const h=harness(),pkg={id:'firmware-retry',name:'Firmware.tar.gz',size:1024};
+  h.api.open(norTarget,norReady);await drain();h.get('fl-cache').click();h.chooseImage(pkg);
+  h.take('/api/flash-selection').resolve({error:'fixture import failed'},409);await drain();
+  h.get('fl-select').click();h.take('/api/flash-selection').resolve({error:'fixture still failed'},409);await drain();
+  assert.equal(h.get('fl-select').disabled,false);assert.match(h.get('fl-status').textContent,/fixture still failed/);
+  h.get('fl-select').click();const stale=h.take('/api/flash-selection');
+  h.api.open({...norTarget,target_id:'other-board'}, {...norReady,id:'other-task'});await drain();
+  stale.resolve({plan:{id:'old-catalogue',writes:[]},inspection:norReady.flash.inspection,payload_candidates:[]});await drain();
+  assert.equal(h.requests.some(r=>r.url==='/api/flash-selection'||r.url==='/api/task-start'),false);
+});
+
+test('reparsing for a partition preview retains only the explicitly selected partition', async () => {
+  const h=harness(),pkg={id:'firmware-retry',name:'Firmware.tar.gz',size:1024};
+  h.api.open(norTarget,norReady);await drain();h.get('fl-cache').click();h.chooseImage(pkg);
+  h.take('/api/flash-selection').resolve({error:'fixture import failed'},409);await drain();
+  h.get('fl-mode').value='partitions';h.get('fl-mode').emit('change');
+  const row=h.get('fl-partitions').children[0];row.checkbox.checked=true;row.artifactSelect.value=pkg.id;row.checkbox.emit('change');
+  h.get('fl-select').click();h.take('/api/flash-selection').resolve({plan:{id:'partition-retry-catalogue',verify:'if-supported',writes:[]},
+    inspection:norReady.flash.inspection,payload_candidates:['opensbi','env'].map(partition=>({storage:'active',partition,artifact_id:pkg.id}))});await drain();
+  const preview=h.take('/api/flash-selection');
+  assert.equal(preview.payload.preview,true);assert.deepEqual(preview.payload.selections.map(x=>x.partition),['opensbi']);
+  assert.equal(preview.payload.target_generation,'brom-original');
 });
 
 test('partition rows offer only the active package mapping, never arbitrary cached archives', async () => {
@@ -76,7 +242,7 @@ test('partition rows offer only the active package mapping, never arbitrary cach
   h.get('fl-artifact').value=pkg.id;h.get('fl-artifact').emit('change');
   row=h.get('fl-partitions').children[0];
   assert.equal(row.artifactSelect.value,pkg.id);
-  assert.match(row.artifactSelect.children.find(o=>o.value===pkg.id).textContent,/匹配包内分区.*rootfs-a/);
+  assert.match(row.artifactSelect.children.find(o=>o.value===pkg.id).textContent,/firmware.tar.gz/);
   assert.equal(row.artifactSelect.children.some(o=>o.value===other.id),false);
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
 });
@@ -105,6 +271,13 @@ test('a raw file is not automatically duplicated into multiple selected partitio
   rows.forEach(row=>{row.checkbox.checked=true;row.checkbox.emit('change');});
   h.get('fl-store').click();h.chooseImage({id:'new-raw',name:'payload.bin',size:32});
   assert.equal(h.get('fl-partitions').children.some(row=>row.artifactSelect.value==='new-raw'),false);
+});
+
+test('choosing a new source file replaces the package when no partition override is selected', async () => {
+  const h=harness();await open(h);h.get('fl-store').click();h.chooseImage({id:'package',name:'firmware.tar.gz',size:1024});
+  h.get('fl-store').click();h.chooseImage({id:'new-source',name:'opensbi.itb',size:512});
+  assert.equal(h.get('fl-artifact').value,'new-source');assert.match(h.get('fl-source-summary').textContent,/opensbi.itb/);
+  assert.equal(h.get('fl-mode').value,'partitions');
 });
 
 test('a per-partition raw override keeps the source package for the other partition mappings', async () => {
@@ -243,6 +416,8 @@ test('lost flash submission locks start and queries original request rather than
   h.take('/api/flash-plan').resolve({plan: {id: 'plan-1', writes: [{storage: 'disk-a', size: 32}]}}); await drain();
   h.get('fl-start').click(); const request = h.take('/api/task-start'); request.reject(new Error('network lost')); await drain();
   assert.equal(h.get('fl-start').disabled, true); assert.equal(h.get('fl-recover').hidden, false);
+  assert.ok(h.get('fl-partitions').children.every(row=>row.checkbox.disabled&&row.artifactSelect.disabled));
+  assert.equal(h.get('fl-all-partitions').disabled,true);
   h.get('fl-start').click(); assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
   h.get('fl-recover').click(); h.take('/api/tasks').resolve({tasks: [{id: 'original', kind: 'flash', state: 'completed',
     progress: {}, flash: {request_id: request.payload.request_id}, result: {write_result: 'written', verify_result: 'unsupported', boot_result: 'not-requested'}}]}); await drain();
@@ -285,7 +460,7 @@ test('empty final write scope cannot be submitted and capability failure preserv
   assert.equal(h.get('fl-start').disabled, true); assert.match(h.get('fl-status').textContent, /缺少写入范围/);
   const denied = harness(); denied.api.open(board);
   denied.take('/api/flash-capabilities').resolve({supported: false, reason: 'Executor not configured'}); await drain();
-  assert.equal(denied.get('fl-plan').disabled, true); assert.equal(denied.get('fl-upload').disabled, true);
+  assert.equal(denied.get('fl-plan').disabled, true); assert.equal(denied.get('fl-files').disabled, true);
 });
 
 test('image upload uses bounded artifact chunks and seals before offering a preview', async () => {
@@ -293,7 +468,7 @@ test('image upload uses bounded artifact chunks and seals before offering a prev
   const bytes = Uint8Array.from([0, 255, 13, 10]);
   h.get('fl-files').files = [{name: 'payload.bin', size: bytes.length,
     slice: () => ({arrayBuffer: async () => bytes.buffer})}];
-  h.get('fl-upload').click(); const create = h.take('/api/artifact-create');
+  h.get('fl-files').emit('change'); const create = h.take('/api/artifact-create');
   assert.deepEqual(create.payload, {key: 'board-1', serial: 'SN-1', actor: 'web', name: 'payload.bin', size: 4});
   create.resolve({artifact: {id: 'new-image'}}); await drain();
   const append = h.take('/api/artifact-append'); assert.equal(append.payload.data_b64, 'AP8NCg==');
@@ -465,7 +640,7 @@ test('late USB discovery does not replace another board and absent devices keep 
   const empty = harness(); empty.api.discover();
   empty.take('/api/flash-discover').resolve({available: true, targets: []}); await drain();
   assert.match(empty.get('fl-status').textContent, /USB 数据线和下载模式/);
-  assert.equal(empty.get('fl-upload').disabled, true);
+  assert.equal(empty.get('fl-files').disabled, true);
 });
 
 test('a retained USB task can be observed without probing or reselecting a disconnected device', async () => {
@@ -519,7 +694,7 @@ for (const supported of [true, false]) test('BootROM image preparation is explic
     can_prepare_from_image: true, can_upload: true, modes: ['partitions'], storages: [], readback_supported: false}}); await drain();
   assert.equal(h.get('fl-mode').value, 'partitions');
   assert.equal(h.get('fl-mode').disabled, true);
-  assert.equal(h.get('fl-upload').disabled, false);
+  assert.equal(h.get('fl-files').disabled, false);
   assert.match(h.get('fl-status').textContent, /BootROM.*不写存储/);
   assert.match(h.get('fl-connections').textContent, /回读支持待确认/);
   assert.match(h.get('fl-partitions').textContent, /准备阶段将读取现场布局/);
@@ -551,7 +726,7 @@ test('NOR full package preview prepares first and requires a second explicit con
   h.take('/api/flash-target').resolve({target, capabilities: {...capabilities, preparable: true,
     modes: ['partitions', 'full'], storages: []}}); await drain();
   assert.equal(h.get('fl-mode').disabled, false);
-  assert.equal(h.get('fl-mode').value, 'partitions', 'full recovery is a separate explicit choice');
+  assert.equal(h.get('fl-mode').value, 'full', 'full package is available without opening advanced settings');
   h.get('fl-mode').value = 'full'; h.get('fl-mode').emit('change');
   h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change');
   h.get('fl-plan').click(); const preview = h.take('/api/flash-plan');
@@ -633,7 +808,7 @@ test('an unavailable executor can still show a disconnected recovery target and 
   assert.equal(release.payload.id, original.id);
   release.resolve({task: {...original, flash: {...original.flash, recovery_required: false}}}); await drain();
   assert.equal(h.get('fl-plan').disabled, true, 'a task snapshot cannot submit a new flash');
-  assert.equal(h.get('fl-upload').disabled, true);
+  assert.equal(h.get('fl-files').disabled, true);
   assert.equal(h.get('fl-discover').disabled, false);
 });
 
@@ -644,8 +819,8 @@ test('awaiting-selection upload carries the original task id and does not create
     flash: {inspection: {layout_digest: 'live', storages: capabilities.storages}, payload_candidates: [artifact]}};
   h.api.open(target, original); await drain();
   h.get('fl-files').files = [{name: 'payload.bin', size: 3, slice: () => ({arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer})}];
-  assert.equal(h.get('fl-upload').disabled, false);
-  h.get('fl-upload').click(); const create = h.take('/api/artifact-create');
+  assert.equal(h.get('fl-files').disabled, false);
+  h.get('fl-files').emit('change'); const create = h.take('/api/artifact-create');
   assert.equal(create.payload.task_id, original.id);
   assert.equal(create.payload.target_generation, 'initial-brom');
   create.resolve({artifact: {id: 'new-payload', size: 3}}); await drain();
@@ -673,7 +848,7 @@ test('unavailable USB connection shows its diagnostic and unknown readback witho
   h.get('fl-artifact').value=artifact.id; h.get('fl-artifact').emit('change');
   assert.equal(h.get('fl-plan').disabled,true);
   assert.equal(h.get('fl-start').disabled,true);
-  assert.equal(h.get('fl-upload').disabled,false);
+  assert.equal(h.get('fl-files').disabled,false);
   const raw=h.get('fl-connections').children.find(node=>node.textContent==='flush read error: -1');
   assert.equal(Object.hasOwn(raw.dataset,'i18nIgnore'),true);
 });
@@ -744,19 +919,53 @@ const norReady = {id:'nor-task',kind:'flash',state:'running',flash_targets:[{tar
     inspection:{layout_digest:'nor-live',storages:[{id:'active',label:'NOR',size:8388608,partitions:[
       {name:'opensbi',offset:1769472,size:393216},{name:'env',offset:655360,size:65536}]}]},payload_candidates:[artifact]}};
 
+test('reopening a prepared task restores reset capability without probing or changing selections', async () => {
+  const h=harness();h.api.open(norTarget,norReady);await drain();
+  assert.equal(h.get('fl-reset-after').disabled,true);
+  const query=h.take('/api/flash-capabilities');
+  assert.match(query.url,/target_id=nor-fixture/);assert.doesNotMatch(query.url,/target_generation=/);
+  h.get('fl-mode').value='partitions';h.get('fl-mode').emit('change');
+  const row=h.get('fl-partitions').children[0];row.checkbox.checked=true;
+  row.artifactSelect.value=artifact.id;row.checkbox.emit('change');
+  query.resolve({...capabilities,supported:false,reset_after_supported:true});await drain();
+  assert.equal(h.get('fl-reset-after').disabled,false);
+  assert.equal(h.get('fl-mode').value,'partitions');assert.equal(row.checkbox.checked,true);
+  assert.equal(h.requests.some(r=>r.url==='/api/flash-target'||r.url==='/api/task-start'),false);
+  h.get('fl-reset-after').checked=true;h.get('fl-reset-after').emit('change');
+  h.get('fl-select').click();const preview=h.take('/api/flash-selection');
+  assert.equal(preview.payload.reset_after,true);assert.equal(preview.payload.target_generation,'brom-original');
+  preview.resolve({plan:{id:'restored-reset-plan',reset_after:true,writes:[{storage:'active',partition:'opensbi',size:32}]}});await drain();
+  const poll=[...h.timers.values()][0];poll();await drain();
+  h.take('/api/task?id=').resolve({task:{...norReady,progress:{phase:'writing'}}});await drain();
+  assert.equal(h.get('fl-reset-after').disabled,true);
+  assert.equal(h.requests.some(r=>r.url.startsWith('/api/flash-capabilities')),false);
+});
+
+test('history recovery restores reset capability and late capability results cannot cross devices', async () => {
+  const h=harness();h.api.open(norTarget);h.take('/api/tasks').resolve({tasks:[norReady]});await drain();
+  const stale=h.take('/api/flash-capabilities');
+  h.api.open({...norTarget,target_id:'other-target'}, {...norReady,id:'other-task',
+    flash_targets:[{target_id:'other-target',generation:'other-generation'}]});await drain();
+  const current=h.take('/api/flash-capabilities');
+  current.resolve({...capabilities,reset_after_supported:false});await drain();
+  stale.resolve({...capabilities,reset_after_supported:true});await drain();
+  assert.equal(h.get('fl-reset-after').disabled,true);
+  assert.equal(h.requests.some(r=>r.url==='/api/flash-target'||r.url==='/api/task-start'),false);
+});
+
 test('image-free NOR preparation posts no payload or write scope and recovers an uncertain submission', async () => {
   const h=harness();h.api.open(norTarget);
   h.take('/api/tasks').resolve({tasks:[]});await drain();
   h.take('/api/flash-target').resolve({target:norTarget,capabilities:{...capabilities,artifacts:[],storages:[],
     nor_workspace_supported:true,preparable:true,modes:['partitions']}});await drain();
   assert.equal(h.get('fl-read-nor').disabled,false);
-  assert.equal(h.get('fl-mode').value,'partitions');assert.equal(h.get('fl-verify').value,'required');
+  assert.equal(h.get('fl-mode').value,'partitions');assert.equal(h.get('fl-verify').value,'if-supported');
   h.get('fl-read-nor').click();const request=h.take('/api/task-start');
   assert.equal(request.payload.kind,'nor-backup');assert.equal(request.payload.target_generation,'brom-original');
   assert.equal('artifact_id' in request.payload,false);assert.equal('plan_id' in request.payload,false);
   request.reject(new Error('lost response'));await drain();
   assert.equal(h.get('fl-read-nor').disabled,true);assert.equal(h.get('fl-recover').hidden,false);
-  assert.equal(h.get('fl-upload').disabled,true);
+  assert.equal(h.get('fl-files').disabled,true);
   h.get('fl-read-nor').click();assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
   h.get('fl-recover').click();h.take('/api/tasks').resolve({tasks:[{...norReady,flash:{...norReady.flash,request_id:request.payload.request_id}}]});await drain();
   assert.match(h.get('fl-task-id').textContent,/nor-task/);
@@ -783,9 +992,63 @@ test('NOR partition comparison shows real backup versions and file metadata afte
   preview.resolve({plan:{id:'new-partition-plan',write_layout:false,writes:[{storage:'active',partition:'opensbi',size:32}],
     payload_metadata:[{storage:'active',partition:'opensbi',content:{version:'OpenSBI v1.7',version_state:'identified',sha256:'4'.repeat(64),size:32}}]}});await drain();
   assert.match(row.payloadInfo.textContent,/OpenSBI v1.7/);assert.equal(row.checkbox.checked,true);
+  assert.match(row.payloadInfo.textContent,/载荷 SHA-256.*32.*字节/);
   h.get('fl-select').click();const commit=h.take('/api/flash-selection');
   assert.equal(commit.payload.id,'nor-task');assert.equal(commit.payload.plan_id,'new-partition-plan');
   assert.equal('selections' in commit.payload,false);
+});
+
+test('NOR preview compares replacement-file length before writing and clears it when changing files', async () => {
+  const h=harness();h.api.open(norTarget,norReady);await drain();
+  let row=h.get('fl-partitions').children[0];
+  row.checkbox.checked=true;row.artifactSelect.value=artifact.id;row.checkbox.emit('change');
+  h.get('fl-select').click();
+  const comparison={size:32,sha256:artifact.sha256,expected_sha256:artifact.sha256,matches:true,
+    phase:'before',backup_id:norBackup.artifact.id,backup_sha256:norBackup.artifact.sha256};
+  h.take('/api/flash-selection').resolve({plan:{id:'comparison-plan',write_layout:false,
+    writes:[{storage:'active',partition:'opensbi',size:32}],payload_metadata:[{
+      storage:'active',partition:'opensbi',sha256:artifact.sha256,
+      content:{version:'OpenSBI v1.7',size:32,sha256:artifact.sha256},board_comparison:comparison}]}});await drain();
+  assert.match(row.currentInfo.textContent,/与替换文件一致.*32.*字节/);
+  assert.match(row.currentInfo.textContent,/按替换文件长度 SHA-256.*32.*字节/);
+  assert.match(row.currentInfo.textContent,/板上备份.*aaaa.*替换文件.*aaaa/);
+  assert.match(row.currentInfo.textContent,/整分区 SHA-256.*393216.*字节/);
+  assert.equal(row.checkbox.checked,true,'comparison never changes the reviewed write scope');
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+  h.get('fl-cache').click();h.chooseImage({...artifact,id:'different-file',name:'opensbi.itb',sha256:'5'.repeat(64)});
+  row=h.get('fl-partitions').children[0];
+  assert.doesNotMatch(row.currentInfo.textContent,/与替换文件一致|与替换文件不同|按替换文件长度/);
+  assert.match(row.currentInfo.textContent,/整分区 SHA-256/);
+});
+
+test('NOR preview reports unequal bytes and rejects comparisons from another backup or payload', async () => {
+  for (const changed of [{matches:false},{backup_id:'wrong-backup'},{expected_sha256:'9'.repeat(64)}]) {
+    const h=harness();h.api.open(norTarget,norReady);await drain();
+    const row=h.get('fl-partitions').children[0];
+    row.checkbox.checked=true;row.artifactSelect.value=artifact.id;row.checkbox.emit('change');
+    h.get('fl-select').click();
+    const comparison={size:32,sha256:'6'.repeat(64),expected_sha256:artifact.sha256,matches:false,
+      phase:'before',backup_id:norBackup.artifact.id,backup_sha256:norBackup.artifact.sha256,...changed};
+    h.take('/api/flash-selection').resolve({plan:{id:'comparison-plan',writes:[{storage:'active',partition:'opensbi'}],
+      payload_metadata:[{storage:'active',partition:'opensbi',sha256:artifact.sha256,
+        content:{size:32,sha256:artifact.sha256},board_comparison:comparison}]}});await drain();
+    if (changed.matches===false) assert.match(row.currentInfo.textContent,/与替换文件不同.*32.*字节/);
+    else assert.doesNotMatch(row.currentInfo.textContent,/与替换文件一致|与替换文件不同/);
+  }
+});
+
+test('NOR readback distinguishes full partition digest from exact payload-range comparison', async () => {
+  const h=harness(),content={size:393216,sha256:'a'.repeat(64),version:'OpenSBI v1.7',
+    payload_comparison:{size:80,sha256:'b'.repeat(64),expected_sha256:'b'.repeat(64),matches:true}};
+  const after={...norBackup,partitions:[{name:'opensbi',size:393216,content}],artifact:{...norBackup.artifact,id:'c'.repeat(24)}};
+  h.api.open(norTarget,{...norReady,state:'completed',flash:{...norReady.flash,nor_after:after}});await drain();
+  assert.match(h.get('fl-partitions').textContent,/整分区 SHA-256.*393216.*字节/);
+  assert.match(h.get('fl-partitions').textContent,/与本次载荷一致.*80.*字节/);
+  assert.match(h.get('fl-partitions').textContent,/载荷范围 SHA-256.*80.*字节/);
+  assert.match(h.get('fl-partitions').textContent,/板上回读.*bbbb.*本次载荷.*bbbb/);
+  h.api.open(norTarget,{...norReady,state:'failed',flash:{...norReady.flash,nor_after:{...after,partitions:[
+    {name:'opensbi',size:393216,content:{...content,payload_comparison:{...content.payload_comparison,matches:false}}}]}}});await drain();
+  assert.match(h.get('fl-partitions').textContent,/与本次载荷不同/);
 });
 
 test('NOR byte progress and readback failures remain separate from completed writes', async () => {
@@ -806,6 +1069,140 @@ test('URL payload import during NOR selection carries the original task generati
   h.get('fl-url').value='https://firmware.example/opensbi.itb';h.get('fl-download').click();
   const download=h.take('/api/image-download');assert.equal(download.payload.task_id,'nor-task');
   assert.equal(download.payload.target_generation,'brom-original');
+});
+
+test('full package is the NOR default and never carries hidden partition selections', async () => {
+  const h=harness();h.api.open(board);
+  h.take('/api/flash-capabilities').resolve({...capabilities,nor_workspace_supported:true,preparable:true});await drain();
+  h.take('/api/tasks').resolve({tasks:[]});await drain();
+  assert.equal(h.get('fl-mode').value,'full');assert.equal(h.get('fl-read-nor').hidden,true);
+  assert.equal(h.get('fl-verify').value,'if-supported');
+  h.get('fl-artifact').value=artifact.id;h.get('fl-artifact').emit('change');
+  const row=h.get('fl-partitions').children[0];row.checkbox.checked=true;row.artifactSelect.value=artifact.id;
+  h.get('fl-plan').click();
+  const request=h.take('/api/flash-plan');assert.equal(request.payload.mode,'full');assert.deepEqual(request.payload.selections,[]);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('select all maps the package to every partition, deselection stays scoped and full mode drops the checks', async () => {
+  const pkg={...artifact,id:'full-package',name:'firmware.tar.gz'},h=harness();h.api.open(board);
+  h.take('/api/flash-capabilities').resolve({...capabilities,artifacts:[pkg]});await drain();h.take('/api/tasks').resolve({tasks:[]});await drain();
+  h.get('fl-artifact').value=pkg.id;h.get('fl-artifact').emit('change');
+  h.get('fl-mode').value='partitions';h.get('fl-mode').emit('change');
+  h.get('fl-all-partitions').checked=true;h.get('fl-all-partitions').emit('change');
+  const rows=h.get('fl-partitions').children;assert.ok(rows.every(row=>row.checkbox.checked&&row.artifactSelect.value===pkg.id));
+  h.get('fl-plan').click();const selected=h.take('/api/flash-plan');assert.equal(selected.payload.selections.length,2);
+  selected.resolve({error:'fixture preview failure'},409);await drain();
+  rows[0].checkbox.checked=false;rows[0].checkbox.emit('change');assert.equal(h.get('fl-all-partitions').indeterminate,true);
+  h.get('fl-mode').value='full';h.get('fl-mode').emit('change');h.get('fl-plan').click();
+  assert.deepEqual(h.take('/api/flash-plan').payload.selections,[]);
+});
+
+test('selection preview errors survive task polling and clear when the user edits the selection', async () => {
+  const h=harness();h.api.open(norTarget,norReady);await drain();
+  h.get('fl-store').click();h.chooseImage(artifact);
+  const row=h.get('fl-partitions').children[0];row.checkbox.checked=true;row.artifactSelect.value=artifact.id;
+  h.get('fl-select').click();h.take('/api/flash-selection').resolve({error:'fixture layout rejected: mismatched-size'},409);await drain();
+  assert.match(h.get('fl-status').textContent,/mismatched-size/);
+  const poll=[...h.timers.values()][0];poll();await drain();
+  h.take('/api/task?id=').resolve({task:{...norReady,flash:{...norReady.flash,selection_deadline:1900000000}}});await drain();
+  assert.match(h.get('fl-status').textContent,/mismatched-size/);
+  assert.match(h.get('fl-task-status').textContent,/确认剩余/);
+  row.checkbox.emit('change');assert.equal(h.get('fl-status').textContent,'');
+});
+
+test('pasting a URL downloads immediately and blur cannot submit it again after completion', async () => {
+  const h=harness();await open(h);let prevented=false;
+  const url='https://images.example/firmware.tar.gz';
+  h.get('fl-url').emit('paste',{clipboardData:{getData:()=>url},preventDefault:()=>{prevented=true;}});
+  const request=h.take('/api/image-download');assert.equal(prevented,true);assert.equal(request.payload.url,url);
+  assert.equal(h.get('fl-download').hidden,true);
+  request.resolve({task:{id:'pasted-image',state:'running'}});await drain();
+  h.take('/api/task?id=pasted-image').resolve({task:{id:'pasted-image',state:'completed',result:{artifact:{...artifact,name:'firmware.tar.gz',state:'ready'}}}});await drain();
+  assert.match(h.get('fl-source-summary').textContent,/firmware.tar.gz/);
+  h.get('fl-url').emit('change');assert.equal(h.requests.some(r=>r.url==='/api/image-download'),false);
+});
+
+test('typed URL enters once on Enter and invalid or incomplete values do not submit', async () => {
+  const h=harness();await open(h);
+  h.get('fl-url').value='https://';h.get('fl-url').emit('change');assert.equal(h.requests.some(r=>r.url==='/api/image-download'),false);
+  h.get('fl-url').value='https://images.example/opensbi.itb';h.get('fl-url-sha256').value='bad';
+  h.get('fl-url').emit('keydown',{key:'Enter',preventDefault(){}});assert.match(h.get('fl-status').textContent,/SHA-256/);
+  assert.equal(h.requests.some(r=>r.url==='/api/image-download'),false);
+  h.get('fl-url-sha256').value='';h.get('fl-url').emit('keydown',{key:'Enter',preventDefault(){}});
+  assert.equal(h.take('/api/image-download').payload.url,'https://images.example/opensbi.itb');
+});
+
+test('downloaded cache and store buttons open the same picker at the requested source', async () => {
+  const h=harness();await open(h);h.get('fl-cache').click();assert.equal(h.imagePicker().source,'local');
+  h.chooseImage(artifact);assert.match(h.get('fl-source-summary').textContent,/image.bin.*32 B/);
+  h.get('fl-store').click();assert.equal(h.imagePicker().source,'public');
+});
+
+test('unified storage read starts once from full mode and requests system metadata with NOR backup', async () => {
+  const h=harness();h.api.open(norTarget);h.take('/api/tasks').resolve({tasks:[]});await drain();
+  h.take('/api/flash-target').resolve({target:norTarget,capabilities:{...capabilities,nor_workspace_supported:true,
+    storage_inventory_supported:true,preparable:true,modes:['full','partitions']}});await drain();
+  assert.equal(h.get('fl-mode').value,'full');assert.equal(h.get('fl-read-nor').hidden,false);
+  assert.equal(h.get('fl-read-nor').textContent,'读取设备存储');
+  h.get('fl-read-nor').click();const request=h.take('/api/task-start');assert.equal(request.payload.kind,'nor-backup');
+  assert.equal(request.payload.read_system,true);assert.equal('artifact_id' in request.payload,false);
+  h.get('fl-read-nor').click();assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('system storage metadata uses the proven default and changing views never changes write selections', async () => {
+  const h=harness(),inventory={default_storage:'scsi:0',priority_source:'eeprom:UFS',storages:[
+    {id:'nvme:0',size:64*1024**3,partitions:[{name:'rootfs',offset:1048576,size:4096,content:{version:'Debian 13',version_state:'identified'}}]},
+    {id:'scsi:0',size:128*1024**3,partitions:[{name:'rootfs',offset:1048576,size:4096,content:{version:'Bianbu 2.3.5',version_state:'identified'}}]}]};
+  h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:inventory}});await drain();
+  assert.equal(h.get('fl-system').hidden,false);assert.equal(h.get('fl-system-storage').value,'scsi:0');
+  assert.match(h.get('fl-system-parts').textContent,/Bianbu 2.3.5/);
+  assert.match(h.get('fl-system-origin').textContent,/EEPROM.*UFS/);
+  h.get('fl-system-storage').value='nvme:0';h.get('fl-system-storage').emit('change');
+  assert.match(h.get('fl-system-parts').textContent,/Debian 13/);
+  assert.ok(h.get('fl-partitions').children.every(row=>!row.checkbox.checked));
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'||r.url==='/api/flash-selection'),false);
+  h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:{...inventory,default_storage:'',priority_source:'ram-policy'}}});await drain();
+  assert.equal(h.get('fl-system-storage').value,'');assert.match(h.get('fl-system-origin').textContent,/未能确认默认介质/);
+});
+
+test('old EEPROM edit records resolve UFS to the unique SCSI disk for viewing only', async () => {
+  const h=harness(), inventory={default_storage:'',default_candidate:'',priority_source:'eeprom:UFS',storages:[
+    {id:'scsi:0',size:128*1024**3,partitions:[{name:'rootfs',size:4096,offset:1048576,content:{version:'Debian 13'}}]}]};
+  h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:inventory}});await drain();
+  assert.equal(h.get('fl-system-storage').value,'scsi:0');
+  assert.match(h.get('fl-system-origin').textContent,/EEPROM.*UFS/);
+  assert.match(h.get('fl-system-parts').textContent,/Debian 13/);
+  assert.ok(h.get('fl-partitions').children.every(row=>!row.checkbox.checked));
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'||r.url==='/api/flash-selection'),false);
+  for (const [disks,message] of [
+    [[...inventory.storages,{id:'scsi:1',size:128*1024**3,partitions:[]}],/多个匹配/],
+    [[{id:'nvme:0',size:64*1024**3,partitions:[]}],/未发现与优先启动介质匹配/]]) {
+    h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:{...inventory,storages:disks}}});await drain();
+    assert.equal(h.get('fl-system-storage').value,'');assert.match(h.get('fl-system-origin').textContent,message);
+  }
+});
+
+test('EEPROM priority edit sends a separate fixed action and retains the flash selection scope', async () => {
+  const h=harness(), inventory={default_storage:'',priority_source:'eeprom:UFS',boot_priority_editable:true,storages:[]};
+  h.api.open(norTarget,{...norReady,flash:{...norReady.flash,resolved_serial:'BOARD-SAMPLE-01',storage_inventory:inventory}});await drain();
+  assert.equal(h.get('fl-boot-priority').value,'UFS');assert.equal(h.get('fl-boot-save').disabled,true);
+  assert.match(h.get('fl-eeprom-identity').textContent,/BOARD-SAMPLE-01/);
+  h.get('fl-boot-priority').value='SSD';h.get('fl-boot-priority').emit('change');h.get('fl-boot-save').click();
+  const save=h.take('/api/flash-selection');
+  assert.equal(save.payload.action,'boot-priority');assert.equal(save.payload.value,'SSD');assert.equal(save.payload.expected,'UFS');
+  assert.equal('selections' in save.payload,false);assert.equal(h.get('fl-boot-save').disabled,true);
+  save.resolve({task:{...norReady,flash:{...norReady.flash,storage_inventory:{...inventory,priority_source:'eeprom:SSD'},
+    boot_priority_change:{state:'completed',verify_result:'verified'}}}});await drain();
+  assert.match(h.get('fl-boot-status').textContent,/已回读校验.*下次启动/);
+  assert.ok(h.get('fl-partitions').children.every(row=>!row.checkbox.checked));
+});
+
+test('uncertain EEPROM write cannot be resubmitted as another change', async () => {
+  const h=harness(),inventory={default_storage:'',priority_source:'eeprom:UFS',boot_priority_editable:true,storages:[]};
+  h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:inventory,boot_priority_change:{state:'unknown'}}});await drain();
+  assert.equal(h.get('fl-boot-priority').disabled,true);assert.equal(h.get('fl-boot-save').disabled,true);
+  assert.match(h.get('fl-boot-status').textContent,/未确认/);
 });
 
 (async () => {

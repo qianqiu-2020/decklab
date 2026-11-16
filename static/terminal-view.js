@@ -9,6 +9,14 @@
     function isCurrent(ctx) {
       return !!ctx && view === ctx && ctx.gen === loopGen;
     }
+    function terminalVisible(ctx) {
+      if (!isCurrent(ctx)) return false;
+      // Desktop is another view of the same live session. Keep consuming its
+      // stream, but never negotiate geometry from a display:none terminal.
+      var detail = $('detail'), host = $('d-term');
+      if (detail.classList && detail.classList.contains('desktop-active')) return false;
+      return !host.getClientRects || host.getClientRects().length > 0;
+    }
 
     function disposeView() {
       var old = view;
@@ -214,7 +222,7 @@
       clearSerialSizeStatus(ctx);
     }
     function requestSerialSize(ctx, automatic) {
-      if (!isCurrent(ctx) || ctx.serialSizePending) return;
+      if (!terminalVisible(ctx) || ctx.serialSizePending) return;
       if (!idleSerialPrompt(ctx)) {
         if (!automatic) {
           ctx.serialSizeRequest = null;
@@ -264,7 +272,7 @@
     function syncSerialSize() { requestSerialSize(view, false); }
     function scheduleSerialSize(ctx) {
       clearTimeout(ctx.serialSizeTimer);
-      if (!idleSerialPrompt(ctx)) return;
+      if (!terminalVisible(ctx) || !idleSerialPrompt(ctx)) return;
       ctx.serialSizeTimer = setTimeout(function () { requestSerialSize(ctx, true); }, 400);
     }
     function applySerialGeometry(ctx, geometry) {
@@ -321,10 +329,10 @@
 
     function resizeTerm() {
       var ctx = view;
-      if (!isCurrent(ctx)) return;
+      if (!terminalVisible(ctx)) return;
       try { fitTerminal(ctx); syncTerminalLayers(ctx); } catch (e) {}
       if (window.requestAnimationFrame) window.requestAnimationFrame(function () {
-        if (!isCurrent(ctx)) return;
+        if (!terminalVisible(ctx)) return;
         try { fitTerminal(ctx); syncTerminalLayers(ctx); ctx.term.refresh(0, ctx.term.rows - 1); } catch (e) {}
         pushSize(ctx);
       });
@@ -363,6 +371,7 @@
       return {cols: dimensions && dimensions.cols, rows: visibleTerminalRows(ctx, dimensions)};
     }
     function fitTerminal(ctx) {
+      if (!terminalVisible(ctx)) return;
       // UART has no PTY window-size negotiation. Linux serial consoles,
       // readline, EDK2 and GRUB normally lay out against 80 columns; fitting
       // xterm to a wide browser makes wrapped input and cursor-left disagree
@@ -450,10 +459,10 @@
     // 把浏览器终端尺寸推给后端,后端 ioctl 到 pty —— 否则远端以为自己是 80x24,
     // 宽度用不满,vi/htop 也按错误列数画。串口那条没法协商(线路上没有 window-change)。
     function pushSize(ctx) {
-      if (!isCurrent(ctx) || ctx.sid === 'serial' || ctx.readonly) return;
+      if (!terminalVisible(ctx) || ctx.sid === 'serial' || ctx.readonly) return;
       clearTimeout(ctx.sizeTimer);
       ctx.sizeTimer = setTimeout(function () {
-        if (!isCurrent(ctx) || ctx.readonly) return;
+        if (!terminalVisible(ctx) || ctx.readonly) return;
         var dimensions = ctx.fit.proposeDimensions();
         if (ctx.screenManaged) {
           var capacity = serialCapacity(ctx, dimensions);
@@ -516,7 +525,7 @@
           ctx.initialRendered = true;
           if (snapshot) scheduleFullRefresh(ctx);
           scheduleSerialSize(ctx); pushSize(ctx);
-          if (ctx.sid === 'serial' && ctx.screenPhase === 'text' && !ctx.readonly && !ctx.internalOutput
+          if (terminalVisible(ctx) && ctx.sid === 'serial' && ctx.screenPhase === 'text' && !ctx.readonly && !ctx.internalOutput
               && !ctx.inputQueue.length && !ctx.inputSending) {
             var capacity = serialCapacity(ctx, ctx.fit.proposeDimensions());
             var ratio = ctx.term.options.fontSize / DEFAULT_TERMINAL_FONT_SIZE;

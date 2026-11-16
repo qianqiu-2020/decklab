@@ -1,12 +1,24 @@
 {
   "schema": 1,
   "scope": "official-PyPI-wheel-artifacts-for-pinned-build",
-  "python": "3.10",
+  "python": "3.12",
   "architectures": [
     "amd64",
     "arm64"
   ],
   "distributions": [
+    {
+      "name": "aardwolf",
+      "version": "0.2.17",
+      "source": "https://pypi.org/project/aardwolf/0.2.17/",
+      "wheels": [
+        {
+          "filename": "aardwolf-0.2.17-cp311-abi3-manylinux_2_28_x86_64.whl",
+          "sha256": "8a2fc66cb4c32ff5ede8f9a157e4b7f6f62ca34ca86a2b8443879ac963f34642",
+          "url": "https://files.pythonhosted.org/packages/bb/fa/1b8c4c3b2cc0abc4da838f5a02974eea4991eec1f52d9b487dbc68bb6b0c/aardwolf-0.2.17-cp311-abi3-manylinux_2_28_x86_64.whl"
+        }
+      ]
+    },
     {
       "name": "altgraph",
       "version": "0.17.5",
@@ -44,6 +56,66 @@
       ]
     },
     {
+      "name": "arc4",
+      "version": "0.5.0",
+      "source": "https://pypi.org/project/arc4/0.5.0/",
+      "wheels": [
+        {
+          "filename": "arc4-0.5.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "7a3b4325e550a8bc2b56484edf91a983d2bd3f32fae8f169d5a5846a22554ea9",
+          "url": "https://files.pythonhosted.org/packages/7a/77/c4b547dd33a23079dff6e173fc2313841802bb9a1be3975673bf4c5efbe1/arc4-0.5.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl"
+        }
+      ]
+    },
+    {
+      "name": "asn1crypto",
+      "version": "1.5.1",
+      "source": "https://pypi.org/project/asn1crypto/1.5.1/",
+      "wheels": [
+        {
+          "filename": "asn1crypto-1.5.1-py2.py3-none-any.whl",
+          "sha256": "db4e40728b728508912cbb3d44f19ce188f218e9eba635821bb4b68564f8fd67",
+          "url": "https://files.pythonhosted.org/packages/c9/7f/09065fd9e27da0eda08b4d6897f1c13535066174cc023af248fc2a8d5e5a/asn1crypto-1.5.1-py2.py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "asn1tools",
+      "version": "0.169.0",
+      "source": "https://pypi.org/project/asn1tools/0.169.0/",
+      "wheels": [
+        {
+          "filename": "asn1tools-0.169.0-py3-none-any.whl",
+          "sha256": "2efc6a83d3ad3c57aea313d7896ffeca82d83155668620a54c88f426ea0eded1",
+          "url": "https://files.pythonhosted.org/packages/a6/51/caff14a34bada6c900115ca49f9416fccb62116e5938c98da61a51b522fe/asn1tools-0.169.0-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "asyauth",
+      "version": "0.0.25",
+      "source": "https://pypi.org/project/asyauth/0.0.25/",
+      "wheels": [
+        {
+          "filename": "asyauth-0.0.25-py3-none-any.whl",
+          "sha256": "c3d8b98d9ec5895a4aebd3d3bb10d52440c210c43f65cbb3a3dc04b5b6522f32",
+          "url": "https://files.pythonhosted.org/packages/26/88/285eceb8bbe28bef074f0902808a6713e429187922269c2bc8bbac791be9/asyauth-0.0.25-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "asysocks",
+      "version": "0.2.19",
+      "source": "https://pypi.org/project/asysocks/0.2.19/",
+      "wheels": [
+        {
+          "filename": "asysocks-0.2.19-py3-none-any.whl",
+          "sha256": "be34dd128287371cad5ff6332314034d54d587ba58a0c7dd8be2787138c29d28",
+          "url": "https://files.pythonhosted.org/packages/53/70/99cd52c7c541d79174ef8b978fb00fe5bb5285ef424f8ee50ec7bc71a189/asysocks-0.2.19-py3-none-any.whl"
+        }
+      ]
+    },
+    {
       "name": "attrs",
       "version": "26.1.0",
       "source": "https://pypi.org/project/attrs/26.1.0/",
@@ -56,19 +128,48 @@
       ]
     },
     {
+      "name": "automat",
+      "version": "25.4.16",
+      "source": "https://pypi.org/project/automat/25.4.16/",
+      "wheels": [
+        {
+          "filename": "automat-25.4.16-py3-none-any.whl",
+          "sha256": "04e9bce696a8d5671ee698005af6e5a9fa15354140a87f4870744604dcdd3ba1",
+          "url": "https://files.pythonhosted.org/packages/02/ff/1175b0b7371e46244032d43a56862d0af455823b5280a50c63d99cc50f18/automat-25.4.16-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "bitstruct",
+      "version": "8.24.0",
+      "source": "https://pypi.org/project/bitstruct/8.24.0/",
+      "wheels": [
+        {
+          "filename": "bitstruct-8.24.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "72bddf875f42329787ca5655f4cb3c67b6ebdd9c5dbe43273f5f32985f6d3063",
+          "url": "https://files.pythonhosted.org/packages/ff/4f/a40014ac1c5252bec30138d983ec6660ff1aeefa4d1de825582978b623a8/bitstruct-8.24.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+        },
+        {
+          "filename": "bitstruct-8.24.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "214886dddfbb399ff65a491c6cbd935d007a84d4271301bb9297e4fb9d833f6a",
+          "url": "https://files.pythonhosted.org/packages/95/a5/c6b8f6e043f28abf4d4fa97f671aa69bfe09e3d3eb97f0579c0ac5ba0c32/bitstruct-8.24.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+        }
+      ]
+    },
+    {
       "name": "cffi",
       "version": "2.1.1",
       "source": "https://pypi.org/project/cffi/2.1.1/",
       "wheels": [
         {
-          "filename": "cffi-2.1.1-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
-          "sha256": "5a59cc1c4442bc3d5c703bf720b51138d0bfc173618807c9ee2490a7541dd3d9",
-          "url": "https://files.pythonhosted.org/packages/a3/b9/0f2e58b2cefa33255bff36935d42b13180fe559bba82596540eb404bde7d/cffi-2.1.1-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+          "filename": "cffi-2.1.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+          "sha256": "68e62fe11f30d5ca8289242866f0a5291402d8529ca2178ab8afc5c9694ae890",
+          "url": "https://files.pythonhosted.org/packages/44/de/f98430906df1545ffde0d543dd124a7a439bc2cd32b36b9c53f805df7333/cffi-2.1.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
         },
         {
-          "filename": "cffi-2.1.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
-          "sha256": "194cffa889098ced9976c3fc6340305e43f6303657d298da55366907c05c22d6",
-          "url": "https://files.pythonhosted.org/packages/75/77/60bebf6f818bec84210ac5b6979ce4eeadce6fbbaabc9c7ab23e506d1ce5/cffi-2.1.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+          "filename": "cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf",
+          "url": "https://files.pythonhosted.org/packages/b1/db/dceb9dd5b231e1da801793f8acc9f3c52a7e1afe40bb1aae37e02b0faad5/cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
         }
       ]
     },
@@ -85,10 +186,94 @@
       ]
     },
     {
+      "name": "colorama",
+      "version": "0.4.6",
+      "source": "https://pypi.org/project/colorama/0.4.6/",
+      "wheels": [
+        {
+          "filename": "colorama-0.4.6-py2.py3-none-any.whl",
+          "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+          "url": "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "constantly",
+      "version": "23.10.4",
+      "source": "https://pypi.org/project/constantly/23.10.4/",
+      "wheels": [
+        {
+          "filename": "constantly-23.10.4-py3-none-any.whl",
+          "sha256": "3fd9b4d1c3dc1ec9757f3c52aef7e53ad9323dbe39f51dfd4c43853b68dfa3f9",
+          "url": "https://files.pythonhosted.org/packages/b8/40/c199d095151addf69efdb4b9ca3a4f20f70e20508d6222bffb9b76f58573/constantly-23.10.4-py3-none-any.whl"
+        }
+      ]
+    },
+    {
       "name": "cryptography",
       "version": "50.0.2",
       "source": "https://pypi.org/project/cryptography/50.0.2/",
       "wheels": [
+        {
+          "filename": "cryptography-50.0.2-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+          "sha256": "79def8d059362e7831389ed3be0ecdf58a89386e1271e35dd9f5af84e81bffd0",
+          "url": "https://files.pythonhosted.org/packages/d9/69/c9bd862c3bf43d6399c433caf002df16e2dffd4be49bdf515cda38038711/cryptography-50.0.2-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "630ebfea3bf689d075f82316324ff7433dc447fe6bc1bfc76524b74b4a9567d2",
+          "url": "https://files.pythonhosted.org/packages/21/69/64cef1f702bf6657e0cc186ed1a2891d50d29fb41586b254e1c07adea261/cryptography-50.0.2-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp311-abi3-manylinux_2_28_aarch64.whl",
+          "sha256": "f9f6143a8c75945eb960d9eb98905a441394abfa24afaae239d514ffb2586480",
+          "url": "https://files.pythonhosted.org/packages/38/6b/61a3f8d8c5e1e49a6cddccafc4015cc1c0021360ab0acb4080e7a423644a/cryptography-50.0.2-cp311-abi3-manylinux_2_28_aarch64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp311-abi3-manylinux_2_28_x86_64.whl",
+          "sha256": "4061c0079120205fb760c58acab6443e217307dcf05e3702cf970e0689972856",
+          "url": "https://files.pythonhosted.org/packages/1a/f1/b474e930c4d910328780e3940da76f5aa5cbc48ce1fc14e44d239d9ea9db/cryptography-50.0.2-cp311-abi3-manylinux_2_28_x86_64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp311-abi3-manylinux_2_34_aarch64.whl",
+          "sha256": "87e9ce85beb6b328ba370cc6e6aea483c92617b4c95b1d33a49297eb662bfb04",
+          "url": "https://files.pythonhosted.org/packages/71/37/6202e488cc1eb625ea110c292c6bda92823176e023f427d8d5660ce8d632/cryptography-50.0.2-cp311-abi3-manylinux_2_34_aarch64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl",
+          "sha256": "9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079",
+          "url": "https://files.pythonhosted.org/packages/d3/69/2c833a049475e0a3444e94c7d0aca0aa51d166374a449b09e92ac98138de/cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp315-abi3.abi3t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+          "sha256": "d370b8d1dfcdf7130178137f6fbee6140774a1acc6cacefc4b42643ec11d0a3a",
+          "url": "https://files.pythonhosted.org/packages/8c/75/32ac2a56243d778805c16ca6a32b8f74fb757df7e28d7ecb560afafb59cf/cryptography-50.0.2-cp315-abi3.abi3t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp315-abi3.abi3t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "f2f9bd7f90c64fe89253f0a2c05e3c4856072660429ce8831b4235bf29403a67",
+          "url": "https://files.pythonhosted.org/packages/aa/a4/2c8d734e43d97f0842ee9f1b7b4bfb3d0cf5e19edebf43c2afe6675c2320/cryptography-50.0.2-cp315-abi3.abi3t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_28_aarch64.whl",
+          "sha256": "e275096ea1e60cc595cda2836fd4a6c725d1125108b868be17f53684d164e2cc",
+          "url": "https://files.pythonhosted.org/packages/c2/58/ee288c829a6f41f6235ae9dd33d82fd19b45442b65b4c8a3da36963d9f7a/cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_28_aarch64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_28_x86_64.whl",
+          "sha256": "58a0c478eeca76fe5e07993c5a0703def34a6dc6a0cda4f5564639b33112ffe7",
+          "url": "https://files.pythonhosted.org/packages/02/a8/8df951850d6b31d2a00218f19e2b3f999523437ed7a819df7fa427942fca/cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_28_x86_64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_34_aarch64.whl",
+          "sha256": "fdd28f912fccfec1846a94e2e1e8f9b0012f557f0c46fe4f3eb0d7a87afcf90b",
+          "url": "https://files.pythonhosted.org/packages/8c/72/20f99a219f6af47cdd1cbd978c243b92d71496e168a746138af44ded4f29/cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_34_aarch64.whl"
+        },
+        {
+          "filename": "cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_34_x86_64.whl",
+          "sha256": "e105ab60406787da31fccc883fc0f733af1efd78f0136a4599692c4083a73d0c",
+          "url": "https://files.pythonhosted.org/packages/24/95/83378121ef3eaaaf71d4b781577ff794acb39b9e1b87a3f156898c8497ed/cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_34_x86_64.whl"
+        },
         {
           "filename": "cryptography-50.0.2-cp39-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
           "sha256": "c5e67125c7dca78d199ec4e116aa93dbb83494808ecbb8211a2cb09b1bf41dbd",
@@ -118,18 +303,6 @@
           "filename": "cryptography-50.0.2-cp39-abi3-manylinux_2_34_x86_64.whl",
           "sha256": "1981f1db4630889b9ef7803fadef12b056f428cb6b85c27ba57b774793b6093c",
           "url": "https://files.pythonhosted.org/packages/40/cf/6b5c8e2fd9202d98988ab7cb5cc5c991704c4ad55f492ff408e4969f83f1/cryptography-50.0.2-cp39-abi3-manylinux_2_34_x86_64.whl"
-        }
-      ]
-    },
-    {
-      "name": "exceptiongroup",
-      "version": "1.3.1",
-      "source": "https://pypi.org/project/exceptiongroup/1.3.1/",
-      "wheels": [
-        {
-          "filename": "exceptiongroup-1.3.1-py3-none-any.whl",
-          "sha256": "a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598",
-          "url": "https://files.pythonhosted.org/packages/8a/0e/97c33bf5009bdbac74fd2beace167cab3f978feb69cc36f1ef79360d6c4e/exceptiongroup-1.3.1-py3-none-any.whl"
         }
       ]
     },
@@ -170,6 +343,18 @@
       ]
     },
     {
+      "name": "hyperlink",
+      "version": "21.0.0",
+      "source": "https://pypi.org/project/hyperlink/21.0.0/",
+      "wheels": [
+        {
+          "filename": "hyperlink-21.0.0-py2.py3-none-any.whl",
+          "sha256": "e6b14c37ecb73e89c77d78cdb4c2cc8f3fb59a885c5b3f819ff4ed80f25af1b4",
+          "url": "https://files.pythonhosted.org/packages/6e/aa/8caf6a0a3e62863cbb9dab27135660acba46903b703e224f14f447e57934/hyperlink-21.0.0-py2.py3-none-any.whl"
+        }
+      ]
+    },
+    {
       "name": "idna",
       "version": "3.20",
       "source": "https://pypi.org/project/idna/3.20/",
@@ -178,6 +363,18 @@
           "filename": "idna-3.20-py3-none-any.whl",
           "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
           "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "incremental",
+      "version": "24.11.0",
+      "source": "https://pypi.org/project/incremental/24.11.0/",
+      "wheels": [
+        {
+          "filename": "incremental-24.11.0-py3-none-any.whl",
+          "sha256": "a34450716b1c4341fe6676a0598e88a39e04189f4dce5dc96f656e040baa10b3",
+          "url": "https://files.pythonhosted.org/packages/1d/55/0f4df2a44053867ea9cbea73fc588b03c55605cd695cee0a3d86f0029cb2/incremental-24.11.0-py3-none-any.whl"
         }
       ]
     },
@@ -230,6 +427,18 @@
       ]
     },
     {
+      "name": "minikerberos",
+      "version": "0.4.12",
+      "source": "https://pypi.org/project/minikerberos/0.4.12/",
+      "wheels": [
+        {
+          "filename": "minikerberos-0.4.12-py3-none-any.whl",
+          "sha256": "4a8b0ce5ccd28e858e72124dc5764168da230b9af0b400406b6a7788cf7fa82e",
+          "url": "https://files.pythonhosted.org/packages/8a/06/2ea3a877d6add3cb5ebaa34513f171dc6297213237d750492cf5a82dfc8c/minikerberos-0.4.12-py3-none-any.whl"
+        }
+      ]
+    },
+    {
       "name": "opentelemetry-api",
       "version": "1.45.2",
       "source": "https://pypi.org/project/opentelemetry-api/1.45.2/",
@@ -238,6 +447,18 @@
           "filename": "opentelemetry_api-1.45.2-py3-none-any.whl",
           "sha256": "2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34",
           "url": "https://files.pythonhosted.org/packages/a9/2d/610db864d7513158cebb8f36cc88e67e73bd6c7aa1905ef18d89e1281c81/opentelemetry_api-1.45.2-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "oscrypto",
+      "version": "1.3.0",
+      "source": "https://pypi.org/project/oscrypto/1.3.0/",
+      "wheels": [
+        {
+          "filename": "oscrypto-1.3.0-py2.py3-none-any.whl",
+          "sha256": "2b2f1d2d42ec152ca90ccb5682f3e051fb55986e1b170ebde472b133713e7085",
+          "url": "https://files.pythonhosted.org/packages/01/7c/fa07d3da2b6253eb8474be16eab2eadf670460e364ccc895ca7ff388ee30/oscrypto-1.3.0-py2.py3-none-any.whl"
         }
       ]
     },
@@ -254,14 +475,19 @@
       ]
     },
     {
-      "name": "pip",
-      "version": "22.0.2",
-      "source": "https://pypi.org/project/pip/22.0.2/",
+      "name": "pillow",
+      "version": "13.0.0",
+      "source": "https://pypi.org/project/pillow/13.0.0/",
       "wheels": [
         {
-          "filename": "pip-22.0.2-py3-none-any.whl",
-          "sha256": "682eabc4716bfce606aca8dab488e9c7b58b0737e9001004eb858cdafcd8dbdd",
-          "url": "https://files.pythonhosted.org/packages/83/b5/df8640236faa5a3cb80bfafd68e9fb4b22578208b8398c032ccff803f9e0/pip-22.0.2-py3-none-any.whl"
+          "filename": "pillow-13.0.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+          "sha256": "8bf295fe459343bc6093c8e5e0df60bfa189e0fcb775a22e2c2488fdeccc6c0d",
+          "url": "https://files.pythonhosted.org/packages/3b/bb/9e30e8ed18c20800ee327a12107d5249ad8dc444867b3adfcc21654e3c71/pillow-13.0.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"
+        },
+        {
+          "filename": "pillow-13.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca",
+          "url": "https://files.pythonhosted.org/packages/e6/99/fdf65cc539e266ab93546c261bdf98411fe165c6e4e13f9dbf597097192b/pillow-13.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
         }
       ]
     },
@@ -278,6 +504,23 @@
       ]
     },
     {
+      "name": "pycryptodomex",
+      "version": "3.24.2",
+      "source": "https://pypi.org/project/pycryptodomex/3.24.2/",
+      "wheels": [
+        {
+          "filename": "pycryptodomex-3.24.2-cp37-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+          "sha256": "97dc6ea02ec1ed55dca0fbc98758ac23d0ca8ce9d7ea32d538c2851e23b8b27f",
+          "url": "https://files.pythonhosted.org/packages/61/13/fd720f518c31f7bdcf8984f5a0f8d01014e2e044dc49932112447a4bf7ba/pycryptodomex-3.24.2-cp37-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+        },
+        {
+          "filename": "pycryptodomex-3.24.2-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "e340408a601003f235b50117cd16f87b2a5b4760765aafe93340eeaadeb0414d",
+          "url": "https://files.pythonhosted.org/packages/05/18/38963ed164a09e2de52f2f8308937254bb7c1ec42ef6a9873d793c62f1bd/pycryptodomex-3.24.2-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+        }
+      ]
+    },
+    {
       "name": "pydantic",
       "version": "2.14.3",
       "source": "https://pypi.org/project/pydantic/2.14.3/",
@@ -290,19 +533,19 @@
       ]
     },
     {
-      "name": "pydantic_core",
+      "name": "pydantic-core",
       "version": "2.50.4",
-      "source": "https://pypi.org/project/pydantic_core/2.50.4/",
+      "source": "https://pypi.org/project/pydantic-core/2.50.4/",
       "wheels": [
         {
-          "filename": "pydantic_core-2.50.4-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
-          "sha256": "c4c5a1770ecfe8bdb6c6f09f8d81ea4de04f7efb012fac1efa4ad315dccc1fd1",
-          "url": "https://files.pythonhosted.org/packages/f2/d6/1a14b5da27def1db17274c215d4ab62c380b600689c4e54c4dc02c1b0cba/pydantic_core-2.50.4-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+          "filename": "pydantic_core-2.50.4-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+          "sha256": "16902a147b3da4840612164a5e67947104d63e978f7a57c395877a5e26690b9c",
+          "url": "https://files.pythonhosted.org/packages/61/a0/8028ef3e014be522ce43060aeac82a5be2288215e660866f5e6260acc123/pydantic_core-2.50.4-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
         },
         {
-          "filename": "pydantic_core-2.50.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
-          "sha256": "ed9c0b6f236648dbf30d57e9f57e1f74878caafa04833a19f529b5ba5164b7a8",
-          "url": "https://files.pythonhosted.org/packages/e3/df/cddc0729c366460763831e6087e88fc0197c78f34fc79ac993a41b5d0242/pydantic_core-2.50.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+          "filename": "pydantic_core-2.50.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "c81d98e27d9d9261909dcccab1ba5d6ea1c98b0bb9470e368604614fd1d36ddd",
+          "url": "https://files.pythonhosted.org/packages/91/23/e0c6e3cd09a0ac809953fea698c816b9f03bf0b35b6820c9553e4f5d85a8/pydantic_core-2.50.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
         }
       ]
     },
@@ -336,14 +579,38 @@
       ]
     },
     {
-      "name": "PyJWT",
+      "name": "pyjwt",
       "version": "2.15.1",
-      "source": "https://pypi.org/project/PyJWT/2.15.1/",
+      "source": "https://pypi.org/project/pyjwt/2.15.1/",
       "wheels": [
         {
           "filename": "pyjwt-2.15.1-py3-none-any.whl",
           "sha256": "42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193",
           "url": "https://files.pythonhosted.org/packages/50/ca/44de4e75f8aadc457f0634be3b542815078ded46dca30efb960edeecad6e/pyjwt-2.15.1-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "pyparsing",
+      "version": "3.3.3",
+      "source": "https://pypi.org/project/pyparsing/3.3.3/",
+      "wheels": [
+        {
+          "filename": "pyparsing-3.3.3-py3-none-any.whl",
+          "sha256": "ece8c00a69cf01b45d0b1dedabb469c90d8caf996d4fda40f147627a122849a4",
+          "url": "https://files.pythonhosted.org/packages/38/bb/d215ee7c73b61497b28a5503f9f53523f294fcc936762b7caf90e0c1c2b5/pyparsing-3.3.3-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "pyperclip",
+      "version": "1.11.0",
+      "source": "https://pypi.org/project/pyperclip/1.11.0/",
+      "wheels": [
+        {
+          "filename": "pyperclip-1.11.0-py3-none-any.whl",
+          "sha256": "299403e9ff44581cb9ba2ffeed69c7aa96a008622ad0c46cb575ca75b5b84273",
+          "url": "https://files.pythonhosted.org/packages/df/80/fc9d01d5ed37ba4c42ca2b55b4339ae6e200b456be3a1aaddf4a9fa99b8c/pyperclip-1.11.0-py3-none-any.whl"
         }
       ]
     },
@@ -377,26 +644,38 @@
       "source": "https://pypi.org/project/rpds-py/0.30.0/",
       "wheels": [
         {
-          "filename": "rpds_py-0.30.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
-          "sha256": "389a2d49eded1896c3d48b0136ead37c48e221b391c052fba3f4055c367f60a6",
-          "url": "https://files.pythonhosted.org/packages/cd/7c/e4933565ef7f7a0818985d87c15d9d273f1a649afa6a52ea35ad011195ea/rpds_py-0.30.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
+          "filename": "rpds_py-0.30.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+          "sha256": "ca28829ae5f5d569bb62a79512c842a03a12576375d5ece7d2cadf8abe96ec28",
+          "url": "https://files.pythonhosted.org/packages/65/1c/ae157e83a6357eceff62ba7e52113e3ec4834a84cfe07fa4b0757a7d105f/rpds_py-0.30.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
         },
         {
-          "filename": "rpds_py-0.30.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
-          "sha256": "0c0e95f6819a19965ff420f65578bacb0b00f251fefe2c8b23347c37174271f3",
-          "url": "https://files.pythonhosted.org/packages/61/b5/707f6cf0066a6412aacc11d17920ea2e19e5b2f04081c64526eb35b5c6e7/rpds_py-0.30.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+          "filename": "rpds_py-0.30.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "47f236970bccb2233267d89173d3ad2703cd36a0e2a6e92d0560d333871a3d23",
+          "url": "https://files.pythonhosted.org/packages/60/1b/6f8f29f3f995c7ffdde46a626ddccd7c63aefc0efae881dc13b6e5d5bb16/rpds_py-0.30.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
         }
       ]
     },
     {
       "name": "setuptools",
-      "version": "59.6.0",
-      "source": "https://pypi.org/project/setuptools/59.6.0/",
+      "version": "80.9.0",
+      "source": "https://pypi.org/project/setuptools/80.9.0/",
       "wheels": [
         {
-          "filename": "setuptools-59.6.0-py3-none-any.whl",
-          "sha256": "4ce92f1e1f8f01233ee9952c04f6b81d1e02939d6e1b488428154974a4d0783e",
-          "url": "https://files.pythonhosted.org/packages/b0/3a/88b210db68e56854d0bcf4b38e165e03be377e13907746f825790f3df5bf/setuptools-59.6.0-py3-none-any.whl"
+          "filename": "setuptools-80.9.0-py3-none-any.whl",
+          "sha256": "062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922",
+          "url": "https://files.pythonhosted.org/packages/a3/dc/17031897dae0efacfea57dfd3a82fdd2a2aeb58e0ff71b77b87e44edc772/setuptools-80.9.0-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "source": "https://pypi.org/project/six/1.17.0/",
+      "wheels": [
+        {
+          "filename": "six-1.17.0-py2.py3-none-any.whl",
+          "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+          "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl"
         }
       ]
     },
@@ -425,6 +704,18 @@
       ]
     },
     {
+      "name": "tqdm",
+      "version": "4.70.1",
+      "source": "https://pypi.org/project/tqdm/4.70.1/",
+      "wheels": [
+        {
+          "filename": "tqdm-4.70.1-py3-none-any.whl",
+          "sha256": "c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73",
+          "url": "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl"
+        }
+      ]
+    },
+    {
       "name": "truststore",
       "version": "0.10.5",
       "source": "https://pypi.org/project/truststore/0.10.5/",
@@ -433,6 +724,30 @@
           "filename": "truststore-0.10.5-py3-none-any.whl",
           "sha256": "9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c",
           "url": "https://files.pythonhosted.org/packages/51/e9/3a7820be2bb0fe53b6bc9c3be26d3d1158004e4c3ab953aa6840b955b1e9/truststore-0.10.5-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "twisted",
+      "version": "26.10.0",
+      "source": "https://pypi.org/project/twisted/26.10.0/",
+      "wheels": [
+        {
+          "filename": "twisted-26.10.0-py3-none-any.whl",
+          "sha256": "3732f42af218925a0fe78d6668db55853f7fb532245a89a2669babe7d3000fa8",
+          "url": "https://files.pythonhosted.org/packages/10/93/fdfa79229fdc19a6542086d46b5c5d424ee62a6408d25657e8690e0a745f/twisted-26.10.0-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "source": "https://pypi.org/project/typing-extensions/4.16.0/",
+      "wheels": [
+        {
+          "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+          "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+          "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
         }
       ]
     },
@@ -449,14 +764,14 @@
       ]
     },
     {
-      "name": "typing_extensions",
-      "version": "4.16.0",
-      "source": "https://pypi.org/project/typing_extensions/4.16.0/",
+      "name": "unicrypto",
+      "version": "0.0.12",
+      "source": "https://pypi.org/project/unicrypto/0.0.12/",
       "wheels": [
         {
-          "filename": "typing_extensions-4.16.0-py3-none-any.whl",
-          "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
-          "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
+          "filename": "unicrypto-0.0.12-py3-none-any.whl",
+          "sha256": "6fb7e9bbaa60c49128ad6584201290ead99b703ae834c28911c82ddca38a0d6f",
+          "url": "https://files.pythonhosted.org/packages/f4/1c/9964cd41f3240cfcc33076f49565d583033a5628f1804bf3de7ea3d2f6bc/unicrypto-0.0.12-py3-none-any.whl"
         }
       ]
     },
@@ -473,14 +788,43 @@
       ]
     },
     {
-      "name": "wheel",
-      "version": "0.37.1",
-      "source": "https://pypi.org/project/wheel/0.37.1/",
+      "name": "vncdotool",
+      "version": "1.4.2",
+      "source": "https://pypi.org/project/vncdotool/1.4.2/",
       "wheels": [
         {
-          "filename": "wheel-0.37.1-py2.py3-none-any.whl",
-          "sha256": "4bdcd7d840138086126cd09254dc6195fb4fc6f01c050a1d7236f2630db1d22a",
-          "url": "https://files.pythonhosted.org/packages/27/d6/003e593296a85fd6ed616ed962795b2f87709c3eee2bca4f6d0fe55c6d00/wheel-0.37.1-py2.py3-none-any.whl"
+          "filename": "vncdotool-1.4.2-py3-none-any.whl",
+          "sha256": "6512732fc191aca5c17c731e7a9e7951a36f8d95c7c48c63904eefec1616fc41",
+          "url": "https://files.pythonhosted.org/packages/75/c4/abb105cb5d81a67f38ca2d1c7b3fe81119da0fb43e1145dcb7711c380443/vncdotool-1.4.2-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "wheel",
+      "version": "0.45.1",
+      "source": "https://pypi.org/project/wheel/0.45.1/",
+      "wheels": [
+        {
+          "filename": "wheel-0.45.1-py3-none-any.whl",
+          "sha256": "708e7481cc80179af0e556bbf0cc00b8444c7321e2700b8d8580231d13017248",
+          "url": "https://files.pythonhosted.org/packages/0b/2c/87f3254fd8ffd29e4c02732eee68a83a1d3c346ae39bc6822dcbcb697f2b/wheel-0.45.1-py3-none-any.whl"
+        }
+      ]
+    },
+    {
+      "name": "zope-interface",
+      "version": "8.7",
+      "source": "https://pypi.org/project/zope-interface/8.7/",
+      "wheels": [
+        {
+          "filename": "zope_interface-8.7-cp312-cp312-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "90aef6e0a9924af18f60528895f2fc50cb634191939d65b10a96d9ced05030b5",
+          "url": "https://files.pythonhosted.org/packages/54/af/0eddc2dd0fcfa3da3a6256c4f58278729076c77296b6f00567b03718026d/zope_interface-8.7-cp312-cp312-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl"
+        },
+        {
+          "filename": "zope_interface-8.7-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+          "sha256": "383c04293dbcfee8ae8d24f85592291207d5bb6a703af437343e44ddb94fb68c",
+          "url": "https://files.pythonhosted.org/packages/a4/0f/a25f7e0866e65db2a756ee7e444568796ddbf0ffb97d950a268835324228/zope_interface-8.7-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
         }
       ]
     }
@@ -513,6 +857,13 @@
       "filename": "rpds_py-0.30.0.tar.gz",
       "url": "https://files.pythonhosted.org/packages/20/af/3f2f423103f1113b36230496629986e0ef7e199d2aa8392452b484b38ced/rpds_py-0.30.0.tar.gz",
       "sha256": "dd8ff7cf90014af0c0f787eea34794ebf6415242ee1d6fa91eaba725cc441e84"
+    },
+    {
+      "name": "aardwolf",
+      "version": "0.2.17",
+      "filename": "aardwolf-0.2.17.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/6c/21/60829e9ab5fcc41b32886d80ad8fbe86e56ade3c68086aab0cef5cd30df7/aardwolf-0.2.17.tar.gz",
+      "sha256": "42ee9e8d457e11b2bb8dc1400268c39c5898cc7b1fa9c3735a43ee2ee28505e0"
     }
   ]
 }

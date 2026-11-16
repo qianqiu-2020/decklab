@@ -1,6 +1,6 @@
 # Ubuntu 安装与升级
 
-支持 Ubuntu 22.04 / 24.04，发布包分别为 `Architecture: amd64` 和 `Architecture: arm64`。
+本轮完整包覆盖 Ubuntu 22.04 / 24.04 x86_64（`Architecture: amd64`）；历史 ARM 架构代码保留，本轮不构建或验收。
 1.7.1 起，deb 内置 MCP 所需的私有 Python、官方 SDK 及依赖；安装过程中不运行 pip，
 不需要手动配置 `SERIALD_MCP_PYTHON`。核心服务仍使用系统 Python 3.10+，系统依赖由 apt 处理。
 其他上位机架构可使用源码运行方式，目前不提供对应的预编译 deb。
@@ -16,7 +16,6 @@ Windows 安装器已内置该运行时，使用者无需额外安装。
 用 `dpkg --print-architecture` 核对上位机架构，从固定地址下载对应包：
 
 - [amd64 最新安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb)
-- [arm64 最新安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_arm64.deb)
 
 例如安装已下载的 amd64 固定文件名安装包：
 
@@ -35,7 +34,7 @@ serialctl devices
 1.10.0 起默认构建完整包，包含主程序、MCP、刷机执行器和匹配的 RAM 加载材料，自动选择包内路径；Linux 的 Node、libusb、udev 等系统依赖由 apt 安装。当前内置 RAM 材料支持 K3；列出 K1 镜像不代表已验证 K1 刷机。
 历史 GitHub 1.9.0 及更早的精简包仍需[单独安装刷机组件](HARDWARE_EXTENSIONS.md#独立安装刷机组件)，升级完整包时保留显式配置的外部组件路径。
 
-镜像商店从[公开站](https://archive.spacemit.com/image/)和[内部 Nexus](https://nexus.bianbu.xyz/service/rest/repository/browse/image/)读取目录，下载保存在控制机。使用见[镜像商店](IMAGE_STORE.md)。
+镜像商店默认使用[公开站](https://archive.spacemit.com/image/)，管理员可配置组织镜像源，下载保存在控制机。使用见[镜像商店](IMAGE_STORE.md)。
 
 ## 从源码构建安装包
 
@@ -44,15 +43,15 @@ serialctl devices
 组装步骤不访问网络、不需要 root：
 
 ```sh
-python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime
+python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dists/seriald_1.10.1_amd64.deb
+sudo apt install ./dist/seriald_1.14.0_amd64.deb
 ```
 
-arm64 构建将上述 `amd64` 改为 `arm64`，在对应原生构建机执行。
+历史 ARM 构建代码保留，本轮不提供 ARM 完整包。
 `build_deb.py` 未传 `--runtime` 时只查找本机架构的 `build/linux-mcp/<arch>/runtime`；
 不存在或校验失败会停止构建，不生成缺少 MCP 依赖的包。已准备运行时还可通过
-`python3 tools/build_linux_mcp.py --arch amd64 --output build/linux-mcp/amd64/runtime --verify`
+`python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime --verify`
 离线核对清单及内容。
 
 ## 服务与配置
@@ -60,6 +59,8 @@ arm64 构建将上述 `amd64` 改为 `arm64`，在对应原生构建机执行。
 包安装后自动启动 `seriald-collector.service` 和 `seriald.service`。collector 是唯一串口读者；
 `seriald.service` 是可独立重启的 Web/API 控制面。**同一组串口不可同时运行源码服务和包服务**，切换安装前先停止旧服务。
 默认监听 `0.0.0.0:8898`；浏览器访问 `http://上位机地址:8898`。
+安装会自动启动服务，并等待 Web 就绪后打印访问链接。`seriald` 是禁用密码登录的系统服务账号，无需为它设置密码。
+
 安装后运行 `sudo seriald-access` 可打印本机和局域网访问链接；启用访问密码时使用现有分享授权，有效期内可直接打开。链接仅分享给受信任的使用者。若局域网地址未出现，请检查网卡和防火墙配置。
 
 远程 MCP 使用同一地址的 `/mcp` 路径，AI 客户端只需填写 URL 和网页生成的 Agent 令牌。

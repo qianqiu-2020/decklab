@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 param([switch]$UseCurrentPython, [switch]$PortableOnly, [string]$ParamikoSource,
       [string]$FlashExecutor, [string]$FlashNotices, [string]$FlashLoaders,
-      [string]$FlashDriver, [string]$FlashComponents, [switch]$CoreOnly)
+      [string]$FlashDriver, [string]$FlashComponents, [string]$DesktopRuntime,
+      [switch]$CoreOnly)
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') {
@@ -9,6 +10,14 @@ if ($env:OS -ne 'Windows_NT') {
 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if (-not $DesktopRuntime -and -not $CoreOnly) {
+    $DesktopRuntime = Join-Path $root 'build\desktop-runtime\windows-amd64'
+}
+if ($DesktopRuntime -and -not (Test-Path -LiteralPath (Join-Path $DesktopRuntime 'runtime-manifest.json') -PathType Leaf)) {
+    throw 'A prepared desktop SDK runtime-manifest.json is required before building.'
+}
+if ($DesktopRuntime) { $DesktopRuntime = [System.IO.Path]::GetFullPath($DesktopRuntime) }
+$desktopSnapshot = $null
 if ($CoreOnly -and ($FlashExecutor -or $FlashNotices -or $FlashLoaders -or $FlashDriver -or $FlashComponents)) {
     throw 'CoreOnly cannot be combined with flashing components.'
 }
@@ -43,6 +52,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is required (install it with the py launcher).' }
     $python = Join-Path $root 'build\windows-venv\Scripts\python.exe'
     $pyinstaller = Join-Path $root 'build\windows-venv\Scripts\pyinstaller.exe'
+    $desktopArguments = @()
+    if ($DesktopRuntime) {
+        $desktopSnapshot = Join-Path $root ('build\desktop-runtime-freeze-' + [Guid]::NewGuid().ToString('N'))
+        & $python tools/package_desktop_runtime.py $DesktopRuntime --platform windows-amd64 --destination $desktopSnapshot | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Prepared desktop SDK validation failed.' }
+        $desktopManifestHash = (Get-FileHash -LiteralPath (Join-Path $desktopSnapshot 'runtime-manifest.json') -Algorithm SHA256).Hash
+        $desktopArguments = @('--add-data', ($desktopSnapshot + ';desktop-runtime/freerdp'))
+    }
     if ($ParamikoSource) {
         $sourceSuffix = if ($ParamikoSource.ToLowerInvariant().EndsWith('.tar.gz')) { '.tar.gz' } else { '.zip' }
         $sourceSnapshot = Join-Path $root ('build\windows-venv\paramiko-source' + $sourceSuffix)
@@ -94,6 +111,8 @@ try {
     $failedSuites = @()
     foreach ($suite in @('test_cli.py', 'test_schema.py', 'test_identity.py', 'test_identity_association.py',
                          'test_tasks.py', 'test_task_actions.py', 'test_flash_foundation.py',
+                         'test_board_ownership.py', 'test_agent_revocation.py', 'test_discrete_task_contract.py',
+                         'test_integration_client.py', 'test_capabilities.py', 'test_mcp_leases.py',
                          'test_flash_runner.py', 'test_flash_integration.py', 'test_flash_recovery.py',
                          'test_flash_targets.py', 'test_flash_discovery_review.py',
                          'test_flash_discovery_integration.py', 'test_pending_labels.py',
@@ -104,6 +123,10 @@ try {
                          'test_transfer_artifacts.py', 'test_file_tasks.py',
                          'test_transfer_tasks.py', 'test_input_ownership.py',
                          'test_models.py', 'test_maintenance.py', 'test_agent_grants.py', 'test_board_control.py',
+                         'test_desktop.py', 'test_desktop_setup.py', 'test_desktop_native.py', 'test_desktop_provider_stream.py',
+                         'test_desktop_freerdp.py', 'test_desktop_runtime_package.py',
+                         'test_websocket_io.py', 'test_desktop_proxy.py',
+                         'test_desktop_stream.py', 'test_desktop_stream_wire.py',
                          'test_ui_language.py', 'test_boot_compare.py', 'test_sse.py',
                          'test_terminal_backend.py', 'test_terminal_runtime.py',
                          'test_console_visibility.py', 'test_serial_health.py')) {
@@ -132,6 +155,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Image store regression tests failed.' }
         & node tests/share.test.js
         if ($LASTEXITCODE -ne 0) { throw 'Agent share UI tests failed.' }
+        & node tests/desktop.test.js
+        if ($LASTEXITCODE -ne 0) { throw 'Desktop UI tests failed.' }
     } else {
         Write-Warning 'Node.js is unavailable; frontend regression tests were not run.'
     }
@@ -146,6 +171,12 @@ try {
         --collect-data mcp `
         --collect-data mcp_types `
         --collect-all uvicorn `
+        --collect-all vncdotool `
+        --collect-all aardwolf `
+        --hidden-import unicrypto.backends.pycryptodomex `
+        --collect-all Cryptodome `
+        --hidden-import seriald_core.desktop_providers `
+        --hidden-import seriald_core.desktop_freerdp `
         --recursive-copy-metadata mcp `
         --icon packaging/decklab.ico `
         --add-data 'index.html;.' `
@@ -160,8 +191,19 @@ try {
         --add-data 'pyproject.toml;.' `
         --add-data 'skills/seriald-board/SKILL.md;skills/seriald-board' `
         --add-data 'skills/seriald-board/SKILL.zh-CN.md;skills/seriald-board' `
+        @desktopArguments `
         seriald_windows.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
+    if ($DesktopRuntime) {
+        & $python tools/package_desktop_runtime.py $bundle --platform windows-amd64 --prune-frozen-aliases | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Frozen desktop SDK alias reconciliation failed.' }
+        $packagedDesktop = Join-Path $bundle '_internal\desktop-runtime\freerdp'
+        & $python tools/package_desktop_runtime.py $packagedDesktop --platform windows-amd64 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Frozen desktop SDK validation failed.' }
+        if ((Get-FileHash -LiteralPath (Join-Path $packagedDesktop 'runtime-manifest.json') -Algorithm SHA256).Hash -ne $desktopManifestHash) {
+            throw 'Desktop SDK changed while freezing.'
+        }
+    }
 
     $noticeArguments = @('tools/collect_windows_notices.py', (Join-Path $bundle 'third-party'), '--bundle', $bundle)
     if ($ParamikoSource) { $noticeArguments += @('--paramiko-source', $ParamikoSource) }
@@ -195,6 +237,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP worker launcher failed.' }
     & $python tools/test_windows_mcp.py --executable (Join-Path $bundle 'seriald.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP worker protocol smoke failed.' }
+    if ($DesktopRuntime) {
+        & $python tools/test_desktop_security.py --executable (Join-Path $bundle 'seriald.exe')
+        if ($LASTEXITCODE -ne 0) { throw 'Packaged desktop transport security regression failed.' }
+    }
 
     # A content-specific ICO path makes shortcuts independent of the EXE icon cache.
     $iconSource = Join-Path $root 'packaging\decklab.ico'
@@ -223,5 +269,8 @@ try {
     if ($PortableOnly) { Write-Host 'ZIP only: run Install-seriald.cmd to install/update.' }
     else { Write-Host 'Distribute the setup EXE for installation and future upgrades.' }
 } finally {
+    if ($desktopSnapshot -and (Test-Path -LiteralPath $desktopSnapshot)) {
+        Remove-Item -LiteralPath $desktopSnapshot -Recurse -Force
+    }
     Pop-Location
 }

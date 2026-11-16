@@ -20,13 +20,14 @@ from seriald_core.storage import Store
 from seriald_core import __version__
 from tools.build_deb import build, collector_build_id, flash_executor_metadata, flash_notice_files
 from tools import build_linux_mcp as mcp_builder
+from test_linux_mcp_runtime import prepare_desktop_runtime_fixture
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
 @unittest.skipUnless(shutil.which('dpkg-deb'), 'requires dpkg-deb')
 class PackageTests(unittest.TestCase):
-    def prepare_runtime_fixture(self, root):
+    def prepare_runtime_fixture(self, root, desktop=True):
         # Package layout tests use an inert ELF header. Real frozen worker and
         # license validation run in the clean Ubuntu installation gate.
         runtime = root / 'runtime'
@@ -36,9 +37,11 @@ class PackageTests(unittest.TestCase):
         executable.chmod(0o755)
         (runtime / 'third-party').mkdir()
         (runtime / 'third-party/inventory.json').write_text('{"schema": 1}')
+        if desktop:
+            prepare_desktop_runtime_fixture(runtime / mcp_builder.DESKTOP_RUNTIME)
         manifest = {
             'schema': 1, 'architecture': 'amd64', 'elf_machine': 62,
-            'executable': mcp_builder.EXECUTABLE, 'python_version': '3.10.12', 'mcp_version': '2.3.0',
+            'executable': mcp_builder.EXECUTABLE, 'python_version': '3.12.16', 'mcp_version': '2.3.0',
             'build_platform': {'os': 'ubuntu', 'version': '22.04', 'glibc': '2.35', 'machine': 'x86_64'},
             'requirements_sha256': mcp_builder.sha256(mcp_builder.LOCK),
             'source_files': {name: mcp_builder.sha256(SOURCE_ROOT / name) for name in mcp_builder.SOURCES},
@@ -46,10 +49,66 @@ class PackageTests(unittest.TestCase):
         (runtime / 'runtime-manifest.json').write_text(json.dumps(manifest))
         return runtime
 
+    def test_complete_x64_package_rejects_missing_desktop_sdk(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = self.prepare_runtime_fixture(root, desktop=False)
+            with mock.patch.object(mcp_builder, 'notice_module'), \
+                    self.assertRaisesRegex(ValueError, 'Complete x64 installation requires the prepared desktop SDK'):
+                build(root / 'dist', __version__, runtime=runtime, complete=True)
+
+    def test_complete_package_preserves_the_validated_desktop_sdk(self):
+        from test_flash_loaders import FlashLoaderTests
+        from tools.package_desktop_runtime import validate
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = self.prepare_runtime_fixture(root)
+            executor = root / 'decklab-flash'
+            executor.write_bytes(b'\x7fELF\x02\x01' + bytes(12) + struct.pack('<H', 62))
+            notices = root / 'notices'
+            notices.mkdir()
+            (notices / 'LICENSE').write_text('private flash component fixture')
+            loaders = FlashLoaderTests().bundle(root / 'loaders').parent
+            with mock.patch.object(mcp_builder, 'notice_module'):
+                package = build(root / 'dist', __version__, runtime=runtime, complete=True,
+                    flash_executor=executor, flash_notices=notices, flash_loaders=loaders)
+            extracted = root / 'extracted'
+            subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True,
+                           stdout=subprocess.DEVNULL)
+            installed = extracted / 'usr/lib/seriald'
+            self.assertEqual(json.loads((installed / 'installation.json').read_text())['profile'], 'complete')
+            self.assertEqual(validate(installed / 'mcp-runtime' / mcp_builder.DESKTOP_RUNTIME, 'linux-amd64'),
+                validate(runtime / mcp_builder.DESKTOP_RUNTIME, 'linux-amd64'))
+
     def test_packaging_requires_prepared_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(ValueError, 'Prepared MCP runtime is required'):
                 build(Path(temporary) / 'dist', __version__, runtime=Path(temporary) / 'missing')
+
+    def test_desktop_vendor_tree_is_packaged_unchanged_and_zip_imports_without_site_packages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = self.prepare_runtime_fixture(root)
+            with mock.patch.object(mcp_builder, 'notice_module'):
+                package = build(root / 'dist', __version__, runtime=runtime)
+            extracted = root / 'extract'
+            subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True,
+                           stdout=subprocess.DEVNULL)
+            code = extracted / 'usr/lib/seriald'
+            for tree in ('novnc', 'python'):
+                original = SOURCE_ROOT / 'vendor' / tree
+                installed = code / 'vendor' / tree
+                expected = {path.relative_to(original) for path in original.rglob('*') if path.is_file()}
+                self.assertEqual(expected, {path.relative_to(installed) for path in installed.rglob('*') if path.is_file()})
+                for name in expected:
+                    self.assertEqual((installed / name).read_bytes(), (original / name).read_bytes(), str(name))
+            result = subprocess.run([os.sys.executable, '-S', '-c',
+                'from seriald_core.websocket_io import _protocol_modules; p,e=_protocol_modules(); '
+                'import h11,sys; assert p.__version__=="1.3.2" and h11.__version__=="0.16.0"; '
+                'assert ".whl/" in p.__file__.replace(chr(92),"/"); assert "mcp" not in sys.modules'],
+                cwd=code, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('ZIP importer', (extracted / 'usr/share/doc/seriald/THIRD_PARTY.md').read_text())
 
     def test_optional_flash_executor_is_packaged_with_dependency_digest_and_inert_example(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -69,7 +128,7 @@ class PackageTests(unittest.TestCase):
             binary = extracted / 'usr/libexec/seriald/decklab-flash'
             self.assertEqual(binary.read_bytes(), executor.read_bytes())
             self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
-            self.assertIn(', libusb-1.0-0, udev\n', (control / 'control').read_text())
+            self.assertIn(', libusb-1.0-0, udev, libstdc++6, libgcc-s1\n', (control / 'control').read_text())
             rule = (extracted / 'lib/udev/rules.d/70-seriald-fastboot.rules').read_text()
             self.assertIn('ATTR{idVendor}=="361c"', rule)
             self.assertIn('ENV{ID_USB_INTERFACES}=="*:ff4203:*"', rule)
@@ -119,7 +178,7 @@ class PackageTests(unittest.TestCase):
             (root / 'seriald_core').mkdir()
             (root / 'packaging').mkdir()
             for name in ('__init__.py', 'admin.py', 'control_server.py', 'mcp_host.py', 'version.py',
-                         'collector_server.py'):
+                         'collector_server.py', 'desktop_proxy.py'):
                 (root / 'seriald_core' / name).write_text(name)
             unit = root / 'packaging/seriald-collector.service'
             unit.write_text('collector unit')
@@ -127,7 +186,15 @@ class PackageTests(unittest.TestCase):
             (root / 'seriald_core/control_server.py').write_text('new control')
             (root / 'seriald_core/mcp_host.py').write_text('new control-owned MCP worker')
             (root / 'seriald_core/version.py').write_text("__version__ = 'next'")
+            (root / 'seriald_core/desktop_proxy.py').write_text('new control-owned desktop proxy')
             self.assertEqual(collector_build_id(root), original)
+            (root / 'vendor/python').mkdir(parents=True)
+            wheel = root / 'vendor/python/protocol.whl'
+            wheel.write_bytes(b'fixed protocol wheel')
+            changed_wheel = collector_build_id(root)
+            self.assertNotEqual(changed_wheel, original)
+            wheel.write_bytes(b'revised protocol wheel')
+            self.assertNotEqual(collector_build_id(root), changed_wheel)
             (root / 'seriald_core/collector_server.py').write_text('new collector')
             self.assertNotEqual(collector_build_id(root), original)
             changed_collector = collector_build_id(root)
@@ -147,6 +214,7 @@ class PackageTests(unittest.TestCase):
                            stdout=subprocess.DEVNULL)
             subprocess.run(['dpkg-deb', '--control', str(package), str(root / 'control')], check=True)
             self.assertIn('Architecture: amd64\n', (root / 'control/control').read_text())
+            self.assertIn('libstdc++6, libgcc-s1', (root / 'control/control').read_text())
             packaged_runtime = extracted / 'usr/lib/seriald/mcp-runtime'
             self.assertEqual((packaged_runtime / 'runtime-manifest.json').read_bytes(),
                              (runtime / 'runtime-manifest.json').read_bytes())

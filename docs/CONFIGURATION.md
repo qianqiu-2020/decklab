@@ -4,7 +4,7 @@
 
 Open **系统配置 / System settings** using the primary Web credential. The form
 covers all host settings below, with JSON editors for `profiles`, `hardware`,
-`flash` and the fixed Agent-token map. Embedded documents take precedence over
+`flash`, `desktop` and the fixed Agent-token map. Embedded documents take precedence over
 their file paths. Saving/importing configuration never executes hardware
 commands, identifies a board, or changes a board's password.
 
@@ -429,3 +429,9 @@ are `SERIALD_BACKEND_BIND`, `SERIALD_BACKEND_PORT`, `SERIALD_BACKEND_CERT` and
 `SERIALD_FLASH_LOADERS` optionally names a backend-local manifest for prebuilt
 RAM-only FSBL/U-Boot files; the package default is `flash-loaders/manifest.json`.
 The backend verifies the chip family and SHA-256 before staging either file.
+
+`SERIALD_DESKTOP` selects the server-owned desktop configuration JSON. The Web `desktop` document uses the same schema and overrides that path; see [desktop sessions](DESKTOP.md). It binds native VNC/RDP or a fixed helper to a registered serial, with private connection credentials and optional original-console reservation.
+
+## 组织镜像目录
+
+`SERIALD_IMAGE_INTERNAL_BROWSE` 与 `SERIALD_IMAGE_INTERNAL_DOWNLOAD` 默认为空，组织镜像源关闭。两项必须同时设置为不含账号密码、查询参数或片段、以 `/` 结尾的 HTTPS 目录；分别选择目录浏览和实际文件下载根。可通过 Web 配置的对应字段导入、导出、保存和应用，属于采集器配置，重启后生效。默认公开源不受影响。不要把凭据放进目录地址；需要组织 CA 时在控制机配置信任。详见 [镜像商店](IMAGE_STORE.md)。

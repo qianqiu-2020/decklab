@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
+from test_linux_mcp_runtime import prepare_desktop_runtime_fixture
+from tools import package_desktop_runtime as desktop_sdk
 
 
 SCRIPT = Path(__file__).resolve().parent.parent / 'tools/collect_linux_mcp_notices.py'
@@ -59,6 +61,61 @@ class LinuxMCPNoticesTests(unittest.TestCase):
         self.assertEqual(provider['wheel']['member'], 'pydantic_core/native.so')
         self.assertEqual(provider['sha256'], hashlib.sha256(self.native).hexdigest())
         self.assertEqual(notices.verify(self.destination, self.bundle), result)
+
+    def test_reviewed_desktop_sdk_has_its_own_source_and_notice_provenance(self):
+        sdk = self.bundle / desktop_sdk.RESOURCE_PATH
+        manifest = prepare_desktop_runtime_fixture(sdk)
+        result = self.collect()
+        desktop = result['desktop_runtime']
+        self.assertEqual(desktop['sources'], manifest['sources'])
+        providers = [row for row in result['native_providers'] if row['kind'] == 'desktop-sdk']
+        self.assertEqual({row['binary']: row['sha256'] for row in providers}, desktop['providers'])
+        self.assertEqual(set(desktop['notices']), {'freerdp', 'openssl', 'openh264'})
+        self.assertEqual(notices.verify(self.destination, self.bundle), result)
+        for row in desktop['notice_files']:
+            self.assertEqual(hashlib.sha256((self.destination / row['file']).read_bytes()).hexdigest(), row['sha256'])
+
+    def test_desktop_sdk_tampering_and_fake_provider_kind_are_rejected(self):
+        sdk = self.bundle / desktop_sdk.RESOURCE_PATH
+        prepare_desktop_runtime_fixture(sdk)
+        result = self.collect()
+        provider = next(row for row in result['native_providers'] if row['kind'] == 'desktop-sdk')
+        provider.update(kind='dpkg', notice=result['distributions'][0]['licenses'][0]['file'])
+        (self.destination / 'inventory.json').write_text(json.dumps(result))
+        with self.assertRaisesRegex(ValueError, 'desktop runtime native provider provenance'):
+            notices.verify(self.destination, self.bundle)
+        (sdk / 'libdecklab-freerdp.so').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'changed checksums'):
+            notices.verify(self.destination, self.bundle)
+
+    def test_added_sdk_or_changed_source_association_and_notices_are_rejected(self):
+        result = self.collect()
+        sdk = self.bundle / desktop_sdk.RESOURCE_PATH
+        prepare_desktop_runtime_fixture(sdk)
+        with self.assertRaisesRegex(ValueError, 'source/notice association'):
+            notices.verify(self.destination, self.bundle)
+        self.destination.rename(self.root / 'previous-notices')
+        result = self.collect()
+        record = result['desktop_runtime']
+        record['sources']['freerdp']['version'] = 'unreviewed'
+        (self.destination / 'inventory.json').write_text(json.dumps(result))
+        with self.assertRaisesRegex(ValueError, 'source/notice association'):
+            notices.verify(self.destination, self.bundle)
+        result['desktop_runtime'] = desktop_sdk.notice_inventory(self.bundle, 'linux-amd64')
+        (self.destination / 'inventory.json').write_text(json.dumps(result))
+        (self.destination / result['desktop_runtime']['notice_files'][0]['file']).write_text('changed')
+        with self.assertRaisesRegex(ValueError, 'notice checksum'):
+            notices.verify(self.destination, self.bundle)
+
+    def test_nested_vendor_metadata_is_not_a_second_top_level_distribution(self):
+        wheel = next(self.wheelhouse.glob('*.whl'))
+        with zipfile.ZipFile(wheel, 'a') as archive:
+            archive.writestr('pydantic_core/_vendor/another.dist-info/METADATA', 'Name: another\nVersion: 1\n')
+        checksum = hashlib.sha256(wheel.read_bytes()).hexdigest()
+        self.lock.write_text('pydantic-core==2.50.4 --hash=sha256:' + checksum + '\n')
+        self.catalog['wheels'][0]['sha256'] = checksum
+        result = self.collect()
+        self.assertEqual(result['native_providers'][0]['wheel']['name'], 'pydantic-core')
 
     def test_tampered_wheel_is_rejected_before_notice_publication(self):
         wheel = next(self.wheelhouse.glob('*.whl'))

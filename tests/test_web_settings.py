@@ -3,6 +3,7 @@ from copy import deepcopy
 import io
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import subprocess
@@ -29,6 +30,13 @@ class SettingsTests(unittest.TestCase):
 
     def save(self, document, preview=False):
         return self.settings.save(document, self.settings.snapshot()['revision'], preview)
+
+    def test_browser_groups_render_every_field_offered_by_server(self):
+        source = (Path(__file__).parents[1] / 'static/settings.js').read_text(encoding='utf-8')
+        groups = source.split('var groups =', 1)[1].split('var labels =', 1)[0]
+        names = re.findall(r"'([A-Z][A-Z0-9_]*)'", groups)
+        self.assertEqual(len(names), len(set(names)), 'a field must have one settings location')
+        self.assertEqual(set(names), {field['name'] for field in self.settings.snapshot()['fields']})
 
     def test_redacted_round_trip_preserves_all_secrets_and_changes_other_values(self):
         self.save({'version': 1, 'environment': {'AUTH_TOKEN': 'owner-password'}, 'documents': {
@@ -59,7 +67,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_control_provider_preview_and_save_never_read_credentials_or_send_requests(self):
         document = {'version': 1, 'documents': {'hardware': {'boards': {'SN': {'control': {
-            'provider': 'bmc', 'url': 'https://bmc.example', 'board': 'sub23-1',
+            'provider': 'bmc', 'url': 'https://bmc.example', 'board': 'test-board-b',
             'module_index': 47, 'usb_port': '1-8.3',
             'credentials_file': str(self.path.parent / 'missing-credentials.json'), 'actions': ['reset']}}}}}}
         with mock.patch('seriald_core.board_control._credentials', side_effect=AssertionError('must not execute')), \

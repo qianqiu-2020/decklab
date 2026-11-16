@@ -138,7 +138,7 @@ class IdentitySessionMigration(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.store = Store(':memory:')
         self.addCleanup(self.store.close)
-        self.serial = '0059D968E583C49A'
+        self.serial = '0061020304050607'
         record = self.store.bind({'serial': self.serial, 'hostname': 'board',
                                   'serial_source': 'soc-sysfs', 'identity_status': 'provisional'},
                                  'fake-usb', '/fake/tty')

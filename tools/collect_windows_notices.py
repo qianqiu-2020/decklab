@@ -15,6 +15,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 FALLBACKS = {('pyserial', '3.5'): (
     ROOT / 'packaging/third-party/pyserial-3.5/LICENSE.txt',
     'https://github.com/pyserial/pyserial/blob/v3.5/LICENSE.txt')}
@@ -30,7 +31,14 @@ RUNTIME_SOURCE_NOTICES = (
     ('xz-COPYING', 'bcb02973ef6e87ea73d331b3a80df7748407f17efdb784b61b47e0e610d3bb5c',
      'https://github.com/python/cpython-source-deps/blob/xz-5.2.5/COPYING'))
 NATIVE_SOURCE_CATALOG_HASH = 'a20d92f7de96c8ac7a30fa7f352e2444f0da9bbc4f90e11d63eeb76cd3ae0273'
+DESKTOP_SOURCE_CATALOG_HASH = 'ae6aeefe705de7d76c4283f88063acc133910c60812703c639aaf7f1c285651f'
 PARAMIKO_SOURCE_HASH = '6a25f07b380cc9c9a88d2b920ad37167ac4667f8d9886ccebd8f90f654b5d69f'
+DESKTOP_RUNTIME = '_internal/desktop-runtime/freerdp'
+
+
+def desktop_runtime_notices(bundle, destination=None):
+    from tools.package_desktop_runtime import notice_inventory
+    return notice_inventory(bundle, 'windows-amd64', destination)
 
 
 def paramiko_source_notices(distributions, destination, override=None):
@@ -105,6 +113,29 @@ def native_source_notices(bundle, destination):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(notice_data)
         entries.append({'file': 'native-source/' + relative, 'sha256': checksum})
+    # Desktop's native codec uses the same upstream Rust source graph on both
+    # platforms. Add its locked source notices without changing prior providers.
+    source = ROOT / 'packaging/third-party/linux-mcp-native-notices'
+    data = (source / 'inventory.json').read_bytes()
+    checksum = DESKTOP_SOURCE_CATALOG_HASH
+    if hashlib.sha256(data).hexdigest() != checksum:
+        raise ValueError('pinned desktop source notices mismatch')
+    additional = json.loads(data)
+    verify_native_providers(bundle, additional['providers'])
+    for relative, expected in dict(additional['files'], **{'inventory.json': checksum}).items():
+        path = PurePosixPath(relative)
+        if path.is_absolute() or '..' in path.parts or '\\' in relative or ':' in relative:
+            raise ValueError('invalid desktop notice path')
+        original = source / relative
+        if original.is_symlink() or not original.resolve().is_relative_to(source.resolve()):
+            raise ValueError('desktop notice escapes catalog')
+        value = original.read_bytes()
+        if hashlib.sha256(value).hexdigest() != expected:
+            raise ValueError('desktop source notice checksum mismatch')
+        target = Path(destination) / 'native-source/desktop' / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(value)
+        entries.append({'file': 'native-source/desktop/' + relative, 'sha256': expected})
     return entries
 
 
@@ -223,6 +254,9 @@ def inventory(distributions, destination, python_license, fallbacks=None, native
             manifest['runtime_source_notices'] = runtime_source_notices(temporary)
             manifest['native_source_notices'] = native_source_notices(native_bundle, temporary)
             manifest['corresponding_sources'] = paramiko_source_notices(rows, temporary, paramiko_source)
+            desktop = desktop_runtime_notices(native_bundle, temporary)
+            if desktop is not None:
+                manifest['desktop_runtime'] = desktop
         (temporary / 'inventory.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         (temporary / 'README.txt').write_text(
             'These notices cover all installed Python distributions in the build environment.\n'
@@ -231,6 +265,7 @@ def inventory(distributions, destination, python_license, fallbacks=None, native
             'native_crypto_providers, when present, links observed OpenSSL binaries to pinned licenses.\n'
             'runtime_source_notices covers a named CPython source baseline, not arbitrary runtime versions.\n'
             'native-source/inventory.json records a reviewed source-graph superset and matched provider hashes.\n'
+            'desktop_runtime links the validated native desktop SDK to its reviewed sources and notices.\n'
             'This is not a complete native-library SBOM; inspect frozen binaries separately.\n', encoding='utf-8')
         temporary.rename(destination)
         return manifest
@@ -270,6 +305,11 @@ def verify(destination):
     entries.extend(manifest.get('runtime_source_notices', []))
     entries.extend(manifest.get('native_source_notices', []))
     entries.extend(manifest.get('corresponding_sources', []))
+    desktop = desktop_runtime_notices(destination.parent)
+    if desktop != manifest.get('desktop_runtime'):
+        raise ValueError('desktop runtime notice association mismatch')
+    if desktop is not None:
+        entries.extend(desktop['notice_files'])
     files = set()
     for entry in entries:
         relative = entry['file']
@@ -289,6 +329,10 @@ def verify(destination):
             raise ValueError('native source catalog missing from notice inventory')
         catalog = json.loads((destination / catalog_path).read_text(encoding='utf-8'))
         verify_native_providers(destination.parent, catalog['providers'])
+        desktop_catalog = 'native-source/desktop/inventory.json'
+        if desktop_catalog in files:
+            catalog = json.loads((destination / desktop_catalog).read_text(encoding='utf-8'))
+            verify_native_providers(destination.parent, catalog['providers'])
     return manifest
 
 

@@ -1,0 +1,75 @@
+{
+  "package": "@novnc/novnc",
+  "version": "1.7.0",
+  "tag": "v1.7.0",
+  "tag_object": "9e7def8703ac3234c4bae0cd08663f5dd526ee22",
+  "commit": "63107bd06d9e1f6136ff21aeda8cd62cbf0d433e",
+  "url": "https://github.com/novnc/noVNC",
+  "archive_url": "https://codeload.github.com/novnc/noVNC/tar.gz/63107bd06d9e1f6136ff21aeda8cd62cbf0d433e",
+  "archive_sha256": "06dac239be3973ed79a00e357a68aab996e6ed2fd496ee2cc6e6a34020344ac9",
+  "entry_points": [
+    "core/display.js",
+    "core/input/keyboard.js"
+  ],
+  "selection": "Unmodified entry points and their complete relative ES module dependency closure; no app resources.",
+  "transform": null,
+  "license": "MPL-2.0",
+  "license_files": [
+    "LICENSE.txt",
+    "docs/LICENSE.MPL-2.0"
+  ],
+  "attribution_files": [
+    "AUTHORS"
+  ],
+  "license_note": "Upstream LICENSE.txt identifies the core library as MPL-2.0. Individual source headers, including permission to use later versions where stated, are preserved verbatim. No COPYING or NOTICE file exists in this upstream archive.",
+  "files": {
+    "AUTHORS": {
+      "sha256": "16ee0ef356d5107a4bc039f91abc99a341dc62b9aa8dd47547a2baed38507509"
+    },
+    "LICENSE.txt": {
+      "sha256": "3ccd2242d7f5b6c5ae831a486f63cce1f18d8cd11c511f6a7a7251673763b2d1"
+    },
+    "core/base64.js": {
+      "sha256": "76d6b7ec73aed8cbc72b49b8b865bcb334acc59a6b0e96b19bc39c9e8e053ae3"
+    },
+    "core/display.js": {
+      "sha256": "10d298551124a172c97dcb54d8d30fca416e6038b064c93ba5f7cf079fa4bf1f"
+    },
+    "core/input/domkeytable.js": {
+      "sha256": "5eb985e1a412d1be6b606ba0d7e912fc0842d873d252bd7ec8a363670dfc800c"
+    },
+    "core/input/fixedkeys.js": {
+      "sha256": "6bb21b0a2d5f5d7ad73e75b80ddc1d844ac770c4426b312d5740f2443455f0c0"
+    },
+    "core/input/keyboard.js": {
+      "sha256": "46f82adef772b726ae3db144fb9c12b3d03374b7c803b8a5106e422a10ddcdba"
+    },
+    "core/input/keysym.js": {
+      "sha256": "4ddf0e21f07328358974d91aa2d7f839ba2116688b28e43d3f6f4e2eae8c45cf"
+    },
+    "core/input/keysymdef.js": {
+      "sha256": "76f338d45fb73b7decb7d8b4ef6e95edf7ce9583722c5220642a9be85fc2cc89"
+    },
+    "core/input/util.js": {
+      "sha256": "2e156ea656404afcb6cc54dd85cbe5dd2dd0ba209ae9a6fb1b78ec5db17d01ce"
+    },
+    "core/input/vkeys.js": {
+      "sha256": "9a1ce4393e1aa4ace5dcdcf7e032f4a1c03a9cb964b4e0e7b7fcffd3a982eb84"
+    },
+    "core/util/browser.js": {
+      "sha256": "592f56dc2195331c3b8329f8e51fa3a444a89ac85d5fa29e2364508aa9303df7"
+    },
+    "core/util/events.js": {
+      "sha256": "ec7f4da0407ea67f5d6f5ce53bd9b3342155feb9407707de3992c5261e460ead"
+    },
+    "core/util/int.js": {
+      "sha256": "b1c4b7dec2e7767322b3464f3c186b13138cdf341c621db44ddd06ce78180c01"
+    },
+    "core/util/logging.js": {
+      "sha256": "c3a49715c9f908d5bb385de5787e99b824faf34d26036d993eea4740bac9d482"
+    },
+    "docs/LICENSE.MPL-2.0": {
+      "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"
+    }
+  }
+}

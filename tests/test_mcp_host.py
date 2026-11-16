@@ -40,7 +40,7 @@ class MCPHostTests(IsolatedMCPHostTestCase):
     def test_local_callback_reaches_specific_bind_addresses_and_formats_ipv6(self):
         for address, expected in ((('0.0.0.0', 8898), 'http://127.0.0.1:8898'),
                                   (('127.0.0.2', 9001), 'http://127.0.0.2:9001'),
-                                  (('10.0.90.98', 8898), 'http://10.0.90.98:8898'),
+                                  (('192.0.2.98', 8898), 'http://192.0.2.98:8898'),
                                   (('::', 8898, 0, 0), 'http://[::1]:8898'),
                                   (('2001:db8::1', 8898, 0, 0), 'http://[2001:db8::1]:8898')):
             self.assertEqual(local_control_url(SimpleNamespace(server_address=address)), expected)

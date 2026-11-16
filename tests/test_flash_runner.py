@@ -165,13 +165,13 @@ class FlashRunnerTests(unittest.TestCase):
         self.helper.write_text("import json,sys\nfrom pathlib import Path\n"
             "request=json.loads(Path(sys.argv[-1]).read_text())\n"
             "assert sys.argv[-3]=='nor-read-profile' and 'artifact' not in request\n"
-            "profile=request['profile'];profile['ram_loader_protocol']='decklab-nor-v1';profile['prepare']=[]\n"
+            "profile=request['profile'];profile['ram_loader_protocol']='spacemit-ram-v1';profile['prepare']=[]\n"
             "for name in ('fsbl','uboot'):\n"
             " loader=request['boot_materials'][name]\n"
             " profile['prepare'].extend([{'kind':'stage','path':loader['path'],'sha256':loader['sha256']},{'kind':'continue'}])\n"
             "print(json.dumps({'event':'result','result':profile}))\n")
         def materials(binding, workspace, check):
-            result = {'protocol': 'decklab-nor-v1', 'chip_family': 'k3'}
+            result = {'protocol': 'spacemit-ram-v1', 'chip_family': 'k3'}
             for key, member in [('fsbl', 'factory/FSBL.bin'), ('uboot', 'u-boot.itb')]:
                 path = Path(workspace) / 'ram-loaders' / member
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,7 +181,7 @@ class FlashRunnerTests(unittest.TestCase):
             return result
         with mock.patch('seriald_core.flash_loaders.prepare_materials', side_effect=materials):
             result = self.runner.nor_workspace(binding)
-        self.assertEqual(result['execution_profile']['ram_loader_protocol'], 'decklab-nor-v1')
+        self.assertEqual(result['execution_profile']['ram_loader_protocol'], 'spacemit-ram-v1')
         self.assertEqual(len(result['execution_profile']['prepare']), 4)
         self.assertTrue(Path(result['workspace']).is_dir())
 
@@ -222,6 +222,13 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertEqual(info[0]['content']['kernels'][0]['release'], '6.6.63')
         self.assertEqual(info[0]['content']['sha256'], executor_digest)
         self.assertEqual(info[1]['content']['format'], 'gpt')
+        # Cached OS-only selection previews must retain filesystem descriptions,
+        # even when there are no NOR payloads in the selected scope.
+        binding = self.binding('pass')
+        cached = {'artifact': {}, 'mode': 'partitions', 'writes': writes}
+        with mock.patch.object(self.runner, '_run', return_value={'plan': cached}):
+            checked = self.runner.check_plan(binding, cached)
+        self.assertEqual(checked['payload_metadata'][0]['content']['version'], info[0]['content']['version'])
         self.assertNotIn(str(workspace), str(info))
         writes[0]['size'] += 1
         with self.assertRaises(FlashRunnerError):
@@ -303,19 +310,41 @@ class FlashRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(FlashRunnerError, 'symbolic link'):
                 self.runner.execution_binding(binding, original, workspace)
 
+    def test_system_catalogue_reuses_only_exact_pinned_loaders_from_managed_workspace(self):
+        initial = self.automatic_binding()
+        cache = self.runner._directory(self.runner.root / 'cache')
+        old = cache / 'plan-oldstage'
+        new = cache / 'plan-newimage'
+        old.mkdir(); new.mkdir()
+        profile = self.prepared_profile(initial, old)
+        profile['ram_loader_protocol'] = 'spacemit-ram-v1'
+        binding = self.runner.execution_binding(initial, profile, old)
+        candidate = json.loads(json.dumps(profile))
+        candidate['system_storage'] = 'scsi:0'
+        candidate['storages'][0]['sparse'] = True
+        self.assertEqual(self.runner.execution_binding(binding, candidate, new).profile_data, candidate)
+        for mutate in (
+                lambda p: p.update(system_storage='scsi:0;erase'),
+                lambda p: p['identity'].update(product='another-board'),
+                lambda p: p['prepare'][0].update(sha256='0' * 64),
+                lambda p: p['storages'][0].update(package_tables=['partition_nor.json'])):
+            broken = json.loads(json.dumps(candidate)); mutate(broken)
+            with self.assertRaises(FlashRunnerError):
+                self.runner.execution_binding(binding, broken, new)
+
     def test_nor_package_catalogue_accepts_pinned_loaders_and_live_ram_without_adding_steps(self):
         initial = self.automatic_binding()
         workspace = self.runner._directory(self.root / 'workspace/cache') / 'plan-abcdefgh'
         workspace.mkdir()
         profile = self.prepared_profile(initial, workspace)
-        profile['ram_loader_protocol'] = 'decklab-nor-v1'
+        profile['ram_loader_protocol'] = 'spacemit-ram-v1'
         profile['storages'] = [{'id': 'active', 'label': 'NOR (package payload catalogue)',
             'layout_source': 'spacemit-gpt', 'size_getvar': '__decklab_gpt_capacity',
             'sector_size': 512, 'partitions': [], 'package_tables': ['partition_nor.json'], 'sparse': False}]
         self.assertEqual(self.runner.execution_binding(initial, profile, workspace).profile_data, profile)
         live_data = json.loads(json.dumps(initial.profile_data))
         live_data.pop('bootrom_identity')
-        live_data['ram_loader_protocol'] = 'decklab-nor-v1'
+        live_data['ram_loader_protocol'] = 'spacemit-ram-v1'
         live = replace(initial, profile_data=live_data)
         live_profile = json.loads(json.dumps(profile))
         live_profile.pop('bootrom_identity'); live_profile.pop('prepare')
@@ -472,6 +501,17 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertTrue(self.runner.cleanup_plan(first))
         self.assertFalse(self.runner.cleanup_plan(first))
         self.assertTrue(Path(second['workspace']).exists())
+
+    def test_native_system_storage_ids_reach_executor_but_arbitrary_colon_values_do_not(self):
+        binding = self.binding("print(json.dumps({'event':'result','result':{'target':request['target_storage'],'plan':{}}}))")
+        artifact = {'id': 'image', 'sha256': 'a' * 64, 'size': 1, 'path': '/managed/image', 'name': 'os.tar.gz'}
+        for name in ('scsi:0', 'nvme:1', 'mmc:2', 'usb:3'):
+            result = self.runner.plan(binding, artifact, 'partitions', target_storage=name)
+            self.assertEqual(result['target'], name)
+            self.runner.cleanup_plan(result)
+        for name in ('scsi:4', 'scsi:-1', 'scsi:0;erase', 'host:0', 'scsi:0/../1'):
+            with self.assertRaisesRegex(TaskError, 'invalid flash target storage'):
+                self.runner.plan(binding, artifact, 'partitions', target_storage=name)
 
     def test_image_preparation_precedes_short_usb_inspection_scope(self):
         binding = self.binding('pass')

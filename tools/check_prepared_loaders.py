@@ -39,7 +39,7 @@ def main():
                           'size_getvar': '__decklab_gpt_capacity', 'partitions': None, 'sparse': False}]}
         if args.running:
             profile.pop('bootrom_identity')
-            profile.update(ram_loader_protocol='decklab-nor-v1', identity={'version-IC': 'spacemit,k3-pico'})
+            profile.update(ram_loader_protocol='spacemit-ram-v1', identity={'version-IC': 'spacemit,k3-pico'})
         binding = FlashBinding('', 1, profile['id'], profile, BoardControl(), SerialEndpoint(provider='none'),
             'offline-fixture', (str(args.executor.resolve()),),
             {'port_path': [99, 99], 'vendor_id': 0x361c, 'usb_address': 99}, target_id='offline-target',
@@ -62,7 +62,7 @@ def main():
         assert plan['write_layout'] is False and plan['writes'] == []
         assert len(plan.get('ram_loaders', [])) == (0 if args.running else 2)
         assert len(result['execution_profile'].get('prepare', [])) == (0 if args.running else 4)
-        assert result['execution_profile']['ram_loader_protocol'] == 'decklab-nor-v1'
+        assert result['execution_profile']['ram_loader_protocol'] == 'spacemit-ram-v1'
         if args.nor_package:
             assert len(result['payload_candidates']) == 6
             assert result['execution_profile']['storages'][0]['package_tables'] == ['partition_nor.json']

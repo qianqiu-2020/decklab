@@ -36,6 +36,7 @@ class SessionBase:
         self.user = user or os.environ.get('SERIALD_SSH_USER', 'root')
         self.password = password if password is not None else os.environ.get('SERIALD_SSH_PASSWORD', 'bianbu')
         self.actor, self.title, self.persistent, self.store = 'web', '', False, None
+        self.agent_grants = None
         self.buf, self.base = bytearray(), 0
         self.cv = threading.Condition()
         self.write_lock = threading.Lock()
@@ -129,10 +130,23 @@ class SessionBase:
             replies = self.terminal.feed(chunk, self.base + len(self.buf), live=live)
             self.cv.notify_all()
         for reply in replies:
-            self.write(reply)
+            from contextlib import nullcontext
+            from .board_maintenance import maintenance_for
+            from .transactions import TransactionError
+            device = getattr(self, '_board_device', None)
+            maintenance = maintenance_for(getattr(device, 'manager', None))
+            try:
+                with maintenance.operation(device.serial, allow_parallel=True) if maintenance else nullcontext():
+                    self.write(reply)
+            except TransactionError:
+                # A background parser has no caller's execution proof. Keep
+                # observing output without injecting replies into a held board.
+                pass
 
     def ensure(self):
         with self._lifecycle_lock:
+            if not self._actor_allowed():
+                return False
             with self.cv:
                 if self.closed or self._started_once:
                     return self.fd is not None and not self.closed
@@ -142,6 +156,9 @@ class SessionBase:
                 with self.cv:
                     self.fd = fd
                     self.last_touch = time.monotonic()
+                if not self._actor_allowed():
+                    self._finish()
+                    return False
                 self._append('\r\n*** 已建立 SSH 会话 %s@%s (%dx%d) ***\r\n'
                              % (self.user, self.ip, self.cols, self.rows), live=False)
                 self._thread = threading.Thread(target=self._reader, args=(fd,), daemon=True)
@@ -229,6 +246,8 @@ class SessionBase:
 
     def write(self, text, actor=None, client_id=''):
         with self.write_lock:
+            if not self._actor_allowed(actor):
+                return False
             if actor is not None and not self.terminal.control(actor, client_id):
                 return False
             with self.cv:
@@ -247,6 +266,8 @@ class SessionBase:
         if cols < 20 or rows < 5 or cols > 500 or rows > 200:
             return False
         with self.write_lock:
+            if not self._actor_allowed(actor):
+                return False
             if actor is not None and not self.terminal.control(actor, client_id):
                 return False
             with self.cv:
@@ -286,10 +307,35 @@ class SessionBase:
 
     def takeover(self, actor, client_id):
         with self.write_lock:
+            if not self._actor_allowed(actor):
+                return False
             self.takeovers.add(actor)
             self.terminal.control(actor, client_id, takeover=True)
             with self.cv:
                 self.cv.notify_all()
+
+    def _actor_allowed(self, actor=None):
+        grants = getattr(self, 'agent_grants', None)
+        if grants is None:
+            return True
+        from .agent_grants import GrantRevoked
+        try:
+            grants.check_actor(self.actor)
+            if actor is not None:
+                grants.check_actor(actor)
+            return True
+        except GrantRevoked:
+            return False
+
+    def revoke_actor(self, actor):
+        """Remove a revoked takeover without closing another user's shell."""
+        with self.write_lock:
+            self.takeovers.discard(actor)
+            with self.terminal.lock:
+                owner = self.terminal.controller
+                if owner is not None and owner.get('actor') == actor:
+                    self.terminal.controller = None
+                    self.terminal.control_revision += 1
 
     def _open_transport(self):
         raise NotImplementedError

@@ -49,7 +49,7 @@ class DiscoveryReviewTests(unittest.TestCase):
 
     def test_live_ram_profile_accepts_only_the_fixed_download_environment(self):
         profile = {'id': 'auto-spacemit-gpt-v1', 'chip_family': 'k3',
-            'identity': {'version-IC': 'spacemit,k3-pico'}, 'ram_loader_protocol': 'decklab-nor-v1',
+            'identity': {'version-IC': 'spacemit,k3-pico'}, 'ram_loader_protocol': 'spacemit-ram-v1',
             'storages': [{'id': 'active', 'layout_source': 'spacemit-gpt',
                 'size_getvar': '__decklab_gpt_capacity', 'sector_size': 512, 'partitions': [], 'sparse': False}]}
         self.assertEqual(_profile(copy.deepcopy(profile)), profile)

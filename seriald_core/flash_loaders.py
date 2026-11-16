@@ -28,7 +28,7 @@ def prepare_materials(binding, workspace, check):
     if document.get('version') != 1 or not isinstance(document.get('families'), dict):
         raise TaskError('invalid RAM loader manifest', 503)
     material = document['families'].get(family)
-    if not isinstance(material, dict) or material.get('protocol') not in ('stock', 'decklab-nor-v1'):
+    if not isinstance(material, dict) or material.get('protocol') not in ('stock', 'spacemit-ram-v1'):
         raise TaskError('预备刷机环境不支持当前芯片', 409)
     root = path.parent.resolve()
     output = dict(chip_family=family, protocol=material['protocol'])

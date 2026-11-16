@@ -77,18 +77,18 @@ class ArchiveQueries:
         self.search_epochs = searcher if searcher is not None else search_epochs
         self.compare_boots = comparator if comparator is not None else compare_boots
 
-    def execute(self, action, values, device):
+    def execute(self, action, values, device, allow_connection_history=True):
         params = parameters(values)
         if params is None:
             return response(400, {'error': 'invalid query parameters'})
         if action not in ('activity', 'commands', 'logs', 'boot-search', 'boot-log', 'log'):
             return response(404, {'error': 'not found'})
         try:
-            return self._query(action, params, device)
+            return self._query(action, params, device, allow_connection_history)
         except OSError:
             return response(404, {'error': 'log unavailable'})
 
-    def _query(self, action, params, d):
+    def _query(self, action, params, d, allow_connection_history=True):
         if action == 'activity':
             try:
                 legacy_offset = params.get('offset', '0')
@@ -111,13 +111,28 @@ class ArchiveQueries:
         if action == 'commands':
             commands = self.manager.store.commands(d.serial, 20) if d.serial else []
             return response(200, {'commands': commands})
-        files = d.log_files()
+        connection = params.get('archive_connection', '')
+        if connection and (d.serial or not allow_connection_history):
+            return response(403, {'error': '此授权不能读取其他串口连接的归档'})
+        connections = d.archive_connections() if not d.serial and allow_connection_history else []
+        root = d.stable_dir()
+        if connection:
+            if not any(item['id'] == connection for item in connections):
+                return response(404, {'error': 'no such archived connection'})
+            root = os.path.join(os.path.dirname(root), connection)
+            if os.path.realpath(root) != os.path.abspath(root):
+                return response(404, {'error': 'log unavailable'})
+            files = d.log_files(directory=root)
+            boots = lambda: d.boot_epochs(files, directory=root)
+        else:
+            files = d.log_files()
+            boots = lambda: d.boot_epochs(files)
         if action == 'logs':
-            archive = os.path.relpath(d.stable_dir(), self.log_root)
-            boots = d.boot_epochs(files)
-            boots = [{k: v for k, v in boot.items() if k != 'parts'} for boot in boots]
+            archive = os.path.relpath(root, self.log_root)
+            epochs = [{k: v for k, v in boot.items() if k != 'parts'} for boot in boots()]
             return response(200, {'label': d.label, 'serial': d.serial,
-                                    'archive': archive, 'files': files, 'boots': boots})
+                'archive': archive, 'files': files, 'boots': epochs,
+                'connections': connections, 'archive_connection': connection or (d.connection_id if not d.serial else '')})
         if action == 'boot-search':
             query = params.get('q', '').strip()
             try:
@@ -128,18 +143,18 @@ class ArchiveQueries:
             except ValueError:
                 return response(400, {'error': '请输入 1–200 字符的关键词，分页参数必须有效'})
             try:
-                result = self.search_epochs(d.stable_dir(), d.boot_epochs(files), query, offset, limit)
+                result = self.search_epochs(root, boots(), query, offset, limit)
             except OSError:
                 return response(404, {'error': '启动日志不可用，请刷新后重试'})
             result.update({'query': query, 'serial': d.serial, 'label': d.label})
             return response(200, result)
         if action == 'boot-log':
             boot_id = params.get('id', '')
-            boot = next((item for item in d.boot_epochs(files) if item['id'] == boot_id), None)
+            boot = next((item for item in boots() if item['id'] == boot_id), None)
             if not boot:
                 return response(404, {'error': 'no such boot'})
             try:
-                data = self.read_epoch(d.stable_dir(), boot)
+                data = self.read_epoch(root, boot)
             except OSError:
                 return response(404, {'error': 'boot log unavailable'})
             return response(200, {'id': boot_id, 'data': data.decode('utf-8', 'replace'),
@@ -148,7 +163,7 @@ class ArchiveQueries:
         name = params.get('file', '')
         if name not in {entry['name'] for entry in files}:
             return response(404, {'error': 'no such log'})
-        path = os.path.join(d.stable_dir(), name)
+        path = os.path.join(root, name)
         if params.get('download', '0') == '1':
             return ArchiveDownload(path, name)
         try:

@@ -1,6 +1,8 @@
 """Task adapters and HTTP use fake boards and real in-memory task persistence."""
 import io
 import json
+from pathlib import Path
+import tempfile
 import threading
 import unittest
 from unittest import mock
@@ -11,6 +13,7 @@ from seriald_core.task_actions import TaskActions
 from seriald_core.transactions import TransactionError
 from seriald_core.results import response
 from seriald_core import web
+from seriald_core.agent_grants import attach_agent_grants
 
 
 class TaskActionTests(unittest.TestCase):
@@ -286,6 +289,11 @@ class TaskActionTests(unittest.TestCase):
             lease.check()
 
     def test_revocation_cancels_active_tasks_without_depending_on_history_page(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        grants = attach_agent_grants(self.manager, Path(temporary.name) / 'agent-grants.sqlite3')
+        self.addCleanup(grants.close)
+        _, grant = grants.issue('device', 'SN1')
         ready = threading.Event()
         def probe():
             with self.device.transactions.begin('probe', 10) as lease:
@@ -293,7 +301,7 @@ class TaskActionTests(unittest.TestCase):
                 with self.device.cv:
                     self.device.cv.wait_for(lease.is_set, timeout=2)
                 lease.check()
-        actor = 'shared-agent/test'
+        actor = grant['actor']
         with mock.patch.object(self.device, 'run_probe', side_effect=probe):
             result = self.actions.start({'kind': 'identify', 'connection_id': self.device.connection_id},
                                         self.device, actor)

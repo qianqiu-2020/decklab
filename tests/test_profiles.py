@@ -150,6 +150,7 @@ class ProfileTests(unittest.TestCase):
         attrs = [0, 0, 0, 0, 0, 0, [0] * 32]
         with mock.patch.object(transport.os, 'open', return_value=98765), \
                 mock.patch.object(transport.os, 'fstat'), mock.patch.object(transport.os, 'close'), \
+                mock.patch.object(transport, 'fcntl', types.SimpleNamespace(flock=mock.Mock(), LOCK_EX=2, LOCK_NB=4)), \
                 mock.patch.object(t, 'tcgetattr', return_value=attrs), mock.patch.object(t, 'tcsetattr') as configure:
             self.assertEqual(transport.open_serial('/fake', settings=SerialSettings(9600, 7, 'O', 2, 'xonxoff')), 98765)
         configured = configure.call_args.args[2]

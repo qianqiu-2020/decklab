@@ -47,6 +47,29 @@
     }
     return ok;
   }
+  // Native popovers own Escape, focus and outside-click dismissal; top-layer
+  // menus stay usable inside the scrolling header and terminal toolbars.
+  var menuDocument = global.document;
+  if (menuDocument && menuDocument.querySelectorAll) {
+    menuDocument.querySelectorAll('.action-menu[popover]').forEach(function (menu) {
+      var trigger = menuDocument.querySelector('[popovertarget="' + menu.id + '"]');
+      function position() {
+        var open = menu.matches(':popover-open');
+        trigger.setAttribute('aria-expanded', String(open));
+        if (!open) return;
+        var rect = trigger.getBoundingClientRect();
+        var width = menu.offsetWidth, height = menu.offsetHeight;
+        menu.style.left = Math.max(8, Math.min(rect.right - width, global.innerWidth - width - 8)) + 'px';
+        menu.style.top = (rect.bottom + height + 8 <= global.innerHeight ? rect.bottom + 4
+          : Math.max(8, rect.top - height - 4)) + 'px';
+      }
+      menu.addEventListener('toggle', position);
+      global.addEventListener('resize', position);
+      menu.addEventListener('click', function (event) {
+        if (event.target.closest('button') && menu.matches(':popover-open')) menu.hidePopover();
+      });
+    });
+  }
   global.SerialdUI = { byId: byId, formatBytes: formatBytes, age: age, copyText: copyText,
                       fetch: clientFetch, clientId: clientId };
 })(window);

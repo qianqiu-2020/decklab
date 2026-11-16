@@ -10,13 +10,14 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
 from urllib.parse import urlencode
 
 from seriald_core import control_server, device as device_module
-from seriald_core.agent_grants import AgentGrantStore
+from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
 from seriald_core.backend_link import BackendConfigurationError, BackendLink, server_context
 from seriald_core.backend_server import BackendServer
 from seriald_core.devices import Manager
@@ -48,6 +49,7 @@ def split_nodes(certificate, key):
         grants = AgentGrantStore(base / 'web/agent-grants.sqlite3')
         manager = Manager(store, artifact_dir=base / 'backend/artifacts', profiles=ProfileBook({
             'default': 'raw', 'profiles': {'raw': {'probe': 'manual'}}}))
+        backend_grants = attach_agent_grants(manager, base / 'backend/agent-grants.sqlite3')
         manager.flash_book, manager.flash_executor = FlashBook(), FakeDiscoveryExecutor()
         manager.flash_discovery_argv = ('fake-never-executed',)
         backend_settings = WebSettings(base / 'backend/web-settings.json', {
@@ -88,7 +90,7 @@ def split_nodes(certificate, key):
                     with device.cv: device.cv.notify_all()
                     for server in (control, backend): server.shutdown()
                     for worker in workers: worker.join(timeout=3)
-        manager.close(); grants.close(); store.close()
+        manager.close(); backend_grants.close(); grants.close(); store.close()
 
 
 class SplitNodeTests(unittest.TestCase):
@@ -124,6 +126,45 @@ class SplitNodeTests(unittest.TestCase):
             code, result = api_request(f.url, '/api/agent-revoke', f.token, {'id': issued['grant']['id']})
             self.assertEqual(code, 200, result)
             self.assertEqual(api_request(f.url, '/api/devices', token)[0], 401)
+
+    def test_revocation_retries_after_control_store_reopens_and_https_recovers(self):
+        with split_nodes(self.certificate, self.key) as f:
+            _, issued = api_request(f.url, '/api/agent-share', f.token, {'scope': 'all'})
+            online = threading.Event()
+            def connection(timeout):
+                if not online.is_set():
+                    raise ConnectionRefusedError('isolated backend link unavailable')
+                return f.link.connection(timeout)
+            original = control_server.RevocationReconciler(f.grants, connection, interval=.02).start()
+            f.control.revocation_reconciler = original
+            try:
+                code, revoked = api_request(f.url, '/api/agent-revoke', f.token, {'id': issued['grant']['id']})
+                self.assertEqual(code, 200, revoked)
+                self.assertFalse(revoked['sessions_closed'])
+                self.assertTrue(revoked['revocation_pending'])
+                self.assertEqual(api_request(f.url, '/api/devices', issued['token'])[0], 401)
+            finally:
+                original.close()
+            reopened = AgentGrantStore(str(f.base / 'web/agent-grants.sqlite3'))
+            replacement = control_server.RevocationReconciler(reopened, connection, interval=.02)
+            try:
+                self.assertEqual(len(reopened.pending_revocations()), 1)
+                online.set()
+                replacement.start()
+                deadline = time.monotonic() + 3
+                while reopened.pending_revocations() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertEqual(reopened.pending_revocations(), [])
+                from seriald_core.agent_grants import GrantRevoked
+                with self.assertRaises(GrantRevoked):
+                    f.manager.agent_grants.check_actor(issued['grant']['actor'], 0)
+                code, confirmed = api_request(f.url, '/api/agent-revoke', f.token, {'id': issued['grant']['id']})
+                self.assertEqual(code, 200, confirmed)
+                self.assertTrue(confirmed['sessions_closed'])
+                self.assertFalse(confirmed['revocation_pending'])
+            finally:
+                replacement.close()
+                reopened.close()
 
     def test_backend_rejects_web_credentials_and_untrusted_or_wrong_host_certificates(self):
         with split_nodes(self.certificate, self.key) as f:

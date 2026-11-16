@@ -3,6 +3,7 @@ import time
 import re
 from contextlib import nullcontext
 from .results import response
+from .api_contract import execution_capabilities
 
 from .config import RESCUE_BIN
 from .transport import try_rescue
@@ -17,26 +18,7 @@ from .session_base import SessionBase, SSHAuthenticationError, valid_ssh_user, v
 
 def capabilities():
     """Protocol features, not a promise that a particular board supports a shell."""
-    return response(200, {
-        'api_version': 1, 'version': __version__,
-        'features': {'serial': True, 'ssh': True, 'sse_offsets': True, 'shared_terminal': True,
-                     'boot_archives': True, 'boot_compare': True,
-                     'custom_probe_commands': True, 'unidentified_terminal_access': True,
-                     'operation_status': True, 'operation_cancel': True, 'durable_tasks': True},
-        'tasks': {'kinds': ['identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download', 'flash']
-                  + ['hardware-' + action for action in ACTIONS], 'restart': 'interrupt',
-                  'file_transfer': ['copy', 'upload', 'download']},
-        'artifacts': {'chunk_size': 1024 ** 2, 'append_body_limit': 2 * 1024 ** 2, 'download': 'stream'},
-        'file_transfer': {'transport': 'serial', 'requires_linux_shell': True,
-                          'integrity': 'sha256'},
-        'ssh_provisioning': 'profile-controlled',
-        'input_ownership': 'optional-client',
-        'hardware': {'actions': list(ACTIONS), 'configuration': 'explicit-serial',
-                     'host_adapter': host_adapter(), 'default': 'disabled'},
-        'flashing': {'configuration': 'automatic-usb-or-explicit-board-binding',
-                     'discovery': 'local-usb', 'requires_executor': True, 'automatic_actor': 'web',
-                     'reset': 'manual', 'task_target': 'board-or-usb-target'},
-    })
+    return response(200, execution_capabilities(__version__, ACTIONS, host_adapter()))
 
 
 
@@ -76,6 +58,20 @@ class DeviceActions:
         return response(200, {'operation': transactions.snapshot(), 'input_owner': transactions.ownership()})
 
     def execute(self, action, payload, device, actor='web'):
+        from .board_ownership import ownership_for
+        ownership = ownership_for(self.manager)
+        if ownership is None or not isinstance(payload, dict):
+            return self._execute(action, payload, device, actor)
+        client = payload.get('client_id', '') if actor == 'web' else ''
+        try:
+            with ownership.scope(actor, client, payload.get('execution_lease')):
+                if action not in ('operation-cancel', 'session-close', 'input-release'):
+                    ownership.check(device.serial, actor, client)
+                return self._execute(action, payload, device, actor)
+        except TransactionError as error:
+            return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
+
+    def _execute(self, action, payload, device, actor='web'):
         if not isinstance(payload, dict):
             return response(400, {'error': 'JSON object required'})
         if not isinstance(actor, str) or not actor or len(actor) > 80:
@@ -84,7 +80,7 @@ class DeviceActions:
         if not isinstance(client_id, str) or client_id and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client_id):
             return response(400, {'error': 'invalid client_id'})
         with transactions_for(device).actor_scope(actor, client_id):
-            if action in ('session-send', 'ssh-connect', 'switch-mode', 'session-takeover'):
+            if action in ('session-send', 'session-resize', 'ssh-connect', 'switch-mode', 'session-takeover'):
                 try:
                     from .board_maintenance import maintenance_for
                     maintenance = maintenance_for(self.manager)

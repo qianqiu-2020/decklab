@@ -9,6 +9,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tools import package_desktop_runtime as desktop_runtime
+import test_desktop_runtime_package as desktop_fixture
+
 SCRIPT = Path(__file__).resolve().parent.parent / 'tools/collect_windows_notices.py'
 spec = importlib.util.spec_from_file_location('windows_notices', SCRIPT)
 notices = importlib.util.module_from_spec(spec)
@@ -125,6 +128,99 @@ class NoticeTests(unittest.TestCase):
             path.write_bytes(b'fixture\0OpenSSL ' + version.encode() + b' 11 Feb 2025\0')
         return bundle
 
+    def desktop_sdk(self, bundle):
+        repository, sdk, manifest = desktop_fixture.DesktopRuntimePackageTests().fixture(self.root, 'windows-amd64')
+        target = bundle / notices.DESKTOP_RUNTIME
+        target.parent.mkdir(parents=True, exist_ok=True)
+        sdk.rename(target)
+        return repository, target, manifest
+
+    def test_desktop_sdk_sources_notices_and_provider_hashes_are_attributed(self):
+        bundle = self.native_bundle()
+        repository, sdk, sdk_manifest = self.desktop_sdk(bundle)
+        extra = sdk / 'third-party' / 'toolchain' / 'COPYING.txt'
+        extra.parent.mkdir()
+        extra.write_text('extra closure attribution fixture')
+        sdk_manifest['files'] = desktop_runtime.tree_inventory(sdk)
+        sdk_manifest['files'].pop(desktop_runtime.MANIFEST)
+        (sdk / desktop_runtime.MANIFEST).write_text(json.dumps(sdk_manifest))
+        with patch.object(desktop_runtime, 'ROOT', repository):
+            result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
+            self.assertEqual(notices.verify(self.destination), result)
+        row = result['desktop_runtime']
+        self.assertEqual(row['path'], notices.DESKTOP_RUNTIME)
+        self.assertEqual(row['sources'], sdk_manifest['sources'])
+        self.assertEqual(set(row['notices']), {'freerdp', 'openssl', 'openh264'})
+        self.assertEqual(set(row['providers']), {
+            notices.DESKTOP_RUNTIME + '/decklab-freerdp.dll',
+            notices.DESKTOP_RUNTIME + '/freerdp3.dll'})
+        self.assertIn('desktop-sdk/third-party/toolchain/COPYING.txt',
+                      {entry['file'] for entry in row['notice_files']})
+        for component, files in row['notices'].items():
+            self.assertEqual(files, ['desktop-sdk/' + name for name in sdk_manifest['notices'][component]])
+        for entry in row['notice_files']:
+            self.assertEqual(hashlib.sha256((self.destination / entry['file']).read_bytes()).hexdigest(),
+                             entry['sha256'])
+
+    def test_desktop_sdk_tampering_and_added_sdk_without_inventory_are_rejected(self):
+        bundle = self.native_bundle()
+        result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
+        self.assertNotIn('desktop_runtime', result)
+        repository, sdk, _ = self.desktop_sdk(bundle)
+        with patch.object(desktop_runtime, 'ROOT', repository):
+            with self.assertRaisesRegex(ValueError, 'notice association'):
+                notices.verify(self.destination)
+        self.destination.rename(self.root / 'old-notices')
+        with patch.object(desktop_runtime, 'ROOT', repository):
+            result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
+            for relative in ('decklab-freerdp.dll', 'third-party/openssl/LICENSE.txt'):
+                path = sdk / relative
+                original = path.read_bytes()
+                path.write_bytes(original + b'tampered')
+                with self.subTest(relative=relative), self.assertRaisesRegex(ValueError, 'changed checksums'):
+                    notices.verify(self.destination)
+                path.write_bytes(original)
+            self.assertEqual(notices.verify(self.destination), result)
+
+    def test_desktop_sdk_source_association_and_copied_notices_cannot_be_changed(self):
+        bundle = self.native_bundle()
+        repository, sdk, _ = self.desktop_sdk(bundle)
+        with patch.object(desktop_runtime, 'ROOT', repository):
+            result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
+            result['desktop_runtime']['sources']['freerdp']['version'] = 'unreviewed'
+            (self.destination / 'inventory.json').write_text(json.dumps(result))
+            with self.assertRaisesRegex(ValueError, 'notice association'):
+                notices.verify(self.destination)
+            result['desktop_runtime'] = notices.desktop_runtime_notices(bundle)
+            (self.destination / 'inventory.json').write_text(json.dumps(result))
+            (self.destination / result['desktop_runtime']['notice_files'][0]['file']).write_bytes(b'tampered')
+            with self.assertRaisesRegex(ValueError, 'notice checksum'):
+                notices.verify(self.destination)
+
+    def test_invalid_desktop_sdk_fails_atomically_before_notice_publication(self):
+        bundle = self.native_bundle()
+        repository, sdk, _ = self.desktop_sdk(bundle)
+        (sdk / 'unreviewed.dll').write_bytes(b'unreviewed')
+        with patch.object(desktop_runtime, 'ROOT', repository), \
+                self.assertRaisesRegex(ValueError, 'changed checksums'):
+            notices.inventory([], self.destination, self.python, native_bundle=bundle)
+        self.assertFalse(self.destination.exists())
+        self.assertEqual(list(self.destination.parent.glob('.notices-*')), [])
+
+    def test_desktop_sdk_cannot_escape_through_a_parent_symlink(self):
+        bundle = self.native_bundle()
+        _, sdk, _ = self.desktop_sdk(bundle)
+        outside = self.root / 'outside-desktop-runtime'
+        outside.mkdir()
+        sdk.rename(outside / sdk.name)
+        sdk.parent.rmdir()
+        try:
+            sdk.parent.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest('directory symlinks require privileges on this host')
+        with self.assertRaisesRegex(ValueError, 'escapes bundle'):
+            notices.desktop_runtime_notices(bundle)
+
     def test_native_providers_copy_exact_licenses_and_verify_binary_hashes(self):
         bundle = self.native_bundle()
         result = notices.inventory([], self.destination, self.python, native_bundle=bundle)
@@ -197,15 +293,25 @@ class NoticeTests(unittest.TestCase):
         target = repository / relative
         target.parent.mkdir(parents=True)
         target.write_bytes(original)
+        native_sources = {name: (desktop_runtime.ROOT / name).read_bytes()
+                          for name in desktop_runtime.SOURCES}
+        for name, data in native_sources.items():
+            path = repository / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
         def git(*args):
             subprocess.run(['git', '-c', 'core.autocrlf=true', *args], cwd=repository,
                            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         git('init', '--quiet')
-        git('add', '.gitattributes', relative)
+        git('add', '.gitattributes', relative, *native_sources)
         target.unlink()
+        for name in native_sources:
+            (repository / name).unlink()
         git('checkout-index', '--all')
         self.assertEqual(target.read_bytes(), original)
         self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), notices.OPENSSL_LICENSE_HASH)
+        for name, data in native_sources.items():
+            self.assertEqual((repository / name).read_bytes(), data, name)
 
     def test_paramiko_corresponding_source_is_version_specific_and_hash_pinned(self):
         rows = notices.paramiko_source_notices([{'name': 'paramiko', 'version': '4.0.0'}], self.destination)
@@ -276,6 +382,14 @@ class NativeSourceNoticeTests(unittest.TestCase):
         self.license = self.source / 'LICENSE.txt'
         self.license.write_bytes(b'fixture license')
         self.destination = self.bundle / 'third-party'
+        desktop = self.root / 'packaging/third-party/linux-mcp-native-notices'
+        desktop.mkdir(parents=True)
+        (desktop / 'LICENSE.txt').write_bytes(b'fixture desktop license')
+        raw = json.dumps({'providers': {}, 'files': {'LICENSE.txt': hashlib.sha256(b'fixture desktop license').hexdigest()}}).encode()
+        (desktop / 'inventory.json').write_bytes(raw)
+        patched = patch.object(notices, 'DESKTOP_SOURCE_CATALOG_HASH', hashlib.sha256(raw).hexdigest())
+        patched.start()
+        self.addCleanup(patched.stop)
 
     def catalog(self, file='LICENSE.txt'):
         data = json.dumps({'providers': {'provider.pyd': hashlib.sha256(self.binary.read_bytes()).hexdigest()},
@@ -286,7 +400,7 @@ class NativeSourceNoticeTests(unittest.TestCase):
     def test_provider_catalog_and_notice_bytes_are_verified_and_copied(self):
         with patch.object(notices, 'ROOT', self.root), self.catalog():
             rows = notices.native_source_notices(self.bundle, self.destination)
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(rows), 4)
         for row in rows:
             self.assertEqual(hashlib.sha256((self.destination / row['file']).read_bytes()).hexdigest(), row['sha256'])
 

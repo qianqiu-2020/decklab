@@ -87,15 +87,15 @@ class PersistenceTests(unittest.TestCase):
 
     def test_vendor_firmware_eeprom_contract_promotes_same_serial(self):
         d = self.connection()
-        self.identify(d, serial='MJM10004000001', host='k1')
+        self.identify(d, serial='SAMPLE-K1-000001', host='k1')
         d.append(b'provisional vendor history\n')
         provisional = Path(d.stable_dir())
         self.manager.identify(d, {
-            'serial': 'MJM10004000001', 'model': 'Milk-V Jupiter',
-            'soc_serial': '0059D968E583CA22', 'soc_family': 'spacemit socs',
+            'serial': 'SAMPLE-K1-000001', 'model': 'Milk-V Jupiter',
+            'soc_serial': '0061020304050608', 'soc_family': 'spacemit socs',
             'soc_id': 'K1-6370', 'uboot_version': 'U-Boot 2024.10',
             'hostname': 'k1', 'ips': []})
-        self.assertEqual(Path(d.stable_dir()), self.root / 'logs' / 'MJM10004000001')
+        self.assertEqual(Path(d.stable_dir()), self.root / 'logs' / 'SAMPLE-K1-000001')
         self.assertTrue(provisional.exists())
         self.assertEqual(d.record['info']['serial_source'], 'uboot-injected')
         self.assertEqual(d.record['info']['identity_status'], 'confirmed')
@@ -128,7 +128,7 @@ class PersistenceTests(unittest.TestCase):
 
     def test_changed_eeprom_serial_requires_explicit_archive_migration(self):
         old = self.connection('usb-1')
-        fields = {'serial': '0123456789ABCDEF', 'soc_serial': '0059D968E583C49A',
+        fields = {'serial': '0123456789ABCDEF', 'soc_serial': '0061020304050607',
                   'soc_family': 'spacemit socs', 'soc_id': 'K1-6370', 'hostname': 'milkv2'}
         self.manager.identify(old, fields)
         old.present, old.fd = False, None
@@ -136,7 +136,7 @@ class PersistenceTests(unittest.TestCase):
         with self.assertRaisesRegex(IdentityError, 'correct-serial'):
             self.manager.identify(new, dict(fields, eeprom_serial='MVJ-K1-000001'))
         self.assertIsNone(self.store.get('MVJ-K1-000001'))
-        self.assertIsNotNone(self.store.get('0059D968E583C49A'))
+        self.assertIsNotNone(self.store.get('0061020304050607'))
         self.assertIn('/_unprovisioned/', new.stable_dir())
 
     def test_eeprom_provisioning_promotes_boot_marker_on_same_usb_path(self):
@@ -153,19 +153,19 @@ class PersistenceTests(unittest.TestCase):
 
         new = self.connection('usb-1')
         self.manager.identify(new, {
-            'serial': 'MJM10004000001', 'eeprom_serial': 'MJM10004000001',
+            'serial': 'SAMPLE-K1-000001', 'eeprom_serial': 'SAMPLE-K1-000001',
             'boot_marker': marker, 'hostname': 'k1', 'ips': []})
 
-        self.assertEqual(new.serial, 'MJM10004000001')
+        self.assertEqual(new.serial, 'SAMPLE-K1-000001')
         self.assertEqual(new.key, 'milkv')
         self.assertEqual(new.record['info']['identity_status'], 'confirmed')
-        self.assertEqual(new.stable_dir(), str(self.root / 'logs' / 'MJM10004000001'))
+        self.assertEqual(new.stable_dir(), str(self.root / 'logs' / 'SAMPLE-K1-000001'))
         self.assertFalse(provisional.exists())
         self.assertIsNone(self.store.get(marker))
         self.assertTrue(any('history before eeprom' in path.read_text()
                             for path in Path(new.stable_dir()).glob('*.log')))
         self.assertIn('identity-promoted',
-                      [event['action'] for event in self.store.events('MJM10004000001')])
+                      [event['action'] for event in self.store.events('SAMPLE-K1-000001')])
 
     def test_eeprom_does_not_claim_boot_marker_archive_after_usb_move(self):
         marker = 'boot-4e75e47e-c41f-4e9b-8f61-ccc2d2e2c1e9'
@@ -177,9 +177,9 @@ class PersistenceTests(unittest.TestCase):
         new = self.connection('usb-9')
         with self.assertRaisesRegex(IdentityError, 'correct-serial'):
             self.manager.identify(new, {
-                'serial': 'MJM10004000001', 'eeprom_serial': 'MJM10004000001',
+                'serial': 'SAMPLE-K1-000001', 'eeprom_serial': 'SAMPLE-K1-000001',
                 'boot_marker': marker, 'hostname': 'k1', 'ips': []})
-        self.assertIsNone(self.store.get('MJM10004000001'))
+        self.assertIsNone(self.store.get('SAMPLE-K1-000001'))
 
     def test_moving_board_preserves_label_and_old_logs_after_fresh_identification(self):
         old = self.connection('usb-1')
@@ -358,8 +358,8 @@ class PersistenceTests(unittest.TestCase):
     def test_distinct_efuse_ids_with_same_firmware_serial_have_separate_archives(self):
         self.store.mark_conflict('0123456789ABCDEF')
         one, two = self.connection('usb-1'), self.connection('usb-2')
-        for d, uid, hostname in ((one, '0059D968E583C49A', 'milkv2'),
-                                 (two, '0059D968E583C49B', 'milkv')):
+        for d, uid, hostname in ((one, '0061020304050607', 'milkv2'),
+                                 (two, '0061020304050609', 'milkv')):
             frame = ('HOST=%s\nSERIAL=0123456789ABCDEF\nMODEL=Jupiter\nSSHD=active\n'
                      'SOC_SERIAL=%s\nSOC_FAMILY=spacemit socs\nSOC_ID=K1-6370\n') % (hostname, uid)
             with mock.patch.object(d, '_run_cmd', return_value=(True, frame)):

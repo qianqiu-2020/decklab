@@ -65,6 +65,8 @@ class Manager:
                     and len(entry['identity']) == 3
                     and all(type(value) is int for value in entry['identity'])):
                 self.handoff[entry['by_path']] = entry
+        from .desktop import DesktopSessions
+        self.desktop = DesktopSessions(self)
 
     def all_devices(self):
         with self.lock:
@@ -621,6 +623,7 @@ class Manager:
 
     def close(self):
         self.stopping.set()
+        self.desktop.close_actor()
         # Wait for an in-flight scan before taking the final set of collectors.
         with self.scan_lock, self.lock:
             views = [self._board_view(board) for board in self.boards.values()]

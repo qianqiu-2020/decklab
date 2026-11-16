@@ -5,8 +5,8 @@
 #   web 服务不该持有通用提权能力。白名单只放行这个 USB 重新绑定脚本。
 #
 # 为什么必须装在 root 拥有的目录(如 /usr/local/sbin):
-#   若脚本对调用者(qiu)可写,ta 改一行内容就等于拿到完整 root,sudoers 白名单形同虚设。
-#   安装时务必 root:root 0755,且所在目录不可被 qiu 写。
+#   若脚本对调用者可写,ta 改一行内容就等于拿到完整 root,sudoers 白名单形同虚设。
+#   安装时务必 root:root 0755,且所在目录不可被服务使用者写。
 #
 # 用法(参数受控,不做任何别的事):
 #   seriald-rescue.sh <usb设备名> [rebind]  软拔插(内核层 unbind/bind,设备名可能变)

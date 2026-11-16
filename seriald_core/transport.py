@@ -4,6 +4,11 @@ import os
 import re
 import select
 import subprocess
+import sys
+if sys.platform.startswith('linux'):
+    import fcntl
+else:
+    fcntl = None
 try:
     import termios
 except ImportError:  # Windows uses the single pySerial COM handle in WindowsManager.
@@ -17,6 +22,8 @@ def open_serial(dev, flush=False, identity=None, settings=None):
     """Configured framing, raw and no echo; only the collector opens a reader.
 
     默认保留内核里已经排队的字节;重连时 flush 会截断板子的启动现场。
+    Linux readers cooperate through an fd lock across runtime directories and
+    symlink aliases. This does not exclude programs that do not take this lock.
     """
     settings = settings or SerialSettings.from_env()
     speed = getattr(termios, 'B' + str(settings.baud), None)
@@ -29,6 +36,11 @@ def open_serial(dev, flush=False, identity=None, settings=None):
         s = os.fstat(fd)
         if identity is not None and (s.st_dev, s.st_ino, s.st_rdev) != identity:
             raise OSError(errno.ENODEV, '串口已重新枚举')
+        if fcntl is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise OSError(errno.EBUSY, '串口已被另一个合作采集器占用') from None
         a = termios.tcgetattr(fd)
         a[0] = termios.IXON | termios.IXOFF if settings.flow_control == 'xonxoff' else 0
         if settings.parity != 'N':

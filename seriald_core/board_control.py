@@ -24,7 +24,7 @@ MAX_RESPONSE = 1024 * 1024
 
 
 class BoundControl(Protocol):
-    def run(self, check, cleanup_failed=None): ...
+    def run(self, check, cleanup_failed=None, outcome=None): ...
 
 
 class ControlAction(Protocol):
@@ -78,7 +78,7 @@ class BmcAction:
         # This provider never opens a serial device or depends on its COM/tty.
         return self
 
-    def run(self, check, cleanup_failed=None):
+    def run(self, check, cleanup_failed=None, outcome=None):
         started = time.monotonic()
         deadline = started + self.timeout
         sent = False
@@ -104,6 +104,8 @@ class BmcAction:
                 if path.endswith(('/reset', '/firmware-update')):
                     # Mark before sending: a network exception cannot prove the
                     # server did not apply the operation.
+                    if outcome is not None:
+                        outcome('issued')
                     sent = True
                 with opener.open(Request(self.origin + path, data=body, headers=headers),
                                  timeout=min(5, remaining)) as response:
@@ -147,10 +149,14 @@ class BmcAction:
             else:
                 reset_type = {'reset': 'ForceRestart', 'power-on': 'PowerOn', 'power-off': 'PowerOff'}[self.action]
                 request(prefix + '/reset', {'reset_type': reset_type}, token)
+            if outcome is not None:
+                outcome('acknowledged')
             return {'provider': self.provider, 'control_result': 'acknowledged',
                     'duration_ms': round((time.monotonic() - started) * 1000)}
         except Exception as error:
             if sent:
+                if outcome is not None:
+                    outcome('unknown')
                 message = 'BMC control outcome unknown; inspect the original task and board before another action'
                 if isinstance(error, TaskCancelled) or isinstance(error, TransactionError) and error.code == 'cancelled':
                     raise TaskCancelled(message) from None

@@ -2,7 +2,9 @@
 
 1.10.0 起 Linux 和 Windows 构建入口默认生成完整单机安装。构建机提前准备刷机执行器、匹配的 RAM 加载材料、许可证；Windows 还需官方 USB 驱动和有合法发布者签名的 `driverinstall.exe`。安装时不从源码仓库下载刷机组件，不运行 pip。Linux 的发行版依赖由 apt 安装，Windows 内置应用运行时。
 
-材料仅是构建输入，放在 `build/install-components/<平台>/`，平台为 `linux-amd64`、`linux-arm64`、`windows-amd64`。主程序不要求用户填写包内路径；已有显式外部组件设置继续优先，便于已有部署升级。
+goflash 是独立的非开源组件，DeckLab 的 Apache-2.0 不授予其源码或二进制再分发权。本次公开完整包已获 goflash 二进制及 RAM 材料的独立分发授权，不附 goflash 源码。RAM U-Boot 的对应源码、构建配置和许可证另行提供；FSBL 和 USB 驱动遵守各自许可。
+
+材料仅是构建输入，放在 `build/install-components/<平台>/`，1.14.0 交付平台为 `linux-amd64`、`windows-amd64`。主程序不要求用户填写包内路径；已有显式外部组件设置继续优先，便于已有部署升级。
 
 `manifest.json` 示例：
 
@@ -22,7 +24,7 @@ Linux 构建机：
 
 ```sh
 python3 tools/install_components.py --platform linux-amd64
-python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime --output dists
+python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime --output dist
 ```
 
 Windows 构建机：
@@ -37,6 +39,8 @@ Windows 完整安装提供勾选安装 USB 驱动和稍后安装入口。优先�
 
 仅做软件 CI 或明确不需要刷机时，Linux 使用 `--core-only`、Windows 使用 `-CoreOnly`，安装元数据明确标为 `core`。这种包不应作为完整单机安装交付。
 
-正式版流水线在组装前下载经过人工审核并固定 SHA-256 的构建输入 ZIP，ZIP 根目录是上述 `manifest.json` 及相对目录。为每个平台配置 GitHub Actions secrets：`COMPONENTS_LINUX_AMD64_URL` / `COMPONENTS_LINUX_AMD64_SHA256`、`COMPONENTS_LINUX_ARM64_URL` / `COMPONENTS_LINUX_ARM64_SHA256`、`COMPONENTS_WINDOWS_AMD64_URL` / `COMPONENTS_WINDOWS_AMD64_SHA256`。下载地址必须 HTTPS，缺少配置时正式构建停止，不能回退为精简包。材料更新需重新审核摘要，不能从不固定内容的“latest”地址直接构建正式包。
+正式版及软件 CI 都下载经过审核、固定 SHA-256 的 [1.14.0 组件输入](https://github.com/qianqiu-2020/decklab/releases/tag/components-1.14.0)。ZIP 根目录包含 `manifest.json`、刷机材料和 `desktop-runtime/`；图形 SDK 另有逐文件清单。默认公开 URL 和摘要固定在工作流，不需要设置 secrets。组织可用同名 Actions variables 或 secrets 覆盖 `COMPONENTS_LINUX_AMD64_URL` / `COMPONENTS_LINUX_AMD64_SHA256`、`COMPONENTS_WINDOWS_AMD64_URL` / `COMPONENTS_WINDOWS_AMD64_SHA256`。下载必须 HTTPS，缺失或摘要不符立即停止，不回退精简包，也不从可变的 latest 地址构建。
 
-本地交付包直接放 `dists/`，使用版本文件名；不额外套交付目录。正式 GitHub 1.9.0 历史附件保持原样，完整包由后续版本提供。
+在 Linux 构建机下载公开输入时，将工作流里的固定 URL 与 SHA-256 分别设为 `DECKLAB_COMPONENTS_URL` 和 `DECKLAB_COMPONENTS_SHA256`，运行 `python3 tools/fetch_install_components.py --platform linux-amd64`。然后执行 `python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime`，再按上文组装。Windows 同理使用 `--platform windows-amd64`，构建时传 `-DesktopRuntime .\build\install-components\windows-amd64\desktop-runtime`。
+
+本地交付包直接放 `dist/`，使用版本文件名；不额外套交付目录。正式 GitHub 1.9.0 历史附件保持原样；1.14.0 提供 x86_64 Linux 与 Windows x64 完整包，预装 RAM 材料仅含 K3。

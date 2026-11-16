@@ -30,8 +30,9 @@ DEFAULTS = {
     'STOP_BITS': '1', 'FLOW_CONTROL': 'none', 'NEWLINE': 'auto',
     'SSH_USER': 'root', 'SSH_PASSWORD': 'bianbu', 'CONSOLE_USER': '',
     'CONSOLE_PASSWORD': '', 'PROBE': 'linux', 'PROBE_COMMAND': '',
-    'AUTO_CONFIGURE_SSH': '1', 'PROFILES': '', 'HARDWARE': '', 'FLASH': '',
+    'AUTO_CONFIGURE_SSH': '1', 'PROFILES': '', 'HARDWARE': '', 'FLASH': '', 'DESKTOP': '',
     'FLASH_EXECUTOR': '', 'FLASH_LOADERS': '', 'LOG_RETENTION_DAYS': '0', 'DISK_MIN_FREE_MB': '1024',
+    'IMAGE_INTERNAL_BROWSE': '', 'IMAGE_INTERNAL_DOWNLOAD': '',
     'DISK_MIN_FREE_PERCENT': '5', 'TRANSFER_MAX_FILES': '128',
     'TRANSFER_MAX_FILE_BYTES': str(8 * 1024 ** 3),
     'TRANSFER_MAX_TOTAL_BYTES': str(32 * 1024 ** 3),
@@ -40,9 +41,9 @@ DEFAULTS = {
     'UI_LANGUAGE': 'auto', 'SCROLLBACK': str(256 * 1024), 'SSH_LIMIT': '8',
     'SSH_IDLE': '1800', 'SHARE_SECONDS': '86400',
 }
-DOCUMENTS = {'profiles': 'PROFILES', 'hardware': 'HARDWARE', 'flash': 'FLASH',
+DOCUMENTS = {'profiles': 'PROFILES', 'hardware': 'HARDWARE', 'flash': 'FLASH', 'desktop': 'DESKTOP',
              'agent_tokens': 'AGENT_TOKENS_FILE'}
-DOCUMENT_LIMITS = {'profiles': 65536, 'hardware': 65536,
+DOCUMENT_LIMITS = {'profiles': 65536, 'hardware': 65536, 'desktop': 65536,
                    'flash': 1024 ** 2, 'agent_tokens': 65536}
 CHOICES = {'PARITY': ['N', 'E', 'O'], 'DATA_BITS': ['5', '6', '7', '8'],
            'STOP_BITS': ['1', '2'], 'FLOW_CONTROL': ['none', 'rtscts', 'xonxoff'],
@@ -55,7 +56,7 @@ CONTROL = {'BACKEND_URL', 'BACKEND_TOKEN', 'BACKEND_CA', 'PORT', 'BIND', 'AUTH_T
            'MCP_ENABLED', 'MCP_PYTHON', 'MCP_ALLOWED_HOSTS', 'STATIC', 'UI_LANGUAGE', 'SHARE_SECONDS'}
 SHARED = {'BASE', 'SOCKET'}
 PATHS = {'BACKEND_CA', 'BACKEND_CERT', 'BACKEND_KEY', 'BASE', 'STATIC', 'SOCKET', 'HANDOFF', 'BY_PATH', 'RESCUE_BIN',
-         'AGENT_TOKENS_FILE', 'MCP_PYTHON', 'PROFILES', 'HARDWARE', 'FLASH', 'FLASH_EXECUTOR', 'FLASH_LOADERS'}
+         'AGENT_TOKENS_FILE', 'MCP_PYTHON', 'PROFILES', 'HARDWARE', 'FLASH', 'DESKTOP', 'FLASH_EXECUTOR', 'FLASH_LOADERS'}
 REDACTED = {'$redacted': True}
 _LOCK = threading.RLock()
 
@@ -230,6 +231,13 @@ class WebSettings:
         combined = {'version': 1, 'environment': dict(current['environment'], **env),
                     'documents': dict(current['documents'], **docs)}
         merged, docs = combined['environment'], combined['documents']
+        from .image_catalog import configured_sources
+        from .tasks import TaskError
+        try:
+            configured_sources({'SERIALD_IMAGE_INTERNAL_BROWSE': merged['IMAGE_INTERNAL_BROWSE'],
+                                'SERIALD_IMAGE_INTERNAL_DOWNLOAD': merged['IMAGE_INTERNAL_DOWNLOAD']})
+        except TaskError as error:
+            raise SettingsError(str(error)) from error
         integer_limits = {'BACKEND_PORT': (1, 65535), 'PORT': (1, 65535), 'LOG_RETENTION_DAYS': (0, 36500),
                           'DISK_MIN_FREE_MB': (0, 1048576), 'DISK_MIN_FREE_PERCENT': (0, 100),
                           'SCROLLBACK': (4096, 16 * 1024 ** 2), 'SSH_LIMIT': (1, 128),
@@ -251,12 +259,14 @@ class WebSettings:
                 raise SettingsError('后端 HTTPS 连接配置无效') from error
         from .profiles import BoardProfile, ProfileBook
         from .hardware import HardwareBook
+        from .desktop import DesktopBook
         from .flash_runner import FlashBook
         from .transfer_artifacts import ArtifactPolicy
         full_environment = {'SERIALD_' + key: value for key, value in merged.items()}
         base = BoardProfile.from_env(full_environment)
         ProfileBook(docs.get('profiles', {}), base=base)
         HardwareBook(docs.get('hardware', {}))
+        DesktopBook(docs.get('desktop', {}))
         FlashBook(docs.get('flash', {}))
         ArtifactPolicy.from_env(full_environment)
         if 'agent_tokens' in docs:

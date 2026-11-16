@@ -14,9 +14,6 @@ jobs:
           - arch: amd64
             runner: ubuntu-22.04
             archive_hosts: archive.ubuntu.com security.ubuntu.com
-          - arch: arm64
-            runner: ubuntu-22.04-arm
-            archive_hosts: ports.ubuntu.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,13 +40,13 @@ jobs:
       - run: python -m unittest discover -s tests
       - run: python tools/check_public_docs.py
       - run: node tests/frontend.test.js && node tests/share.test.js && node tests/image-store.test.js
-      - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
-        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
       - name: Prepare reviewed complete-install inputs
         env:
-          DECKLAB_COMPONENTS_URL: ${{ matrix.arch == 'amd64' && secrets.COMPONENTS_LINUX_AMD64_URL || secrets.COMPONENTS_LINUX_ARM64_URL }}
-          DECKLAB_COMPONENTS_SHA256: ${{ matrix.arch == 'amd64' && secrets.COMPONENTS_LINUX_AMD64_SHA256 || secrets.COMPONENTS_LINUX_ARM64_SHA256 }}
-        run: python tools/fetch_install_components.py --platform 'linux-${{ matrix.arch }}'
+          DECKLAB_COMPONENTS_URL: ${{ vars.COMPONENTS_LINUX_AMD64_URL || secrets.COMPONENTS_LINUX_AMD64_URL || 'https://github.com/qianqiu-2020/decklab/releases/download/components-1.14.0/decklab-components-1.14.0-linux-amd64.zip' }}
+          DECKLAB_COMPONENTS_SHA256: ${{ vars.COMPONENTS_LINUX_AMD64_SHA256 || secrets.COMPONENTS_LINUX_AMD64_SHA256 || '804be4bc200ddefbc99a614e676ba829670100556d6da405bb3597cfb667127c' }}
+        run: python tools/fetch_install_components.py --platform linux-amd64
+      - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
+        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
       - run: python tools/build_deb.py --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
       - name: Fresh install and public MCP without network on Ubuntu 22.04
         run: python tools/test_deb_container.py --image ubuntu:22.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb"
@@ -91,10 +88,9 @@ jobs:
         run: |
           cd packages
           cp "seriald_${GITHUB_REF_NAME#v}_amd64.deb" seriald_latest_amd64.deb
-          cp "seriald_${GITHUB_REF_NAME#v}_arm64.deb" seriald_latest_arm64.deb
           # Keep existing x86 download links usable; the package metadata is amd64.
           cp "seriald_${GITHUB_REF_NAME#v}_amd64.deb" seriald_latest_all.deb
-          sha256sum "seriald_${GITHUB_REF_NAME#v}_amd64.deb" "seriald_${GITHUB_REF_NAME#v}_arm64.deb" > linux-SHA256SUMS.txt
+          sha256sum "seriald_${GITHUB_REF_NAME#v}_amd64.deb" > linux-SHA256SUMS.txt
           cp "seriald-${GITHUB_REF_NAME#v}-windows-x64-setup.exe" seriald-windows-x64-setup.exe
           sha256sum *.deb *.exe *.zip > SHA256SUMS.txt
           python3 ../tools/verify_release.py . --version "${GITHUB_REF_NAME#v}"

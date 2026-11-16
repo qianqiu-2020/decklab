@@ -25,6 +25,7 @@ class SerialIoTests(unittest.TestCase):
         with mock.patch.object(tr.os, 'open', return_value=98765), \
                 mock.patch.object(tr.os, 'fstat', return_value=identity), \
                 mock.patch.object(tr.os, 'close') as close, \
+                mock.patch.object(tr, 'fcntl', types.SimpleNamespace(flock=mock.Mock(), LOCK_EX=2, LOCK_NB=4)), \
                 mock.patch.object(tr.termios, 'tcgetattr', side_effect=OSError('gone')), \
                 mock.patch.object(tr.termios, 'tcsetattr') as configure:
             with self.assertRaises(OSError):
@@ -88,10 +89,12 @@ class SerialIoTests(unittest.TestCase):
 
     def test_write_side_opens_only_write_fd_and_never_configures(self):
         identity = types.SimpleNamespace(st_dev=1, st_ino=2, st_rdev=3)
+        reader_lock = mock.Mock()
         with mock.patch.object(tr.os, 'open', return_value=98765) as open_fd, \
                 mock.patch.object(tr.os, 'fstat', return_value=identity), \
                 mock.patch.object(tr.os, 'close') as close, \
                 mock.patch.object(tr, 'write_all') as write_all, \
+                mock.patch.object(tr, 'fcntl', types.SimpleNamespace(flock=reader_lock)), \
                 mock.patch.object(tr.termios, 'tcgetattr') as getattrs, \
                 mock.patch.object(tr.termios, 'tcsetattr') as configure:
             ok, error = tr.write_serial('/fake/ttyUSB0', '中文', identity=(1, 2, 3))
@@ -101,6 +104,7 @@ class SerialIoTests(unittest.TestCase):
         close.assert_called_once_with(98765)
         getattrs.assert_not_called()
         configure.assert_not_called()
+        reader_lock.assert_not_called()
 
 
 class DeviceFixture(unittest.TestCase):

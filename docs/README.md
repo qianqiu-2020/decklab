@@ -12,6 +12,8 @@ SpacemiT K3. See the overview for the board support list and default credentials
 - [Demo](DEMO.md): explore the application without hardware.
 - [Agent access](AGENT_ACCESS.md): shared SSH/serial access, grants and CLI commands.
 - [MCP](MCP.md): standard AI client tools over the existing protected control API.
+- [Platform integration](INTEGRATION.md): shared execution contracts and Python/Go examples for existing systems.
+- [Desktop sessions](DESKTOP.md): shared graphical observation and input through the Web UI and MCP.
 
 ## Operate boards
 

@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from seriald_core import control_server, device as device_module, web
-from seriald_core.agent_grants import AgentGrantStore
+from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
 from seriald_core.devices import Manager
 from seriald_core.httpd import BoundedThreadingTCPServer
 from seriald_core.profiles import ProfileBook
@@ -39,6 +39,7 @@ def protected_connection():
         store, grants = Store(':memory:'), AgentGrantStore(':memory:')
         manager = Manager(store, profiles=ProfileBook({
             'default': 'raw', 'profiles': {'raw': {'probe': 'manual'}}}))
+        attach_agent_grants(manager, grants)
         device = device_module.Device('fake-usb-port', 'FAKE-COM7', manager)
         device.fd, device.present = 98765, True
         manager.devices[device.by_path] = device

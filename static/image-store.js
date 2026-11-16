@@ -35,10 +35,16 @@
           var facts = [local ? options.formatBytes(item.size) : labels[item.kind]];
           if (!local && (item.size_label || item.size)) facts.push(item.size ? options.formatBytes(item.size) : item.size_label);
           if (item.modified) facts.push(item.modified);
+          if (local && item.state === 'claimed') facts.push('正在使用');
           text('small', facts.join(' · '), main);
           if (local) {
             var actions = text('div', '', row); actions.className = 'is-actions';
-            if (choose) button('使用', actions, function () { selected(item); });
+            if (choose) {
+              var use = button('使用', actions, function () { selected(item); });
+              if (item.state === 'claimed' || item.serial && item.serial !== picker.serial) {
+                use.disabled = true; use.title = item.state === 'claimed' ? '镜像正在被任务使用' : '此镜像属于其他设备的任务';
+              }
+            }
             var remove = button('删除', actions, function () {
               if (!global.confirm('从控制机删除“' + item.name + '”？')) return;
               // The existing deletion API refuses claimed/in-use artifacts.
@@ -47,6 +53,7 @@
                 status('镜像已从控制机缓存删除。'); loadLibrary();
               }).catch(function (error) { status(error.message); remove.disabled = false; });
             });
+            remove.disabled = item.state === 'claimed';
           } else {
             var download = button(choose ? '下载并使用' : '下载到控制机', row, function () { startDownload(item, download); });
             download.disabled = unknown || !!active[item.url];
@@ -73,6 +80,10 @@
       try {
         var data = await client.request('/api/image-catalog?source=' + current + '&path=' + encodeURIComponent(path) + (force ? '&refresh=1' : ''));
         if (seq !== generation || current !== source) return;
+        if (data.sources) {
+          var organization = Array.from($('is-source').children).find(function (item) { return item.value === 'internal'; });
+          if (organization) organization.disabled = !data.sources.some(function (item) { return item.id === 'internal'; });
+        }
         entries = data.entries; render(entries, false); status('');
       } catch (error) { if (seq === generation) { entries = []; $('is-list').textContent = ''; status(error.message); } }
       finally { if (seq === generation) $('is-refresh').disabled = false; }
@@ -132,6 +143,7 @@
       $('is-title').textContent = picker.fileOnly ? '选择分区文件' + (picker.partition ? ' · ' + picker.partition : '') : '镜像商店';
       if (!$('image-store-dialog').open) $('image-store-dialog').showModal();
       if (!opening) { opening = true; source = $('is-source').value || 'public'; }
+      if (['local', 'public', 'internal'].includes(picker.source)) { source = picker.source; path = ''; $('is-source').value = source; }
       if (picker.fileOnly) { source = 'local'; path = ''; $('is-source').value = 'local'; }
       load();
     }

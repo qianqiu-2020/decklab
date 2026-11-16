@@ -37,7 +37,7 @@ def safe_outcome(value):
     result = {}
     values = {'write_result': {'not-started', 'completed', 'partial', 'failed', 'unknown'},
               'verify_result': {'not-started', 'verified', 'failed', 'unavailable', 'not-requested'},
-              'boot_result': {'not-requested', 'not-observed', 'observed', 'failed', 'unknown'}}
+              'boot_result': {'not-requested', 'not-observed', 'observed', 'failed', 'unknown', 'reset-command-acknowledged'}}
     for field, allowed in values.items():
         if isinstance(value.get(field), str) and value[field] in allowed:
             result[field] = value[field]
@@ -313,6 +313,8 @@ def public_plan(value):
 
 class LocalFlashExecutor:
     supports_nor_snapshot = True
+    supports_reset_after = True
+    supports_storage_metadata = True
 
     def __init__(self, work_dir):
         # Canonicalize the administrator-selected root once. On Windows, TEMP
@@ -411,9 +413,15 @@ class LocalFlashExecutor:
             raise FlashRunnerError('invalid prepared execution profile') from error
         baseline = json.loads(json.dumps(binding.profile_data))
         candidate = json.loads(json.dumps(profile))
+        system_storage = candidate.pop('system_storage', '')
+        original_system = baseline.pop('system_storage', '')
+        if system_storage and (system_storage != 'auto' and not re.fullmatch(r'(nvme|scsi|mmc|usb):[0-3]', system_storage)):
+            raise FlashRunnerError('invalid prepared system storage')
+        if original_system and original_system != system_storage:
+            raise FlashRunnerError('prepared system storage changed')
         baseline_protocol = baseline.pop('ram_loader_protocol', None)
         protocol = candidate.pop('ram_loader_protocol', None)
-        if protocol is not None and protocol not in ('stock', 'decklab-nor-v1'):
+        if protocol is not None and protocol not in ('stock', 'spacemit-ram-v1'):
             raise FlashRunnerError('unsupported RAM loader protocol')
         if baseline_protocol and baseline_protocol != protocol:
             raise FlashRunnerError('prepared execution profile changed RAM loader protocol')
@@ -423,7 +431,7 @@ class LocalFlashExecutor:
         candidate.setdefault('identity', None)
         steps = candidate.pop('prepare', None)
         original_steps = baseline.pop('prepare', None)
-        live_catalogue = (baseline_protocol == protocol == 'decklab-nor-v1'
+        live_catalogue = (baseline_protocol == protocol == 'spacemit-ram-v1'
                           and not baseline.get('bootrom_identity') and not original_steps and not steps)
         if not live_catalogue and (not isinstance(steps, list) or len(steps) != 4
                 or [step.get('kind') if isinstance(step, dict) else None for step in steps]
@@ -434,7 +442,13 @@ class LocalFlashExecutor:
         nor_catalogue = {'id': 'active', 'label': 'NOR (package payload catalogue)',
             'layout_source': 'spacemit-gpt', 'size_getvar': '__decklab_gpt_capacity',
             'sector_size': 512, 'partitions': [], 'package_tables': ['partition_nor.json'], 'sparse': False}
-        if protocol == 'decklab-nor-v1' and storages == [nor_catalogue]:
+        if system_storage:
+            if protocol != 'spacemit-ram-v1' or not isinstance(storages, list) or len(storages) != 1 or storages[0].get('package_tables') != ['partition_universal.json']:
+                raise FlashRunnerError('system storage requires the fixed RAM OS catalogue')
+            if not storages[0].get('sparse'):
+                raise FlashRunnerError('system payload transfer capability missing')
+            storages[0]['sparse'] = original_storages[0].get('sparse', False)
+        if protocol == 'spacemit-ram-v1' and storages == [nor_catalogue]:
             candidate['storages'] = baseline['storages']
         if (isinstance(storages, list) and len(storages) == 1 and isinstance(storages[0], dict)
                 and isinstance(original_storages, list) and len(original_storages) == 1
@@ -472,8 +486,20 @@ class LocalFlashExecutor:
                     or not re.fullmatch(r'[0-9a-f]{64}', step['sha256'])):
                 raise FlashRunnerError('invalid prepared loader reference')
             path = Path(step['path'])
-            if not path.is_absolute() or not path.is_relative_to(target):
+            inherited = (protocol == 'spacemit-ram-v1' and isinstance(original_steps, list)
+                         and len(original_steps) == 4 and step == original_steps[index])
+            if not path.is_absolute():
                 raise FlashRunnerError('prepared loader is outside the managed image workspace')
+            if not path.is_relative_to(target):
+                if not inherited:
+                    raise FlashRunnerError('prepared loader is outside the managed image workspace')
+                # A package imported into an already running RAM workspace may
+                # reuse its exact previously checked loader files. They remain
+                # owned by that task and must still be in our managed cache.
+                inherited_workspace = next((parent for parent in path.parents if parent.parent == cache), None)
+                if inherited_workspace is None:
+                    raise FlashRunnerError('inherited loader left the managed cache')
+                self._owned_workspace(inherited_workspace)
             expected = 'FSBL.bin' if index == 0 else 'u-boot.itb'
             if path.name != expected or index == 0 and path.parent.name != 'factory':
                 raise FlashRunnerError('prepared loader does not match the fixed image member')
@@ -528,6 +554,7 @@ class LocalFlashExecutor:
             content = partition_content(data, part)
             if content['sha256'] != value.get('sha256'):
                 raise FlashRunnerError('NOR payload checksum changed during metadata read')
+            content['sha256_scope'] = 'payload'
             metadata.append({'storage': value.get('storage'), 'partition': part,
                              'sha256': content['sha256'], 'content': content})
         return metadata
@@ -576,7 +603,7 @@ class LocalFlashExecutor:
         if not isinstance(artifact, dict) or not re.fullmatch(r'[0-9a-f]{64}', str(artifact.get('sha256', ''))):
             raise TaskError('a sealed image artifact is required')
         if target_storage is not None and (not isinstance(target_storage, str)
-                or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', target_storage)):
+                or not re.fullmatch(r'(?:[A-Za-z0-9_.-]{1,128}|(?:nvme|scsi|mmc|usb):[0-3])', target_storage)):
             raise TaskError('invalid flash target storage')
         cache = self._directory(self.root / 'cache')
         with self._cache_lock:
@@ -658,7 +685,7 @@ class LocalFlashExecutor:
             if binding.profile_data.get('bootrom_identity'):
                 from .flash_loaders import prepare_materials
                 request['boot_materials'] = prepare_materials(binding, workspace, check)
-                if request['boot_materials'].get('protocol') != 'decklab-nor-v1':
+                if request['boot_materials'].get('protocol') != 'spacemit-ram-v1':
                     raise TaskError('NOR backup requires the RAM-only NOR loader', 409)
             profile = self._run(binding, 'nor-read-profile', request, check=check)
             execution = self.execution_binding(binding, profile, workspace, check)
@@ -691,9 +718,28 @@ class LocalFlashExecutor:
                        attempt_id=attempt_id, mode='partitions')
         return self._run(binding, 'snapshot-nor', request, on_event, check)
 
+    def set_boot_priority(self, binding, expected, value, check=lambda: None):
+        request = dict(self._request(binding), boot_priority={'expected': expected, 'value': value})
+        return self._run(binding, 'boot-priority', request, check=check)
+
+    def storage_inventory(self, binding, check=lambda: None, on_event=None):
+        from .storage_metadata import read_inventory
+        request = dict(self._request(binding), mode='partitions')
+        if on_event:
+            on_event({'event': 'progress', 'phase': 'reading-system-layout', 'done': 0, 'total': 0})
+        document = self._run(binding, 'storage-inventory', request, check=check)
+        def fetch(extent):
+            return self._run(binding, 'storage-metadata', dict(request, storage_read=extent), check=check)
+        def progress(done, total):
+            if on_event:
+                on_event({'event': 'progress', 'phase': 'reading-system-metadata', 'done': done, 'total': 0})
+        return read_inventory(document, fetch, check, progress)
+
     def execute(self, binding, plan, on_event=None, check=lambda: None, task_id='', attempt_id='',
-                workspace=None, nor_baseline=None):
+                workspace=None, nor_baseline=None, reset_after=False):
         request = dict(self._request(binding), plan=plan, task_id=task_id, attempt_id=attempt_id)
+        if reset_after:
+            request['reset_after'] = True
         if workspace is not None:
             request['workspace'] = str(self._owned_workspace(workspace))
         if nor_baseline is not None:
@@ -731,13 +777,13 @@ class LocalFlashExecutor:
                 raise TaskError('USB connection transition requires this plan\'s loader preparation', 409)
             request['previous_device'] = previous_device
         result = self._run(binding, 'check-plan', request, check=check)
-        paths = [value.get('path') for value in (result.get('plan') or {}).get('writes', [])
-                 if value.get('partition') in ('bootinfo', 'fsbl', 'env', 'esos', 'opensbi', 'uboot')]
+        paths = [value.get('path') for value in list((result.get('plan') or {}).get('writes', []))
+                 + list(result.get('payload_candidates') or []) if value.get('path')]
         if paths:
             cache = self.root / 'cache'
             source = Path(paths[0])
             if not source.is_absolute() or not source.is_relative_to(cache):
-                raise FlashRunnerError('NOR payload is outside the managed cache')
+                raise FlashRunnerError('payload is outside the managed cache')
             workspace = cache / source.relative_to(cache).parts[0]
             result['payload_metadata'] = self._payload_metadata(result, workspace)
         return result

@@ -37,6 +37,22 @@ class TaskActions:
                 return FlashActions(self.manager).backup(payload, device, actor)
             if kind == 'flash':
                 return FlashActions(self.manager).start(payload, device, actor)
+            self.tasks._check_actor(actor)
+            request_id, input_digest = payload.get('request_id'), None
+            if request_id is not None:
+                from .flash_store import validate_request
+                validate_request(request_id, '0' * 64)
+                # Actor is pinned by authorization; mutable labels and browser
+                # page IDs are routing/ownership metadata, not operation input.
+                # All remaining inputs, including optional SSH credentials and
+                # execution lease proofs, only enter a private HMAC in memory.
+                document = {key: value for key, value in payload.items()
+                            if key not in ('request_id', 'actor', 'client_id', 'key', 'to_key')}
+                input_digest = self.tasks.store.request_digest(document)
+                previous = self.tasks.store.find_request(actor, request_id, input_digest)
+                if previous is not None:
+                    return response(202, {'ok': True, 'task': self.tasks.store.get(previous)})
+            submission = dict(request_id=request_id, input_digest=input_digest, tracks_outcome=True)
             if kind == 'identify':
                 invalid = validate_identify_request(payload, actor)
                 if invalid is not None:
@@ -58,18 +74,20 @@ class TaskActions:
             with transactions.actor_scope(actor, client):
                 transactions.check_owner(actor)
             if kind.startswith('hardware-'):
-                if set(payload) - {'kind', 'key', 'serial', 'connection_id', 'actor', 'client_id'}:
+                if set(payload) - {'kind', 'key', 'serial', 'connection_id', 'actor', 'client_id', 'request_id',
+                                   'execution_lease'}:
                     raise TaskError('hardware task accepts only a configured action and target')
                 operation = HardwareOperation(self.manager, device, kind[9:], actor, client)
                 task = self.tasks.start(kind, actor, client,
-                    [{'serial': source_serial, 'connection_id': connection}], operation.run)
+                    [{'serial': source_serial, 'connection_id': connection}], operation.run, **submission)
                 return response(202, {'ok': True, 'task': task})
             if kind in ('file-upload', 'file-download'):
                 operation = TransferFile(self.manager, device, actor, client,
                     'upload' if kind == 'file-upload' else 'download', payload.get('path'),
                     payload.get('artifact_id'), payload.get('overwrite') is True, (connection, stop, source_serial))
                 task = self.tasks.start(kind, actor, client,
-                    [{'serial': source_serial, 'connection_id': connection}], operation.run)
+                    [{'serial': source_serial, 'connection_id': connection}],
+                    self._file_runner(operation.run), **submission)
                 return response(202, {'ok': True, 'task': task})
             if kind == 'file-copy':
                 destination = self.manager.resolve(payload.get('to_key'))
@@ -89,7 +107,8 @@ class TaskActions:
                 copy.snapshots[destination] = (payload['to_connection_id'], copy.snapshots[destination][1])
                 task = self.tasks.start(kind, actor, client, [
                     {'serial': source_serial, 'connection_id': connection},
-                    {'serial': payload['to_serial'] or '', 'connection_id': payload['to_connection_id']}], copy.run)
+                    {'serial': payload['to_serial'] or '', 'connection_id': payload['to_connection_id']}],
+                    self._file_runner(copy.run), **submission)
                 return response(202, {'ok': True, 'task': task})
             # Request credentials can be needed by SSH but never enter the task record.
             request = dict(payload)
@@ -103,6 +122,7 @@ class TaskActions:
                     existing_sessions = set(device.ssh_sessions)
                 try:
                     with transactions.task_scope(context.cancelled, connection, stop):
+                        context.issued()
                         result = DeviceActions(self.manager).execute(kind, request, device, actor)
                 except TransactionError:
                     context.check()
@@ -141,16 +161,36 @@ class TaskActions:
                     'ssh_credentials_saved', 'ssh_credentials_note')}
                 # Preserve a completed result if cancellation races the final response.
                 self.tasks.store.update(context.id, progress={'done': 1, 'total': 1, 'phase': kind})
+                context.mark_outcome('observed' if kind in ('identify', 'ssh-connect') else 'acknowledged')
                 return output
             task = self.tasks.start(kind, actor, client, [
-                {'serial': source_serial, 'connection_id': connection}], run)
+                {'serial': source_serial, 'connection_id': connection}], run, **submission)
             return response(202, {'ok': True, 'task': task})
         except (TaskError, TransactionError, TransferError, ValueError) as error:
             return response(getattr(error, 'status', 400), {'ok': False, 'error': str(error)})
 
+    @staticmethod
+    def _file_runner(run):
+        def execute(context):
+            context.issued()
+            result = run(context)
+            # Existing file adapters compare the source/destination SHA-256 and
+            # complete the transfer before returning. This is file-content
+            # evidence, not a board boot or whole-storage verification claim.
+            context.mark_outcome('verified')
+            return result
+        return execute
+
     def query(self, task_id=None, actor='web', serial=None, limit=20, offset=0, connection_id=None, target_serial=None,
-              target_id=None):
+              target_id=None, request_id=None):
         try:
+            self.tasks._check_actor(actor)
+            if request_id is not None:
+                if task_id is not None:
+                    raise TaskError('select a task ID or request ID, not both')
+                task_id = self.tasks.store.find_request(actor, request_id)
+                if task_id is None:
+                    raise TaskError('task not found', 404)
             if task_id:
                 task = self.tasks.store.get(task_id)
                 if target_id is not None and not any(value['target_id'] == target_id

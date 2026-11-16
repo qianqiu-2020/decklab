@@ -12,7 +12,9 @@ from urllib.request import urlopen
 
 import seriald_mcp
 from seriald_core.device import Device
+from seriald_core.flash_runner import FlashBook
 from test_connection_access import protected_connection
+from test_flash_discovery_integration import FakeDiscoveryExecutor
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +67,10 @@ class ProtectedMCPTests(unittest.TestCase):
             fixture.manager.devices[other.by_path] = other
             other_token, _ = fixture.grant_store.issue('connection', key=other.key,
                                                      connection_id=other.connection_id)
+            all_token, all_grant = fixture.grant_store.issue('all')
+            fixture.manager.flash_book = FlashBook()
+            fixture.manager.flash_executor = FakeDiscoveryExecutor()
+            fixture.manager.flash_discovery_argv = (sys.executable,)
             with socket.socket() as handle:
                 handle.bind(('127.0.0.1', 0))
                 port = handle.getsockname()[1]
@@ -98,12 +104,30 @@ class ProtectedMCPTests(unittest.TestCase):
                                 listed = await client.call_tool('list_devices', {})
                                 self.assertFalse(listed.is_error, repr(listed))
                                 self.assertEqual([d['key'] for d in listed.structured_content['devices']], [expected])
+                                denied = await client.call_tool('list_flash_targets', {})
+                                self.assertTrue(denied.is_error)
+                    async def flashing():
+                        async with httpx2.AsyncClient(headers={'Authorization': 'Bearer ' + all_token}) as http:
+                            async with MCPClient(streamable_http_client(endpoint, http_client=http)) as client:
+                                discovered = await client.call_tool('list_flash_targets', {})
+                                self.assertFalse(discovered.is_error, repr(discovered))
+                                row = discovered.structured_content['targets'][0]
+                                target = {name: row[name] for name in ('target_id', 'target_generation')}
+                                probed = await client.call_tool('probe_flash_target', {'target': target})
+                                self.assertFalse(probed.is_error, repr(probed))
+                                self.assertTrue(probed.structured_content['capabilities']['supported'])
                     async def check():
-                        await asyncio.gather(scoped(fixture.token, fixture.device.key), scoped(other_token, other.key))
+                        await asyncio.gather(scoped(fixture.token, fixture.device.key),
+                            scoped(other_token, other.key), flashing())
                         fixture.grant_store.revoke(fixture.grant['id'])
+                        fixture.grant_store.revoke(all_grant['id'])
                         async with httpx2.AsyncClient(headers={'Authorization': 'Bearer ' + fixture.token}) as http:
                             revoked = await http.post(endpoint, json={'jsonrpc': '2.0', 'id': 1,
                                                                      'method': 'tools/list'})
+                            self.assertEqual(revoked.status_code, 401)
+                        async with httpx2.AsyncClient(headers={'Authorization': 'Bearer ' + all_token}) as http:
+                            revoked = await http.post(endpoint, json={'jsonrpc': '2.0', 'id': 2,
+                                'method': 'tools/call', 'params': {'name': 'list_flash_targets', 'arguments': {}}})
                             self.assertEqual(revoked.status_code, 401)
                         await scoped(other_token, other.key)
                     asyncio.run(check())

@@ -5,7 +5,13 @@
     var $ = options.byId, fmt = options.formatBytes;
     var fetch = options.fetch, isCurrent = options.isCurrent;
     var bootSearch = { seq: 0, key: '', serial: '', query: '', offset: 0 };
-    var archiveState = { key: '', serial: '', mode: 'date', date: '', bootId: '' };
+    var archiveState = { key: '', serial: '', mode: 'date', date: '', bootId: '', connection: '' };
+    function connectionQuery(ctx) {
+      return !ctx.serial && ctx.archiveConnection ? '&archive_connection=' + encodeURIComponent(ctx.archiveConnection) : '';
+    }
+    function archiveName(ctx, name) {
+      return !ctx.serial && ctx.archiveConnection ? ctx.archiveConnection + ':' + name : name;
+    }
     function clearBootSearch() {
       bootSearch.seq++;
       bootSearch.query = '';
@@ -27,7 +33,7 @@
       $('boot-search-prev').disabled = $('boot-search-next').disabled = true;
       fetch('/api/boot-search?key=' + encodeURIComponent(ctx.key)
         + '&serial=' + encodeURIComponent(ctx.serial || '') + '&q=' + encodeURIComponent(query)
-        + '&offset=' + bootSearch.offset + '&limit=20', { cache: 'no-store' })
+        + '&offset=' + bootSearch.offset + '&limit=20' + connectionQuery(ctx), { cache: 'no-store' })
         .then(function (response) { return response.json(); }).then(function (data) {
           var view = options.getView();
           if (seq !== bootSearch.seq || !view || view.key !== ctx.key
@@ -79,8 +85,8 @@
     function openBootLog(ctx, boot) {
       if (!isCurrent(ctx)) return;
       var url = '/api/boot-log?key=' + encodeURIComponent(ctx.key)
-        + '&serial=' + encodeURIComponent(ctx.serial || '') + '&id=' + encodeURIComponent(boot.id);
-      options.openArchive(ctx, boot.id, '启动 #' + boot.number + ' · ' + (boot.started || ''), url);
+        + '&serial=' + encodeURIComponent(ctx.serial || '') + '&id=' + encodeURIComponent(boot.id) + connectionQuery(ctx);
+      options.openArchive(ctx, archiveName(ctx, boot.id), '启动 #' + boot.number + ' · ' + (boot.started || ''), url);
     }
 
     function archiveHeading(box, title) {
@@ -94,6 +100,25 @@
       var box = $('d-logs'), picker = $('archive-picker');
       box.textContent = ''; picker.textContent = '';
       var files = ctx.archiveFiles || [], boots = ctx.archiveBoots || [];
+      var connections = $('archive-connections'); connections.textContent = '';
+      connections.hidden = !ctx.archiveConnections || !ctx.archiveConnections.length;
+      if (!connections.hidden) {
+        var captures = document.createElement('select'); captures.setAttribute('aria-label', '选择串口连接');
+        ctx.archiveConnections.forEach(function (capture) {
+          var option = document.createElement('option'); option.value = capture.id;
+          option.textContent = (capture.current ? '当前连接' : '历史连接') + ' · '
+            + (capture.started || new Date(capture.last_seen * 1000).toLocaleString()) + ' · ' + fmt(capture.size);
+          captures.appendChild(option);
+        });
+        captures.value = ctx.archiveConnection;
+        captures.addEventListener('change', function () {
+          if (!isCurrent(ctx)) return;
+          archiveState.connection = captures.value; archiveState.date = ''; archiveState.bootId = '';
+          clearBootSearch(); $('d-logs').textContent = '正在读取日志…'; $('archive-picker').textContent = '';
+          loadLogs();
+        });
+        connections.appendChild(captures);
+      }
       var dates = Array.from(new Set(files.map(archiveDate))).sort().reverse();
       var hasBoots = boots.length > 0;
       if (!hasBoots) archiveState.mode = 'date';
@@ -142,14 +167,17 @@
           open.textContent = file.name;
           open.dataset.i18nIgnore = '';
           open.addEventListener('click', function () {
-            if (isCurrent(ctx)) options.openArchive(ctx, file.name, '串口日志 · ' + archiveDate(file));
+            if (!isCurrent(ctx)) return;
+            var url = '/api/log?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
+              + '&file=' + encodeURIComponent(file.name) + '&full=1' + connectionQuery(ctx);
+            options.openArchive(ctx, archiveName(ctx, file.name), '串口日志 · ' + archiveDate(file), url);
           });
           var size = document.createElement('span'); size.className = 'log-size';
           size.textContent = fmt(file.size);
           var download = document.createElement('a'); download.className = 'log-download';
           download.href = '/api/log?key=' + encodeURIComponent(ctx.key)
             + '&serial=' + encodeURIComponent(ctx.serial || '') + '&file=' + encodeURIComponent(file.name)
-            + '&download=1';
+            + '&download=1' + connectionQuery(ctx);
           download.download = file.name; download.textContent = '下载';
           row.appendChild(date); row.appendChild(open); row.appendChild(size);
           row.appendChild(download); box.appendChild(row);
@@ -220,14 +248,24 @@
     function loadLogs() {
       var ctx = options.getView();
       if (!isCurrent(ctx)) return;
+      if (archiveState.key !== ctx.key || archiveState.serial !== (ctx.serial || '')
+          || archiveState.liveConnection !== ctx.connectionId) {
+        archiveState = { key: ctx.key, serial: ctx.serial || '', mode: 'date', date: '', bootId: '', connection: '',
+          liveConnection: ctx.connectionId };
+        $('archive-connections').hidden = true; $('archive-connections').textContent = '';
+      }
       var seq = ++ctx.logsSeq;
-      fetch('/api/logs?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || ''), { cache: 'no-store' })
+      var requestedConnection = archiveState.connection;
+      fetch('/api/logs?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
+        + (requestedConnection ? '&archive_connection=' + encodeURIComponent(requestedConnection) : ''), { cache: 'no-store' })
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (!isCurrent(ctx) || seq !== ctx.logsSeq || (d.key && d.key !== ctx.key)) return;
-          if (archiveState.key !== ctx.key || archiveState.serial !== (ctx.serial || '')) {
-            archiveState = { key: ctx.key, serial: ctx.serial || '', mode: 'date', date: '', bootId: '' };
-          }
+          if (!isCurrent(ctx) || seq !== ctx.logsSeq || (d.key && d.key !== ctx.key)
+              || archiveState.connection !== requestedConnection) return;
+          if (d.error) throw new Error(d.error);
+          ctx.archiveConnection = d.archive_connection || '';
+          ctx.archiveConnections = d.connections || [];
+          archiveState.connection = ctx.archiveConnection;
           var oldDates = (ctx.archiveFiles || []).map(archiveDate).sort().reverse();
           var followedDate = archiveState.date && archiveState.date === oldDates[0];
           var followedBoot = archiveState.bootId && (ctx.archiveBoots || []).length

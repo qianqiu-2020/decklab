@@ -2,7 +2,7 @@
 
 DeckLab versions both SQLite databases with `PRAGMA user_version` and identifies
 their purpose with `PRAGMA application_id`. The registry currently uses schema
-version 7; the agent-grant database uses version 2. These versions are independent
+version 11; the agent-grant database uses version 3. These versions are independent
 of the application release number.
 
 ## Automatic upgrade
@@ -23,7 +23,21 @@ username and password, plus a revision for safe updates. Existing boards start
 without saved credentials; no password is guessed from history or copied from a
 task record. Explicit board-identity migrations carry saved credentials to the
 corrected serial. Grant schema 2 adds connection-bound grants; older grants retain
-their existing scope.
+their existing scope. Registry schema 8 adds board-scoped flash tasks, requests,
+plans and recovery resources; schema 9 adds attachment labels; schema 10 adds
+USB download targets. Schema 11 adds persistent board input ownership, fencing
+generations and token hashes. Grant schema 3 adds durable revocation generations,
+backend acknowledgements and actor fences. Existing input ownership becomes
+recovery on collector restart; it is never silently reassigned.
+
+Discrete task request comparison uses a random private key in
+`.task-request-hmac.key` beside `registry.sqlite3`. Preserve this private file
+with private runtime backups and restores. Request records contain only an HMAC,
+not credentials or an unkeyed password digest. If the key is missing while such
+requests exist, new comparisons fail closed; do not delete the key to retry a task.
+The automatic SQLite migration snapshot does not include this separate file.
+Unix enforces owner-only permissions; Windows inherits the runtime directory ACL,
+as with the credential-bearing registry. The task layer does not manage a separate Windows DACL.
 New empty databases need no backup.
 
 Before modifying an existing database, DeckLab creates a snapshot under:

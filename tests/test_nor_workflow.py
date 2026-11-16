@@ -31,7 +31,7 @@ class SnapshotExecutor(FakeFlashExecutor):
     def inspect(self, binding, check=lambda: None):
         check()
         return {'mode': 'download', 'layout_digest': '1' * 64, 'storages': [
-            {'id': 'active', 'size': 8 << 20, 'capacity_source': 'decklab-nor-v1',
+            {'id': 'active', 'size': 8 << 20, 'capacity_source': 'spacemit-ram-v1',
              'capacity_verified': True, 'verify': True, 'partitions': [
                  {'name': name, 'offset': offset, 'size': size} for name, offset, size in self.parts]}]}
 
@@ -80,6 +80,25 @@ class NORWorkflowTests(unittest.TestCase):
         executor = SnapshotExecutor(root)
         fixture.manager.flash_executor = executor
         return executor
+
+    def test_full_package_does_not_require_nor_snapshot_or_system_inventory(self):
+        with protected_flashing() as fixture, tempfile.TemporaryDirectory() as workspace:
+            executor = self.attach_executor(fixture, workspace)
+            executor.image_type = 'package'
+            def unexpected_read(*args, **kwargs):
+                raise AssertionError('full package must not require a backup workspace')
+            executor.snapshot = executor.storage_inventory = unexpected_read
+            executor.execute = lambda *args, **kwargs: FakeFlashExecutor.execute(executor, *args, **kwargs)
+            plan = self.plan(fixture, self.image(fixture), mode='full', verify='none')
+            self.assertEqual(executor.executions, [])
+            code, result = self.start(fixture, plan)
+            self.assertEqual(code, 202, result)
+            task = self.terminal(fixture, result['task']['id'])
+            self.assertEqual(task['state'], 'completed', task)
+            self.assertNotIn('nor_before', task['flash'])
+            self.assertNotIn('storage_inventory', task['flash'])
+            self.assertEqual(executor.executions[0][0]['mode'], 'full')
+            self.assertEqual(executor.executions[0][0]['verify'], 'none')
 
     def wait_selection(self, fixture, task_id):
         deadline = time.monotonic() + 5

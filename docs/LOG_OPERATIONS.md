@@ -1,5 +1,27 @@
 # Log retention and diagnostics
 
+## Unidentified serial connections
+
+Before a board serial is confirmed, each connection is stored separately under
+`logs/_unprovisioned/<attachment-id>/<connection-id>/`. Replugging the same UART
+or restarting capture starts a new connection; it does not delete the previous
+files. The live terminal shows only the current capture.
+
+The serial archive panel lists current and previous connections on that attachment
+by their first log timestamp. Select a capture to browse its dates and boots,
+search, open a read-only terminal tab, or download it. Identical daily filenames
+in separate captures remain separate. These are attachment records, not proof
+that the same board stayed connected. Confirming a serial promotes only the
+current connection's logs through the existing identity workflow.
+
+`GET /api/logs` includes `connections` for an unidentified attachment. The optional
+`archive_connection` selects a listed capture on `/api/logs`, `/api/log`,
+`/api/boot-log` and `/api/boot-search`. Current-connection Agent grants keep their
+original scope and cannot enumerate or read previous captures. Physical paths
+are never accepted as capture identifiers.
+
+## Retention
+
 DeckLab preserves all archives by default. Optional retention is configured on the
 collector (or Windows host), not the restartable control service:
 

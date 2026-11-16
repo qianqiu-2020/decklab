@@ -1,6 +1,8 @@
 """Complete package checks catch DLL/resource changes without native execution."""
 import json
+import hashlib
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 import subprocess
@@ -28,6 +30,26 @@ class BundleManifestTests(unittest.TestCase):
             self.assertEqual(manifest['files']['_internal/crypto.dll']['kind'], 'native')
             self.assertEqual(manifest['files']['docs/使用说明.md']['kind'], 'resource')
             self.assertNotIn(NAME, manifest['files'])
+
+    def test_windows_vendor_assets_and_notices_are_covered_as_exact_resources(self):
+        source = Path(__file__).resolve().parents[1] / 'vendor'
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory)
+            for tree in ('novnc', 'python'):
+                shutil.copytree(source / tree, root / '_internal/vendor' / tree)
+            manifest = create(root)
+            self.assertEqual(verify(root), manifest)
+            for tree in ('novnc', 'python'):
+                for path in (source / tree).rglob('*'):
+                    if path.is_file():
+                        name = '_internal/vendor/' + path.relative_to(source).as_posix()
+                        self.assertEqual(manifest['files'][name]['kind'], 'resource')
+                        self.assertEqual(manifest['files'][name]['sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
+            wheel = root / '_internal/vendor/python/wsproto-1.3.2-py3-none-any.whl'
+            data = wheel.read_bytes()
+            wheel.write_bytes(b'X' + data[1:])
+            with self.assertRaisesRegex(ValueError, 'content changed'):
+                verify(root)
 
     def test_same_size_dll_or_resource_modification_is_rejected(self):
         for name in ('_internal/crypto.dll', 'Start-seriald.cmd'):
