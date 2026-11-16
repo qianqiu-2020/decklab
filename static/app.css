@@ -694,6 +694,9 @@
 .detail.desktop-active .session-bar .tabs button.on{background:transparent;color:var(--ink-3);border-bottom-color:transparent;box-shadow:none;font-weight:400}
 .session-bar>#b-desktop[aria-selected="true"]{background:var(--accent-soft);border-color:var(--accent-line);font-weight:600}
 .desktop-panel{display:flex;flex:1;flex-direction:column;min-height:0;min-width:0;overflow:auto;background:var(--surface)}
+.desktop-connection-help{font-size:12px;line-height:1.6;color:var(--ink-2)}
+.desktop-connection-help p{margin:4px 0}
+.desktop-connection-help code{display:block;overflow-wrap:anywhere;white-space:normal;font-family:var(--font-mono);color:var(--ink)}
 .desktop-error{padding:10px 14px;border-block:1px solid var(--line);color:var(--dead)}
 .desktop-error summary{cursor:pointer;font-weight:600}
 .desktop-error pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;font:12px/1.5 var(--font-mono);color:var(--ink)}

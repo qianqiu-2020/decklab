@@ -465,6 +465,7 @@
       var rdp = $('desktop-protocol').value === 'rdp';
       $('desktop-user-field').hidden = !rdp; $('desktop-user').required = rdp; $('desktop-certificate-field').hidden = !rdp;
       $('desktop-trust-field').hidden = !rdp || !$('desktop-certificate').value.trim();
+      $('desktop-rdp-help').hidden = !rdp;
     }
     function showSetup(automatic) {
       if (!setupValue) return;

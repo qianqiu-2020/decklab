@@ -4,6 +4,11 @@
   var dictionary = {
     "连接设置": "Connection settings",
     "连接远程桌面": "Connect to desktop",
+    "Debian GNOME 远程登录": "Debian GNOME remote login",
+    "（GDM，通常 3389）：入口用户默认为 rdp；连接后再用 Linux 用户登录。": " (GDM, usually port 3389): the default connection user is rdp. Then sign in to GDM with your Linux user.",
+    "在开发板串口查看入口账号和密码：": "Run in the board's serial console to view the connection credentials:",
+    "当前用户桌面共享": "Current user's desktop sharing",
+    "：使用“设置 → 系统 → 远程桌面 → 桌面共享”中显示的独立账号和密码；3389 被占用时通常使用 3390，端口以设置页为准。": ": use the separate credentials shown in Settings → System → Remote Desktop → Desktop Sharing. It usually uses port 3390 when 3389 is occupied; use the port shown in Settings.",
     "发现的服务": "Detected services",
     "手工填写": "Enter manually",
     "协议": "Protocol",

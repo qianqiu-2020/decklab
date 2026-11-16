@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 远程桌面连接设置直接说明 Debian GNOME 的 GDM 入口账号、串口查看密码命令，以及当前用户桌面共享的独立凭据和端口区别。
+
 ## 1.14.0
 
 - 发布 Linux x86_64 与 Windows x64 完整单机包，内置 MCP 运行时、获授权的 goflash 二进制及 K3 RAM 材料；goflash 源码不公开，K1 不具备本版同等预装 RAM 工作区支持。
