@@ -77,7 +77,7 @@ const server = http.createServer((req,res) => {
             assert.deepEqual(payload.selections,[{storage:'active',partition:'opensbi',artifact_id:artifactId}]);
             preview={id:'f'.repeat(24),write_layout:false,ready:true,digest:'6'.repeat(64),writes:[{storage:'active',partition:'opensbi',kind:'partition',
               size:upload.length,write_size:512,offset:1769472,capacity:393216,sha256:digest(upload),write_sha256:digest(Buffer.concat([upload,Buffer.alloc(512-upload.length)]))}],
-              erase_ranges:[{storage:'active',offset:1769472,size:393216}],payload_metadata:[{storage:'active',partition:'opensbi',
+              erase_ranges:[{storage:'active',offset:1769472,size:393216}],payload_metadata:[{storage:'active',partition:'opensbi',sha256:digest(upload),
                 content:{version:'OpenSBI v1.7（模拟）',version_state:'identified',size:upload.length,sha256:digest(upload)}}]};
             return json({plan:preview});
           }
@@ -197,7 +197,7 @@ let chrome,ws;
   await wait('document.querySelector("#fl-status").textContent.includes("模拟预览错误")');
   await delay(1200);
   assert.ok(await evaluate('document.querySelector("#fl-status").textContent.includes("模拟预览错误")'));
-  assert.ok(await evaluate('document.querySelector("#fl-task-status").textContent.includes("选区截止")'));
+  assert.ok(await evaluate('document.querySelector("#fl-task-status").textContent.includes("确认剩余")'));
   await shot('preview-error-persisted-light-fixture');
   await evaluate('document.querySelector("#fl-select").click()');
   await wait('document.querySelector("#fl-select").textContent.includes("确认分区")');
