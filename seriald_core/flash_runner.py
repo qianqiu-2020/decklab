@@ -38,7 +38,7 @@ def safe_outcome(value):
         return {}
     result = {}
     values = {'write_result': {'not-started', 'completed', 'partial', 'failed', 'unknown'},
-              'verify_result': {'not-started', 'verified', 'failed', 'unavailable', 'not-requested'},
+              'verify_result': {'not-started', 'verified', 'failed', 'unavailable', 'not-requested', 'skipped'},
               'boot_result': {'not-requested', 'not-observed', 'observed', 'failed', 'unknown', 'reset-command-acknowledged'}}
     for field, allowed in values.items():
         if isinstance(value.get(field), str) and value[field] in allowed:
@@ -317,6 +317,7 @@ class LocalFlashExecutor:
     supports_nor_snapshot = True
     supports_reset_after = True
     supports_storage_metadata = True
+    supports_skip_verification = True
 
     def __init__(self, work_dir):
         # Canonicalize the administrator-selected root once. On Windows, TEMP
@@ -742,7 +743,7 @@ class LocalFlashExecutor:
         return read_inventory(document, fetch, check, progress)
 
     def execute(self, binding, plan, on_event=None, check=lambda: None, task_id='', attempt_id='',
-                workspace=None, nor_baseline=None, reset_after=False):
+                workspace=None, nor_baseline=None, reset_after=False, skip_verification=None):
         request = dict(self._request(binding), plan=plan, task_id=task_id, attempt_id=attempt_id)
         if reset_after:
             request['reset_after'] = True
@@ -753,7 +754,7 @@ class LocalFlashExecutor:
                 raise TaskError('invalid NOR baseline')
             self._owned_workspace(Path(nor_baseline['path']).parent)
             request['nor_baseline'] = {key: nor_baseline[key] for key in ('id', 'path', 'size', 'sha256')}
-        return self._run(binding, 'execute', request, on_event, check)
+        return self._run(binding, 'execute', request, on_event, check, skip_verification=skip_verification)
 
     def check_plan(self, binding, plan, payload_candidates=None, check=lambda: None, selections=None,
                    previous_device=None):
@@ -794,13 +795,14 @@ class LocalFlashExecutor:
             result['payload_metadata'] = self._payload_metadata(result, workspace)
         return result
 
-    def _run(self, binding, operation, request, on_event=None, check=lambda: None, timeout=None):
+    def _run(self, binding, operation, request, on_event=None, check=lambda: None, timeout=None, skip_verification=None):
         encoded = json.dumps(request, allow_nan=False, separators=(',', ':')).encode('utf-8')
         if len(encoded) > MAX_REQUEST:
             raise TaskError('flash request is too large', 413)
         check()
         directory = self._directory(self.root / 'requests')
         descriptor, path = tempfile.mkstemp(prefix='flash-', suffix='.json', dir=directory)
+        skip_path, skip_sent = Path(path + '.skip-verification'), False
         process, reader, stopping = None, None, threading.Event()
         cleanup_attempted = False
         outcome, nor_snapshots = {}, {}
@@ -837,6 +839,11 @@ class LocalFlashExecutor:
             root_exited = None
             while True:
                 check()
+                if operation == 'execute' and not skip_sent and skip_verification and skip_verification():
+                    # One monotonic control alongside the private immutable
+                    # request; the child checks it only between readback blocks.
+                    os.close(os.open(skip_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+                    skip_sent = True
                 if time.monotonic() >= deadline:
                     raise FlashRunnerError('flashing executor timed out; write outcome may be partial', 504)
                 if process.poll() is not None:
@@ -938,7 +945,11 @@ class LocalFlashExecutor:
             if operation == 'execute':
                 if result.get('write_result') != 'completed':
                     raise FlashRunnerError('flashing executor did not confirm completed writes', outcome=outcome)
-                if request.get('plan', {}).get('verify') == 'required' and result.get('verify_result') != 'verified':
+                skipped = result.get('verify_result') == 'skipped'
+                if skipped and not skip_sent:
+                    outcome['verify_result'] = 'unavailable'
+                    raise FlashRunnerError('flashing executor skipped verification without an operator request', outcome=outcome)
+                if request.get('plan', {}).get('verify') == 'required' and result.get('verify_result') != 'verified' and not skipped:
                     raise FlashRunnerError('required flash verification was not confirmed', outcome=outcome)
             return result
         except BaseException as error:
@@ -969,6 +980,7 @@ class LocalFlashExecutor:
                 if process is not None and process.stdout is not None and not (reader and reader.is_alive()):
                     process.stdout.close()
                 Path(path).unlink(missing_ok=True)
+                skip_path.unlink(missing_ok=True)
                 if reader is not None and reader.is_alive():
                     raise FlashRunnerError('flashing event reader cleanup could not be confirmed', 503, False, outcome,
                                            stage=operation)

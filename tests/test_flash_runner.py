@@ -411,6 +411,27 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertEqual(events, [{'event': 'progress', 'phase': 'write', 'done': 4, 'total': 4}])
         self.assertEqual(list((self.root / 'workspace' / 'requests').iterdir()), [])
 
+    def test_skip_control_preserves_required_plan_and_cleans_private_sidecar(self):
+        binding = self.binding("control=Path(sys.argv[-1]+'.skip-verification')\n"
+            "print(json.dumps({'event':'progress','phase':'verifying-system','done':0,'total':32}),flush=True)\n"
+            "deadline=time.monotonic()+1\n"
+            "while not control.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+            "assert control.exists() and control.read_bytes()==b''\n"
+            "assert request['plan']=={'verify':'required'}\n"
+            "print(json.dumps({'event':'result','result':{'ok':True,'write_result':'completed','verify_result':'skipped'}}))\n")
+        requested = []
+        result = self.runner.execute(binding, {'verify': 'required'},
+            on_event=lambda value: requested.append(value), skip_verification=lambda: bool(requested))
+        self.assertEqual(result['verify_result'], 'skipped')
+        self.assertEqual(list((self.runner.root / 'requests').iterdir()), [])
+
+    def test_executor_cannot_claim_skip_without_an_operator_request(self):
+        binding = self.binding("print(json.dumps({'event':'result','result':"
+            "{'ok':True,'write_result':'completed','verify_result':'skipped'}}))\n")
+        with self.assertRaisesRegex(FlashRunnerError, 'without an operator request') as error:
+            self.runner.execute(binding, {'verify': 'if-supported'})
+        self.assertEqual(error.exception.outcome['verify_result'], 'unavailable')
+
     def test_error_and_failed_result_keep_only_confirmed_domain_outcomes(self):
         report = {'write_result': 'completed', 'verify_result': 'failed', 'boot_result': 'not-requested',
                   'written_bytes': 4096, 'password': 'host-secret', 'argv': ['/private/helper'],

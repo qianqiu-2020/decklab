@@ -222,6 +222,48 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             time.sleep(.02)
         self.fail('fake flash task did not finish')
 
+    def test_skip_readback_is_scoped_idempotent_and_does_not_cancel_required_flash(self):
+        with protected_flashing() as fixture:
+            fixture.executor.supports_skip_verification = True
+            verifying = threading.Event()
+            def execute(binding, plan, on_event, check, skip_verification, **identity):
+                on_event({'event': 'progress', 'phase': 'writing', 'done': 0, 'total': 32})
+                fixture.executor.started.set()
+                while not fixture.executor.release.wait(.02):
+                    check()
+                on_event({'event': 'progress', 'phase': 'verifying-system', 'done': 1, 'total': 32})
+                verifying.set()
+                deadline = time.monotonic() + 5
+                while not skip_verification():
+                    check()
+                    if time.monotonic() > deadline:
+                        raise AssertionError('skip request did not reach the original execution')
+                    time.sleep(.01)
+                return {'ok': True, 'write_result': 'completed', 'verify_result': 'skipped', 'boot_result': 'not-requested'}
+            fixture.executor.execute = execute
+            plan = self.plan(fixture, self.image(fixture), verify='required')
+            code, started = self.start(fixture, plan)
+            self.assertEqual(code, 202, started)
+            self.assertTrue(fixture.executor.started.wait(2))
+            payload = {'id': started['task']['id'], 'action': 'skip-verification', 'key': 'offline-board', 'serial': 'FLASH-A'}
+            code, _ = self.request(fixture, '/api/flash-selection', payload)
+            self.assertEqual(code, 409, 'writing cannot skip integrity checks')
+            fixture.executor.release.set()
+            self.assertTrue(verifying.wait(2))
+            code, _ = self.request(fixture, '/api/flash-selection', dict(payload, serial='FLASH-B'))
+            self.assertNotEqual(code, 200)
+            self.assertEqual(FlashActions(fixture.manager).skip_verification(payload, 'agent-unrelated').status, 404)
+            code, result = self.request(fixture, '/api/flash-selection', payload)
+            self.assertEqual(code, 200, result)
+            self.assertTrue(result['task']['flash']['verify_skip_requested'])
+            final = self.terminal(fixture, payload['id'])
+            self.assertEqual(final['state'], 'completed', final)
+            self.assertEqual(final['result']['verify_result'], 'skipped')
+            self.assertFalse(final['cancel_requested'])
+            code, repeated = self.request(fixture, '/api/flash-selection', payload)
+            self.assertEqual(code, 200, repeated)
+            self.assertEqual(repeated['task']['id'], payload['id'])
+
     def test_cached_nor_catalogue_uses_its_sealed_execution_profile(self):
         from seriald_core.flash_tasks import FlashActions
         with protected_flashing() as fixture:

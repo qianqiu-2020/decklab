@@ -299,6 +299,11 @@
       $('fl-start').textContent = plan && plan.confirm_after_prepare && plan.ready === false ? '准备环境并核对固件范围' : prepareOnly(plan) ? '准备刷机环境并读取布局' : '开始刷写';
       $('fl-cancel').disabled = previewTask ? !['queued','running'].includes(previewTask.state) || previewTask.cancel_requested : !active || task.cancel_requested;
       $('fl-cancel').textContent = previewTask ? '取消预览' : nor && selecting ? '结束准备并保留备份' : '取消刷机';
+      var verifying = active && task.flash && task.flash.can_skip_verification === true
+        && ['verifying','verifying-nor','verifying-system'].includes((task.progress || {}).phase);
+      $('fl-skip-verify').hidden = !verifying;
+      $('fl-skip-verify').disabled = !verifying || busy || task.cancel_requested || task.flash.verify_skip_requested === true;
+      $('fl-skip-verify').textContent = task && task.flash && task.flash.verify_skip_requested ? '正在跳过校验…' : '跳过剩余校验';
       if (nor && selecting && !uploading) {
         var preview = task.flash && task.flash.preview_progress;
         previewProgress = preview && preview.stages ? preview : null;
@@ -563,7 +568,7 @@
       var names = {'checking-upload': '核对上传文件 SHA-256', 'checking-image-sha256': '核对镜像 SHA-256',
         'expanding-image': '解压镜像（压缩包读取）', 'checking-payloads': '核对包内载荷',
         'checking-layout': '核对现场布局', 'reading-payload-metadata': '读取分区文件系统信息', 'reading-nor': '读取整片 NOR', 'checking-nor-baseline': '检查备份后板上内容是否变化',
-        'checking-image': '核对写入计划与载荷', 'verifying-nor': '回读整片 NOR 并校验', 'verifying-system': '回读所选系统盘分区', 'writing': '写入所选分区', 'resetting': '刷写完成，正在复位',
+        'checking-image': '核对写入计划与载荷', 'verifying': '回读校验', 'verifying-nor': '回读整片 NOR 并校验', 'verifying-system': '回读所选系统盘分区', 'writing': '写入所选分区', 'resetting': '刷写完成，正在复位',
         'preparing-loader': '加载临时刷机器', 'prepare': '准备临时刷机器',
         'awaiting-selection': '备份已完成，等待选择替换内容', 'image-download': '后端下载镜像',
         'image-ready': '镜像已准备', 'uploading-image': '上传替换文件',
@@ -1081,8 +1086,9 @@
     function outcome(value) {
       if (value === undefined || value === null) return '未执行';
       var names = { 'not-started': '未开始', 'not-completed': '未完成', pending: '等待执行',
+        skipped: '用户跳过，校验未完成',
         writing: '正在写入', written: '写入完成', completed: '已完成', verified: '校验通过',
-        unsupported: '不支持回读校验', 'not-supported': '不支持回读校验', skipped: '已跳过',
+        unsupported: '不支持回读校验', 'not-supported': '不支持回读校验',
         'not-requested': '未请求', 'reset-command-acknowledged': '复位已应答', unknown: '结果待确认', failed: '失败', 'partial-or-unknown': '可能部分写入，结果待确认',
         'unknown-or-partial': '写入结果未知或可能部分完成' };
       if (typeof value === 'string') return names[value] || value;
@@ -1635,6 +1641,18 @@
     $('fl-select').addEventListener('click', submitSelection);
     $('fl-recovery-reason').addEventListener('input', updateControls);
     $('fl-release').addEventListener('click', releaseRecovery);
+    $('fl-skip-verify').addEventListener('click', async function () {
+      if (!board || !task || $('fl-skip-verify').disabled) return;
+      var selected = board, seq = sequence, current = task;
+      busy = true; updateControls(); status('正在请求跳过剩余回读校验…');
+      try {
+        var result = await client.request('/api/flash-selection', Object.assign(scope(selected), {
+          id: current.id, action: 'skip-verification'}));
+        if (same(selected, seq) && task.id === current.id) observe(result.task, selected, seq);
+      } catch (error) {
+        if (same(selected, seq)) status(error.result ? error.message : '跳过请求结果未确认；将继续查询原任务。', true);
+      } finally { if (same(selected, seq)) { busy = false; updateControls(); } }
+    });
     $('fl-cancel').addEventListener('click', async function () {
       if (previewTask) {
         var previewId = previewTask.id;

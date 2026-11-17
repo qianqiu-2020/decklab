@@ -31,7 +31,7 @@ function backup(id, phase, bytes) {
       description:name==='esos'?'<img src=x onerror=window.norInjected=1>':undefined,
       built_at:!['env','bootinfo'].includes(name)?'2026-11-14T00:00:00+00:00':null}}))};
 }
-let previewTask = null, previewSubmissions = 0;
+let previewTask = null, previewSubmissions = 0, verificationSkips = 0;
 let current = null, upload = Buffer.alloc(0), artifact = null, preview = null, rejectPreview = true, urlDownloads = 0;
 const packageArtifact = {id:'9'.repeat(24),name:'firmware-fixture.tar.gz',size:2<<20,sha256:'a'.repeat(64),state:'ready'};
 const urlArtifact = {id:'8'.repeat(24),name:'url-fixture.itb',size:512,sha256:'b'.repeat(64),state:'ready'};
@@ -79,6 +79,13 @@ const server = http.createServer((req,res) => {
         if(url.pathname==='/api/artifact-append') {assert.equal(payload.offset,upload.length);upload=Buffer.concat([upload,Buffer.from(payload.data_b64,'base64')]);return json({artifact:{id:artifactId,received:upload.length}});}
         if(url.pathname==='/api/artifact-seal') {artifact={id:artifactId,name:'opensbi-fixture.itb',size:upload.length,sha256:digest(upload),state:'ready'};return json({artifact});}
         if(url.pathname==='/api/flash-selection') {
+          if(payload.action==='skip-verification') {
+            assert.equal(payload.id,current.id);assert.equal(current.progress.phase,'verifying-nor');
+            verificationSkips++;current.state='completed';
+            current.flash.verify_skip_requested=true;current.flash.verify_result='skipped';
+            current.result={write_result:'completed',verify_result:'skipped',boot_result:'not-requested'};
+            return json({task:current});
+          }
           assert.equal(payload.id,taskId);assert.equal(payload.target_generation,target.target_generation);
           if(payload.action==='boot-priority') {
             assert.equal(payload.expected,'SSD');assert.equal(payload.value,'UFS');assert.equal('selections' in payload,false);
@@ -258,6 +265,15 @@ let chrome,ws;
   await evaluate('SerialdI18n.setLocale("en");document.querySelector("#flash-dialog").scrollTop=0');await delay(100);await shot('nor-results-english-fixture');
   assert.equal(await evaluate('document.querySelector("#fl-title").textContent'),'Flashing workspace');
   assert.ok(await evaluate('[...document.querySelectorAll(".fl-partition")].every(r=>r.artifactSelect.hidden===!r.checkbox.checked)'),'language changes preserve selection visibility');
+  current={...current,id:'skip-readback-fixture',state:'running',progress:{phase:'verifying-nor',done:4<<20,total:8<<20},
+    flash:{...current.flash,can_skip_verification:true,verify_result:'running'},result:null};
+  await evaluate('SerialdI18n.setLocale("zh-CN");ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
+  await wait('!document.querySelector("#fl-skip-verify").hidden && !document.querySelector("#fl-skip-verify").disabled');
+  await evaluate('document.querySelector("#fl-skip-verify").click()');
+  await wait('document.querySelector("#fl-results").textContent.includes("用户跳过，校验未完成")');
+  assert.equal(verificationSkips,1);assert.equal(submissions.length,1,'skip cannot submit another flash');
+  assert.equal(await evaluate('document.querySelector("#fl-skip-verify").hidden'),true);
+  await evaluate('document.querySelector(".fl-execution").scrollIntoView({block:"center"})');await shot('readback-skipped-fixture');
   // Restore an ended task, then explicitly detect a new connection at the same
   // USB port. Saved request IDs and history must not restore the old identity.
   current.board_targets=['OLD-SN'];current.flash.request_serial='OLD-SN';
@@ -278,6 +294,6 @@ let chrome,ws;
   await evaluate('document.querySelector("#flash-dialog").scrollTop=0');await shot('redetect-after-completed-task-fixture');
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,async_preview_progress:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,
-    redetect_after_completed_task:true,screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
+    verification_skips:verificationSkips,redetect_after_completed_task:true,screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
   console.log('NOR browser workflow passed: full package preview, automatic URL/file imports, persistent errors, image-free read, six partition rows, same-task confirmation, byte progress, backups, desktop/mobile and light/dark (simulated data).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});

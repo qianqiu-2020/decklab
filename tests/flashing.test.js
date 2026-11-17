@@ -56,6 +56,25 @@ async function open(h) {
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
+test('readback can be skipped explicitly without cancelling or restarting the original task', async () => {
+  const h=harness(),target={target_id:'skip-usb',target_generation:'original-loader'};
+  const current={id:'skip-task',kind:'flash',state:'running',progress:{phase:'verifying-system',done:10,total:32},
+    flash_targets:[{target_id:target.target_id,generation:target.target_generation}],flash:{can_skip_verification:true}};
+  h.api.open(target,current);await drain();
+  assert.equal(h.get('fl-skip-verify').hidden,false);assert.equal(h.get('fl-skip-verify').disabled,false);
+  h.get('fl-skip-verify').click();const request=h.take('/api/flash-selection');
+  assert.equal(request.payload.id,current.id);assert.equal(request.payload.action,'skip-verification');
+  assert.equal(request.payload.target_generation,'original-loader');assert.equal(h.get('fl-skip-verify').disabled,true);
+  request.resolve({task:{...current,flash:{...current.flash,verify_skip_requested:true}}});await drain();
+  assert.equal(h.get('fl-skip-verify').disabled,true);
+  const poll=[...h.timers.values()][0];poll();await drain();
+  h.take('/api/task?id=').resolve({task:{...current,state:'completed',result:{write_result:'completed',verify_result:'skipped'}}});await drain();
+  assert.equal(h.get('fl-skip-verify').hidden,true);assert.match(h.get('fl-results').textContent,/用户跳过，校验未完成/);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-cancel'||r.url==='/api/task-start'),false);
+  const writing=harness();writing.api.open({...target},{...current,progress:{phase:'writing'}});await drain();
+  assert.equal(writing.get('fl-skip-verify').hidden,true);
+});
+
 test('full package is directly previewed without opening or submitting storage backup', async () => {
   const h=harness(),pkg={id:'full-firmware',name:'Firmware.tar.gz',size:1024};
   h.api.open({target_id:'direct-full',target_generation:'direct-generation'});

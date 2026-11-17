@@ -251,6 +251,7 @@ class FlashActions:
                 result = dict(book.available(device.serial, actor))
             result.setdefault('board_serial', device.serial)
             result['reset_after_supported'] = bool(getattr(_services(self.manager)[1], 'supports_reset_after', False))
+            result['skip_verification_supported'] = bool(getattr(_services(self.manager)[1], 'supports_skip_verification', False))
             result['artifacts'] = []
             artifacts = self.manager.artifacts
             with self.manager.store.lock:
@@ -859,7 +860,33 @@ class FlashActions:
         except (TaskError, TransactionError, ValueError, OSError) as error:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
 
+    def skip_verification(self, payload, actor='web'):
+        try:
+            if set(payload) - {'id', 'action', 'key', 'serial', 'actor', 'client_id', 'target_id', 'target_generation'}:
+                raise TaskError('invalid skip verification request')
+            with self.manager.store.lock:
+                task = self._owned_task(payload.get('id'), actor, payload.get('serial'))
+                if task['kind'] != 'flash':
+                    raise TaskError('not a flash execution task', 409)
+                if task.get('flash_targets') and not any(
+                        row['target_id'] == payload.get('target_id') and row['generation'] == payload.get('target_generation')
+                        for row in task['flash_targets']):
+                    raise TaskError('flash verification USB target changed', 409)
+                details = self.store.details(task['id'])
+                if not details.get('verify_skip_requested'):
+                    if (task['state'] != 'running' or task.get('cancel_requested')
+                            or task.get('progress', {}).get('phase') not in ('verifying', 'verifying-system', 'verifying-nor')
+                            or details.get('can_skip_verification') is not True):
+                        raise TaskError('flash task is not in skippable readback verification', 409)
+                    self.store.update_details(task['id'], {'verify_skip_requested': True,
+                        'verify_skip_requested_by': actor, 'verify_skip_requested_at': time.time()})
+                return response(200, {'ok': True, 'task': self.manager.tasks.store.get(task['id'])})
+        except (TaskError, TransactionError, ValueError, OSError) as error:
+            return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
+
     def selection(self, payload, device, actor='web'):
+        if isinstance(payload, dict) and payload.get('action') == 'skip-verification':
+            return self.skip_verification(payload, actor)
         if isinstance(payload, dict) and payload.get('action') == 'boot-priority':
             return self.boot_priority(payload, actor)
         try:
@@ -1214,6 +1241,9 @@ class FlashOperation:
             context.progress(0, 0, 'checking-image')
             write_started = True
             execution_args = dict(task_id=context.id, attempt_id=self.attempt_id)
+            if getattr(self.executor, 'supports_skip_verification', False):
+                store.update_details(context.id, {'can_skip_verification': True})
+                execution_args['skip_verification'] = lambda: store.details(context.id).get('verify_skip_requested') is True
             if record['intent'].get('reset_after'):
                 if not getattr(self.executor, 'supports_reset_after', False):
                     raise TaskError('刷机执行器不支持刷后自动复位')
@@ -1237,7 +1267,11 @@ class FlashOperation:
                 raise TaskError('flash executor did not confirm success', 502)
             if output.get('write_result') != 'completed':
                 raise TaskError('flash executor did not confirm all planned writes', 502)
-            if record['intent']['verify'] == 'required' and output.get('verify_result') != 'verified':
+            skipped = output.get('verify_result') == 'skipped'
+            if skipped and store.details(context.id).get('verify_skip_requested') is not True:
+                outcome['verify_result'] = 'unavailable'
+                raise TaskError('flash verification skipped without an operator request', 502)
+            if record['intent']['verify'] == 'required' and output.get('verify_result') != 'verified' and not skipped:
                 raise TaskError('required flash verification did not pass', 502)
             output.setdefault('boot_result', 'not-requested')
             output.update(ok=True, plan_id=record['plan_id'], plan_digest=record['digest'])
