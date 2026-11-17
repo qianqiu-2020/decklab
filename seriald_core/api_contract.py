@@ -150,5 +150,8 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
             'import_endpoint': '/api/image-download', 'import_task_kind': 'image-download',
             'prepare_endpoint': '/api/image-prepare', 'prepare_task_kind': 'image-prepare',
             'preparation_requires_device': False,
+            'workspace_endpoint': '/api/image-workspace', 'workspace_owner_only': True,
+            'directory_location': 'control-host', 'editable_revisions': True,
+            'companion_firmware_field': 'firmware_artifact_id',
         },
     }

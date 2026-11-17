@@ -753,3 +753,13 @@
 #fl-image-information { display: grid; gap: .6rem; margin: .8rem 0; }
 
 #fl-image-information small { display: block; }
+
+#image-workspace-dialog { width: min(1000px, 94vw); max-height: 90vh; overflow: auto; }
+#image-workspace-dialog header { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+.iw-files { display:grid; gap:.3rem; margin:1rem 0; max-height:35vh; overflow:auto; }
+.iw-files button { text-align:left; overflow-wrap:anywhere; }
+#iw-text { width:100%; box-sizing:border-box; font-family:monospace; margin:.6rem 0; }
+
+.fl-firmware-row { display:flex; gap:.6rem; align-items:center; }
+.fl-firmware-row select { flex:1; min-width:0; }
+.fl-firmware-row button { flex-shrink:0; }

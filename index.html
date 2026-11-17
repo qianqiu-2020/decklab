@@ -357,15 +357,16 @@ PasswordAuthentication yes</code></pre>
       <div class="fl-source-actions" role="group" aria-label="选择镜像来源">
         <button id="fl-local" type="button">选择本地文件</button><input id="fl-files" type="file" multiple hidden aria-label="选择本地文件">
         <button id="fl-store" type="button">镜像商店</button><button id="fl-cache" type="button">已下载</button>
-        <button id="fl-url-toggle" type="button" aria-expanded="false" aria-controls="fl-url-panel">指定 URL</button>
+        <button id="fl-directory" type="button">选择解压目录</button><button id="fl-url-toggle" type="button" aria-expanded="false" aria-controls="fl-url-panel">指定 URL</button>
       </div>
       <div id="fl-url-panel" hidden>
         <label class="ft-field">镜像 URL<input id="fl-url" type="url" placeholder="粘贴链接即下载，手动输入后按回车" spellcheck="false"></label>
         <details class="fl-details"><summary>校验 SHA-256（可选，请先填写）</summary><label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label></details>
         <button id="fl-download" type="button" hidden>重试下载</button>
       </div>
-      <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
+      <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
       <select id="fl-artifact" hidden aria-label="当前镜像来源"></select>
+      <label id="fl-firmware-field" class="ft-field">配套 Firmware（可选）<div class="fl-firmware-row"><select id="fl-firmware"><option value="">仅刷当前镜像</option></select><button id="fl-firmware-choose" type="button">选择配套固件</button></div><small id="fl-firmware-status" role="status"></small><button id="fl-firmware-retry" type="button" hidden>重试准备配套固件</button></label>
       <section id="fl-image-preparation" hidden aria-live="polite">
         <div class="fl-current-source"><strong id="fl-image-preparation-status"></strong><span id="fl-image-preparation-bytes"></span><button id="fl-image-preparation-cancel" type="button" hidden>取消准备</button><button id="fl-image-preparation-retry" type="button" hidden>重新准备镜像</button></div>
         <progress id="fl-image-preparation-progress" max="1" aria-label="镜像准备进度"></progress>
@@ -413,6 +414,13 @@ PasswordAuthentication yes</code></pre>
   </fieldset>
   <details id="fl-task-details" class="fl-details" hidden><summary>执行详情</summary><p id="fl-task-id" class="log-note" data-i18n-ignore></p><dl id="fl-verification" class="fl-connections"></dl><p id="fl-event-status" role="status"></p><pre id="fl-events" data-i18n-ignore></pre></details>
   <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+</dialog>
+<dialog id="image-workspace-dialog" class="ft-dialog">
+  <header><h2>镜像工作目录</h2><button id="iw-close" type="button">关闭</button></header>
+  <label class="ft-field">控制机目录<input id="iw-directory" type="text" spellcheck="false" placeholder="控制机上的已解压镜像目录"></label>
+  <div class="fl-source-actions"><button id="iw-browse" type="button">浏览控制机目录</button><button id="iw-copy" type="button">复制路径</button><button id="iw-import" type="button">读取并使用此目录</button><button id="iw-fork" type="button">创建可编辑副本</button><button id="iw-refresh" type="button">刷新文件列表</button></div>
+  <div id="iw-directories" class="fl-source-actions"></div><p id="iw-status" role="status"></p><button id="iw-cancel" type="button" hidden>取消目录准备</button><div id="iw-files" class="iw-files"></div>
+  <section id="iw-editor" hidden><strong id="iw-name"></strong><textarea id="iw-text" rows="14" spellcheck="false" aria-label="文件内容"></textarea><div class="fl-source-actions"><button id="iw-save" type="button">保存为新镜像版本</button><button id="iw-replace" type="button">上传并替换文件</button><input id="iw-upload" type="file" hidden></div></section>
 </dialog>
 <dialog id="probe-settings-dialog" class="probe-settings-dialog" aria-labelledby="probe-settings-title">
   <div class="agent-share-head"><strong id="probe-settings-title">探测设置</strong><button id="probe-settings-close" type="button">关闭</button></div>
@@ -486,6 +494,7 @@ Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\seriald-mcp.exe'</code></pre>
 <script src="/static/board-control.js"></script>
 <script src="/static/desktop.js"></script>
 <script src="/static/file-transfer.js"></script>
+<script src="/static/image-workspaces.js"></script>
 <script src="/static/flashing.js"></script>
 <script src="/static/boot-compare.js"></script>
 <script src="/static/share.js"></script>

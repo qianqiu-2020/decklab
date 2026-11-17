@@ -7,7 +7,7 @@ from .tasks import TaskError
 
 
 def body_limit(route):
-    if route in ('/api/settings', '/api/backend-settings'):
+    if route in ('/api/settings', '/api/backend-settings', '/api/image-workspace'):
         return 2 * 1024 ** 2
     if route == '/api/device-preferences':
         return 1024 ** 2

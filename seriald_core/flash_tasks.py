@@ -263,7 +263,10 @@ class FlashActions:
                     () if actor == 'web' else (device.serial, actor)).fetchall()
             for row in rows:
                 metadata = artifacts.get(row['id'], actor, None if actor == 'web' else device.serial)
-                result['artifacts'].append({key: metadata[key] for key in ('id', 'name', 'size', 'sha256')})
+                item = {key:metadata[key] for key in ('id','name','size','sha256')}
+                from .image_workspaces import public_directory_info
+                item.update(public_directory_info(artifacts._path(metadata['id'], '.bin')))
+                result['artifacts'].append(item)
             result['maintenance'] = (maintenance_for(self.manager).target_holds(target_id) if target_id
                                      else maintenance_for(self.manager).holds(device.serial))
             return response(200, result)
@@ -302,14 +305,21 @@ class FlashActions:
             normalized.append(dict(storage=target[0], partition=target[1], artifact_id=source))
         if mode == 'full' and normalized:
             raise TaskError('full image mode does not accept partition selections')
+        companion = payload.get('firmware_artifact_id')
+        if companion is not None and (mode != 'full' or not isinstance(companion, str) or not re.fullmatch(r'[0-9a-f]{24}', companion) or companion == artifact_id):
+            raise TaskError('invalid companion firmware image')
         result = {'artifact_id': artifact_id, 'mode': mode, 'selections': normalized, 'verify': verify,
                   'target_storage': target_storage}
+        if companion:
+            result['firmware_artifact_id'] = companion
         if payload.get('reset_after'):
             result['reset_after'] = True
         return result
 
     def _artifacts(self, intent, actor, serial, stack, task_id=None, check=lambda: None, on_event=None):
         ids = {intent['artifact_id']} | {value['artifact_id'] for value in intent['selections']}
+        if intent.get('firmware_artifact_id'):
+            ids.add(intent['firmware_artifact_id'])
         output = {}
         for artifact_id in sorted(ids):
             row = self.manager.artifacts.get(artifact_id, actor, None if actor == 'web' else serial)
@@ -353,8 +363,12 @@ class FlashActions:
             checked_binding = binding
             if prepared.get('execution_profile'):
                 checked_binding = executor.execution_binding(binding, prepared['execution_profile'], prepared['workspace'], check)
-            result = executor.check_plan(checked_binding, prepared['executor_plan'],
-                prepared.get('executor_candidates', []), check, selections=selections, **arguments)
+            if prepared['executor_plan'].get('image_type') == 'bundle':
+                from .flash_bundle import check_bundle
+                result = check_bundle(executor, checked_binding, prepared['executor_plan'], check, previous_device)
+            else:
+                result = executor.check_plan(checked_binding, prepared['executor_plan'],
+                    prepared.get('executor_candidates', []), check, selections=selections, **arguments)
             result['workspace'] = prepared.get('workspace')
             if binding.target_id:
                 result['execution_device'] = dict(binding.device)
@@ -370,8 +384,12 @@ class FlashActions:
                 if inspection_scope is not None:
                     arguments['inspection_scope'] = inspection_scope
                 try:
-                    result = executor.plan(binding, artifacts[intent['artifact_id']], intent['mode'], selections,
-                                           intent['verify'], check, **arguments)
+                    if intent.get('firmware_artifact_id'):
+                        from .flash_bundle import plan_bundle
+                        result = plan_bundle(executor, binding, artifacts[intent['artifact_id']], artifacts[intent['firmware_artifact_id']], intent['mode'], intent['verify'], check, **arguments)
+                    else:
+                        result = executor.plan(binding, artifacts[intent['artifact_id']], intent['mode'], selections,
+                                               intent['verify'], check, **arguments)
                 except BaseException as error:
                     if getattr(error, 'cleanup_confirmed', True) is False:
                         # Keep source files pinned until a durable task owns them.
@@ -449,6 +467,8 @@ class FlashActions:
     @staticmethod
     def _preview(record):
         result = _public(record['executor_plan'])
+        if record['intent'].get('firmware_artifact_id'):
+            result['firmware_artifact_id'] = record['intent']['firmware_artifact_id']
         result.update(id=record['plan_id'], plan_id=record['plan_id'], digest=record['digest'],
                       binding_revision=record['binding_revision'],
                       target_id=record.get('target_id'), target_generation=record.get('target_generation'),
@@ -460,7 +480,7 @@ class FlashActions:
         try:
             if not isinstance(payload, dict) or set(payload) - {
                     'key', 'serial', 'actor', 'client_id', 'binding_revision',
-                    'artifact_id', 'mode', 'selections', 'verify', 'target_storage', 'reset_after',
+                    'artifact_id', 'firmware_artifact_id', 'mode', 'selections', 'verify', 'target_storage', 'reset_after',
                     'target_id', 'target_generation', 'request_id'}:
                 raise TaskError('invalid flash plan request')
             device = self._device(device, payload, actor)
@@ -486,6 +506,9 @@ class FlashActions:
                     self.store.initialize_details(context.id, {
                         'preview_intent': intent,
                         'preview_source': {key: source[key] for key in ('id', 'name', 'size', 'sha256')}})
+                    if intent.get('firmware_artifact_id'):
+                        firmware = self.manager.artifacts.get(intent['firmware_artifact_id'], actor, None if actor == 'web' else device.serial)
+                        self.store.update_details(context.id, {'preview_firmware':{key:firmware[key] for key in ('id','name','size','sha256')}})
                     timing = PreviewProgress(self.store, context.id, source, binding.endpoint,
                         source['name'].lower().endswith(('.gz', '.tgz', '.zip')))
                     def progress(value):
@@ -1004,7 +1027,7 @@ class FlashActions:
                                     or source_record['intent'].get('target_storage', '') != intent.get('target_storage', '')
                                     or time.time() - source_record['created'] > 600):
                                 raise TaskError('source image preview changed or expired', 409)
-                        cached = (source_record if source_record['executor_plan'].get('image_type') in ('package', 'payload', 'payload.gz')
+                        cached = (source_record if source_record['executor_plan'].get('image_type') in ('package', 'payload', 'payload.gz', 'bundle')
                                   and source_record['intent']['artifact_id'] == intent['artifact_id']
                                   and all(value['artifact_id'] == source_record['intent']['artifact_id']
                                           for value in intent['selections']) else None)
@@ -1148,6 +1171,8 @@ class FlashOperation:
                 store.update_details(context.id, {'workspace': record['workspace'], 'plan_id': record['plan_id']})
             initial_artifacts = {record['intent']['artifact_id']} | {
                 value['artifact_id'] for value in record['intent']['selections']}
+            if record['intent'].get('firmware_artifact_id'):
+                initial_artifacts.add(record['intent']['firmware_artifact_id'])
             for artifact_id in sorted(value for value in initial_artifacts if value):
                 self.manager.artifacts.claim(artifact_id, context.id, self.actor, None if self.actor == 'web' else record['serial'])
                 claimed.append(artifact_id)
@@ -1275,7 +1300,11 @@ class FlashOperation:
                 execution_args['reset_after'] = True
             if getattr(self.executor, 'supports_nor_snapshot', False):
                 execution_args.update(workspace=record.get('workspace'), nor_baseline=nor_baseline)
-            result = self.executor.execute(self.binding, plan, event, check, **execution_args)
+            if plan.get('image_type') == 'bundle':
+                from .flash_bundle import execute_bundle
+                result = execute_bundle(self.executor, self.binding, plan, event, check, **execution_args)
+            else:
+                result = self.executor.execute(self.binding, plan, event, check, **execution_args)
             if not isinstance(result, dict):
                 raise TaskError('flash executor did not confirm success', 502)
             output = {key: result[key] for key in ('write_result', 'verify_result', 'boot_result',

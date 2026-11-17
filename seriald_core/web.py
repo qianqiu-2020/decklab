@@ -500,6 +500,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(error.status, {'ok': False, 'error': str(error), 'code': error.code})
 
     def _post_payload(self, route, payload):
+        if route == '/api/image-workspace':
+            from .image_workspaces import ImageWorkspaces
+            result = ImageWorkspaces(self.manager).request(payload, payload.get('actor') or 'web')
+            return self._json(result.status, result.payload)
         if route == '/api/image-prepare':
             from .image_preparation import for_manager
             result = for_manager(self.manager).request(payload, payload.get('actor') or 'web')

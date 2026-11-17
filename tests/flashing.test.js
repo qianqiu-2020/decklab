@@ -100,6 +100,22 @@ test('refresh restores the selected image and options but refreshes board capabi
   assert.equal(next.get('fl-start').disabled,true);
 });
 
+test('choosing an OS with its optional firmware previews both and clearing it restores a single image', async () => {
+  const h=harness();await open(h);
+  const firmware={id:'paired-fw',name:'Debian-13-Firmware-K3.tar.gz',size:100,sha256:'b'.repeat(64)};
+  const os={id:'paired-os',name:'Debian-13-GNOME-K3.tar.gz',size:200,sha256:'c'.repeat(64),firmware};
+  h.get('fl-cache').click();h.chooseImage(os);await drain();
+  assert.equal(h.get('fl-artifact').value,os.id);assert.equal(h.get('fl-firmware').value,firmware.id);
+  h.get('fl-plan').click();const paired=h.take('/api/flash-plan');
+  assert.equal(paired.payload.artifact_id,os.id);assert.equal(paired.payload.firmware_artifact_id,firmware.id);
+  paired.resolve({plan:{id:'pair-preview',ready:true,components:[{label:'Firmware',name:firmware.name,ready:true},{label:'OS',name:os.name,ready:true}],writes:[{storage:'NOR',partition:'fsbl',size:100},{storage:'scsi:0',partition:'rootfs',size:200}]}});await drain();
+  assert.match(h.get('fl-preview').textContent,/Firmware/);assert.match(h.get('fl-preview').textContent,/OS/);
+  h.get('fl-firmware').value='';h.get('fl-firmware').emit('change');assert.equal(h.get('fl-start').disabled,true);
+  h.get('fl-plan').click();const single=h.take('/api/flash-plan');assert.equal(single.payload.firmware_artifact_id,undefined);
+  single.resolve({plan:{id:'single-preview',writes:[{storage:'scsi:0',partition:'rootfs',size:200}]}});await drain();
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
 test('readback can be skipped explicitly without cancelling or restarting the original task', async () => {
   const h=harness(),target={target_id:'skip-usb',target_generation:'original-loader'};
   const current={id:'skip-task',kind:'flash',state:'running',progress:{phase:'verifying-system',done:10,total:32},

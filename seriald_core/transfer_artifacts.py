@@ -323,7 +323,7 @@ class TransferArtifacts:
             self._unlink(artifact_id)
 
     def _unlink(self, artifact_id):
-        for suffix in ('.part', '.bin'):
+        for suffix in ('.part', '.bin', '.directory.json'):
             self._path(artifact_id, suffix).unlink(missing_ok=True)
 
     def _maintenance_protected(self, task_id):

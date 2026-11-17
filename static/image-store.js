@@ -4,6 +4,7 @@
   function create(options) {
     var $ = options.byId, client = global.SerialdTasks.createClient(options.fetch);
     var source = 'public', path = '', generation = 0, entries = [], choose = null;
+    var jobs = Object.create(null), indexFiles = Object.create(null);
     var active = Object.create(null), unknown = false, opening = false;
     var picker = {}, selectionSession = 0;
     var platform = 'k3', operatingSystem = '', channel = 'version', version = '', variant = '';
@@ -21,6 +22,19 @@
         server:'Server',firmware:'Firmware',agentic:'Agentic',cloud:'Cloud'};
       return {os:osId(name + '/' + (item.path || '')), date:date ? date[1] : '',
         release:release ? release[1] : '', variant:desktop ? variants[desktop[1].toLowerCase()] : '其他变体'};
+    }
+    function companion(item) {
+      if (picker.fileOnly || picker.firmwareOnly || osId(item.name) !== 'debian' || /[-_]firmware[-_.]/i.test(item.name)) return null;
+      function identity(value) {
+        var info=details(value), chip=value.name.match(/(?:^|[-_])(k[13])(?=[-_.]|$)/i), major=value.name.match(/debian[-_](\d+)/i);
+        return [info.os,major&&major[1],chip&&chip[1].toLowerCase(),info.release.toLowerCase(),info.date].join('|');
+      }
+      var info=details(item);if(!info.date&&!info.release)return null;
+      var candidates=entries.concat.apply(entries,Object.values(indexFiles)).filter(function(value){
+        return value.url && /[-_]firmware[-_.]/i.test(value.name||'') && supported(value) && identity(value)===identity(item);
+      });
+      candidates=candidates.filter(function(value,index,all){return all.findIndex(function(other){return other.url===value.url;})===index;});
+      return candidates.length===1?candidates[0]:null;
     }
     function supported(item) { return !/\.(?:img|raw)(?:\.|$)/i.test(item.name || '') && item.kind !== 'disk-image'; }
     function newest(a, b) {
@@ -51,7 +65,7 @@
       if (!directories[key]) {
         directories[key] = client.request('/api/image-catalog?source=' + current + '&path=' + encodeURIComponent(target) + (force ? '&refresh=1' : ''));
       }
-      try { return await directories[key]; }
+      try { var result = await directories[key]; indexFiles[key] = result.entries || []; return result; }
       catch (error) { delete directories[key]; throw error; }
     }
     function catalogVisible(value) {
@@ -204,11 +218,12 @@
       try { choose(item); $('image-store-dialog').close(); return true; }
       catch (error) { status(error.message); return false; }
     }
-    function packageFile(item) { return /\.(tar(?:\.(?:gz|xz|bz2|zst))?|tgz|zip|7z)$/i.test(item.name || ''); }
+    function packageFile(item) { return /\.(tar(?:\.(?:gz|xz|bz2|zst))?|tgz|zip|7z|directory)$/i.test(item.name || ''); }
     function render(rows, local) {
       var box = $('is-list'), filter = $('is-search').value.toLowerCase(); box.textContent = '';
       rows.filter(function (item) { return (local || supported(item)) && item.name.toLowerCase().includes(filter)
-        && (!picker.fileOnly || item.kind === 'directory' || !packageFile(item)); }).forEach(function (item) {
+        && (!picker.fileOnly || item.kind === 'directory' || !packageFile(item))
+        && (!picker.firmwareOnly || item.kind === 'directory' || (/firmware/i.test(item.name) || /\.directory$/i.test(item.name))); }).forEach(function (item) {
         var row = text('div', '', box); row.className = 'is-row';
         var main = text('div', '', row); main.className = 'is-main';
         if (item.kind === 'directory') {
@@ -247,7 +262,9 @@
             });
             remove.disabled = item.state === 'claimed';
           } else {
-            var download = button(choose ? '下载并使用' : '下载到控制机', row, function () { startDownload(item, download); });
+            var firmware=companion(item), includeFirmware=null;
+            if(firmware){var paired=text('label','',main);includeFirmware=document.createElement('input');includeFirmware.type='checkbox';includeFirmware.checked=true;paired.appendChild(includeFirmware);text('span','同时选择 '+firmware.name,paired).setAttribute('data-i18n-ignore','');}
+            var download = button(choose ? '下载并使用' : '下载到控制机', row, function () { startDownload(item, download, includeFirmware&&includeFirmware.checked?firmware:null); });
             download.disabled = unknown || !!active[item.url];
           }
         }
@@ -307,7 +324,7 @@
           status(error.message); cancel.disabled = false;
         });
       });
-      client.watch(task, {key:''}, function (current) {
+      return client.watch(task, {key:''}, function (current) {
         var p = current.progress || {};
         var phases = {'checking-image-sha256':'校验镜像', 'expanding-image':'解压镜像', 'checking-payloads':'校验包内文件', 'reading-payload-metadata':'读取基本信息'};
         progress.textContent = (preparing ? (phases[p.phase] || '准备镜像') + '：' : '控制机下载：') + options.formatBytes(p.done || 0)
@@ -318,27 +335,41 @@
           progress.textContent = selected(result.artifact) ? '下载完成，已返回当前选择。' : '下载完成，请重新选择替换目标。';
         } else progress.textContent = preparing ? '镜像准备完成，可跨板卡复用。' : '镜像已保存到控制机，正在准备解压与校验。';
         if (source === 'local' && $('image-store-dialog').open) loadLibrary();
+        return result;
       }).catch(function (error) { progress.textContent = error.message; })
         .finally(function () { delete active[key]; cancel.remove(); if (source !== 'local') draw(); });
     }
-    async function startDownload(item, button) {
+    async function startDownload(item, button, firmware) {
       if (unknown || active[item.url]) return;
-      button.disabled = true; active[item.url] = 'submitting';
-      var useAfterDownload = choose ? {choose:choose,session:++selectionSession} : null;
-      var id = global.crypto && global.crypto.randomUUID ? global.crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+      button.disabled = true;
+      var target = choose ? {choose:choose,session:++selectionSession} : null;
+      async function download(value) {
+        if(jobs[value.url])return jobs[value.url];
+        var id=global.crypto&&global.crypto.randomUUID?global.crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+        active[value.url]='submitting';
+        jobs[value.url]=client.request('/api/image-download',{url:value.url,name:value.name,request_id:id,actor:'web'}).then(function(result){
+          delete active[value.url];return follow(result.task,value.url);
+        }).finally(function(){delete jobs[value.url];});
+        return jobs[value.url];
+      }
       try {
-        var result = await client.request('/api/image-download', {url:item.url,name:item.name,request_id:id,actor:'web'});
-        delete active[item.url]; follow(result.task, item.url, useAfterDownload);
-      } catch (error) {
+        var results=await Promise.all(firmware?[download(item),download(firmware)]:[download(item)]);
+        if (!results[0] || firmware && !results[1]) return;
+        if(target && target.session===selectionSession && choose===target.choose && $('image-store-dialog').open){
+          var artifact=Object.assign({},results[0].artifact,{preparation_task:results[0].preparation_task});
+          if(firmware)artifact.firmware=Object.assign({},results[1].artifact,{preparation_task:results[1].preparation_task});
+          selected(artifact);
+        }
+      } catch(error) {
         delete active[item.url];
-        if (!error.result) { unknown = true; status('提交结果未知，请打开“已下载”检查原下载任务；不会自动重新提交。'); }
-        else { status(error.message); button.disabled = false; }
+        if(!error.result){unknown=true;status('提交结果未知，请打开“已下载”检查原下载任务；不会自动重新提交。');}
+        else {status(error.message);button.disabled=false;}
       }
     }
     function open(onChoose, configuration) {
-      ++selectionSession; picker = configuration || {}; directories = Object.create(null);
+      ++selectionSession; picker = configuration || {}; directories = Object.create(null); indexFiles = Object.create(null);
       choose = typeof onChoose === 'function' ? onChoose : null;
-      $('is-title').textContent = picker.fileOnly ? '选择分区文件' + (picker.partition ? ' · ' + picker.partition : '') : '镜像商店';
+      $('is-title').textContent = picker.firmwareOnly ? '选择配套固件' : picker.fileOnly ? '选择分区文件' + (picker.partition ? ' · ' + picker.partition : '') : '镜像商店';
       if (!$('image-store-dialog').open) $('image-store-dialog').showModal();
       if (!opening) { opening = true; source = $('is-source').value || 'public'; }
       if (['local', 'public', 'internal'].includes(picker.source)) { source = picker.source; path = ''; $('is-source').value = source; }

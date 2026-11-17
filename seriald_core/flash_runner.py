@@ -304,7 +304,7 @@ def public_plan(value):
     hidden = {'path', 'workspace', 'argv', 'device', 'profile', 'profile_data', 'prepare',
               'cache_path', 'source_path', 'source_proofs', 'image_path', 'request_path', 'files',
               'execution_profile', 'execution_device', 'initial_device', 'previous_device', 'final_device',
-              'allowed_final_generation', 'source_workspaces'}
+              'allowed_final_generation', 'source_workspaces', 'steps'}
     if isinstance(value, dict):
         return {key: public_plan(item) for key, item in value.items()
                 if key not in hidden and not key.endswith('_path')}
@@ -719,7 +719,7 @@ class LocalFlashExecutor:
             with self._cache_lock:
                 existing = self._cache_size(workspace)
                 available = min(max(0, shutil.disk_usage(images).free - 256 * 1024 ** 2 - self._cache_reserved),
-                    max(0, max_cache_bytes - self._cache_size(images) - self._cache_size(self.root / 'cache') - self._cache_reserved))
+                    max(0, max_cache_bytes - self._cache_size(images) - self._cache_size(self.root / 'cache') - self._cache_size(self.root / 'workdirs') - self._cache_reserved))
                 budget = min(max_cache_bytes, existing + available)
                 if budget < artifact['size']:
                     raise TaskError('insufficient image preparation cache quota', 503)
@@ -729,7 +729,22 @@ class LocalFlashExecutor:
             request = dict(version=1, artifact=dict(artifact), workspace=str(workspace),
                            max_expanded_bytes=max_expanded_bytes, max_cache_bytes=budget)
             try:
-                result = self._run(SimpleNamespace(argv=tuple(argv), timeout=3600), 'prepare-image', request, on_event=on_event, check=check)
+                operation = 'prepare-image'
+                from .image_workspaces import origin_path
+                origin = origin_path(artifact['path'])
+                if artifact.get('name', '').endswith('.directory') and not origin.exists():
+                    raise TaskError('目录来源记录缺失，请重新选择控制机目录', 409)
+                if origin.exists():
+                    if origin.is_symlink() or origin.stat().st_size > MAX_REQUEST:
+                        raise TaskError('directory source record changed', 409)
+                    document = _json(origin.read_bytes())
+                    from .image_workspaces import members
+                    _, current_files = members(document['directory'])
+                    if current_files != document.get('files'):
+                        raise TaskError('目录内容已修改，请重新读取目录生成新版本', 409)
+                    request['directory_source'] = document['directory']
+                    operation = 'prepare-directory'
+                result = self._run(SimpleNamespace(argv=tuple(argv), timeout=3600), operation, request, on_event=on_event, check=check)
                 if result.get('receipt_path'):
                     receipt = workspace / ('prepared-' + artifact['sha256'] + '.json')
                     if (result['receipt_path'] != str(receipt) or receipt.is_symlink()

@@ -89,7 +89,10 @@ class ImagePreparations:
                 if maintenance:
                     from .flash_store import FlashStore
                     from .flash_progress import PreviewProgress
-                    timing = PreviewProgress(FlashStore(self.manager.store), context.id, source, 'image-preparation:local',
+                    from .image_workspaces import public_directory_info
+                    directory_info = public_directory_info(source['path'])
+                    timing_source = dict(source, size=directory_info.get('directory_bytes') or source['size'])
+                    timing = PreviewProgress(FlashStore(self.manager.store), context.id, timing_source, 'image-preparation:local',
                         source['name'].lower().endswith(('.gz', '.tgz', '.zip')),
                         phases=('checking-image-sha256', 'expanding-image', 'checking-payloads', 'reading-payload-metadata'))
                 success = False
@@ -175,7 +178,7 @@ class ImagePreparations:
 
     def after_upload(self, row, actor='web', client_id=''):
         """Seal/import succeeds independently; a preparation error remains a task."""
-        if not row['name'].lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip', '.itb', '.bin', '.ext2', '.ext3', '.ext4', '.vfat', '.f2fs', '.squashfs', '.ubifs', '.img', '.dtb', '.gz')):
+        if not row['name'].lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip', '.itb', '.bin', '.ext2', '.ext3', '.ext4', '.vfat', '.f2fs', '.squashfs', '.ubifs', '.img', '.dtb', '.gz', '.directory')):
             return None
         try:
             return self.start(row['id'], actor, None if actor == 'web' else row['serial'], client_id)

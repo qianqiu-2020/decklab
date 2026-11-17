@@ -207,6 +207,8 @@ def library(manager, actor='web', serial=None):
     for artifact_id in ids:
         row = manager.artifacts.get(artifact_id, actor, None if actor == 'web' else serial)
         item = {k: row[k] for k in ('id', 'name', 'size', 'sha256', 'updated', 'serial', 'state')}
+        from .image_workspaces import public_directory_info
+        item.update(public_directory_info(manager.artifacts._path(artifact_id, '.bin')))
         task = preparations.latest(artifact_id, actor)
         if task:
             item['preparation_task'] = task

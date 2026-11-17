@@ -46,6 +46,16 @@ function setup(request){
   local.buttons().find(n=>n.textContent==='删除').fire();assert.equal(deleted,0);
   local.consent(true);local.buttons().find(n=>n.textContent==='删除').fire();await flush();assert.equal(deleted,1);
   local.buttons().find(n=>n.textContent==='使用').fire();assert.equal(selected,1);assert.equal(local.ids['image-store-dialog'].open,false);
+  const pairedOS={name:'Debian-13-GNOME-K3-v1.0rc1-202611180100.tar.gz',kind:'package',url:'https://repo/os.tar.gz'};
+  const pairedFW={name:'Debian-13-Firmware-K3-v1.0rc1-202611180055.tar.gz',kind:'package',url:'https://repo/fw.tar.gz'};
+  let pairChoice;const pairCalls=[];
+  const paired=setup((url,payload)=>{pairCalls.push({url,payload});return Promise.resolve(url.startsWith('/api/image-catalog')?{entries:[pairedOS,pairedFW]}:{task:{id:payload.name,state:'running'}});});
+  paired.store.open(value=>{pairChoice=value;});await flush();
+  assert.ok(paired.ids['is-list'].textContent.includes('同时选择'));
+  paired.buttons().find(n=>n.textContent==='下载并使用').fire();await flush();
+  assert.equal(pairCalls.filter(c=>c.url==='/api/image-download').length,2);assert.equal(paired.watches.length,2);
+  paired.watches[0].resolve({artifact:{id:'os-selected',name:pairedOS.name}});paired.watches[1].resolve({artifact:{id:'fw-selected',name:pairedFW.name}});await flush();await flush();
+  assert.equal(pairChoice.id,'os-selected');assert.equal(pairChoice.firmware.id,'fw-selected');
   let crossBoardChoice;
   const crossBoard=setup(()=>Promise.resolve({artifacts:[{id:'prepared-on-a',name:'Debian.tar.gz',size:100,
     serial:'BOARD-A',state:'claimed',preparation_task:{id:'preparation-a',kind:'image-prepare',state:'running'}}],tasks:[]}));

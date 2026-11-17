@@ -19,7 +19,7 @@
       var source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
       if (!source) return;
       rememberedImage = source ? {id:source.id, mode:$('fl-mode').value, verify:$('fl-verify').value,
-        reset_after:$('fl-reset-after').checked} : null;
+        reset_after:$('fl-reset-after').checked, firmware:$('fl-firmware').value} : null;
       try {
         if (global.sessionStorage) {
           if (rememberedImage) global.sessionStorage.setItem('decklab-flash-image', JSON.stringify(rememberedImage));
@@ -28,14 +28,27 @@
       } catch (_) {}
     }
     function selectedPreparation() { return imagePreparations[$('fl-artifact').value]; }
-    function imageReady() { return !(capabilities && capabilities.image_preparation_supported && $('fl-artifact').value)
-      || !!(selectedPreparation() && selectedPreparation().state === 'completed'); }
+    function imageReady() {
+      if (!(capabilities && capabilities.image_preparation_supported)) return true;
+      return [$('fl-artifact').value, $('fl-mode').value === 'full' && $('fl-firmware').value].filter(Boolean).every(function (artifactId) {
+        return imagePreparations[artifactId] && imagePreparations[artifactId].state === 'completed';
+      });
+    }
+    function renderFirmwareOptions(selected) {
+      var select = $('fl-firmware'), previous = selected === undefined ? select.value : selected;
+      select.textContent = ''; text('option', '仅刷当前镜像', select).value = '';
+      artifacts.filter(function (item) { return item.id !== $('fl-artifact').value && packageFile(item); }).forEach(function (item) {
+        var option = text('option', item.name, select); option.value = item.id; option.dataset.i18nIgnore = '';
+      });
+      select.value = artifacts.some(function (item) { return item.id === previous && item.id !== $('fl-artifact').value; }) ? previous : '';
+    }
     function renderPreparation() {
       var current = selectedPreparation(), box = $('fl-image-preparation');
       box.hidden = !current;
       if (!current) return;
       var progress = current.progress || {}, active = ['queued','running'].includes(current.state);
-      var phases = {'checking-image-sha256':'校验镜像 SHA-256', 'expanding-image':'解压镜像',
+      var directorySource = artifacts.find(function(item){return item.id===$('fl-artifact').value&&/\.directory$/i.test(item.name);});
+      var phases = {'checking-image-sha256':'校验镜像 SHA-256', 'expanding-image':directorySource?'建立目录快照':'解压镜像',
         'checking-payloads':'校验包内文件', 'reading-payload-metadata':'读取文件系统与版本信息'};
       $('fl-image-preparation-status').textContent = current.state === 'completed' ? '镜像已准备，可复用于其他板卡'
         : active ? (phases[progress.phase] || '等待准备镜像') : current.error || '镜像准备未完成';
@@ -74,7 +87,7 @@
       }
     }
     async function prepareSource(artifact, supplied, retry) {
-      if (!artifact || !(capabilities && capabilities.image_preparation_supported)) return;
+      if (!artifact || !(capabilities && capabilities.image_preparation_supported || supplied)) return;
       var previous = imagePreparations[artifact.id];
       if (!retry && previous) return;
       var marker = {state:'queued'}; imagePreparations[artifact.id] = marker;
@@ -86,13 +99,13 @@
         await client.watch(current, {key:''}, function (value) {
           if (imagePreparations[artifact.id] !== marker && imagePreparations[artifact.id].id !== value.id) return;
           marker = value; imagePreparations[artifact.id] = value;
-          if ($('fl-artifact').value === artifact.id) { renderPreparation(); updateControls(); }
+          if ([$('fl-artifact').value, $('fl-firmware').value].includes(artifact.id)) { renderPreparation(); updateControls(); }
         });
       } catch (error) {
         marker = Object.assign({}, imagePreparations[artifact.id], {state:'failed', error:error.message});
         imagePreparations[artifact.id] = marker;
       }
-      if ($('fl-artifact').value === artifact.id) {
+      if ([$('fl-artifact').value, $('fl-firmware').value].includes(artifact.id)) {
         renderPreparation(); updateControls();
         if (marker.state === 'completed' && workspaceSelection() && packageFile(artifact)) inspectSource();
       }
@@ -123,6 +136,8 @@
       if (!(value.id || value.plan_id || result.plan_id)) throw new Error('刷机计划缺少写入范围，不能执行。');
       if (value.ready !== false && (!Array.isArray(value.writes) || !value.writes.length)) throw new Error('刷机计划缺少写入范围，不能执行。');
       if (value.mode) $('fl-mode').value = value.mode;
+      if(value.firmware_artifact_id){(value.components||[]).forEach(function(component){if(component.id&&!artifacts.some(function(item){return item.id===component.id;}))artifacts.push(component);});renderFirmwareOptions(value.firmware_artifact_id);}
+
       plan = value; plan.id = value.id || value.plan_id || result.plan_id; requestId = id();
       if (result.inspection) { inspection = result.inspection; renderPartitions(); renderStorages(); }
       previewRequestId = ''; setProgress('image-ready', 0, 0, false); renderPlan(plan);
@@ -132,10 +147,12 @@
       busy = true; previewRequestId = current.request_id || operationReference(selected) || '';
       var details = current.flash || {}, intent = details.preview_intent || {};
       if (details.preview_source) artifacts = [details.preview_source];
+      if(details.preview_firmware)artifacts.push(details.preview_firmware);
       if (intent.mode) $('fl-mode').value = intent.mode;
       if (intent.verify) $('fl-verify').value = intent.verify;
       $('fl-reset-after').checked = !!intent.reset_after;
       if (intent.artifact_id) artifactOptions($('fl-artifact'), intent.artifact_id);
+      if(intent.firmware_artifact_id)renderFirmwareOptions(intent.firmware_artifact_id);
       if (intent.target_storage) $('fl-target-storage').value = intent.target_storage;
       try {
         if (!capabilities) {
@@ -153,7 +170,7 @@
     function status(message, failed) { $('fl-status').textContent = message; $('fl-status').dataset.error = failed ? 'true' : ''; }
     function renderSource() {
       var source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
-      $('fl-source-summary').textContent = source ? source.name + ' · ' + format(source.size) : translate('尚未选择镜像');
+      $('fl-source-summary').textContent = source ? source.name + ' · ' + format(source.directory_bytes || source.size) : translate('尚未选择镜像');
       if (source) $('fl-source-summary').dataset.i18nIgnore = '';
       else delete $('fl-source-summary').dataset.i18nIgnore;
     }
@@ -252,7 +269,7 @@
       }
     }
     function packageFile(artifact) {
-      return artifact && /\.(tar(?:\.(?:gz|xz|bz2|zst))?|tgz|zip|7z)$/i.test(artifact.name || '');
+      return artifact && /\.(tar(?:\.(?:gz|xz|bz2|zst))?|tgz|zip|7z|directory)$/i.test(artifact.name || '');
     }
     function partitionOptions(select, selected, storage, partition) {
       select.textContent = '';
@@ -302,8 +319,11 @@
           row.artifactSelect.value = artifact.id; row.checkbox.checked = true;
         }
       });
+      if (artifact.firmware) artifacts = artifacts.filter(function (item) { return item.id !== artifact.firmware.id; }).concat([artifact.firmware]);
+      renderFirmwareOptions(artifact.firmware ? artifact.firmware.id : source && source.id !== anchor ? '' : undefined);
       invalidatePlan(); renderReplacementInfo(null); rememberImage();
       prepareSource(artifact, artifact.preparation_task);
+      if (artifact.firmware) prepareSource(artifact.firmware, artifact.firmware.preparation_task);
     }
     function invalidatePlan() {
       dismissDelete();
@@ -339,6 +359,17 @@
       var nor = norContext() && !(sourceInspection && sourceInspection.storages.some(function (item) { return item.physical_device; })), workspace = workspaceSelection();
       $('fl-all-label').textContent = nor ? '全选 NOR 分区' : '全选分区';
       renderSource(); renderPreparation();
+      var primary = artifacts.find(function(item){return item.id===$('fl-artifact').value;});
+      $('fl-firmware-field').hidden = $('fl-mode').value !== 'full' || !packageFile(primary) || /(?:^|[-_])firmware(?:[-_.]|$)/i.test(primary.name);
+      $('fl-firmware-choose').disabled = busy || uploading || !!active || submissionUnknown || !options.openImageStore;
+      $('fl-firmware').disabled = busy || uploading || !!active || submissionUnknown;
+      $('fl-workspace').hidden = !$('fl-artifact').value;
+      $('fl-workspace').disabled = busy || uploading || !!active || !options.openImageWorkspace || !(primary && /\.directory$/i.test(primary.name)) && capabilities && capabilities.image_preparation_supported && !(selectedPreparation() && selectedPreparation().state === 'completed');
+      $('fl-directory').disabled = busy || uploading || !!active || !options.openImageWorkspace;
+      var firmwarePreparation = imagePreparations[$('fl-firmware').value];
+      $('fl-firmware-retry').hidden = !firmwarePreparation || ['queued','running','completed'].includes(firmwarePreparation.state);
+      $('fl-firmware-retry').disabled = busy || uploading || !!active;
+      $('fl-firmware-status').textContent = !$('fl-firmware').value ? '' : firmwarePreparation && firmwarePreparation.state === 'completed' ? '配套固件已准备' : firmwarePreparation && ['failed','cancelled','interrupted'].includes(firmwarePreparation.state) ? firmwarePreparation.error || '配套固件准备失败' : '正在准备配套固件…';
       renderCurrentNOR();
       updateBootControls();
       $('fl-review').hidden = !$('fl-preview').children.length;
@@ -907,6 +938,9 @@
       var saved = rememberedImage;
       artifacts = (capabilities.artifacts || []).slice();
       artifactOptions($('fl-artifact'), saved && saved.id);
+      renderFirmwareOptions(saved && saved.firmware);
+      var retainedFirmware = artifacts.find(function (item) { return item.id === $('fl-firmware').value; });
+      if (retainedFirmware) prepareSource(retainedFirmware);
       resumeDownload(board, sequence);
       renderPartitions(); renderStorages();
       var modes = preparationPending() ? capabilities.modes || ['partitions'] : capabilities.modes || ['full', 'partitions'];
@@ -1061,6 +1095,7 @@
       if (value.reset_after) status('本次写入和所选校验成功后，将自动复位；复位请求不自动重发。');
       renderReplacementInfo(value);
       var box = $('fl-preview'); box.textContent = '';
+      (value.components || []).forEach(function(component){text('p',component.label+' · '+component.name+' · '+(component.ready?'范围已核对':'加载临时环境后核对现场范围'),box).dataset.i18nIgnore='';});
       text('p', '回读校验：' + (value.verify === 'none' ? '不执行' : value.verify === 'required' ? '必须通过' : '能力支持时执行')
         + ' · 刷后复位：' + (value.reset_after ? '自动复位' : '保持当前模式'), box);
       if (value.physical_storage) text('p', translate('目标系统盘') + ' · ' + value.physical_storage, box).dataset.i18nIgnore='';
@@ -1090,7 +1125,7 @@
         var row = document.createElement('tr');
         var cells = [write.partition || write.target || write.partition_id || '完整磁盘',
           format(write.write_size || write.size || write.bytes || 0)];
-        if (!compact) cells.unshift(write.storage || write.storage_id || '未知');
+        if (!compact) cells.unshift((write.component ? write.component + ' · ' : '') + (write.storage || write.storage_id || '未知'));
         if (showRanges) cells.push(write.kind === 'layout' ? translate('MTD 映射 / env 擦除')
           : (write.offset === undefined ? '未知' : write.offset) + ' / ' + format(write.capacity || 0));
         if (!compact) cells.push(write.write_sha256 || write.sha256 || '未知');
@@ -1132,7 +1167,7 @@
       (value.pending_checks || []).forEach(function (check) { text('p', check, box); });
     }
     async function makePlan() {
-      if (busy || !board || !$('fl-artifact').value) return;
+      if (busy || !board || !$('fl-artifact').value || !imageReady()) return;
       var selected = board, seq = sequence, responseReceived = false;
       var preparing = preparationPending(), chosen = preparing || $('fl-mode').value === 'full' ? [] : selections();
       if (chosen.some(function (item) { return !item.artifact_id; })) {
@@ -1148,6 +1183,7 @@
           reset_after: !!$('fl-reset-after').checked });
         if (payload.mode === 'full' && $('fl-target-storage').value) payload.target_storage = $('fl-target-storage').value;
         payload.request_id = previewRequestId;
+        if ($('fl-mode').value === 'full' && $('fl-firmware').value) payload.firmware_artifact_id = $('fl-firmware').value;
         var result = await client.request('/api/flash-plan', payload); responseReceived = true;
         if (result.task) result = await client.watch(result.task, {key:selected.key || '',serial:selected.serial || ''}, function (current) {
           if (!same(selected, seq)) return;
@@ -1533,7 +1569,12 @@
         }
         if (same(selected, seq)) {
           if (files.length === 1) addSource(artifacts[artifacts.length - 1]);
-          else { invalidatePlan(); artifactOptions($('fl-artifact'), artifacts[artifacts.length - 1].id); renderPartitions(); }
+          else {
+            var uploaded = artifacts.slice(-files.length), firmware = uploaded.find(function (item) { return /(?:^|[-_])firmware(?:[-_.]|$)/i.test(item.name); });
+            var os = uploaded.find(function (item) { return item !== firmware && packageFile(item); });
+            if (firmware && os && uploaded.length === 2) { os.firmware = firmware; addSource(os); }
+            else { addSource(uploaded[uploaded.length-1]); uploaded.forEach(function (item) { prepareSource(item,item.preparation_task); }); }
+          }
           status(task && ['queued', 'running'].indexOf(task.state) >= 0 && awaitingSelection(task)
             ? (norContext() ? '' : '载荷已准备，请在原任务选择实际分区并预览。')
             : preparationPending()
@@ -1618,6 +1659,33 @@
       try { await client.request('/api/task-cancel', {id:current.id}); }
       catch (error) { status(error.message, true); }
     });
+    $('fl-firmware-choose').addEventListener('click',function(){
+      if($('fl-firmware-choose').disabled)return;
+      var selected=board,seq=sequence,mainId=$('fl-artifact').value;
+      options.openImageStore(function(firmware){
+        if(!same(selected,seq)||mainId!==$('fl-artifact').value)throw new Error('当前镜像或板卡已变化，请重新选择配套固件。');
+        artifacts=artifacts.filter(function(item){return item.id!==firmware.id;}).concat([firmware]);
+        renderFirmwareOptions(firmware.id);invalidatePlan();rememberImage();prepareSource(firmware,firmware.preparation_task);updateControls();
+      },{source:'public',firmwareOnly:true,serial:selected.serial||''});
+    });
+    $('fl-firmware-retry').addEventListener('click',function(){var source=artifacts.find(function(item){return item.id===$('fl-firmware').value;});if(source)prepareSource(source,null,true);});
+    $('fl-firmware').addEventListener('change', function () {
+      invalidatePlan(); rememberImage();
+      var source = artifacts.find(function (item) { return item.id === $('fl-firmware').value; });
+      var main=artifacts.find(function(item){return item.id===$('fl-artifact').value;});
+      if(main){if(source)main.firmware=source;else delete main.firmware;}
+      if (source) prepareSource(source,source.preparation_task); updateControls();
+    });
+    function openWorkspace(empty) {
+      if (!options.openImageWorkspace) return;
+      var selected=board,seq=sequence,firmware=artifacts.find(function(item){return item.id===$('fl-firmware').value;});
+      options.openImageWorkspace(empty ? null : artifacts.find(function(item){return item.id===$('fl-artifact').value;}),function(artifact){
+        if (!same(selected,seq)) throw new Error('板卡已变化，请从已下载重新选择镜像目录。');
+        if (firmware) artifact.firmware=firmware; addSource(artifact);
+      });
+    }
+    $('fl-directory').addEventListener('click',function(){openWorkspace(true);});
+    $('fl-workspace').addEventListener('click',function(){openWorkspace(false);});
     $('fl-read-nor').addEventListener('click', readNOR);
     $('fl-system-storage').addEventListener('change', renderSystemInventory);
     $('fl-boot-priority').addEventListener('change', updateBootControls);
