@@ -176,7 +176,7 @@
     '芯片': 'Chip', '操作系统': 'Operating system', '发布类型': 'Release channel',
     '镜像分类': 'Image categories', '镜像变体': 'Image variant', '版本或 Daily 日期': 'Version or Daily date',
     '全部变体': 'All variants', '其他变体': 'Other variants', '其他系统': 'Other systems',
-    '搜索当前版本': 'Search current version', '内容目录': 'Contents', '当前版本': 'Current version',
+    '搜索当前版本': 'Search current version', '内容目录': 'Contents', '当前目录': 'Current folder', '当前版本': 'Current version',
     '不支持此镜像格式': 'This image format is unsupported',
     '镜像商店': 'Image store', '公开镜像': 'Public images', '内部镜像': 'Internal images', '组织镜像': 'Organization images', '已下载': 'Downloaded',
     '搜索当前目录': 'Search this folder', '镜像来源': 'Image source', '搜索镜像': 'Search images', '镜像目录': 'Image folders',

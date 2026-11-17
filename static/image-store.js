@@ -39,10 +39,10 @@
         node.setAttribute('aria-pressed', String(value.id === current));
       });
     }
-    function selectOptions(node, groups, current) {
+    function selectOptions(node, groups, current, markLatest) {
       node.textContent = '';
       groups.forEach(function (group, index) {
-        var option = text('option', group.name + (index === 0 ? ' · 最新' : ''), node); option.value = group.id;
+        var option = text('option', group.name + (index === 0 && markLatest !== false ? ' · 最新' : ''), node); option.value = group.id;
       });
       node.value = current;
     }
@@ -170,15 +170,19 @@
       // Traverse only the selected branch, never recursively crawl old versions/days.
       for (var depth = 0; depth < 4; depth++) {
         var children = rows.filter(function (row) { return row.kind === 'directory'; }).sort(newest);
-        if (!children.length || rows.some(function (row) { return row.kind !== 'directory' && supported(row); })) break;
+        if (!children.length) break;
+        var hasFiles = rows.some(function (row) { return row.kind !== 'directory' && supported(row); });
         var base = children[0].path.split('/').slice(0, -2).join('/');
         var selectedPath = folderChoices[base];
-        if (!children.some(function (row) { return row.path === selectedPath; })) selectedPath = children[0].path;
+        if (!children.some(function (row) { return row.path === selectedPath; })) selectedPath = hasFiles ? '' : children[0].path;
         folders.hidden = false;
         var label = text('label', '内容目录 ', folders), chooser = text('select', '', label);
         chooser.setAttribute('aria-label', '内容目录 ' + (depth + 1));
-        selectOptions(chooser, children.map(function (row) { return {id:row.path,name:row.name}; }), selectedPath);
+        var choices = children.map(function (row) { return {id:row.path,name:row.name}; });
+        if (hasFiles) choices.unshift({id:'',name:'当前目录'});
+        selectOptions(chooser, choices, selectedPath, false);
         (function (node, key) { node.addEventListener('change', function () { folderChoices[key] = node.value; load(); }); })(chooser, base);
+        if (!selectedPath) break;
         rows = (await directory(current, selectedPath, force)).entries;
         if (!valid()) return;
       }
@@ -208,7 +212,14 @@
         var row = text('div', '', box); row.className = 'is-row';
         var main = text('div', '', row); main.className = 'is-main';
         if (item.kind === 'directory') {
-          button(item.name + '/', main, function () { path = item.path; load(); });
+          button(item.name + '/', main, function () {
+            if (guided) {
+              // Reuse the selected-branch navigator so OS/date/variant controls
+              // survive a folder click alongside ordinary image files.
+              folderChoices[item.path.split('/').slice(0, -2).join('/')] = item.path;
+            } else path = item.path;
+            load();
+          });
         } else {
           text('strong', item.name, main);
           var facts = [local ? options.formatBytes(item.size) : labels[item.kind]];

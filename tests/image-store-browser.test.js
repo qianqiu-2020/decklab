@@ -19,7 +19,8 @@ const tree = {
   'k3/version/bianbu/v4.0.8/':[image('Bianbu-LXQt-K3-v4.0.8.tar.gz')],
   'k3/version/debian/':[image('Debian-13-GNOME-K3-202611161345.tar.gz')],
   'k3/daily/':[directory('20261116','k3/daily/'),directory('20261117','k3/daily/')],
-  'k3/daily/20261117/':[image('Bianbu-LXQt-K3-20261117032354.tar.gz'),image('Debian-13-GNOME-K3-202611170510.tar.gz'),image('Debian-13-Firmware-K3-202611170457.tar.gz')],
+  'k3/daily/20261117/':[directory('cloud','k3/daily/20261117/'),image('Bianbu-LXQt-K3-20261117032354.tar.gz'),image('Debian-13-GNOME-K3-202611170510.tar.gz'),image('Debian-13-Firmware-K3-202611170457.tar.gz')],
+  'k3/daily/20261117/cloud/':[image('Bianbu-Cloud-K3-202611170510.tar.gz'),image('Debian-13-Cloud-K3-202611170510.tar.gz')],
   'k3/daily/20261116/':[image('Bianbu-LXQt-K3-20261116032354.tar.gz')]
 };
 const visited = [], errors = [];
@@ -88,6 +89,16 @@ let chrome,ws;
   await click('is-os','Debian');
   await until('!document.getElementById("is-refresh").disabled && document.getElementById("is-list").textContent.includes("GNOME")');
   assert.equal(await evaluate('document.getElementById("is-list").textContent.includes("Bianbu")'),false);
+  assert.ok(!visited.includes('k3/daily/20261117/cloud/'));
+  await click('is-list','cloud/');
+  await until('!document.getElementById("is-refresh").disabled && document.getElementById("is-list").textContent.includes("Debian-13-Cloud")');
+  assert.equal(await evaluate('document.getElementById("is-catalog").hidden'),false);
+  assert.equal(await evaluate('document.getElementById("is-version").value'),'day:20261117');
+  assert.equal(await evaluate('document.getElementById("is-list").textContent.includes("Bianbu")'),false);
+  await screenshot('cloud.png');
+  await evaluate('const folder=document.querySelector("#is-path select");folder.value="";folder.dispatchEvent(new Event("change"))');
+  await until('!document.getElementById("is-refresh").disabled && document.getElementById("is-list").textContent.includes("Firmware")');
+  assert.equal(await evaluate('document.getElementById("is-catalog").hidden'),false);
   await click('is-variants','Firmware');
   assert.equal(await evaluate('document.getElementById("is-list").textContent.includes("GNOME")'),false);
   await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
@@ -100,7 +111,7 @@ let chrome,ws;
   await evaluate('SerialdI18n.setLocale("en")');
   assert.equal(await evaluate('document.getElementById("is-os").getAttribute("aria-label")'),'Operating system');
   assert.deepEqual(errors,[]);
-  console.log('Image-store Chromium passed: OS/channel/history/variants, numeric ordering, unsupported formats, no historical crawl, desktop/mobile and i18n.');
+  console.log('Image-store Chromium passed: OS/channel/history/variants, nested cloud navigation/return, numeric ordering, unsupported formats, no historical crawl, desktop/mobile and i18n.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(ws)ws.close();await stopBrowser(chrome);await new Promise(resolve=>server.close(resolve));fs.rmSync(profile,{recursive:true,force:true});
 });

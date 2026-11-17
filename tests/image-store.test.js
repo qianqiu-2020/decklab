@@ -96,7 +96,9 @@ function setup(request){
     'k3/version/bianbu/v4.0.10/':[pkg('Bianbu-LXQt-K3-v4.0.10.tar.gz'),pkg('Bianbu-Minimal-UEFI-K3-v4.0.10.tar.gz'),pkg('bad.img.gz'),pkg('bad.img.zip')],
     'k3/version/bianbu/v4.0.8/':[pkg('Bianbu-LXQt-K3-v4.0.8.tar.gz')],
     'k3/version/debian/':[pkg('Debian-13-GNOME-K3-202607301654.tar.gz'),pkg('Debian-13-GNOME-K3-202605140900.tar.gz')],
-    'k3/daily/20261117/':[pkg('Bianbu-LXQt-K3-20261117032354.tar.gz'),pkg('Debian-13-GNOME-K3-202611170510.tar.gz'),pkg('Debian-13-Firmware-K3-202611170457.tar.gz')],
+    'k3/daily/20261117/':[dir('cloud','k3/daily/20261117/cloud/'),pkg('Bianbu-LXQt-K3-20261117032354.tar.gz'),pkg('Debian-13-GNOME-K3-202611170510.tar.gz'),pkg('Debian-13-Firmware-K3-202611170457.tar.gz')],
+    'k3/daily/20261117/cloud/':[dir('nested','k3/daily/20261117/cloud/nested/'),pkg('Bianbu-Cloud-K3-202611170510.tar.gz'),pkg('Debian-13-Cloud-K3-202611170510.tar.gz')],
+    'k3/daily/20261117/cloud/nested/':[pkg('Debian-13-Cloud-K3-202611170600.tar.gz')],
     'k3/daily/20261116/':[pkg('Bianbu-Minimal-K3-20261116032354.tar.gz')],
     'k1/':[dir('version','k1/version/')],
     'k1/version/':[dir('buildroot','k1/version/buildroot/')],
@@ -133,6 +135,23 @@ function setup(request){
   assert.ok(browse.ids['is-list'].textContent.includes('Minimal'));
   assert.equal(browse.ids['is-version'].children.filter(n=>n.value==='day:20261117').length,1);
   assert.ok(!visited.includes('k3/daily/debian/13/20261115/'));
+  assert.ok(!browse.ids['is-list'].textContent.includes('Bianbu'));
+  assert.ok(!visited.includes('k3/daily/20261117/cloud/')); // no eager subfolder crawl
+  await clickAt('is-list','cloud/');
+  assert.equal(browse.ids['is-catalog'].hidden,false);
+  assert.equal(browse.ids['is-version'].value,'day:20261117');
+  assert.ok(browse.ids['is-list'].textContent.includes('Debian-13-Cloud'));
+  assert.ok(!browse.ids['is-list'].textContent.includes('Bianbu'));
+  assert.ok(browse.buttons(browse.ids['is-os']).find(n=>n.textContent==='Debian')['aria-pressed']==='true');
+  await clickAt('is-list','nested/');
+  assert.ok(browse.ids['is-list'].textContent.includes('202611170600'));
+  assert.equal(browse.ids['is-catalog'].hidden,false);
+  // Back to the selected day's root without changing OS, date or channel.
+  const rootFolder=browse.ids['is-path'].children[0].children[0];
+  rootFolder.value='';rootFolder.fire('change');await ready();
+  assert.equal(browse.ids['is-catalog'].hidden,false);
+  assert.equal(browse.ids['is-version'].value,'day:20261117');
+  assert.ok(browse.ids['is-list'].textContent.includes('Firmware'));
   assert.ok(!browse.ids['is-list'].textContent.includes('Bianbu'));
   await clickAt('is-channel','版本');
   assert.ok(browse.ids['is-list'].textContent.includes('20260730'));
