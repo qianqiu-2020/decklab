@@ -225,14 +225,16 @@
           var facts = [local ? options.formatBytes(item.size) : labels[item.kind]];
           if (!local && (item.size_label || item.size)) facts.push(item.size ? options.formatBytes(item.size) : item.size_label);
           if (item.modified) facts.push(item.modified);
-          if (local && item.state === 'claimed') facts.push('正在使用');
+          var preparation = item.preparation_task, preparing = preparation && ['queued','running'].includes(preparation.state);
+          if (local && preparation) facts.push(preparing ? '准备中' : preparation.state === 'completed' ? '已准备' : '准备未完成');
+          if (local && item.state === 'claimed' && !preparing) facts.push('正在使用');
           text('small', facts.join(' · '), main);
           if (local) {
             var actions = text('div', '', row); actions.className = 'is-actions';
             if (choose) {
               var use = button('使用', actions, function () { selected(item); });
-              if (!supported(item) || item.state === 'claimed' || item.serial && item.serial !== picker.serial) {
-                use.disabled = true; use.title = !supported(item) ? '不支持此镜像格式' : item.state === 'claimed' ? '镜像正在被任务使用' : '此镜像属于其他设备的任务';
+              if (!supported(item) || item.state === 'claimed' && !preparing) {
+                use.disabled = true; use.title = !supported(item) ? '不支持此镜像格式' : '镜像正在被任务使用';
               }
             }
             var remove = button('删除', actions, function () {
@@ -297,8 +299,9 @@
       if (Object.values(active).includes(task.id)) return;
       active[key] = task.id;
       var box = text('div', '', $('is-downloads'));
-      var progress = text('span', '正在下载…', box);
-      var cancel = button('取消下载', box, function () {
+      var preparing = task.kind === 'image-prepare';
+      var progress = text('span', preparing ? '正在准备镜像…' : '正在下载…', box);
+      var cancel = button(preparing ? '取消准备' : '取消下载', box, function () {
         cancel.disabled = true;
         client.request('/api/task-cancel', {id:task.id,actor:'web'}).catch(function (error) {
           status(error.message); cancel.disabled = false;
@@ -306,13 +309,14 @@
       });
       client.watch(task, {key:''}, function (current) {
         var p = current.progress || {};
-        progress.textContent = '控制机下载：' + options.formatBytes(p.done || 0)
+        var phases = {'checking-image-sha256':'校验镜像', 'expanding-image':'解压镜像', 'checking-payloads':'校验包内文件', 'reading-payload-metadata':'读取基本信息'};
+        progress.textContent = (preparing ? (phases[p.phase] || '准备镜像') + '：' : '控制机下载：') + options.formatBytes(p.done || 0)
           + (p.total ? ' / ' + options.formatBytes(p.total) : '');
       }).then(function (result) {
         if (useAfterDownload && useAfterDownload.session === selectionSession && choose === useAfterDownload.choose
             && $('image-store-dialog').open && result.artifact) {
           progress.textContent = selected(result.artifact) ? '下载完成，已返回当前选择。' : '下载完成，请重新选择替换目标。';
-        } else progress.textContent = '镜像已保存到控制机，可从“已下载”中选择。';
+        } else progress.textContent = preparing ? '镜像准备完成，可跨板卡复用。' : '镜像已保存到控制机，正在准备解压与校验。';
         if (source === 'local' && $('image-store-dialog').open) loadLibrary();
       }).catch(function (error) { progress.textContent = error.message; })
         .finally(function () { delete active[key]; cancel.remove(); if (source !== 'local') draw(); });

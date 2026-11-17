@@ -366,6 +366,17 @@ PasswordAuthentication yes</code></pre>
       </div>
       <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
       <select id="fl-artifact" hidden aria-label="当前镜像来源"></select>
+      <section id="fl-image-preparation" hidden aria-live="polite">
+        <div class="fl-current-source"><strong id="fl-image-preparation-status"></strong><span id="fl-image-preparation-bytes"></span><button id="fl-image-preparation-cancel" type="button" hidden>取消准备</button><button id="fl-image-preparation-retry" type="button" hidden>重新准备镜像</button></div>
+        <progress id="fl-image-preparation-progress" max="1" aria-label="镜像准备进度"></progress>
+        <div id="fl-image-overall" hidden><progress id="fl-image-overall-bar" max="100" value="0" aria-label="整体镜像准备进度"></progress><p id="fl-image-overall-text"></p><ol id="fl-image-stages" class="fl-stage-list"></ol></div>
+        <div id="fl-image-information"></div>
+        <div id="fl-image-recovery" hidden>
+          <label><input id="fl-image-stopped" type="checkbox">已检查并确认原镜像准备进程停止</label>
+          <input id="fl-image-recovery-reason" type="text" placeholder="确认依据" aria-label="镜像准备恢复依据">
+          <button id="fl-image-recover" type="button">释放占用</button>
+        </div>
+      </section>
       <div id="fl-package-contents" aria-live="polite"></div>
     </div>
     <fieldset id="fl-delete-field" class="fl-alert" hidden><legend>确认删除镜像</legend>

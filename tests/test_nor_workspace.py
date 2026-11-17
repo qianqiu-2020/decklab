@@ -531,7 +531,9 @@ class NORWorkspaceTests(unittest.TestCase):
             task, _ = self.begin(fixture, target)
             self.phase(fixture, task['id'], 'awaiting-selection')
             def download(artifacts, context, url, serial, name=None, sha256=None, actor='web'):
-                return {'fixture': True, 'serial': serial}
+                row = artifacts.create('upload', name or 'opensbi.itb', 4, actor, serial)
+                artifacts.append(row['id'], 0, b'test', actor, serial)
+                return {'artifact': artifacts.seal(row['id'], actor, serial)}
             with mock.patch('seriald_core.image_download.fetch_image', side_effect=download):
                 body = dict(self.scope(target), task_id=task['id'], url='https://firmware.example/opensbi.itb',
                             request_id='nor-url-import-001')

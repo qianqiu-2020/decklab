@@ -44,7 +44,10 @@ def fixture():
         with closing(Store(directory + '/registry.sqlite3')) as store:
             artifacts = TransferArtifacts(store, directory + '/images', ArtifactPolicy(
                 max_file=8192, max_total=32768, reserve_free=0))
-            manager = SimpleNamespace(store=store, artifacts=artifacts, tasks=TaskManager(store))
+            # Download transport tests do not launch a machine-installed flasher.
+            # Automatic native preparation is covered by test_image_preparation.
+            manager = SimpleNamespace(store=store, artifacts=artifacts, tasks=TaskManager(store),
+                                      flash_executor=SimpleNamespace(supports_image_preparation=False))
             address = server.server_address
             with mock.patch('seriald_core.image_download._addresses', return_value=[
                     (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, address)]):

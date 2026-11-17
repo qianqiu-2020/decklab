@@ -302,7 +302,7 @@ def safe_event(event):
 def public_plan(value):
     """Strip implementation paths and device selectors from the domain preview."""
     hidden = {'path', 'workspace', 'argv', 'device', 'profile', 'profile_data', 'prepare',
-              'cache_path', 'source_path', 'image_path', 'request_path', 'files',
+              'cache_path', 'source_path', 'source_proofs', 'image_path', 'request_path', 'files',
               'execution_profile', 'execution_device', 'initial_device', 'previous_device', 'final_device',
               'allowed_final_generation', 'source_workspaces'}
     if isinstance(value, dict):
@@ -537,12 +537,19 @@ class LocalFlashExecutor:
         root = self._owned_workspace(workspace)
         summary = root / 'image-metadata.json'
         cached = None
+        roots = [root] + [self._owned_workspace(value) for value in result.get('source_workspaces', [])]
         if root.parent == (self.root / 'images').resolve() and summary.is_file():
             if summary.is_symlink() or summary.stat().st_size > MAX_REQUEST:
                 raise FlashRunnerError('invalid image metadata cache')
             cached = _json(summary.read_bytes()).get('payload_metadata', [])
+        for other in roots[1:]:
+            summary = other / 'image-metadata.json'
+            if summary.is_file() and not summary.is_symlink() and summary.stat().st_size <= MAX_REQUEST:
+                cached = (cached or []) + _json(summary.read_bytes()).get('payload_metadata', [])
         metadata, seen = [], set()
         for value in list((result.get('plan') or {}).get('writes') or []) + list(result.get('payload_candidates') or []):
+            path = Path(value.get('path', ''))
+            payload_root = next((candidate for candidate in roots if path.is_absolute() and path.is_relative_to(candidate)), root)
             part = value.get('partition')
             hit = next((item for item in cached or [] if item.get('sha256') == value.get('sha256')
                         and (item.get('partition') == part or item.get('partition') == ''
@@ -555,7 +562,7 @@ class LocalFlashExecutor:
                 continue
             if part not in ('bootinfo', 'fsbl', 'env', 'esos', 'opensbi', 'uboot'):
                 if value.get('kind') in ('partition', 'disk') and value.get('path') and len(metadata) < 128:
-                    item = self._os_payload_metadata(value, root, seen)
+                    item = self._os_payload_metadata(value, payload_root, seen)
                     if item:
                         metadata.append(item)
                 continue
@@ -564,7 +571,7 @@ class LocalFlashExecutor:
                 continue
             seen.add(key)
             path = Path(value.get('path', ''))
-            if (not path.is_absolute() or not path.is_relative_to(root)
+            if (not path.is_absolute() or not path.is_relative_to(payload_root)
                     or path.resolve(strict=True) != path):
                 raise FlashRunnerError('NOR payload metadata escaped its managed workspace')
             size = value.get('size')
@@ -654,10 +661,47 @@ class LocalFlashExecutor:
             return (not source.is_symlink() and document.get('version') == 1
                 and document.get('artifact_sha256') == artifact['sha256']
                 and document.get('artifact_size') == artifact['size'] == info.st_size
-                and document.get('source_path') == str(source)
-                and document.get('source_modified_ns') == info.st_mtime_ns)
+                and ((document.get('source_path') == str(source)
+                      and document.get('source_modified_ns') == info.st_mtime_ns)
+                     or document.get('source_proofs', {}).get(str(source)) == info.st_mtime_ns)
+                and bool(document.get('files'))
+                and not (workspace / 'image-metadata.json').is_symlink()
+                and all(self._prepared_member_unchanged(document, item) for item in document['files'])
+                and (workspace / 'image-metadata.json').is_file())
         except (TaskError, ValueError, KeyError, OSError):
             return False
+
+    @staticmethod
+    def _prepared_member_unchanged(document, item):
+        try:
+            root = Path(document['root_path'])
+            path = root / item['name']
+            if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+                return False
+            info = path.stat()
+            return info.st_size == item['size'] and info.st_mtime_ns == item['modified_ns']
+        except (KeyError, OSError, ValueError):
+            return False
+
+    def cleanup_image(self, workspace):
+        target = Path(workspace).absolute()
+        if target.parent != self.root / 'images' or not re.fullmatch(r'[0-9a-f]{64}', target.name):
+            raise TaskError('image directory is outside managed cache', 409)
+        lock = self.image_lock({'sha256': target.name})
+        if not lock.acquire(blocking=False):
+            return False
+        try:
+            with self._cache_lock:
+                if str(target) in self._active_workspaces:
+                    return False
+                if target.is_symlink():
+                    raise TaskError('image directory changed', 409)
+                if target.exists():
+                    shutil.rmtree(target)
+                    return True
+                return False
+        finally:
+            lock.release()
 
     def prepare_image(self, argv, artifact, on_event=None, check=lambda: None,
                       max_expanded_bytes=32 * 1024 ** 3, max_cache_bytes=64 * 1024 ** 3):
@@ -667,6 +711,11 @@ class LocalFlashExecutor:
             if workspace.is_symlink() or workspace.exists() and not workspace.is_dir():
                 raise TaskError('image preparation directory changed', 409)
             workspace = self._directory(workspace)
+            # A cancelled, confirmed-stopped import has no completion seal.
+            # Discard that partial extraction before retrying the same image.
+            if not (workspace / ('prepared-' + artifact['sha256'] + '.json')).exists():
+                shutil.rmtree(workspace)
+                workspace = self._directory(workspace)
             with self._cache_lock:
                 existing = self._cache_size(workspace)
                 available = min(max(0, shutil.disk_usage(images).free - 256 * 1024 ** 2 - self._cache_reserved),
@@ -730,6 +779,8 @@ class LocalFlashExecutor:
                     error.operation = 'prepare-image'
                 if not getattr(error, 'cleanup_confirmed', True):
                     error.workspace = str(workspace)
+                elif not (workspace / ('prepared-' + artifact['sha256'] + '.json')).exists():
+                    shutil.rmtree(workspace, ignore_errors=True)
                 raise
             finally:
                 with self._cache_lock:
@@ -753,6 +804,13 @@ class LocalFlashExecutor:
             raise TaskError('invalid flash target storage')
         preparation = self.prepare_image(binding.argv, artifact, on_event, check,
             max_expanded_bytes=binding.max_expanded_bytes, max_cache_bytes=binding.max_cache_bytes)
+        source_workspaces = []
+        for selection in selections or []:
+            source = selection.get('artifact')
+            if source and source.get('sha256') != artifact['sha256']:
+                self.prepare_image(binding.argv, source, on_event, check,
+                    max_expanded_bytes=binding.max_expanded_bytes, max_cache_bytes=binding.max_cache_bytes)
+                source_workspaces.append(str(self.image_workspace(source)))
         workspace = self.image_workspace(artifact)
         budget = binding.max_cache_bytes
         with self._cache_lock:
@@ -787,6 +845,7 @@ class LocalFlashExecutor:
                     on_event({'event': 'phase', 'phase': 'checking-layout'})
                 result = self._run(execution, 'check-plan', inspection_request, on_event=on_event, check=check)
             result['workspace'] = str(workspace)
+            result['source_workspaces'] = sorted(set(source_workspaces))
             if on_event:
                 on_event({'event': 'phase', 'phase': 'reading-payload-metadata'})
             result['payload_metadata'] = self._payload_metadata(result, workspace)

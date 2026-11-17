@@ -56,6 +56,32 @@ async function open(h) {
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
+test('image preparation is independent, reports byte progress and gates preview until complete', async () => {
+  const h=harness(); h.api.open(board);
+  h.take('/api/flash-capabilities').resolve({...capabilities,image_preparation_supported:true}); await drain();
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.get('fl-artifact').value=artifact.id; h.get('fl-artifact').emit('change');
+  const request=h.take('/api/image-prepare'); assert.equal(request.payload.id,artifact.id);
+  assert.equal(request.payload.serial,undefined);assert.equal(h.get('fl-plan').disabled,true);
+  request.resolve({task:{id:'prepare-one',kind:'image-prepare',state:'running',progress:{phase:'checking-payloads',done:16,total:32}}}); await drain();
+  assert.match(h.get('fl-image-preparation-status').textContent,/校验包内文件/);
+  assert.match(h.get('fl-image-preparation-bytes').textContent,/50%/);
+  h.get('fl-close').click();h.api.open({...board});await drain();
+  assert.equal(h.requests.some(r=>r.url==='/api/image-prepare'),false);
+  h.take('/api/task?id=prepare-one').resolve({task:{id:'prepare-one',state:'completed',result:{preparation:{catalogue:[{partitions:[{name:'rootfs'}]}]}}}});await drain();
+  assert.equal(h.get('fl-plan').disabled,false);assert.match(h.get('fl-image-information').textContent,/rootfs/);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('refresh restores the selected image and options but refreshes board capabilities', async () => {
+  const storage=new Map(), first=harness(storage);await open(first);
+  first.get('fl-verify').value='none';first.get('fl-verify').emit('change');
+  const next=harness(storage);next.api.open({...board});next.take('/api/flash-capabilities').resolve(capabilities);await drain();
+  next.take('/api/tasks').resolve({tasks:[]});await drain();
+  assert.equal(next.get('fl-artifact').value,artifact.id);assert.equal(next.get('fl-verify').value,'none');
+  assert.equal(next.get('fl-start').disabled,true);
+});
+
 test('readback can be skipped explicitly without cancelling or restarting the original task', async () => {
   const h=harness(),target={target_id:'skip-usb',target_generation:'original-loader'};
   const current={id:'skip-task',kind:'flash',state:'running',progress:{phase:'verifying-system',done:10,total:32},
@@ -1046,7 +1072,8 @@ test('refresh resumes the same backend image download without submitting another
   refreshed.take('/api/task?id=persistent-image-task').resolve({task:{id:'persistent-image-task', kind:'image-download', state:'completed',
     result:{artifact:{id:'restored-image',name:'opensbi.itb',size:16,sha256:'b'.repeat(64),state:'ready'}}}}); await drain();
   assert.equal(refreshed.get('fl-artifact').value,'restored-image');
-  assert.equal(storage.size,0);
+  assert.equal(storage.has('decklab-flash-download:SN-1'),false);
+  assert.equal(JSON.parse(storage.get('decklab-flash-image')).id,'restored-image');
 });
 
 test('a confirmed failed import permits an explicit new download request', async () => {

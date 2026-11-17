@@ -183,7 +183,7 @@ let chrome,ws;
   await evaluate('document.querySelector("#fl-url").dispatchEvent(new Event("change"))');await delay(100);
   assert.equal(urlDownloads,1);assert.equal(await evaluate('document.querySelector("#fl-download").hidden'),true);
   await evaluate('ui.open('+JSON.stringify(target)+')');
-  await wait('document.querySelector("#fl-read-nor").disabled===false && document.querySelector("#fl-mode").value==="full"');
+  await wait('document.querySelector("#fl-read-nor").disabled===false && document.querySelector("#fl-mode").value==="partitions"');
   await evaluate('document.querySelector("#fl-mode").value="partitions";document.querySelector("#fl-mode").dispatchEvent(new Event("change"))');
   const contrast=selector=>`(()=>{const s=getComputedStyle(document.querySelector(${JSON.stringify(selector)}));const l=c=>{const a=c.match(/[\\d.]+/g).slice(0,3).map(x=>{x=Number(x)/255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4});return .2126*a[0]+.7152*a[1]+.0722*a[2]};const a=l(s.color),b=l(s.backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05)})()`;
   assert.ok(await evaluate(contrast('#fl-read-nor'))>=4.5,'light primary button contrast');

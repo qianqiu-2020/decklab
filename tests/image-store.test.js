@@ -46,6 +46,12 @@ function setup(request){
   local.buttons().find(n=>n.textContent==='删除').fire();assert.equal(deleted,0);
   local.consent(true);local.buttons().find(n=>n.textContent==='删除').fire();await flush();assert.equal(deleted,1);
   local.buttons().find(n=>n.textContent==='使用').fire();assert.equal(selected,1);assert.equal(local.ids['image-store-dialog'].open,false);
+  let crossBoardChoice;
+  const crossBoard=setup(()=>Promise.resolve({artifacts:[{id:'prepared-on-a',name:'Debian.tar.gz',size:100,
+    serial:'BOARD-A',state:'claimed',preparation_task:{id:'preparation-a',kind:'image-prepare',state:'running'}}],tasks:[]}));
+  crossBoard.store.open(value=>{crossBoardChoice=value;},{source:'local',serial:'BOARD-B'});await flush();
+  const usePrepared=crossBoard.buttons().find(n=>n.textContent==='使用');
+  assert.equal(!!usePrepared.disabled,false);usePrepared.fire();assert.equal(crossBoardChoice.id,'prepared-on-a');
   const archive={id:'archive',name:'firmware.tar.gz',kind:'package',url:'https://repo/firmware.tar.gz',size:100};
   const scoped=setup(url=>Promise.resolve(url.startsWith('/api/image-catalog')?{entries:[archive,item]}:{artifacts:[archive,{id:'raw',name:'opensbi.itb',size:1}],tasks:[]}));
   scoped.store.open(()=>{}, {fileOnly:true,partition:'opensbi'});await flush();

@@ -43,6 +43,9 @@ class BoardMaintenance:
             self.store.db.execute("UPDATE flash_resource_holds SET state='recovery',updated=? "
                                   "WHERE task_id IN (SELECT id FROM tasks WHERE state='interrupted')",
                                   (time.time(),))
+            self.store.db.execute("UPDATE flash_details SET document=json_set(document,'$.recovery_required',json('true')) "
+                "WHERE task_id IN (SELECT t.id FROM tasks t JOIN flash_resource_holds h ON h.task_id=t.id "
+                "WHERE t.kind='image-prepare' AND t.state='interrupted')")
 
     @staticmethod
     def resources(serial, resources=()):
@@ -289,7 +292,7 @@ class BoardMaintenance:
     def check_preparation(self):
         """Unknown cache writers block new imports without reserving a board."""
         with self._lock, self.store.lock:
-            row = self.store.db.execute('SELECT task_id FROM flash_resource_holds WHERE resource=?',
+            row = self.store.db.execute("SELECT task_id FROM flash_resource_holds WHERE resource=? OR (resource LIKE 'flash-image:%' AND state='recovery') LIMIT 1",
                                         (CACHE_POOL_RESOURCE,)).fetchone()
         if row is not None:
             raise TaskError('flash image cache is waiting for recovery of task ' + row['task_id'], 423)
@@ -357,6 +360,26 @@ class BoardMaintenance:
                 document, [CACHE_POOL_RESOURCE], initial_state='failed', resource_state='recovery',
                 error='image preparation process cleanup could not be confirmed; recovery required')
         return tasks.get(task_id)
+
+    def begin_image(self, task_id, sha256, workspace, artifact_id):
+        from .flash_store import FlashStore
+        if not re.fullmatch(r'[0-9a-f]{64}', sha256):
+            raise TaskError('invalid prepared image identity')
+        with self._lock, self.store.lock, self.store.db:
+            self.check_preparation()
+            FlashStore(self.store).initialize_details(task_id, dict(workspace=workspace, artifact_id=artifact_id,
+                attempt_id=secrets.token_hex(12), operation='image-preparation', recovery_required=False,
+                cleanup_confirmed=False, write_result='not-started'))
+            self.store.db.execute('INSERT INTO flash_resource_holds VALUES(?,?,?,?)',
+                ('flash-image:' + sha256, task_id, 'active', time.time()))
+
+    def retain_image_failure(self, task_id, details):
+        """Keep host-only image uncertainty on its existing durable task."""
+        from .flash_store import FlashStore
+        with self._lock, self.store.lock, self.store.db:
+            FlashStore(self.store).update_details(task_id, dict(details, recovery_required=True,
+                cleanup_confirmed=False, phase='preparation-recovery'))
+            self.keep_recovery(task_id)
 
     @contextmanager
     def operation(self, serial, allow_parallel=False):
@@ -429,7 +452,7 @@ class BoardMaintenance:
             tasks, flashes = TaskStore(self.store), FlashStore(self.store)
             task = tasks.get(task_id)
             details = flashes.details(task_id)
-            if (task['kind'] not in ('flash', 'flash-inspect') or not isinstance(expected_attempt_id, str)
+            if (task['kind'] not in ('flash', 'flash-inspect', 'image-prepare') or not isinstance(expected_attempt_id, str)
                     or not expected_attempt_id or details.get('attempt_id') != expected_attempt_id):
                 raise TaskError('flash recovery execution attempt changed', 409)
             if task['state'] not in ('failed', 'cancelled', 'interrupted', 'completed'):

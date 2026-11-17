@@ -9,8 +9,9 @@ PHASES = ('checking-upload', 'checking-image-sha256', 'expanding-image',
 
 
 class PreviewProgress:
-    def __init__(self, store, task_id, source, executor, compressed=True, clock=time.monotonic):
+    def __init__(self, store, task_id, source, executor, compressed=True, clock=time.monotonic, phases=PHASES):
         self.store, self.task_id, self.clock = store, task_id, clock
+        self.phases = phases
         self.start = self.phase_start = clock()
         self.index = -1
         self.size = source['size']
@@ -22,32 +23,32 @@ class PreviewProgress:
         histories = []
         with store.store.lock:
             rows = store.store.db.execute("SELECT f.document FROM flash_details f JOIN tasks t ON t.id=f.task_id "
-                "WHERE t.kind='flash-preview' AND t.state='completed' ORDER BY t.updated DESC LIMIT 20").fetchall()
+                "WHERE t.kind IN ('flash-preview','image-prepare') AND t.state='completed' ORDER BY t.updated DESC LIMIT 20").fetchall()
         for row in rows:
             old = json.loads(row[0]).get('preview_progress', {})
             if (old.get('executor') == executor and old.get('compressed') == compressed
                     and old.get('source_bytes', 0) > 0 and old.get('state') == 'completed'):
                 histories.append(old)
         self.estimates = []
-        for index, phase in enumerate(PHASES):
+        for index, phase in enumerate(self.phases):
             samples = []
             for old in histories:
                 step = next((step for step in old.get('stages', []) if step.get('phase') == phase
                              and step.get('state') == 'completed' and step.get('elapsed_seconds', 0) > .1), None)
                 if step:
-                    samples.append(step['elapsed_seconds'] * (self.size/old['source_bytes'] if index < 4 else 1))
-            self.estimates.append(max(.2, statistics.median(samples) if samples else defaults[index]))
+                    samples.append(step['elapsed_seconds'] * (self.size/old['source_bytes'] if phase in PHASES[:4] else 1))
+            self.estimates.append(max(.2, statistics.median(samples) if samples else defaults[PHASES.index(phase)]))
         self.value = {'source_bytes': self.size, 'executor': executor, 'compressed': compressed,
                       'sample_count': len(histories), 'started': time.time(), 'state': 'running', 'active': True,
                       'stages': [{'phase': phase, 'state': 'pending', 'elapsed_seconds': 0,
-                                  'estimated_seconds': self.estimates[index]} for index, phase in enumerate(PHASES)]}
+                                  'estimated_seconds': self.estimates[index]} for index, phase in enumerate(self.phases)]}
 
     def event(self, event):
         phase = event.get('phase')
-        if phase not in PHASES:
+        if phase not in self.phases:
             return
         now = self.clock()
-        index = PHASES.index(phase)
+        index = self.phases.index(phase)
         if index != self.index:
             if self.index >= 0:
                 old = self.value['stages'][self.index]

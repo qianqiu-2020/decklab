@@ -13,6 +13,90 @@
     var bootPriorityRequest = null;
     var progressSample = null, previewTask = null, previewRequestId = '';
     var previewProgress = null;
+    var imagePreparations = Object.create(null), rememberedImage = null;
+    try { rememberedImage = JSON.parse(global.sessionStorage && global.sessionStorage.getItem('decklab-flash-image') || 'null'); } catch (_) {}
+    function rememberImage() {
+      var source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
+      if (!source) return;
+      rememberedImage = source ? {id:source.id, mode:$('fl-mode').value, verify:$('fl-verify').value,
+        reset_after:$('fl-reset-after').checked} : null;
+      try {
+        if (global.sessionStorage) {
+          if (rememberedImage) global.sessionStorage.setItem('decklab-flash-image', JSON.stringify(rememberedImage));
+          else global.sessionStorage.removeItem('decklab-flash-image');
+        }
+      } catch (_) {}
+    }
+    function selectedPreparation() { return imagePreparations[$('fl-artifact').value]; }
+    function imageReady() { return !(capabilities && capabilities.image_preparation_supported && $('fl-artifact').value)
+      || !!(selectedPreparation() && selectedPreparation().state === 'completed'); }
+    function renderPreparation() {
+      var current = selectedPreparation(), box = $('fl-image-preparation');
+      box.hidden = !current;
+      if (!current) return;
+      var progress = current.progress || {}, active = ['queued','running'].includes(current.state);
+      var phases = {'checking-image-sha256':'校验镜像 SHA-256', 'expanding-image':'解压镜像',
+        'checking-payloads':'校验包内文件', 'reading-payload-metadata':'读取文件系统与版本信息'};
+      $('fl-image-preparation-status').textContent = current.state === 'completed' ? '镜像已准备，可复用于其他板卡'
+        : active ? (phases[progress.phase] || '等待准备镜像') : current.error || '镜像准备未完成';
+      var timing = current.flash && current.flash.preview_progress;
+      $('fl-image-overall').hidden = !timing;
+      if (timing) drawStageProgress(timing, phases, $('fl-image-stages'), $('fl-image-overall-bar'), $('fl-image-overall-text'), '整体准备进度');
+      var bar = $('fl-image-preparation-progress'); bar.hidden = !active;
+      bar.max = progress.total || 1;
+      if (progress.total) bar.value = Math.min(progress.done || 0, progress.total);
+      else bar.removeAttribute('value');
+      $('fl-image-preparation-bytes').textContent = active && progress.total
+        ? format(progress.done || 0) + ' / ' + format(progress.total) + ' · ' + Math.floor(100*(progress.done || 0)/progress.total) + '%' : '';
+      var recovery = current.flash && current.flash.recovery_required;
+      $('fl-image-recovery').hidden = !recovery;
+      $('fl-image-preparation-retry').hidden = active || current.state === 'completed' || !!recovery;
+      $('fl-image-preparation-cancel').hidden = !active || !current.id;
+      $('fl-image-preparation-cancel').disabled = !!current.cancel_requested;
+      var info = $('fl-image-information'); info.textContent = '';
+      if (current.state === 'completed') {
+        var prepared = (current.result || {}).preparation || {};
+        var metadata = prepared.payload_metadata || [], extra = null;
+        var hasFilesystem = metadata.some(function (item) { return item.content && item.content.filesystem; });
+        metadata.slice().sort(function (a,b) { return Number(!!(b.content && b.content.filesystem))-Number(!!(a.content && a.content.filesystem)); }).forEach(function (item) {
+          var parent = info;
+          if (hasFilesystem && !(item.content && item.content.filesystem)) {
+            if (!extra) { extra = text('details', '', info); text('summary', '固件与其他分区', extra); }
+            parent = extra;
+          }
+          var row = text('div', '', parent);
+          text('strong', item.partition || '镜像文件', row).dataset.i18nIgnore = '';
+          renderContent(text('div', '', row), item.content || {}, '', false);
+        });
+        if (!info.children.length) (prepared.catalogue || []).forEach(function (table) {
+          text('p', (table.partitions || []).map(function (part) { return part.name; }).join(' · '), info).dataset.i18nIgnore = '';
+        });
+      }
+    }
+    async function prepareSource(artifact, supplied, retry) {
+      if (!artifact || !(capabilities && capabilities.image_preparation_supported)) return;
+      var previous = imagePreparations[artifact.id];
+      if (!retry && previous) return;
+      var marker = {state:'queued'}; imagePreparations[artifact.id] = marker;
+      renderPreparation(); updateControls();
+      try {
+        var current = supplied || (await client.request('/api/image-prepare', Object.assign({id:artifact.id},
+          retry ? {request_id:id()} : {}))).task;
+        if (imagePreparations[artifact.id] !== marker) return;
+        await client.watch(current, {key:''}, function (value) {
+          if (imagePreparations[artifact.id] !== marker && imagePreparations[artifact.id].id !== value.id) return;
+          marker = value; imagePreparations[artifact.id] = value;
+          if ($('fl-artifact').value === artifact.id) { renderPreparation(); updateControls(); }
+        });
+      } catch (error) {
+        marker = Object.assign({}, imagePreparations[artifact.id], {state:'failed', error:error.message});
+        imagePreparations[artifact.id] = marker;
+      }
+      if ($('fl-artifact').value === artifact.id) {
+        renderPreparation(); updateControls();
+        if (marker.state === 'completed' && workspaceSelection() && packageFile(artifact)) inspectSource();
+      }
+    }
     function operationReference(selected, value) {
       try {
         if (!global.sessionStorage) return null;
@@ -75,7 +159,7 @@
     }
     function workspaceSelection() { return task && ['queued','running'].includes(task.state) && task.flash && task.flash.operation === 'nor-workspace' && awaitingSelection(task); }
     function changeMode() {
-      invalidatePlan();
+      rememberImage(); invalidatePlan();
       $('fl-storage-details').open = $('fl-mode').value === 'partitions' && !task;
       renderReplacementInfo($('fl-mode').value === 'full' ? sourceCatalogue : null);
     }
@@ -218,7 +302,8 @@
           row.artifactSelect.value = artifact.id; row.checkbox.checked = true;
         }
       });
-      invalidatePlan(); renderReplacementInfo(null);
+      invalidatePlan(); renderReplacementInfo(null); rememberImage();
+      prepareSource(artifact, artifact.preparation_task);
     }
     function invalidatePlan() {
       dismissDelete();
@@ -253,7 +338,7 @@
       var selecting = active && awaitingSelection(task);
       var nor = norContext() && !(sourceInspection && sourceInspection.storages.some(function (item) { return item.physical_device; })), workspace = workspaceSelection();
       $('fl-all-label').textContent = nor ? '全选 NOR 分区' : '全选分区';
-      renderSource();
+      renderSource(); renderPreparation();
       renderCurrentNOR();
       updateBootControls();
       $('fl-review').hidden = !$('fl-preview').children.length;
@@ -290,7 +375,7 @@
       $('fl-url-sha256').disabled = busy || uploading || submissionUnknown || !!active && !selecting;
       $('fl-download-cancel').hidden = !downloadTask || !['queued', 'running'].includes(downloadTask.state);
       $('fl-plan').disabled = busy || uploading || !!active || !!(board && board.observingTask)
-        || !(available || preparable) || !$('fl-artifact').value;
+        || !(available || preparable) || !$('fl-artifact').value || !imageReady();
       $('fl-plan').hidden = !!selecting;
       if (nor && $('fl-mode').value === 'partitions' && !active) $('fl-plan').disabled = true;
       $('fl-plan').textContent = preparable ? '预览刷机准备步骤' : '预览写入范围';
@@ -314,7 +399,7 @@
       $('fl-target-storage-field').hidden = sourceInspection ? !sourceInspection.storages.some(function (item) { return item.physical_device; }) : $('fl-mode').value !== 'full' && !workspace;
       $('fl-select').hidden = !selecting;
       var needsCatalogue = workspace && packageFile(artifacts.find(function (item) { return item.id === $('fl-artifact').value; })) && !sourceCatalogue;
-      $('fl-select').disabled = busy || uploading || submissionUnknown || !selecting;
+      $('fl-select').disabled = busy || uploading || submissionUnknown || !selecting || !imageReady();
       $('fl-select').textContent = needsCatalogue ? '解析镜像并预览写入范围' : workspace && sourceCatalogue && $('fl-mode').value === 'full' ? (selectionPlan ? '确认包内全部目标分区并刷写' : '预览包内全部目标分区') : fullConfirmation() ? (selectionPlan ? '确认固件范围并刷写' : '预览固件写入与擦除范围') : selectionPlan ? (nor ? '确认分区并刷写' : '确认分区并继续') : '预览分区写入范围';
       $('fl-recover').hidden = !submissionUnknown;
       var recovery = task && task.flash && task.flash.recovery_required === true;
@@ -602,10 +687,14 @@
       overall.hidden = !previewProgress;
       if (!previewProgress) return;
       $('fl-execution').hidden = false;
+      drawStageProgress(previewProgress, names, box, $('fl-overall-bar'), $('fl-overall-text'), '整体预览进度');
+    }
+    function drawStageProgress(model, names, box, bar, labelNode, title) {
+      box.textContent = '';
       var pending = 0, completed = 0, now = Date.now()/1000;
-      (previewProgress.stages || []).forEach(function (step) {
+      (model.stages || []).forEach(function (step) {
         var elapsed = Number(step.elapsed_seconds) || 0, estimate = Number(step.estimated_seconds) || 0;
-        if (step.state === 'running' && previewProgress.active) elapsed += Math.max(0, now-previewProgress.updated);
+        if (step.state === 'running' && model.active) elapsed += Math.max(0, now-model.updated);
         // A quiet hashing/layout stage can outlive its estimate. Recalibrate
         // instead of leaving the whole preview stuck at "1 second remaining".
         if (step.state === 'running') estimate = Math.max(estimate, elapsed*1.25);
@@ -616,11 +705,11 @@
           + (step.state === 'completed' ? ' · ' + Math.ceil(elapsed) + ' ' + translate('秒') : ''), box);
         row.dataset.state = step.state;
       });
-      var percent = previewProgress.state === 'completed' ? 100 : Math.min(99, Math.floor(100*completed/Math.max(1,completed+pending)));
-      $('fl-overall-bar').value = percent;
+      var percent = model.state === 'completed' ? 100 : Math.min(99, Math.floor(100*completed/Math.max(1,completed+pending)));
+      bar.value = percent;
       var seconds = Math.ceil(pending), duration = seconds < 60 ? seconds + ' ' + translate('秒') : Math.ceil(seconds/60) + ' ' + translate('分钟');
-      $('fl-overall-text').textContent = translate('整体预览进度') + ' · ' + percent + '%'
-        + (previewProgress.active ? ' · ' + translate(previewProgress.sample_count ? '预计剩余' : '初步估算剩余') + ' ' + duration : '');
+      labelNode.textContent = translate(title) + ' · ' + percent + '%'
+        + (model.active ? ' · ' + translate(model.sample_count ? '预计剩余' : '初步估算剩余') + ' ' + duration : '');
     }
     function renderPartitions() {
       var box = $('fl-partitions'), previous = {};
@@ -745,6 +834,11 @@
         if (!same(selected, seq)) return;
         if (!result.artifact || result.artifact.id !== chosen.artifact.id || result.artifact.state !== 'deleted')
           throw new Error('删除结果未确认，请重新检测镜像列表。');
+        if (rememberedImage && rememberedImage.id === chosen.artifact.id) {
+          rememberedImage = null;
+          try { if (global.sessionStorage) global.sessionStorage.removeItem('decklab-flash-image'); } catch (_) {}
+        }
+        delete imagePreparations[chosen.artifact.id];
         artifacts = artifacts.filter(function (item) { return item.id !== chosen.artifact.id; });
         payloadCandidates = payloadCandidates.filter(function (item) { return (item.artifact_id || item.id) !== chosen.artifact.id; });
         if (capabilities) capabilities.artifacts = artifacts.slice();
@@ -810,12 +904,20 @@
           ? '尚未取得设备能力，回读支持待确认。' : '当前下载环境不支持写后回读校验。', box);
         if ($('fl-verify').value === 'required') $('fl-verify').value = 'if-supported';
       }
-      artifacts = (capabilities.artifacts || []).slice(); artifactOptions($('fl-artifact'));
+      var saved = rememberedImage;
+      artifacts = (capabilities.artifacts || []).slice();
+      artifactOptions($('fl-artifact'), saved && saved.id);
       resumeDownload(board, sequence);
       renderPartitions(); renderStorages();
       var modes = preparationPending() ? capabilities.modes || ['partitions'] : capabilities.modes || ['full', 'partitions'];
       Array.from($('fl-mode').children).forEach(function (option) { option.disabled = modes.indexOf(option.value) < 0; });
-      $('fl-mode').value = modes.indexOf('full') >= 0 ? 'full' : modes[0] || 'full';
+      $('fl-mode').value = saved && modes.includes(saved.mode) ? saved.mode : modes.indexOf('full') >= 0 ? 'full' : modes[0] || 'full';
+      if (saved && $('fl-artifact').value === saved.id) {
+        $('fl-verify').value = saved.verify || 'if-supported';
+        $('fl-reset-after').checked = !!saved.reset_after;
+      }
+      var retainedSource = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
+      if (retainedSource) prepareSource(retainedSource);
       $('fl-storage-details').open = $('fl-mode').value === 'partitions';
       status(capabilities.nor_workspace_supported ? ''
         : preparationPending() ? '已检测到 BootROM；上传刷机包后可准备临时环境并读取布局，此阶段不写存储。'
@@ -888,12 +990,11 @@
       var selected = { target_id: target.target_id || target.id,
         target_generation: target.target_generation || target.generation, label: target.label, serial: target.serial || '',
         present: target.present };
-      board = selected; var seq = ++sequence; clearTimeout(pollTimer); ++eventSequence;
+      rememberImage(); board = selected; var seq = ++sequence; clearTimeout(pollTimer); ++eventSequence;
       sourceInspection = null; sourceCatalogue = null; sourceAnalysedId=''; $('fl-package-contents').textContent='';
       busy = true; capabilities = null; task = null; inspection = null; artifacts = []; payloadCandidates = [];
       bootPriorityRequest = null;
       renderedBackup = ''; $('flash-dialog').dataset.taskState = ''; renderBackups(); renderSystemInventory(); setProgress('', 0, 0, false);
-      $('fl-reset-after').checked = false;
       invalidatePlan(); $('fl-connections').textContent = ''; $('fl-partitions').textContent = '';
       $('fl-task-id').textContent = ''; $('fl-events').textContent = ''; $('fl-results').textContent = '';
       $('fl-task-status').textContent = '';
@@ -927,7 +1028,7 @@
     }
     async function discover() {
       if (busy || uploading || task && ['queued', 'running'].indexOf(task.state) >= 0) return;
-      var selected = board, seq = sequence;
+      rememberImage(); var selected = board, seq = sequence;
       busy = true; capabilities = null; artifacts = []; inspection = null; payloadCandidates = [];
       invalidatePlan(); $('fl-connections').textContent = ''; $('fl-partitions').textContent = '';
       artifactOptions($('fl-artifact')); renderStorages();
@@ -1357,6 +1458,7 @@
         if (downloadTask.state !== 'completed') throw new Error(downloadTask.error || '镜像下载未完成');
         var artifact = (downloadTask.result || {}).artifact;
         if (!artifact || artifact.state !== 'ready') throw new Error('镜像尚未准备好');
+        artifact.preparation_task = (downloadTask.result || {}).preparation_task;
         addSource(artifact);
         downloadRequest = null;
         status('镜像已下载并校验 SHA-256；请选择写入范围并预览。');
@@ -1420,7 +1522,8 @@
                 status('正在上传镜像，尚未写入开发板 · ' + file.name + ' · ' + format(offset) + ' / ' + format(file.size));
               }
             }
-            var completed = (await client.request('/api/artifact-seal', Object.assign(scope(selected), { id: artifact.id }))).artifact;
+            var sealedResult = await client.request('/api/artifact-seal', Object.assign(scope(selected), { id: artifact.id, prepare_image: true }));
+            var completed = sealedResult.artifact; completed.preparation_task = sealedResult.preparation_task;
             if (completed.size !== file.size || !/^[a-f0-9]{64}$/.test(completed.sha256)) throw new Error('暂存文件校验失败');
             sealed = true;
             if (same(selected, seq)) artifacts.push(completed);
@@ -1452,8 +1555,9 @@
       var identity = function (value) { return value && (value.target_id || value.serial || value.key); };
       if (!existing && board && (!selected || identity(board) === identity(selected)
           && (!selected.target_generation || !board.target_generation || selected.target_generation === board.target_generation))
-          && (busy || task || plan || submissionUnknown)) { $('flash-dialog').show(); return; }
+          && (busy || task || plan || submissionUnknown || selectedPreparation())) { $('flash-dialog').show(); return; }
       sourceInspection = null; sourceCatalogue = null; sourceAnalysedId=''; $('fl-package-contents').textContent='';
+      if (capabilities) rememberImage();
       board = selected || {}; selected = board; var seq = ++sequence; clearTimeout(pollTimer);
       busy = false; previewTask = null; previewRequestId = ''; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; $('fl-execution').hidden = true; cursor = 0; eventLines = []; ++eventSequence;
       inspection = null; payloadCandidates = []; selectionRequestId = ''; selectionPlan = null; renderedBackup = '';
@@ -1491,6 +1595,29 @@
         if (same(selected, seq) && capabilities.supported === false && !task) await discover();
       } catch (error) { if (same(selected, seq)) status(error.message); }
     }
+    $('fl-image-recover').addEventListener('click', async function () {
+      var current = selectedPreparation(), reason = $('fl-image-recovery-reason').value.trim();
+      if (!current || !current.flash || !$('fl-image-stopped').checked || !reason) {
+        status('请先确认原准备进程已停止，并填写依据。', true); return;
+      }
+      try {
+        var result = await client.request('/api/image-prepare', {action:'recover', task_id:current.id,
+          attempt_id:current.flash.attempt_id, confirm_stopped:true, reason:reason});
+        imagePreparations[$('fl-artifact').value] = result.task;
+        $('fl-image-stopped').checked = false; $('fl-image-recovery-reason').value = '';
+        renderPreparation(); updateControls();
+      } catch (error) { status(error.message, true); }
+    });
+    $('fl-image-preparation-retry').addEventListener('click', function () {
+      var source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
+      prepareSource(source, null, true);
+    });
+    $('fl-image-preparation-cancel').addEventListener('click', async function () {
+      var current = selectedPreparation();
+      if (!current || !current.id) return;
+      try { await client.request('/api/task-cancel', {id:current.id}); }
+      catch (error) { status(error.message, true); }
+    });
     $('fl-read-nor').addEventListener('click', readNOR);
     $('fl-system-storage').addEventListener('change', renderSystemInventory);
     $('fl-boot-priority').addEventListener('change', updateBootControls);
@@ -1533,15 +1660,15 @@
     $('fl-delete').addEventListener('click', beginDelete);
     $('fl-delete-confirm').addEventListener('click', confirmDelete);
     $('fl-delete-cancel').addEventListener('click', dismissDelete);
-    $('fl-verify').addEventListener('change', function () { invalidatePlan(); if (workspaceSelection()) inspectSource(); });
-    $('fl-reset-after').addEventListener('change', function () { invalidatePlan(); });
+    $('fl-verify').addEventListener('change', function () { rememberImage(); invalidatePlan(); if (workspaceSelection()) inspectSource(); });
+    $('fl-reset-after').addEventListener('change', function () { rememberImage(); invalidatePlan(); });
     $('fl-target-storage').addEventListener('change', function () { invalidatePlan(); if (workspaceSelection()) inspectSource(); });
     $('fl-local').addEventListener('click', function () { if (!$('fl-local').disabled) $('fl-files').click(); });
     $('fl-files').addEventListener('change', upload); $('fl-plan').addEventListener('click', makePlan);
     function sourceIdentity() { return [task && task.id, $('fl-artifact').value, $('fl-target-storage').value, $('fl-verify').value].join('/'); }
     async function inspectSource() {
       var artifact = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
-      if (!workspaceSelection() || busy || uploading || !packageFile(artifact)) return;
+      if (!workspaceSelection() || busy || uploading || !packageFile(artifact) || !imageReady()) return;
       sourceAnalysedId = sourceIdentity();
       var selected = board, seq = sequence, current = task, artifactId = artifact.id;
       var targetStorage = sourceInspection && !sourceInspection.storages.some(function (item) { return item.physical_device; })

@@ -1,7 +1,10 @@
 """Durable host-only image preparation, reusing artifact authorization and tasks."""
+from contextlib import nullcontext
 import hashlib
 import json
+import secrets
 import threading
+import time
 
 from .flash_runner import public_plan
 from .results import response
@@ -21,8 +24,23 @@ def for_manager(manager):
 class ImagePreparations:
     def __init__(self, manager):
         self.manager = manager
+        self._lock = threading.RLock()
+
+    def latest(self, artifact_id, actor='web'):
+        with self.manager.store.lock:
+            row = self.manager.store.db.execute(
+                "SELECT t.id FROM tasks t JOIN task_targets s ON s.task_id=t.id "
+                "WHERE t.kind='image-prepare' AND t.actor=? AND s.connection_id=? "
+                "ORDER BY t.created DESC LIMIT 1", (actor, 'image-prepare:' + artifact_id)).fetchone()
+        return self.manager.tasks.store.get(row[0]) if row else None
 
     def start(self, artifact_id, actor='web', serial=None, client_id='', request_id=None):
+        # Serialize default request selection with enqueue; explicit request IDs
+        # continue using the task manager's exact original-request semantics.
+        with self._lock:
+            return self._start(artifact_id, actor, serial, client_id, request_id)
+
+    def _start(self, artifact_id, actor='web', serial=None, client_id='', request_id=None):
         from .flash_tasks import _services, FlashActions
         from .flash_discovery import executor_command
         _, executor = _services(self.manager)
@@ -37,27 +55,112 @@ class ImagePreparations:
             raise TaskError('image preparation executor is unavailable', 503)
         if row.get('task_id'):
             FlashActions(self.manager)._owned_task(row['task_id'], actor, scope_serial)
+        source = dict(id=row['id'], name=row['name'], size=row['size'], sha256=row['sha256'],
+                      path=str(self.manager.artifacts._path(artifact_id, '.bin')))
+        if request_id is None:
+            previous = self.latest(artifact_id, actor)
+            if previous and previous['state'] in ('queued', 'running'):
+                return previous
+            valid = getattr(executor, 'prepared_artifact_unchanged', lambda source: True)
+            if previous and previous['state'] == 'completed' and valid(source):
+                return previous
+            request_id = 'image-prepare-' + secrets.token_hex(12)
+        from .board_maintenance import maintenance_for
+        maintenance = maintenance_for(self.manager)
+        if maintenance:
+            maintenance.check_preparation()
+        FlashActions(self.manager).expire()
         identity = hashlib.sha256(json.dumps({'kind': 'image-prepare', 'artifact_id': artifact_id,
             'sha256': row['sha256'], 'serial': row['serial']}, sort_keys=True).encode()).hexdigest()
         def prepare(context):
             # This pin protects the source upload, not a USB endpoint or board.
-            with self.manager.artifacts.open(artifact_id, actor, scope_serial, row.get('task_id')):
-                source = dict(id=row['id'], name=row['name'], size=row['size'], sha256=row['sha256'],
-                              path=str(self.manager.artifacts._path(artifact_id, '.bin')))
-                def event(value):
-                    context.check()
-                    context.progress(value.get('done', 0), value.get('total', 0), value.get('phase', 'preparing-image'))
-                result = executor.prepare_image(argv, source, event, context.check)
-                return {'artifact': {k: row[k] for k in ('id', 'name', 'size', 'sha256', 'serial', 'state')},
-                        'preparation': public_plan(result)}
+            guard = getattr(executor, 'image_guard', lambda source, check: nullcontext())
+            with guard(source, context.check):
+                if maintenance:
+                    maintenance.begin_image(context.id, row['sha256'],
+                        str(executor.image_workspace(source)) if hasattr(executor, 'image_workspace') else '', artifact_id)
+                reader, claimed, uncertain = None, False, False
+                timing = None
+                if maintenance:
+                    from .flash_store import FlashStore
+                    from .flash_progress import PreviewProgress
+                    timing = PreviewProgress(FlashStore(self.manager.store), context.id, source, 'image-preparation:local',
+                        source['name'].lower().endswith(('.gz', '.tgz', '.zip')),
+                        phases=('checking-image-sha256', 'expanding-image', 'checking-payloads', 'reading-payload-metadata'))
+                success = False
+                try:
+                    current = self.manager.artifacts.get(artifact_id, actor, scope_serial)
+                    if current['state'] == 'ready':
+                        self.manager.artifacts.claim(artifact_id, context.id, actor, scope_serial)
+                        claimed = True
+                    reader = self.manager.artifacts.open(artifact_id, actor, scope_serial,
+                        context.id if claimed else current.get('task_id'))
+                    last_progress = ['', 0.0]
+                    def event(value):
+                        context.check()
+                        now = time.monotonic()
+                        phase = value.get('phase', 'preparing-image')
+                        if (phase == last_progress[0] and now - last_progress[1] < .2
+                                and value.get('done', 0) != value.get('total', -1)):
+                            return
+                        last_progress[:] = [phase, now]
+                        if timing:
+                            timing.event(value)
+                        context.progress(value.get('done', 0), value.get('total', 0), value.get('phase', 'preparing-image'))
+                    result = executor.prepare_image(argv, source, event, context.check)
+                    success = True
+                    return {'artifact': {k: row[k] for k in ('id', 'name', 'size', 'sha256', 'serial', 'state')},
+                            'preparation': public_plan(result)}
+                except BaseException as error:
+                    if maintenance and getattr(error, 'cleanup_confirmed', True) is False:
+                        uncertain = True
+                        maintenance.retain_image_failure(context.id, {'workspace': getattr(error, 'workspace', '')})
+                        if not hasattr(self.manager, '_flash_recovery_pins'):
+                            self.manager._flash_recovery_pins = {}
+                        self.manager._flash_recovery_pins[context.id] = reader
+                        reader = None
+                    raise
+                finally:
+                    if timing:
+                        timing.finish(success)
+                    if reader is not None:
+                        reader.close()
+                    if not uncertain:
+                        if claimed:
+                            self.manager.artifacts.finish_claim(artifact_id, context.id)
+                        if maintenance:
+                            from .flash_store import FlashStore
+                            FlashStore(self.manager.store).update_details(context.id, {'cleanup_confirmed': True})
+                            maintenance.release(context.id, confirmed=True)
         return self.manager.tasks.start('image-prepare', actor, client_id,
             [{'serial': row['serial'] or '', 'connection_id': 'image-prepare:' + artifact_id}], prepare,
-            request_id=request_id or 'image-prepare-' + artifact_id + '-v1', input_digest=identity)
+            request_id=request_id, input_digest=identity)
 
     def request(self, payload, actor='web'):
         try:
-            if not isinstance(payload, dict) or set(payload) - {'id', 'actor', 'client_id', 'serial', 'request_id'}:
+            if not isinstance(payload, dict) or set(payload) - {'id', 'actor', 'client_id', 'serial', 'request_id', 'action', 'task_id', 'attempt_id', 'reason', 'confirm_stopped'}:
                 raise TaskError('invalid image preparation request')
+            if payload.get('action') == 'recover':
+                from .board_maintenance import maintenance_for
+                task = self.manager.tasks.store.get(payload.get('task_id'))
+                if task['kind'] != 'image-prepare' or actor != 'web':
+                    raise TaskError('only the human owner may recover image preparation', 403)
+                if payload.get('confirm_stopped') is not True or not payload.get('reason', '').strip():
+                    raise TaskError('confirm the original process has stopped and give a reason', 409)
+                if task['id'] in self.manager.tasks._active:
+                    raise TaskError('image preparation worker is still active', 409)
+                from .flash_store import FlashStore
+                details = FlashStore(self.manager.store).details(task['id'])
+                if details.get('attempt_id') != payload.get('attempt_id'):
+                    raise TaskError('image preparation recovery attempt changed', 409)
+                pins = getattr(self.manager, '_flash_recovery_pins', {}).pop(task['id'], None)
+                if pins:
+                    pins.close()
+                task = maintenance_for(self.manager).confirm_recovery(task['id'], actor,
+                    payload.get('attempt_id'), payload.get('reason'), True, self.manager.artifacts)
+                return response(200, {'ok': True, 'task': task})
+            if payload.get('action') not in (None, 'prepare'):
+                raise TaskError('invalid image preparation action')
             task = self.start(payload.get('id'), actor, payload.get('serial'), payload.get('client_id', ''), payload.get('request_id'))
             if task is None:
                 raise TaskError('image preparation is not supported by this executor', 503)
@@ -67,7 +170,7 @@ class ImagePreparations:
 
     def after_upload(self, row, actor='web', client_id=''):
         """Seal/import succeeds independently; a preparation error remains a task."""
-        if not row['name'].lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip', '.itb', '.bin', '.ext4', '.vfat', '.img', '.dtb', '.gz')):
+        if not row['name'].lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip', '.itb', '.bin', '.ext2', '.ext3', '.ext4', '.vfat', '.f2fs', '.squashfs', '.ubifs', '.img', '.dtb', '.gz')):
             return None
         try:
             return self.start(row['id'], actor, None if actor == 'web' else row['serial'], client_id)

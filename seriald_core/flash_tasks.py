@@ -252,14 +252,15 @@ class FlashActions:
             result.setdefault('board_serial', device.serial)
             result['reset_after_supported'] = bool(getattr(_services(self.manager)[1], 'supports_reset_after', False))
             result['skip_verification_supported'] = bool(getattr(_services(self.manager)[1], 'supports_skip_verification', False))
+            result['image_preparation_supported'] = bool(getattr(_services(self.manager)[1], 'supports_image_preparation', False))
             result['artifacts'] = []
             artifacts = self.manager.artifacts
             with self.manager.store.lock:
                 rows = self.manager.store.db.execute(
-                    ("SELECT id FROM transfer_artifacts WHERE serial IN (?, '') AND direction='upload' AND state='ready' " if actor == 'web' else
+                    ("SELECT id FROM transfer_artifacts WHERE direction='upload' AND state IN ('ready','claimed') " if actor == 'web' else
                      "SELECT id FROM transfer_artifacts WHERE serial=? AND direction='upload' AND state='ready' ")
                     + ('' if actor == 'web' else 'AND actor=? ') + 'ORDER BY updated DESC LIMIT 100',
-                    (device.serial,) if actor == 'web' else (device.serial, actor)).fetchall()
+                    () if actor == 'web' else (device.serial, actor)).fetchall()
             for row in rows:
                 metadata = artifacts.get(row['id'], actor, None if actor == 'web' else device.serial)
                 result['artifacts'].append({key: metadata[key] for key in ('id', 'name', 'size', 'sha256')})
@@ -412,6 +413,7 @@ class FlashActions:
             if len(actual) != len(expected) or set(actual) != expected:
                 raise TaskError('flash plan differs from selected partition scope', 502)
         source_workspaces = set((prepared or {}).get('source_workspaces') or [])
+        source_workspaces.update(result.get('source_workspaces') or [])
         if (prepared or {}).get('workspace') and prepared['workspace'] != result.get('workspace'):
             source_workspaces.add(prepared['workspace'])
         metadata = result.get('payload_metadata') or []
@@ -744,7 +746,7 @@ class FlashActions:
         except (TaskError, TransactionError, ValueError, OSError) as error:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
 
-    def expire(self):
+    def expire(self, image_sha256=None):
         """Follow the collector's existing maintenance tick; keep active/recovery data."""
         executor = getattr(self.manager, 'flash_executor', None)
         if executor is None or not hasattr(executor, 'cleanup_plan'):
@@ -785,6 +787,23 @@ class FlashActions:
                 executor.cleanup_plan(document)
                 # Retain immutable receipt metadata and digests, remove only expired payloads.
                 removed += 1
+            if hasattr(executor, 'cleanup_image'):
+                # Same task/plan registry protects image data used by writers,
+                # including unknown helpers retained for human recovery.
+                pool = self.manager.store.db.execute("SELECT 1 FROM flash_resource_holds WHERE resource='flash-cache-pool:local' OR (resource LIKE 'flash-image:%' AND state='recovery')").fetchone()
+                if not pool:
+                    active_images = self.manager.store.db.execute(
+                        "SELECT a.sha256 FROM tasks t JOIN task_targets s ON s.task_id=t.id "
+                        "JOIN transfer_artifacts a ON s.connection_id='image-prepare:' || a.id "
+                        "WHERE t.kind='image-prepare' AND t.state IN ('queued','running')").fetchall()
+                    workspaces.update(str(executor.root / 'images' / value[0]) for value in active_images)
+                    cutoff = time.time() - self.manager.artifacts.policy.ready_seconds
+                    for image in (executor.root / 'images').glob('*'):
+                        if str(image) in workspaces or not re.fullmatch(r'[0-9a-f]{64}', image.name):
+                            continue
+                        if image_sha256 != image.name and image.stat().st_mtime >= cutoff:
+                            continue
+                        removed += bool(executor.cleanup_image(image))
         return removed
 
     def boot_priority(self, payload, actor='web'):

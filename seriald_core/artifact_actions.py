@@ -57,12 +57,20 @@ class ArtifactActions:
                 elif action == 'seal':
                     artifact = self.artifacts.seal(artifact_id, actor, serial)
                 elif action == 'delete':
+                    sha256 = artifact.get('sha256')
                     self.artifacts.remove(artifact_id, actor, serial)
+                    if sha256:
+                        with self.manager.store.lock:
+                            referenced = self.manager.store.db.execute(
+                                "SELECT 1 FROM transfer_artifacts WHERE sha256=? AND state IN ('ready','claimed') LIMIT 1", (sha256,)).fetchone()
+                        if not referenced:
+                            from .flash_tasks import FlashActions
+                            FlashActions(self.manager).expire(image_sha256=sha256)
                     artifact = self.artifacts.get(artifact_id, actor, serial)
                 else:
                     raise TaskError('unknown artifact action', 404)
             result = {'ok': True, 'artifact': artifact}
-            if action == 'seal':
+            if action == 'seal' and payload.get('prepare_image') is True:
                 from .image_preparation import for_manager
                 task = for_manager(self.manager).after_upload(artifact, actor, payload.get('client_id', ''))
                 if task:
