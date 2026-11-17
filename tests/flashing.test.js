@@ -865,6 +865,42 @@ test('BootROM preparation cannot acquire a hidden storage-write scope', async ()
   assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
 });
 
+test('detect again leaves completed history behind and probes the current USB identity', async () => {
+  const h=harness(),target={target_id:'re-entered',target_generation:'new-bootrom',serial:''};
+  const old={id:'last-write',kind:'flash',state:'completed',board_targets:['OLD-SN'],
+    flash_targets:[{target_id:target.target_id,generation:'old-loader'}],progress:{},flash:{}};
+  h.api.open({...target},old);await drain();
+  h.take('/api/flash-capabilities').resolve({error:'USB flash target board identity changed'},403);await drain();
+  assert.match(h.get('fl-status').textContent,/identity changed/);
+  h.get('fl-discover').click();h.take('/api/flash-discover').resolve({targets:[target]});await drain();
+  h.take('/api/tasks').resolve({tasks:[old]});await drain();
+  const probe=h.take('/api/flash-target');
+  assert.equal(probe.payload.target_generation,'new-bootrom');assert.equal('serial' in probe.payload,false);
+  probe.resolve({target:{...target,serial:'CURRENT-SN'},capabilities});await drain();
+  assert.equal(h.get('fl-files').disabled,false);assert.equal(h.get('fl-task-status').textContent,'');
+  h.get('fl-artifact').value=artifact.id;h.get('fl-artifact').emit('change');h.get('fl-plan').click();
+  const preview=h.take('/api/flash-plan');assert.equal(preview.payload.serial,'CURRENT-SN');
+  assert.equal(preview.payload.target_generation,'new-bootrom');
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('explicit target selection ignores a saved completed preview and other terminal tasks', async () => {
+  const storage=new Map([['decklab-flash-task:usb-next','saved-preview']]),h=harness(storage);
+  const target={target_id:'usb-next',target_generation:'new-connection',serial:'NEW-SN'};
+  const preview={id:'previous-preview',request_id:'saved-preview',kind:'flash-preview',state:'completed',
+    updated:Date.now()/1000,result:{plan:{id:'old-plan',writes:[{storage:'disk-a',partition:'rootfs',size:32}]}}};
+  h.api.discover();h.take('/api/flash-discover').resolve({targets:[target,{target_id:'other-usb'}]});await drain();
+  h.get('fl-device').value=target.target_id;h.get('fl-device').emit('change');
+  h.take('/api/task?request_id=').resolve({task:preview});await drain();
+  h.take('/api/tasks').resolve({tasks:[preview,{id:'cancelled-write',kind:'flash',state:'cancelled'},
+    {id:'failed-inspect',kind:'flash-inspect',state:'failed'}]});await drain();
+  const probe=h.take('/api/flash-target');assert.equal(probe.payload.target_generation,'new-connection');
+  probe.resolve({target,capabilities});await drain();
+  assert.equal(h.get('fl-start').disabled,true);assert.equal(h.get('fl-files').disabled,false);
+  assert.equal(storage.has('decklab-flash-task:usb-next'),false);
+  assert.equal(h.requests.some(r=>r.url==='/api/flash-plan'||r.url==='/api/task-start'),false);
+});
+
 test('refresh finds a prepared task before USB probing and preserves its original generation for selection', async () => {
   const h = harness(), target = {target_id: 're-enumerated', target_generation: 'loader-new', label: 'New loader'};
   const original = {id: 'original-preparation', kind: 'flash', state: 'running', board_targets: [],

@@ -35,7 +35,7 @@ let previewTask = null, previewSubmissions = 0;
 let current = null, upload = Buffer.alloc(0), artifact = null, preview = null, rejectPreview = true, urlDownloads = 0;
 const packageArtifact = {id:'9'.repeat(24),name:'firmware-fixture.tar.gz',size:2<<20,sha256:'a'.repeat(64),state:'ready'};
 const urlArtifact = {id:'8'.repeat(24),name:'url-fixture.itb',size:512,sha256:'b'.repeat(64),state:'ready'};
-const submissions = [], selections = [], errors = [];
+const submissions = [], selections = [], errors = [], targetReads = [];
 const server = http.createServer((req,res) => {
   const url = new URL(req.url,'http://localhost');
   const json = value => {res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));};
@@ -44,9 +44,9 @@ const server = http.createServer((req,res) => {
     let body='';req.on('data',data=>body+=data);req.on('end',()=>{
       try {
         const payload=JSON.parse(body || '{}');
-        if(url.pathname==='/api/flash-target') return json({target,capabilities:{supported:true,preparable:true,
+        if(url.pathname==='/api/flash-target') {targetReads.push(payload);return json({target,capabilities:{supported:true,preparable:true,
           nor_workspace_supported:true,storage_inventory_supported:true,binding_revision:1,modes:['full','partitions'],artifacts:[],storages:[],
-          executor:{provider:'goflash',node:'local',endpoint:'fixture-only'},console:null}});
+          executor:{provider:'goflash',node:'local',endpoint:'fixture-only'},console:null}});}
         if(url.pathname==='/api/flash-plan') {
           previewSubmissions++;
           assert.equal(payload.mode,'full');assert.deepEqual(payload.selections,[]);
@@ -111,6 +111,10 @@ const server = http.createServer((req,res) => {
       'formatBytes:n=>n>=1048576?(n/1048576).toFixed(1)+" MiB":n>=1024?(n/1024).toFixed(1)+" KiB":n+" B"});ui.open('+JSON.stringify(target)+');</script></body></html>');
   }
   if(url.pathname==='/api/tasks') return json({tasks:current?[current]:[]});
+  if(url.pathname==='/api/flash-discover') return json({targets:[target]});
+  if(url.pathname==='/api/flash-capabilities' && url.searchParams.has('serial') && url.searchParams.get('serial')!==target.serial) {
+    res.statusCode=403;return json({error:'USB flash target board identity changed'});
+  }
   if(url.pathname==='/api/flash-capabilities') return json({capabilities:{supported:true,preparable:true,nor_workspace_supported:true,storage_inventory_supported:true,binding_revision:1,modes:['full','partitions'],artifacts:[packageArtifact],storages:[]}});
   if(url.pathname==='/api/task' && previewTask && url.searchParams.get('request_id')===previewTask.request_id) return json({task:previewTask});
   if(url.pathname==='/api/task' && url.searchParams.get('id')==='browser-preview') return json({task:previewTask});
@@ -254,8 +258,26 @@ let chrome,ws;
   await evaluate('SerialdI18n.setLocale("en");document.querySelector("#flash-dialog").scrollTop=0');await delay(100);await shot('nor-results-english-fixture');
   assert.equal(await evaluate('document.querySelector("#fl-title").textContent'),'Flashing workspace');
   assert.ok(await evaluate('[...document.querySelectorAll(".fl-partition")].every(r=>r.artifactSelect.hidden===!r.checkbox.checked)'),'language changes preserve selection visibility');
+  // Restore an ended task, then explicitly detect a new connection at the same
+  // USB port. Saved request IDs and history must not restore the old identity.
+  current.board_targets=['OLD-SN'];current.flash.request_serial='OLD-SN';
+  target.target_generation='new-bootrom-after-flash';target.serial='';
+  await evaluate('SerialdI18n.setLocale("zh-CN");ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
+  await wait('document.querySelector("#fl-status").textContent.includes("identity changed")');
+  const readsBeforeRedetect=targetReads.length,submissionsBeforeRedetect=submissions.length;
+  await evaluate('document.querySelector("#fl-discover").click()');
+  await wait('!document.querySelector("#fl-files").disabled');
+  assert.equal(targetReads.length,readsBeforeRedetect+1);
+  assert.equal(targetReads.at(-1).target_generation,'new-bootrom-after-flash');
+  assert.equal(Object.hasOwn(targetReads.at(-1),'serial'),false);
+  assert.equal(await evaluate('document.querySelector("#fl-task-status").textContent'),'');
+  assert.equal(await evaluate('document.querySelector("#fl-system").hidden'),true,'old storage inventory must not appear on the new connection');
+  assert.equal(await evaluate('document.querySelector("#fl-status").textContent.includes("identity changed")'),false);
+  assert.equal(await evaluate('document.querySelector("#fl-start").disabled'),true);
+  assert.equal(submissions.length,submissionsBeforeRedetect,'redetection cannot submit any read or write task');
+  await evaluate('document.querySelector("#flash-dialog").scrollTop=0');await shot('redetect-after-completed-task-fixture');
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,async_preview_progress:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,
-    screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
+    redetect_after_completed_task:true,screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
   console.log('NOR browser workflow passed: full package preview, automatic URL/file imports, persistent errors, image-free read, six partition rows, same-task confirmation, byte progress, backups, desktop/mobile and light/dark (simulated data).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});

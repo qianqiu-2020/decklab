@@ -837,22 +837,26 @@
       }
       select.value = board && board.target_id || '';
     }
-    async function loadHistory(selected, seq, existing) {
+    async function loadHistory(selected, seq, existing, fresh) {
       if (existing) {
         if (existing.kind === 'flash-preview') await resumePreview(existing, selected, seq);
         else observe(existing, selected, seq);
         return true;
+      }
+      function retained(current) {
+        return ['queued','running'].includes(current.state)
+          || current.flash && current.flash.recovery_required === true;
       }
       var reference = operationReference(selected);
       if (reference) {
         try {
           var original = await client.request('/api/task?request_id=' + encodeURIComponent(reference) + query(selected));
           if (!same(selected, seq)) return true;
-          if (original.task.kind === 'flash-preview' && (['queued','running'].includes(original.task.state)
+          if ((!fresh || retained(original.task)) && original.task.kind === 'flash-preview' && (['queued','running'].includes(original.task.state)
               || Date.now()/1000-original.task.updated < 600)) {
             await resumePreview(original.task, selected, seq); return true;
           }
-          if (['flash','flash-inspect'].includes(original.task.kind)) {
+          if ((!fresh || retained(original.task)) && ['flash','flash-inspect'].includes(original.task.kind)) {
             observe(original.task, selected, seq); return true;
           }
         } catch (error) {
@@ -864,10 +868,9 @@
       var records = await client.request(taskQuery(selected, 100));
       if (!same(selected, seq)) return true;
       var current = (records.tasks || []).find(function (entry) {
-        return ['flash','flash-inspect','flash-preview'].includes(entry.kind) && (['queued', 'running'].indexOf(entry.state) >= 0
-          || entry.flash && entry.flash.recovery_required === true);
+        return ['flash','flash-inspect','flash-preview'].includes(entry.kind) && retained(entry);
       });
-      if (!current) current = (records.tasks || []).find(function (entry) { return ['flash','flash-inspect','flash-preview'].includes(entry.kind); });
+      if (!current && !fresh) current = (records.tasks || []).find(function (entry) { return ['flash','flash-inspect','flash-preview'].includes(entry.kind); });
       if (current) {
         if (current.kind === 'flash-preview') await resumePreview(current, selected, seq);
         else observe(current, selected, seq);
@@ -875,7 +878,7 @@
       }
       return false;
     }
-    async function selectTarget(target) {
+    async function selectTarget(target, fresh) {
       if (!target || busy || uploading || task && ['queued', 'running'].indexOf(task.state) >= 0) return;
       var selected = { target_id: target.target_id || target.id,
         target_generation: target.target_generation || target.generation, label: target.label, serial: target.serial || '',
@@ -883,17 +886,21 @@
       board = selected; var seq = ++sequence; clearTimeout(pollTimer); ++eventSequence;
       sourceInspection = null; sourceCatalogue = null; sourceAnalysedId=''; $('fl-package-contents').textContent='';
       busy = true; capabilities = null; task = null; inspection = null; artifacts = []; payloadCandidates = [];
-      renderedBackup = ''; $('flash-dialog').dataset.taskState = ''; renderBackups(); setProgress('', 0, 0, false);
+      bootPriorityRequest = null;
+      renderedBackup = ''; $('flash-dialog').dataset.taskState = ''; renderBackups(); renderSystemInventory(); setProgress('', 0, 0, false);
       $('fl-reset-after').checked = false;
       invalidatePlan(); $('fl-connections').textContent = ''; $('fl-partitions').textContent = '';
       $('fl-task-id').textContent = ''; $('fl-events').textContent = ''; $('fl-results').textContent = '';
+      $('fl-task-status').textContent = '';
       $('fl-event-status').textContent = ''; cursor = 0; eventLines = [];
       $('fl-board').textContent = targetName(target); $('fl-device').value = selected.target_id;
       updateControls(); status('正在读取下载设备身份和刷机能力…');
       try {
         // Recover a running task before any USB probe tries to acquire its
         // endpoint. A refreshed BootROM task keeps its initial generation.
-        if (await loadHistory(selected, seq)) return;
+        // An explicit detection starts a new round after terminal tasks. Active
+        // and recovery tasks still own the endpoint and must be restored first.
+        if (await loadHistory(selected, seq, null, fresh)) return;
         if (selected.present === false) {
           status('设备未连接，原任务待处理'); return;
         }
@@ -907,7 +914,7 @@
         $('fl-board').textContent = targetName(resolved);
       } catch (error) {
         if (same(selected, seq) && error.status === 423) {
-          try { if (await loadHistory(selected, seq)) return; } catch (_) { /* Keep the original endpoint error. */ }
+          try { if (await loadHistory(selected, seq, null, fresh)) return; } catch (_) { /* Keep the original endpoint error. */ }
         }
         if (same(selected, seq)) status(error.message);
       }
@@ -940,7 +947,7 @@
         busy = false; updateControls();
         // Only a single detected USB target can be probed automatically.
         // Probing reads identity/capabilities; no reset, loader or storage write.
-        if (discovered.length === 1) await selectTarget(discovered[0]);
+        if (discovered.length === 1) await selectTarget(discovered[0], true);
       } catch (error) { if (same(selected, seq)) status(error.message); }
       finally { if (same(selected, seq)) { busy = false; updateControls(); } }
     }
@@ -1489,7 +1496,7 @@
     });
     $('fl-device').addEventListener('change', function () {
       var target = discovered.find(function (entry) { return (entry.target_id || entry.id) === $('fl-device').value; });
-      if (target) selectTarget(target);
+      if (target) selectTarget(target, true);
       else if (!busy && !(task && ['queued', 'running'].indexOf(task.state) >= 0)) {
         board = {}; ++sequence; ++eventSequence; clearTimeout(pollTimer);
         task = null; capabilities = null; inspection = null; artifacts = []; payloadCandidates = [];
