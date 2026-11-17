@@ -79,10 +79,9 @@ class _Index(HTMLParser):
 
 def _format(name):
     lower = name.lower()
-    if lower in ('flash-all.zip', 'flash_all.zip'):
+    if lower in ('flash-all.zip', 'flash_all.zip') or re.search(r'\.(?:img|raw)(?:\.|$)', lower):
         return ''
     if lower.endswith(('.tar.gz', '.tgz', '.tar', '.zip')): return 'package'
-    if lower.endswith(('.img.gz', '.img', '.raw.gz', '.raw')): return 'disk-image'
     if lower.endswith(('.itb', '.ext4', '.bin')): return 'partition-file'
     return ''
 

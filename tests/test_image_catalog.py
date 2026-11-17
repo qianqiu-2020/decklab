@@ -58,6 +58,15 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(result[0]['validation'], 'preview-required')
         self.assertEqual(result[0]['size_label'], '1024')
 
+    def test_catalog_excludes_raw_disks_and_checksums_but_keeps_supported_payloads(self):
+        names = ('sd.img', 'sd.img.gz', 'sd.img.zip', 'sd.img.zst', 'disk.raw.gz',
+                 'image.iso', 'image.tar.gz.md5', 'SHA256SUMS', 'flash-all.zip',
+                 'Bianbu-LXQt-K3.tar.gz', 'Buildroot-K3.zip', 'rootfs.ext4', 'opensbi.itb')
+        raw = ''.join('<a href="' + name + '">' + name + '</a>' for name in names)
+        result = catalog.parse_index('public', 'k3/', raw)
+        self.assertEqual({row['name'] for row in result},
+                         {'Bianbu-LXQt-K3.tar.gz', 'Buildroot-K3.zip', 'rootfs.ext4', 'opensbi.itb'})
+
     def test_nexus_download_uses_repository_url_and_row_metadata(self):
         raw = '''<table><tr><td><a href="daily/">daily</a></td></tr>
 <tr><td><a href="https://images.example.test/repository/image/k3/opensbi.itb">opensbi.itb</a></td>

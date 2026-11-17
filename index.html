@@ -306,7 +306,14 @@ PasswordAuthentication yes</code></pre>
 <dialog id="image-store-dialog" class="image-store-dialog" aria-labelledby="is-title">
   <div class="agent-share-head"><strong id="is-title">镜像商店</strong><button id="is-close" type="button">关闭</button></div>
   <div class="is-toolbar"><select id="is-source" aria-label="镜像来源"><option value="public">公开镜像</option><option value="internal" disabled>组织镜像</option><option value="local">已下载</option></select>
-    <input id="is-search" type="text" placeholder="搜索当前目录" aria-label="搜索镜像"><button id="is-refresh" type="button">刷新</button></div>
+    <input id="is-search" type="text" placeholder="搜索当前版本" aria-label="搜索镜像"><button id="is-refresh" type="button">刷新</button></div>
+  <section id="is-catalog" aria-label="镜像分类">
+    <div class="is-platform"><label>芯片 <select id="is-platform" aria-label="芯片"><option value="k3">K3</option><option value="k1">K1</option></select></label></div>
+    <div id="is-os" class="is-tabs" aria-label="操作系统"></div>
+    <div class="is-release-toolbar"><div id="is-channel" class="is-tabs" aria-label="发布类型"></div>
+      <label id="is-version-label"><span id="is-version-caption">版本</span> <select id="is-version" aria-label="版本或 Daily 日期"></select></label></div>
+    <div id="is-variants" class="is-tabs is-variants" aria-label="镜像变体"></div>
+  </section>
   <nav id="is-path" class="is-path" aria-label="镜像目录"></nav>
   <div id="is-list" class="is-list"></div>
   <p id="is-status" class="log-note" role="status"></p><div id="is-downloads" class="log-note" role="status"></div>

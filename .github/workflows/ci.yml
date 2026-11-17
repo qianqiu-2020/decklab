@@ -93,6 +93,9 @@ jobs:
       - name: Real browser with hardware-free fixtures
         if: matrix.python == '3.12'
         run: node tools/browser_smoke.js
+      - name: Image-store categories in desktop and mobile browsers without hardware
+        if: matrix.python == '3.12'
+        run: node tests/image-store-browser.test.js
       - name: Native mouse dragging previews device positions without hardware
         if: matrix.python == '3.12'
         run: node tools/browser_device_order.js

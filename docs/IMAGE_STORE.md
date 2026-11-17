@@ -5,7 +5,7 @@
 - 公开源：https://archive.spacemit.com/image/
 - 组织源：默认关闭。管理员在控制机配置 `SERIALD_IMAGE_INTERNAL_BROWSE`（目录页面）和 `SERIALD_IMAGE_INTERNAL_DOWNLOAD`（文件下载根目录），均为无凭据、以 `/` 结尾的 HTTPS 地址。例如 `https://images.example.org/service/rest/repository/browse/image/` 与 `https://images.example.org/repository/image/`。也可通过原 Web 配置入口保存，应用后重启采集器。实际组织地址只保存在部署配置中，不随项目发布。
 
-按 K1/K3 进入目录，搜索框筛选当前目录的名称。目录元数据缓存 60 秒，“刷新”强制重新读取。列表展示镜像包（tar.gz、tgz、tar、zip）、磁盘镜像（img、raw 及 gzip）和分区载荷（itb、ext4、bin），排除刷机脚本压缩包。扩展名筛选不代表已验证板型兼容性，当前完整包的内置 RAM 材料支持 K3。
+选择 K1/K3 后按 OS 标签页浏览，在“版本”和“Daily”间切换；版本号按数字倒序，Daily 按日期倒序，默认只列最新批次。版本／日期下拉框可切换历史批次，再按 LXQt、GNOME、Minimal、Firmware 等变体筛选；UEFI 等差异仍保留在完整文件名中。搜索框只筛选当前版本。多层版本目录保留“内容目录”选择；不规则目录仍可按原路径浏览。仅读取选中的分支，不遍历全部历史。目录元数据缓存 60 秒，“刷新”强制重新读取。列表保留镜像包（tar.gz、tgz、tar、zip）和分区载荷（itb、ext4、bin），过滤 img／raw 及其压缩文件、ISO、校验文件和刷机脚本压缩包。既有缓存中的不支持格式仍可删除，但不能选择用于刷写。扩展名筛选不代表已验证板型兼容性，当前完整包的内置 RAM 材料支持 K3。
 
 点击“下载到控制机”后复用现有异步下载任务、磁盘配额及 SHA-256 校验。可取消下载；关闭窗口或刷新页面不会重新提交任务。“已下载”重新读取原下载任务和共享缓存，可选择或确认删除镜像。正在被任务使用的文件不能删除。网络中断导致提交结果未知时，先到“已下载”核对原任务，不自动重试。
 
