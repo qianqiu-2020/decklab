@@ -1084,6 +1084,7 @@
       if (task && task.id !== current.id) { sourceInspection=null; sourceCatalogue=null; sourceAnalysedId=''; $('fl-package-contents').textContent=''; }
       task = current; $('flash-dialog').dataset.taskState = current.state;
       var p = current.progress || {}, result = current.result || {}, details = current.flash || {};
+      if (!awaitingSelection(current)) previewProgress = null;
       renderBackups(); renderSystemInventory();
       if (workspaceSelection() && details.storage_inventory) renderStorages();
       if (details.write_inspection && details.write_inspection.storages && details.write_inspection.storages.some(function (item) { return item.physical_device; })) {

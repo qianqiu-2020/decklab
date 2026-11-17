@@ -115,6 +115,9 @@ test('closing and reopening a busy preview keeps its original watcher and all st
     result:{plan:{id:'retained-plan',writes:[{storage:'disk-a',partition:'rootfs',size:32}]}}}});await drain();
   assert.equal(h.get('fl-start').disabled,false);
   assert.equal(h.requests.some(r=>r.url==='/api/flash-plan'||r.url==='/api/task-start'),false);
+  h.get('fl-start').click();h.take('/api/task-start').resolve({task:{id:'next-write',kind:'flash',state:'running',progress:{phase:'writing',done:8,total:32}}});await drain();
+  assert.equal(h.get('fl-preview-overall').hidden,true);
+  assert.equal(h.get('fl-execution-title').textContent,'刷写与校验');
 });
 
 test('page refresh recovers preview by saved request ID and restores its original image and intent', async () => {
