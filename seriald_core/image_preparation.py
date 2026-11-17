@@ -50,6 +50,12 @@ class ImagePreparations:
         row = self.manager.artifacts.get(artifact_id, actor, scope_serial)
         if row['direction'] != 'upload' or row['state'] not in ('ready', 'claimed'):
             raise TaskError('image must be sealed before preparation', 409)
+        identity = hashlib.sha256(json.dumps({'kind': 'image-prepare', 'artifact_id': artifact_id,
+            'sha256': row['sha256'], 'serial': row['serial']}, sort_keys=True).encode()).hexdigest()
+        if request_id is not None:
+            previous = self.manager.tasks.store.find_request(actor, request_id, identity)
+            if previous is not None:
+                return self.manager.tasks.store.get(previous)
         argv = executor_command()
         if not argv:
             raise TaskError('image preparation executor is unavailable', 503)
@@ -59,7 +65,8 @@ class ImagePreparations:
                       path=str(self.manager.artifacts._path(artifact_id, '.bin')))
         if request_id is None:
             previous = self.latest(artifact_id, actor)
-            if previous and previous['state'] in ('queued', 'running'):
+            if previous and (previous['state'] in ('queued', 'running')
+                    or previous.get('flash', {}).get('recovery_required')):
                 return previous
             valid = getattr(executor, 'prepared_artifact_unchanged', lambda source: True)
             if previous and previous['state'] == 'completed' and valid(source):
@@ -70,8 +77,6 @@ class ImagePreparations:
         if maintenance:
             maintenance.check_preparation()
         FlashActions(self.manager).expire()
-        identity = hashlib.sha256(json.dumps({'kind': 'image-prepare', 'artifact_id': artifact_id,
-            'sha256': row['sha256'], 'serial': row['serial']}, sort_keys=True).encode()).hexdigest()
         def prepare(context):
             # This pin protects the source upload, not a USB endpoint or board.
             guard = getattr(executor, 'image_guard', lambda source, check: nullcontext())

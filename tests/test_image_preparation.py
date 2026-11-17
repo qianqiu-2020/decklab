@@ -144,15 +144,17 @@ class ImagePreparationTests(unittest.TestCase):
             artifact = helper.image(fixture)
             service = for_manager(fixture.manager)
             with mock.patch('seriald_core.flash_discovery.executor_command', return_value=('fixed-executor',)):
-                first = service.start(artifact['id'])
+                first = service.start(artifact['id'], request_id='unknown-preparation-001')
                 final = helper.terminal(fixture, first['id'])
                 self.assertEqual(final['state'], 'failed')
                 self.assertTrue(final['flash']['recovery_required'])
                 holds = maintenance_for(fixture.manager).holds()
                 self.assertEqual([row['resource'] for row in holds], ['flash-image:' + artifact['sha256']])
                 self.assertEqual(holds[0]['task_id'], first['id'])
+                self.assertEqual(service.start(artifact['id'])['id'], first['id'])
+                self.assertEqual(service.start(artifact['id'], request_id='unknown-preparation-001')['id'], first['id'])
                 with self.assertRaisesRegex(ValueError, 'recovery'):
-                    service.start(artifact['id'])
+                    service.start(artifact['id'], request_id='unknown-preparation-new')
                 result = service.request({'action':'recover', 'task_id':first['id'],
                     'attempt_id':final['flash']['attempt_id'], 'confirm_stopped':True, 'reason':'confirmed original test process stopped'})
                 self.assertEqual(result.status, 200, result.payload)

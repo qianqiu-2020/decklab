@@ -73,6 +73,24 @@ test('image preparation is independent, reports byte progress and gates preview 
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
 });
 
+test('refresh exposes recovery of the original preparation without a new task or board action', async () => {
+  const h=harness();h.api.open(board);
+  h.take('/api/flash-capabilities').resolve({...capabilities,image_preparation_supported:true});await drain();
+  h.take('/api/tasks').resolve({tasks:[]});await drain();
+  h.get('fl-artifact').value=artifact.id;h.get('fl-artifact').emit('change');
+  const original={id:'unknown-image-original',kind:'image-prepare',state:'interrupted',error:'original process requires recovery',
+    flash:{recovery_required:true,attempt_id:'original-image-attempt'}};
+  h.take('/api/image-prepare').resolve({task:original});await drain();
+  assert.equal(h.get('fl-image-recovery').hidden,false);assert.equal(h.get('fl-image-preparation-retry').hidden,true);
+  h.get('fl-image-stopped').checked=true;h.get('fl-image-recovery-reason').value='confirmed process stopped';
+  h.get('fl-image-recover').click();const recover=h.take('/api/image-prepare');
+  assert.equal(recover.payload.action,'recover');assert.equal(recover.payload.task_id,original.id);
+  assert.equal(recover.payload.attempt_id,original.flash.attempt_id);assert.equal(recover.payload.serial,undefined);
+  recover.resolve({task:{...original,flash:{...original.flash,recovery_required:false}}});await drain();
+  assert.equal(h.get('fl-image-recovery').hidden,true);assert.equal(h.get('fl-image-preparation-retry').hidden,false);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'||r.url==='/api/flash-plan'),false);
+});
+
 test('refresh restores the selected image and options but refreshes board capabilities', async () => {
   const storage=new Map(), first=harness(storage);await open(first);
   first.get('fl-verify').value='none';first.get('fl-verify').emit('change');
