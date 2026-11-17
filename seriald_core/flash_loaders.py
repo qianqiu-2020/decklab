@@ -33,7 +33,9 @@ def prepare_materials(binding, workspace, check):
     root = path.parent.resolve()
     output = dict(chip_family=family, protocol=material['protocol'])
     destination = Path(workspace) / 'ram-loaders'
-    destination.mkdir(mode=0o700)
+    if Path(workspace).parent.name == 'images':
+        destination = destination / hashlib.sha256(raw).hexdigest() / family
+    destination.mkdir(mode=0o700, parents=True, exist_ok=True)
     for key in ('fsbl', 'uboot'):
         entry = material.get(key)
         if (not isinstance(entry, dict) or set(entry) != {'file', 'sha256'}
@@ -44,6 +46,19 @@ def prepare_materials(binding, workspace, check):
             raise TaskError('RAM loader is outside the installed materials directory', 503)
         target = destination / ('factory/FSBL.bin' if key == 'fsbl' else 'u-boot.itb')
         target.parent.mkdir(mode=0o700, exist_ok=True)
+        if target.exists():
+            if target.is_symlink() or not target.is_file():
+                raise TaskError('RAM loader cache changed', 409)
+            size = target.stat().st_size
+            digest = hashlib.sha256()
+            with target.open('rb') as cached:
+                for chunk in iter(lambda: cached.read(1024 ** 2), b''):
+                    check()
+                    digest.update(chunk)
+            if not 0 < size <= 16 * 1024 ** 2 or digest.hexdigest() != entry['sha256']:
+                raise TaskError('RAM loader cache changed', 409)
+            output[key] = dict(path=str(target), sha256=digest.hexdigest(), size=size, name=target.name, id=key)
+            continue
         digest = hashlib.sha256()
         size = 0
         with source.open('rb') as incoming, target.open('xb') as outgoing:

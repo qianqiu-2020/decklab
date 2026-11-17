@@ -189,9 +189,16 @@ class ImageDownloads:
                 'name': name, 'sha256': checksum, 'serial': serial}, sort_keys=True).encode()).hexdigest()
             from .flash_store import validate_request
             validate_request(payload.get('request_id'), digest)
+            def download(context):
+                result = fetch_image(self.manager.artifacts, context, payload['url'], serial, name, checksum, actor)
+                from .image_preparation import for_manager
+                prepared = for_manager(self.manager).after_upload(result['artifact'], actor, payload.get('client_id', ''))
+                if prepared:
+                    result['preparation_task'] = prepared
+                return result
             task = self.manager.tasks.start('image-download', actor, payload.get('client_id', ''),
                 [{'serial': serial, 'connection_id': 'image-downloads'}],
-                lambda context: fetch_image(self.manager.artifacts, context, payload['url'], serial, name, checksum, actor),
+                download,
                 request_id=payload.get('request_id'), input_digest=digest)
             return response(202, {'ok': True, 'task': task})
         except (TaskError, ValueError, OSError) as error:

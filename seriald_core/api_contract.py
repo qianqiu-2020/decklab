@@ -65,12 +65,13 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
                 '/api/task-start': submitted,
                 '/api/desktop/input': ['desktop-input'],
                 '/api/image-download': ['image-download'],
+                '/api/image-prepare': ['image-prepare'],
             },
             'kind_aliases': {'nor-backup': 'flash'},
             'request_dedup': {
                 'supported': True, 'parameter': 'request_id',
                 'scope': ['actor', 'request_id'], 'persistent': True,
-                'kinds': submitted + ['desktop-input', 'image-download'],
+                'kinds': submitted + ['desktop-input', 'image-download', 'image-prepare'],
                 'required_kinds': ['flash', 'nor-backup', 'desktop-input', 'image-download'],
                 'format': '[A-Za-z0-9_-]{8,100}',
                 'same_input': 'return-existing-task', 'changed_input_http_status': 409,
@@ -147,5 +148,7 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
         'images': {
             'catalog_endpoint': '/api/image-catalog', 'library_endpoint': '/api/image-library',
             'import_endpoint': '/api/image-download', 'import_task_kind': 'image-download',
+            'prepare_endpoint': '/api/image-prepare', 'prepare_task_kind': 'image-prepare',
+            'preparation_requires_device': False,
         },
     }

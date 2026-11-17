@@ -3,7 +3,7 @@
 No browser input selects a host executable, USB attachment or loader path.  The
 executor owns no UART; the existing collector remains its only reader.
 """
-from contextlib import nullcontext
+from contextlib import nullcontext, contextmanager
 from dataclasses import dataclass, replace
 import hashlib
 import json
@@ -318,6 +318,7 @@ class LocalFlashExecutor:
     supports_reset_after = True
     supports_storage_metadata = True
     supports_skip_verification = True
+    supports_image_preparation = True
 
     def __init__(self, work_dir):
         # Canonicalize the administrator-selected root once. On Windows, TEMP
@@ -327,6 +328,7 @@ class LocalFlashExecutor:
         self._cache_lock = threading.Lock()
         self._cache_reserved = 0
         self._active_workspaces = set()
+        self._image_locks = {}
 
     @staticmethod
     def _cache_size(path):
@@ -355,6 +357,8 @@ class LocalFlashExecutor:
             return False
         target = Path(workspace).absolute()
         cache = (self.root / 'cache').resolve()
+        if target.parent.resolve() == (self.root / 'images').resolve() and re.fullmatch(r'[0-9a-f]{64}', target.name):
+            return False
         if target.parent.resolve() != cache or not re.fullmatch(r'plan-[A-Za-z0-9_-]{8}', target.name):
             raise TaskError('flash workspace is outside managed cache', 409)
         with self._cache_lock:
@@ -474,7 +478,8 @@ class LocalFlashExecutor:
             raise FlashRunnerError('prepared loaders require a managed image workspace')
         target = Path(workspace).absolute()
         cache = (self.root / 'cache').absolute()
-        if (target.parent != cache or not re.fullmatch(r'plan-[A-Za-z0-9_-]{8}', target.name)
+        if (not (target.parent == cache and re.fullmatch(r'plan-[A-Za-z0-9_-]{8}', target.name)
+                or target.parent == (self.root / 'images').absolute() and re.fullmatch(r'[0-9a-f]{64}', target.name))
                 or target.is_symlink() or not target.is_dir() or cache.is_symlink()
                 or target.resolve() != target):
             raise FlashRunnerError('prepared loader workspace is outside the managed image cache')
@@ -499,7 +504,7 @@ class LocalFlashExecutor:
                 # A package imported into an already running RAM workspace may
                 # reuse its exact previously checked loader files. They remain
                 # owned by that task and must still be in our managed cache.
-                inherited_workspace = next((parent for parent in path.parents if parent.parent == cache), None)
+                inherited_workspace = next((parent for parent in path.parents if parent.parent in (cache, (self.root / 'images').absolute())), None)
                 if inherited_workspace is None:
                     raise FlashRunnerError('inherited loader left the managed cache')
                 self._owned_workspace(inherited_workspace)
@@ -530,9 +535,24 @@ class LocalFlashExecutor:
         from .archive_io import open_archive
         from .nor_contents import MAX_PARTITION_BYTES, partition_content
         root = self._owned_workspace(workspace)
+        summary = root / 'image-metadata.json'
+        cached = None
+        if root.parent == (self.root / 'images').resolve() and summary.is_file():
+            if summary.is_symlink() or summary.stat().st_size > MAX_REQUEST:
+                raise FlashRunnerError('invalid image metadata cache')
+            cached = _json(summary.read_bytes()).get('payload_metadata', [])
         metadata, seen = [], set()
         for value in list((result.get('plan') or {}).get('writes') or []) + list(result.get('payload_candidates') or []):
             part = value.get('partition')
+            hit = next((item for item in cached or [] if item.get('sha256') == value.get('sha256')
+                        and (item.get('partition') == part or item.get('partition') == ''
+                             and item.get('content', {}).get('filesystem'))), None)
+            if hit is not None:
+                key = (value.get('storage'), part, value.get('sha256'))
+                if key not in seen:
+                    metadata.append(dict(hit, storage=value.get('storage'), partition=part))
+                    seen.add(key)
+                continue
             if part not in ('bootinfo', 'fsbl', 'env', 'esos', 'opensbi', 'uboot'):
                 if value.get('kind') in ('partition', 'disk') and value.get('path') and len(metadata) < 128:
                     item = self._os_payload_metadata(value, root, seen)
@@ -599,8 +619,131 @@ class LocalFlashExecutor:
         return {'storage': value.get('storage'), 'partition': value.get('partition') or '',
                 'kind': value.get('kind'), 'sha256': value.get('sha256'), 'content': content}
 
+    def image_workspace(self, artifact):
+        sha = artifact.get('sha256') if isinstance(artifact, dict) else None
+        if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{64}', sha):
+            raise TaskError('a sealed image artifact is required')
+        return self.root.resolve() / 'images' / sha
+
+    def image_lock(self, artifact):
+        workspace = self.image_workspace(artifact)
+        with self._cache_lock:
+            return self._image_locks.setdefault(str(workspace), threading.RLock())
+
+    @contextmanager
+    def image_guard(self, artifact, check=lambda: None):
+        lock = self.image_lock(artifact)
+        while not lock.acquire(timeout=.1):
+            check()
+        try:
+            check()
+            yield
+        finally:
+            lock.release()
+
+    def prepared_artifact_unchanged(self, artifact):
+        """Cheap source seal check; Go independently validates prepared members."""
+        try:
+            workspace = self.image_workspace(artifact)
+            receipt = workspace / ('prepared-' + artifact['sha256'] + '.json')
+            if receipt.is_symlink() or receipt.stat().st_size > 16 * 1024 ** 2:
+                return False
+            document = _json(receipt.read_bytes())
+            source = Path(artifact['path'])
+            info = source.stat()
+            return (not source.is_symlink() and document.get('version') == 1
+                and document.get('artifact_sha256') == artifact['sha256']
+                and document.get('artifact_size') == artifact['size'] == info.st_size
+                and document.get('source_path') == str(source)
+                and document.get('source_modified_ns') == info.st_mtime_ns)
+        except (TaskError, ValueError, KeyError, OSError):
+            return False
+
+    def prepare_image(self, argv, artifact, on_event=None, check=lambda: None,
+                      max_expanded_bytes=32 * 1024 ** 3, max_cache_bytes=64 * 1024 ** 3):
+        workspace = self.image_workspace(artifact)
+        with self.image_guard(artifact, check):
+            images = self._directory(self.root / 'images')
+            if workspace.is_symlink() or workspace.exists() and not workspace.is_dir():
+                raise TaskError('image preparation directory changed', 409)
+            workspace = self._directory(workspace)
+            with self._cache_lock:
+                existing = self._cache_size(workspace)
+                available = min(max(0, shutil.disk_usage(images).free - 256 * 1024 ** 2 - self._cache_reserved),
+                    max(0, max_cache_bytes - self._cache_size(images) - self._cache_size(self.root / 'cache') - self._cache_reserved))
+                budget = min(max_cache_bytes, existing + available)
+                if budget < artifact['size']:
+                    raise TaskError('insufficient image preparation cache quota', 503)
+                reserved = min(available, max_expanded_bytes + artifact['size'])
+                self._cache_reserved += reserved
+                self._active_workspaces.add(str(workspace))
+            request = dict(version=1, artifact=dict(artifact), workspace=str(workspace),
+                           max_expanded_bytes=max_expanded_bytes, max_cache_bytes=budget)
+            try:
+                result = self._run(SimpleNamespace(argv=tuple(argv), timeout=3600), 'prepare-image', request, on_event=on_event, check=check)
+                if result.get('receipt_path'):
+                    receipt = workspace / ('prepared-' + artifact['sha256'] + '.json')
+                    if (result['receipt_path'] != str(receipt) or receipt.is_symlink()
+                            or receipt.resolve(strict=True) != receipt or receipt.stat().st_size > 16 * 1024 ** 2):
+                        raise FlashRunnerError('image preparation receipt escaped its image directory')
+                    reused = result.get('reused') is True
+                    result = _json(receipt.read_bytes())
+                    result['reused'] = reused
+                if result.get('artifact_sha256') != artifact['sha256'] or not result.get('files'):
+                    raise FlashRunnerError('invalid image preparation receipt')
+                summary = workspace / 'image-metadata.json'
+                if summary.is_file():
+                    if summary.is_symlink() or summary.stat().st_size > MAX_REQUEST:
+                        raise FlashRunnerError('invalid image metadata cache')
+                    metadata = _json(summary.read_bytes()).get('payload_metadata', [])
+                else:
+                    if on_event:
+                        on_event({'event': 'phase', 'phase': 'reading-payload-metadata'})
+                    files = {value['name']: value for value in result['files']}
+                    writes = []
+                    for table in result.get('catalogue') or []:
+                        for part in table.get('partitions') or []:
+                            name = part.get('payload')
+                            item = files.get(result.get('expanded_files', {}).get(name, name))
+                            if item:
+                                writes.append(dict(item, path=str(Path(result['root_path']) / item['name']),
+                                    storage='image', partition=part['name'], kind='partition'))
+                    if not result.get('catalogue'):
+                        item = files.get(result.get('expanded_files', {}).get('image.raw', 'image.raw'))
+                        if item:
+                            writes.append(dict(item, path=str(Path(result['root_path']) / item['name']),
+                                storage='image', partition='', kind='partition'))
+                    metadata = self._payload_metadata({'plan': {'writes': writes}}, workspace)
+                    descriptor, temporary = tempfile.mkstemp(prefix='.metadata-', dir=workspace)
+                    try:
+                        with os.fdopen(descriptor, 'w') as target:
+                            json.dump({'payload_metadata': metadata}, target, allow_nan=False)
+                        os.replace(temporary, summary)
+                    finally:
+                        Path(temporary).unlink(missing_ok=True)
+                result['payload_metadata'] = metadata
+                os.utime(workspace, None)
+                return result
+            except BaseException as error:
+                if not getattr(error, 'stage', ''):
+                    error.stage = 'prepare-image'
+                    error.operation = 'prepare-image'
+                if not getattr(error, 'cleanup_confirmed', True):
+                    error.workspace = str(workspace)
+                raise
+            finally:
+                with self._cache_lock:
+                    self._cache_reserved -= reserved
+                    self._active_workspaces.discard(str(workspace))
+
     def plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
              target_storage=None, inspection_scope=None, on_event=None):
+        with self.image_guard(artifact, check):
+            return self._plan(binding, artifact, input_mode, selections, verify, check,
+                              target_storage, inspection_scope, on_event)
+
+    def _plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
+              target_storage=None, inspection_scope=None, on_event=None):
         if input_mode not in ('full', 'partitions') or verify not in ('none', 'if-supported', 'optional', 'required'):
             raise TaskError('invalid flash mode or verification policy')
         if not isinstance(artifact, dict) or not re.fullmatch(r'[0-9a-f]{64}', str(artifact.get('sha256', ''))):
@@ -608,15 +751,11 @@ class LocalFlashExecutor:
         if target_storage is not None and (not isinstance(target_storage, str)
                 or not re.fullmatch(r'(?:[A-Za-z0-9_.-]{1,128}|(?:nvme|scsi|mmc|usb):[0-3])', target_storage)):
             raise TaskError('invalid flash target storage')
-        cache = self._directory(self.root / 'cache')
+        preparation = self.prepare_image(binding.argv, artifact, on_event, check,
+            max_expanded_bytes=binding.max_expanded_bytes, max_cache_bytes=binding.max_cache_bytes)
+        workspace = self.image_workspace(artifact)
+        budget = binding.max_cache_bytes
         with self._cache_lock:
-            free = max(0, shutil.disk_usage(cache).free - 256 * 1024 ** 2 - self._cache_reserved)
-            budget = min(free, max(0, binding.max_cache_bytes - self._cache_size(cache) - self._cache_reserved),
-                         binding.max_expanded_bytes + artifact.get('size', 0))
-            if budget < max(1, artifact.get('size', 0)):
-                raise TaskError('insufficient free space or cache quota for flash image preparation', 503)
-            workspace = Path(tempfile.mkdtemp(prefix='plan-', dir=cache))
-            self._cache_reserved += budget
             self._active_workspaces.add(str(workspace))
         request = dict(self._request(binding), artifact=dict(artifact), mode=input_mode,
                        selections=selections or [], verify='if-supported' if verify == 'optional' else verify,
@@ -663,12 +802,9 @@ class LocalFlashExecutor:
                 # An unconfirmed process can still be using imported payloads.
                 # Preserve both its resource hold and the only cache reference.
                 error.workspace = str(workspace)
-            else:
-                shutil.rmtree(workspace)
             raise
         finally:
             with self._cache_lock:
-                self._cache_reserved -= budget
                 self._active_workspaces.discard(str(workspace))
 
     def nor_workspace(self, binding, check=lambda: None):
@@ -714,8 +850,9 @@ class LocalFlashExecutor:
         path = Path(workspace)
         resolved = path.resolve(strict=True)
         cache = (self.root / 'cache').resolve()
-        if (not path.is_absolute() or path != resolved or resolved.parent != cache
-                or not resolved.name.startswith('plan-') or not stat.S_ISDIR(os.lstat(path).st_mode)):
+        if (not path.is_absolute() or path != resolved or not (resolved.parent == cache and resolved.name.startswith('plan-')
+                or resolved.parent == (self.root / 'images').resolve() and re.fullmatch(r'[0-9a-f]{64}', resolved.name))
+                or not stat.S_ISDIR(os.lstat(path).st_mode)):
             raise TaskError('NOR operation workspace changed', 409)
         return resolved
 
@@ -787,11 +924,12 @@ class LocalFlashExecutor:
         paths = [value.get('path') for value in list((result.get('plan') or {}).get('writes', []))
                  + list(result.get('payload_candidates') or []) if value.get('path')]
         if paths:
-            cache = self.root / 'cache'
             source = Path(paths[0])
-            if not source.is_absolute() or not source.is_relative_to(cache):
+            workspace = next((parent for parent in source.parents
+                if parent.parent in (self.root / 'cache', self.root / 'images')), None)
+            if not source.is_absolute() or workspace is None:
                 raise FlashRunnerError('payload is outside the managed cache')
-            workspace = cache / source.relative_to(cache).parts[0]
+            self._owned_workspace(workspace)
             result['payload_metadata'] = self._payload_metadata(result, workspace)
         return result
 

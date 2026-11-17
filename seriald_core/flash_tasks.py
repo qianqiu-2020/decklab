@@ -261,7 +261,7 @@ class FlashActions:
                     + ('' if actor == 'web' else 'AND actor=? ') + 'ORDER BY updated DESC LIMIT 100',
                     (device.serial,) if actor == 'web' else (device.serial, actor)).fetchall()
             for row in rows:
-                metadata = artifacts.get(row['id'], actor, device.serial)
+                metadata = artifacts.get(row['id'], actor, None if actor == 'web' else device.serial)
                 result['artifacts'].append({key: metadata[key] for key in ('id', 'name', 'size', 'sha256')})
             result['maintenance'] = (maintenance_for(self.manager).target_holds(target_id) if target_id
                                      else maintenance_for(self.manager).holds(device.serial))
@@ -311,10 +311,16 @@ class FlashActions:
         ids = {intent['artifact_id']} | {value['artifact_id'] for value in intent['selections']}
         output = {}
         for artifact_id in sorted(ids):
-            row = self.manager.artifacts.get(artifact_id, actor, serial)
+            row = self.manager.artifacts.get(artifact_id, actor, None if actor == 'web' else serial)
             if row['direction'] != 'upload' or row['state'] not in ('ready', 'claimed'):
                 raise TaskError('flash image is not sealed and ready', 409)
-            source = stack.enter_context(self.manager.artifacts.open(artifact_id, actor, serial, task_id))
+            source = stack.enter_context(self.manager.artifacts.open(artifact_id, actor, None if actor == 'web' else serial, task_id))
+            if getattr(self.manager.flash_executor, 'supports_image_preparation', False):
+                # The host preparation task verifies this source once; cached
+                # previews validate its seal and members instead of rescanning.
+                output[artifact_id] = dict(id=artifact_id, name=row['name'], size=row['size'], sha256=row['sha256'],
+                    path=str(self.manager.artifacts._path(artifact_id, '.bin')))
+                continue
             digest, done, last = hashlib.sha256(), 0, 0
             while True:
                 check()
@@ -474,7 +480,7 @@ class FlashActions:
                 validate_request(payload['request_id'], digest)
                 def run(context):
                     from .flash_progress import PreviewProgress
-                    source = self.manager.artifacts.get(intent['artifact_id'], actor, device.serial)
+                    source = self.manager.artifacts.get(intent['artifact_id'], actor, None if actor == 'web' else device.serial)
                     self.store.initialize_details(context.id, {
                         'preview_intent': intent,
                         'preview_source': {key: source[key] for key in ('id', 'name', 'size', 'sha256')}})
@@ -553,9 +559,9 @@ class FlashActions:
         try:
             for artifact_id in getattr(error, 'artifact_ids', []):
                 if artifact_id not in claimed:
-                    row = self.manager.artifacts.get(artifact_id, actor, serial)
+                    row = self.manager.artifacts.get(artifact_id, actor, None if actor == 'web' else serial)
                     if row['state'] != 'claimed' or row['task_id'] != task_id:
-                        self.manager.artifacts.claim(artifact_id, task_id, actor, serial)
+                        self.manager.artifacts.claim(artifact_id, task_id, actor, None if actor == 'web' else serial)
                     claimed.append(artifact_id)
         except BaseException:
             # A registry failure must not close the only remaining expiry pin.
@@ -957,7 +963,7 @@ class FlashActions:
                         # Choosing the package as the import anchor makes this
                         # independent of the visual order of partition rows.
                         for item in intent['selections']:
-                            candidate = self.manager.artifacts.get(item.get('artifact_id'), actor, device.serial)
+                            candidate = self.manager.artifacts.get(item.get('artifact_id'), actor, None if actor == 'web' else device.serial)
                             if candidate['name'].lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip')):
                                 intent['artifact_id'] = candidate['id']
                                 break
@@ -984,7 +990,7 @@ class FlashActions:
                                   and all(value['artifact_id'] == source_record['intent']['artifact_id']
                                           for value in intent['selections']) else None)
                         from .flash_progress import PreviewProgress
-                        source = self.manager.artifacts.get(intent['artifact_id'], actor, device.serial)
+                        source = self.manager.artifacts.get(intent['artifact_id'], actor, None if actor == 'web' else device.serial)
                         timing = PreviewProgress(self.store, task_id, source, binding.endpoint,
                             source['name'].lower().endswith(('.gz', '.tgz', '.zip')))
                         preview_succeeded = False
@@ -1046,7 +1052,7 @@ class FlashActions:
                 try:
                     for artifact_id in sorted({selected['intent']['artifact_id']} | {value['artifact_id'] for value in selected['intent']['selections']}):
                         if artifact_id not in waiter['claimed']:
-                            self.manager.artifacts.claim(artifact_id, task_id, actor, device.serial)
+                            self.manager.artifacts.claim(artifact_id, task_id, actor, None if actor == 'web' else device.serial)
                             added.append(artifact_id)
                     identity = {key: payload.get(key) for key in ('plan_id', 'request_id', 'layout_digest')}
                     self.store.update_details(task_id, {'selection_request': identity})
@@ -1124,7 +1130,7 @@ class FlashOperation:
             initial_artifacts = {record['intent']['artifact_id']} | {
                 value['artifact_id'] for value in record['intent']['selections']}
             for artifact_id in sorted(value for value in initial_artifacts if value):
-                self.manager.artifacts.claim(artifact_id, context.id, self.actor, record['serial'])
+                self.manager.artifacts.claim(artifact_id, context.id, self.actor, None if self.actor == 'web' else record['serial'])
                 claimed.append(artifact_id)
             if record['serial']:
                 self.manager.store.event(record['serial'], self.actor, 'flash-start', context.id)

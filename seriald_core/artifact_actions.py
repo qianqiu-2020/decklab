@@ -61,7 +61,13 @@ class ArtifactActions:
                     artifact = self.artifacts.get(artifact_id, actor, serial)
                 else:
                     raise TaskError('unknown artifact action', 404)
-            return response(200, {'ok': True, 'artifact': artifact})
+            result = {'ok': True, 'artifact': artifact}
+            if action == 'seal':
+                from .image_preparation import for_manager
+                task = for_manager(self.manager).after_upload(artifact, actor, payload.get('client_id', ''))
+                if task:
+                    result['preparation_task'] = task
+            return response(200, result)
         except (TaskError, OSError) as error:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
 
