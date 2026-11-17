@@ -7,11 +7,13 @@ from contextlib import nullcontext
 from dataclasses import dataclass, replace
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import queue
 import re
 import shutil
+import secrets
 import stat
 import struct
 import subprocess
@@ -597,7 +599,7 @@ class LocalFlashExecutor:
                 'kind': value.get('kind'), 'sha256': value.get('sha256'), 'content': content}
 
     def plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
-             target_storage=None, inspection_scope=None):
+             target_storage=None, inspection_scope=None, on_event=None):
         if input_mode not in ('full', 'partitions') or verify not in ('none', 'if-supported', 'optional', 'required'):
             raise TaskError('invalid flash mode or verification policy')
         if not isinstance(artifact, dict) or not re.fullmatch(r'[0-9a-f]{64}', str(artifact.get('sha256', ''))):
@@ -630,7 +632,7 @@ class LocalFlashExecutor:
                 package = artifact.get('name', '').lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip'))
                 if manifest_path().is_file() or input_mode == 'partitions' and not package:
                     request['boot_materials'] = prepare_materials(binding, workspace, check)
-            image = self._run(binding, 'image-plan', request, check=check)
+            image = self._run(binding, 'image-plan', request, on_event=on_event, check=check)
             if (not isinstance(image.get('plan'), dict)
                     or not isinstance(image.get('payload_candidates', []), list)):
                 raise FlashRunnerError('flashing executor returned an invalid image plan')
@@ -641,8 +643,12 @@ class LocalFlashExecutor:
             stage = 'check-plan'
             scope = inspection_scope() if inspection_scope is not None else nullcontext()
             with scope:
-                result = self._run(execution, 'check-plan', inspection_request, check=check)
+                if on_event:
+                    on_event({'event': 'phase', 'phase': 'checking-layout'})
+                result = self._run(execution, 'check-plan', inspection_request, on_event=on_event, check=check)
             result['workspace'] = str(workspace)
+            if on_event:
+                on_event({'event': 'phase', 'phase': 'reading-payload-metadata'})
             result['payload_metadata'] = self._payload_metadata(result, workspace)
             if image.get('execution_profile') is not None:
                 result['execution_profile'] = execution.profile_data
@@ -877,6 +883,20 @@ class LocalFlashExecutor:
                 if event['event'] == 'error':
                     outcome.update(safe_outcome(event.get('result')))
                     message = 'flashing executor reported failure'
+                    reasons = {'host-storage-full': '控制机磁盘空间不足，镜像未能解压完成',
+                        'image-file-missing': '镜像载荷或临时缓存文件不存在，请重新预览',
+                        'image-permission-denied': '控制机没有读取镜像或写入缓存的权限',
+                        'image-archive-corrupt': '镜像压缩包不完整或校验失败，请重新下载',
+                        'image-invalid': '镜像格式或包内布局无效'}
+                    if event.get('code') in reasons:
+                        message = reasons[event['code']]
+                    # Reuse the service log for the complete diagnostic; the
+                    # browser gets a correlation ID, never an arbitrary host path.
+                    diagnostic = event.get('message')
+                    diagnostic_id = secrets.token_hex(6) if isinstance(diagnostic, str) else ''
+                    if diagnostic_id:
+                        logging.getLogger(__name__).error('flash diagnostic %s operation=%s code=%s reason=%r',
+                            diagnostic_id, operation, event.get('code'), diagnostic[:8192])
                     if event.get('code') == 'nor-baseline-changed':
                         message = '板上 NOR 内容在备份后发生变化，尚未写入；请重新读取备份并核对。'
                     if event.get('code') == 'nor-read-failed':
@@ -889,6 +909,8 @@ class LocalFlashExecutor:
                         message = 'NOR 固件包选区需要下载专用 RAM 刷机环境，请升级后端或配置预备 FSBL/U-Boot；无需改选完整镜像。'
                     if event.get('code') == 'nor-package-unsupported':
                         message = '这是 NOR 固件刷机包；当前自动刷机仅支持 GPT 镜像包，尚未支持 NOR 固件刷写。'
+                    if diagnostic_id:
+                        message += '（诊断 ' + diagnostic_id + '）'
                     raise FlashRunnerError(message, outcome=outcome, code=event.get('code'))
                 if result is not None:
                     raise FlashRunnerError('flashing executor emitted events after its result')

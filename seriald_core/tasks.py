@@ -131,7 +131,7 @@ class TaskStore:
             raise TaskError('task request ID was already used with different input', 409)
         return row['task_id'] if row else None
 
-    def create(self, kind, actor, client_id, targets, request_id=None, input_digest=None):
+    def create(self, kind, actor, client_id, targets, request_id=None, input_digest=None, flash_target=None):
         if not all(isinstance(value, str) and value and len(value) <= 80 for value in (kind, actor)):
             raise TaskError('invalid task kind or actor')
         if not isinstance(client_id, str) or len(client_id) > 80:
@@ -152,11 +152,21 @@ class TaskStore:
             if request_id is not None:
                 from .flash_store import validate_request
                 validate_request(request_id, input_digest)
+            if flash_target is not None:
+                target_id, generation = flash_target
+                row = self.store.db.execute('SELECT generation,present,serial FROM flash_targets WHERE id=?', (target_id,)).fetchone()
+                if (len(normalized) != 1 or row is None or not row['present'] or row['generation'] != generation
+                        or (row['serial'] or '') != next(iter(normalized))[0]):
+                    raise TaskError('flash USB target generation changed', 409)
             self.store.db.execute('INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                                   (task_id, kind, actor, client_id if actor == 'web' else '',
                                    'queued', '{}', json.dumps({_OUTCOME_FIELD: 'not-issued'}), '', now, now, 0))
             self.store.db.executemany('INSERT INTO task_targets VALUES (?,?,?)',
                                      [(task_id, serial, connection) for serial, connection in normalized])
+            if flash_target is not None:
+                self.store.db.execute('INSERT INTO task_flash_targets VALUES(?,?,?)', (task_id, *flash_target))
+                if row['serial']:
+                    self.store.db.execute('INSERT INTO task_board_targets VALUES(?,?)', (task_id, row['serial']))
             if request_id is not None:
                 self.store.db.execute('INSERT INTO flash_requests VALUES (?,?,?,?)',
                                       (actor, request_id, input_digest, task_id))
@@ -489,7 +499,7 @@ class TaskManager:
         return hook(run, actor, client_id) if hook is not None else run
 
     def start(self, kind, actor, client_id, targets, run, *, request_id=None, input_digest=None,
-              tracks_outcome=False):
+              tracks_outcome=False, flash_target=None):
         if not callable(run):
             raise TaskError('task runner must be callable')
         with self._lock:
@@ -504,7 +514,7 @@ class TaskManager:
             if len(self._active) >= self.max_active:
                 raise TaskError('too many active tasks', 429)
             run = self._execution_runner(run, actor, client_id)
-            task_id = self.store.create(kind, actor, client_id, targets, request_id, input_digest)
+            task_id = self.store.create(kind, actor, client_id, targets, request_id, input_digest, flash_target)
             context = TaskContext(task_id, self.store, lambda: self._check_actor(actor), tracks_outcome)
             worker = threading.Thread(target=self._run, args=(context, run), daemon=True)
             self._active[task_id] = (context, worker)

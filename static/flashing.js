@@ -11,7 +11,7 @@
     var downloadTask = null, downloadTimer = null, downloadRequest = null, downloadRetry = false;
     var renderedBackup = '', automaticDownloadIdentity = '';
     var bootPriorityRequest = null;
-    var progressSample = null;
+    var progressSample = null, previewTask = null, previewRequestId = '';
     function status(message, failed) { $('fl-status').textContent = message; $('fl-status').dataset.error = failed ? 'true' : ''; }
     function renderSource() {
       var source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
@@ -241,9 +241,13 @@
       $('fl-start').disabled = busy || uploading || !!active || !plan || submissionUnknown;
       $('fl-start').hidden = !!active || nor && $('fl-mode').value === 'partitions';
       $('fl-start').textContent = plan && plan.confirm_after_prepare && plan.ready === false ? '准备环境并核对固件范围' : prepareOnly(plan) ? '准备刷机环境并读取布局' : '开始刷写';
-      $('fl-cancel').disabled = !active || task.cancel_requested;
-      $('fl-cancel').textContent = nor && selecting ? '结束准备并保留备份' : '取消刷机';
-      if (nor && selecting && !uploading) setProgress('awaiting-selection', 0, 0, false);
+      $('fl-cancel').disabled = previewTask ? !['queued','running'].includes(previewTask.state) || previewTask.cancel_requested : !active || task.cancel_requested;
+      $('fl-cancel').textContent = previewTask ? '取消预览' : nor && selecting ? '结束准备并保留备份' : '取消刷机';
+      if (nor && selecting && !uploading) {
+        var preview = task.flash && task.flash.preview_progress;
+        if (preview && preview.active) setProgress(preview.phase, preview.done, preview.total, true);
+        else setProgress('awaiting-selection', 0, 0, false);
+      }
       $('fl-partitions-field').hidden = !sourceInspection && $('fl-mode').value !== 'partitions' && (!selecting || fullConfirmation());
       $('fl-target-storage-field').hidden = sourceInspection ? !sourceInspection.storages.some(function (item) { return item.physical_device; }) : $('fl-mode').value !== 'full' && !workspace;
       $('fl-select').hidden = !selecting;
@@ -499,7 +503,9 @@
       });
     }
     function setProgress(phase, done, total, active) {
-      var names = {'reading-nor': '读取整片 NOR', 'checking-nor-baseline': '检查备份后板上内容是否变化',
+      var names = {'checking-upload': '核对上传文件 SHA-256', 'checking-image-sha256': '核对镜像 SHA-256',
+        'expanding-image': '解压镜像（压缩包读取）', 'checking-payloads': '核对包内载荷',
+        'checking-layout': '核对现场布局', 'reading-payload-metadata': '读取分区文件系统信息', 'reading-nor': '读取整片 NOR', 'checking-nor-baseline': '检查备份后板上内容是否变化',
         'checking-image': '核对写入计划与载荷', 'verifying-nor': '回读整片 NOR 并校验', 'verifying-system': '回读所选系统盘分区', 'writing': '写入所选分区', 'resetting': '刷写完成，正在复位',
         'preparing-loader': '加载临时刷机器', 'prepare': '准备临时刷机器',
         'awaiting-selection': '备份已完成，等待选择替换内容', 'image-download': '后端下载镜像',
@@ -903,19 +909,28 @@
     }
     async function makePlan() {
       if (busy || !board || !$('fl-artifact').value) return;
-      var selected = board, seq = sequence;
+      var selected = board, seq = sequence, responseReceived = false;
       var preparing = preparationPending(), chosen = preparing || $('fl-mode').value === 'full' ? [] : selections();
       if (chosen.some(function (item) { return !item.artifact_id; })) {
         status('请选择至少一个分区及其载荷。'); return;
       }
-      invalidatePlan(); busy = true; updateControls(); status('正在核对镜像和现场布局…');
+      invalidatePlan(); busy = true; previewTask = null; previewRequestId = id(); updateControls();
+      setProgress('checking-upload', 0, 0, true); status('正在核对镜像和现场布局…');
       try {
         var payload = Object.assign(scope(selected), {
           artifact_id: $('fl-artifact').value, mode: $('fl-mode').value, selections: chosen,
           binding_revision: capabilities.binding_revision, verify: $('fl-verify').value,
           reset_after: !!$('fl-reset-after').checked });
         if (payload.mode === 'full' && $('fl-target-storage').value) payload.target_storage = $('fl-target-storage').value;
-        var result = await client.request('/api/flash-plan', payload);
+        payload.request_id = previewRequestId;
+        var result = await client.request('/api/flash-plan', payload); responseReceived = true;
+        if (result.task) result = await client.watch(result.task, {key:selected.key || '',serial:selected.serial || ''}, function (current) {
+          if (!same(selected, seq)) return;
+          previewTask = current; updateControls();
+          var p = current.progress || {};
+          setProgress(p.phase || 'checking-image', p.done, p.total, ['queued','running'].includes(current.state));
+          status('正在核对镜像和现场布局…');
+        });
         if (!same(selected, seq)) return;
         var value = result.plan || result;
         if (result.requires_prepare || value.requires_prepare) value.ready = false;
@@ -928,11 +943,14 @@
             || !prepareOnly(value) && (!Array.isArray(value.writes) || !value.writes.length))
           throw new Error('刷机计划缺少写入范围，不能执行。');
         plan = value; plan.id = value.id || value.plan_id || result.plan_id; requestId = id();
+        previewRequestId = ''; setProgress('image-ready', 0, 0, false);
         renderPlan(value); status(prepareOnly(value) ? '需要先准备临时刷机环境，读取布局后再选择实际写入范围。'
           : '计划已准备，请核对板卡和全部写入范围后开始。');
       } catch (error) {
         if (same(selected, seq)) {
-          status(error.message, true);
+          if (!responseReceived && !error.result && !error.permanent) {
+            submissionUnknown = true; status('预览提交结果未确认，请查询原任务；不会自动重新提交。', true);
+          } else { previewRequestId = ''; status(error.message, true); }
           if (error.result && error.result.recovery_required && error.result.task_id) {
             try {
               var retained = await client.request('/api/task?id=' + encodeURIComponent(error.result.task_id) + query(selected));
@@ -941,7 +959,7 @@
           }
         }
       }
-      finally { if (same(selected, seq)) { busy = false; updateControls(); } }
+      finally { if (same(selected, seq)) { busy = false; previewTask = null; updateControls(); } }
     }
     function outcome(value) {
       if (value === undefined || value === null) return '未执行';
@@ -1103,6 +1121,26 @@
     async function recover() {
       if (!board || busy) return;
       var selected = board, seq = sequence;
+      if (previewRequestId) {
+        try {
+          var original = await client.request('/api/task?request_id=' + encodeURIComponent(previewRequestId) + query(selected));
+          if (!same(selected, seq)) return;
+          busy = true; submissionUnknown = false; updateControls();
+          var recovered = await client.watch(original.task, {key:selected.key || '',serial:selected.serial || ''}, function (current) {
+            if (!same(selected, seq)) return;
+            previewTask = current; updateControls();
+            var progress = current.progress || {}; setProgress(progress.phase, progress.done, progress.total, ['queued','running'].includes(current.state));
+          });
+          if (!same(selected, seq)) return;
+          if (recovered.plan && (recovered.plan.id || recovered.plan.plan_id)) {
+            plan = recovered.plan; plan.id = plan.id || plan.plan_id; requestId = id(); renderPlan(plan);
+            if (recovered.inspection) { inspection = recovered.inspection; renderPartitions(); renderStorages(); }
+            previewRequestId = ''; status('计划已准备，请核对板卡和全部写入范围后开始。');
+          }
+        } catch (error) { if (same(selected, seq)) status(error.message, true); }
+        finally { if (same(selected, seq)) { busy = false; previewTask = null; updateControls(); } }
+        return;
+      }
       try {
         var result = await client.request(taskQuery(selected, 100));
         if (!same(selected, seq)) return;
@@ -1287,7 +1325,7 @@
       if (uploading) { $('flash-dialog').show(); return; }
       sourceInspection = null; sourceCatalogue = null; sourceAnalysedId=''; $('fl-package-contents').textContent='';
       board = selected || {}; selected = board; var seq = ++sequence; clearTimeout(pollTimer);
-      busy = false; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; $('fl-execution').hidden = true; cursor = 0; eventLines = []; ++eventSequence;
+      busy = false; previewTask = null; previewRequestId = ''; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; $('fl-execution').hidden = true; cursor = 0; eventLines = []; ++eventSequence;
       inspection = null; payloadCandidates = []; selectionRequestId = ''; selectionPlan = null; renderedBackup = '';
       downloadRetry = false; automaticDownloadIdentity = '';
       $('fl-files').value = ''; $('fl-url').value = ''; $('fl-url-sha256').value = '';
@@ -1473,6 +1511,13 @@
     $('fl-recovery-reason').addEventListener('input', updateControls);
     $('fl-release').addEventListener('click', releaseRecovery);
     $('fl-cancel').addEventListener('click', async function () {
+      if (previewTask) {
+        var previewId = previewTask.id;
+        $('fl-cancel').disabled = true;
+        try { await client.request('/api/task-cancel', {id:previewId}); }
+        catch (error) { status(error.message); updateControls(); }
+        return;
+      }
       if (!board || !task) return;
       var selected = board, seq = sequence, current = task;
       try {

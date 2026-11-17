@@ -53,9 +53,11 @@ class FakeFlashExecutor:
             'verification': True, 'layout_digest': '1' * 64}
 
     def plan(self, binding, artifact, mode, selections=None,
-             verify='if-supported', check=lambda: None, target_storage=None, inspection_scope=None):
+             verify='if-supported', check=lambda: None, target_storage=None, inspection_scope=None, on_event=None):
         check()
         self.plans.append(copy.deepcopy((artifact, mode, selections, verify, target_storage)))
+        if on_event:
+            on_event({'event': 'progress', 'phase': 'expanding-image', 'done': 8, 'total': 32})
         self.image_started.set()
         while self.block_image and not self.image_release.wait(.02):
             check()
@@ -716,6 +718,48 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(len(fixture.executor.executions), 1)
             self.assertEqual([(entry['storage'], entry['partition'])
                              for entry in fixture.executor.executions[0][0]['writes']], [('nvme', 'rootfs')])
+
+    def test_async_preview_reports_progress_deduplicates_and_does_not_hold_uart_or_write(self):
+        with protected_flashing() as fixture, fake_attachment(fixture) as attachment:
+            image = self.image(fixture)
+            fixture.executor.block_image = True
+            body = {'key': 'offline-board', 'serial': 'FLASH-A', 'artifact_id': image['id'],
+                    'mode': 'full', 'request_id': 'async-preview-001'}
+            code, result = self.request(fixture, '/api/flash-plan', body)
+            self.assertEqual(code, 202, result)
+            task_id = result['task']['id']
+            self.assertTrue(fixture.executor.image_started.wait(2))
+            code, repeated = self.request(fixture, '/api/flash-plan', body)
+            self.assertEqual(code, 202, repeated)
+            self.assertEqual(repeated['task']['id'], task_id)
+            self.assertEqual(len(fixture.executor.plans), 1)
+            code, conflict = self.request(fixture, '/api/flash-plan', dict(body, verify='none'))
+            self.assertEqual(code, 409, conflict)
+            code, current = self.request(fixture, '/api/task', query={'id': task_id})
+            self.assertEqual(current['task']['progress'], {'done': 8, 'total': 32, 'phase': 'expanding-image'})
+            self.assertEqual(maintenance_for(fixture.manager).holds('FLASH-A'), [])
+            fixture.executor.image_release.set()
+            completed = self.terminal(fixture, task_id)
+            self.assertEqual(completed['state'], 'completed', completed)
+            self.assertTrue(completed['result']['plan']['id'])
+            self.assertNotIn('path', json.dumps(completed['result']))
+            self.assertEqual(fixture.executor.executions, [])
+
+    def test_async_preview_can_cancel_import_without_starting_layout_or_writes(self):
+        with protected_flashing() as fixture:
+            image = self.image(fixture)
+            fixture.executor.block_image = True
+            code, result = self.request(fixture, '/api/flash-plan', {
+                'key': 'offline-board', 'serial': 'FLASH-A', 'artifact_id': image['id'],
+                'mode': 'full', 'request_id': 'cancel-preview-001'})
+            self.assertEqual(code, 202, result)
+            self.assertTrue(fixture.executor.image_started.wait(2))
+            task_id = result['task']['id']
+            self.request(fixture, '/api/task-cancel', {'id': task_id})
+            completed = self.terminal(fixture, task_id)
+            self.assertEqual(completed['state'], 'cancelled', completed)
+            self.assertFalse(fixture.executor.inspection_started.is_set())
+            self.assertEqual(fixture.executor.executions, [])
 
     def test_image_preparation_allows_uart_input_but_target_inspection_excludes_it(self):
         with protected_flashing() as fixture, fake_attachment(fixture) as attachment:

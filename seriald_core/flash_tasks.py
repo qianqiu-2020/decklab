@@ -306,7 +306,7 @@ class FlashActions:
             result['reset_after'] = True
         return result
 
-    def _artifacts(self, intent, actor, serial, stack, task_id=None, check=lambda: None):
+    def _artifacts(self, intent, actor, serial, stack, task_id=None, check=lambda: None, on_event=None):
         ids = {intent['artifact_id']} | {value['artifact_id'] for value in intent['selections']}
         output = {}
         for artifact_id in sorted(ids):
@@ -314,13 +314,17 @@ class FlashActions:
             if row['direction'] != 'upload' or row['state'] not in ('ready', 'claimed'):
                 raise TaskError('flash image is not sealed and ready', 409)
             source = stack.enter_context(self.manager.artifacts.open(artifact_id, actor, serial, task_id))
-            digest = hashlib.sha256()
+            digest, done, last = hashlib.sha256(), 0, 0
             while True:
                 check()
                 chunk = source.read(1024 * 1024)
                 if not chunk:
                     break
                 digest.update(chunk)
+                done += len(chunk)
+                if on_event and (time.monotonic() - last >= .25 or done == row['size']):
+                    on_event({'event': 'progress', 'phase': 'checking-upload', 'done': done, 'total': row['size']})
+                    last = time.monotonic()
             if digest.hexdigest() != row['sha256']:
                 raise TaskError('flash image checksum changed', 409)
             output[artifact_id] = dict(id=artifact_id, name=row['name'], size=row['size'],
@@ -328,7 +332,7 @@ class FlashActions:
         return output
 
     def _make_plan(self, binding, executor, intent, actor, serial, check=lambda: None, task_id=None,
-                   inspection_scope=None, prepared=None, previous_device=None, baseline_record=None):
+                   inspection_scope=None, prepared=None, previous_device=None, baseline_record=None, on_event=None):
         if intent.get('reset_after') and not getattr(executor, 'supports_reset_after', False):
             raise TaskError('刷机执行器不支持刷后自动复位')
         if prepared is not None and hasattr(executor, 'check_plan'):
@@ -348,11 +352,13 @@ class FlashActions:
                 result['execution_device'] = dict(binding.device)
         else:
             with ExitStack() as stack:
-                artifacts = self._artifacts(intent, actor, serial, stack, task_id, check)
+                artifacts = self._artifacts(intent, actor, serial, stack, task_id, check, on_event)
                 selections = [dict(storage=value['storage'], partition=value['partition'],
                                    artifact=artifacts[value['artifact_id']]) for value in intent['selections']]
                 check()
                 arguments = {'target_storage': intent['target_storage']} if intent.get('target_storage') else {}
+                if on_event is not None:
+                    arguments['on_event'] = on_event
                 if inspection_scope is not None:
                     arguments['inspection_scope'] = inspection_scope
                 try:
@@ -441,12 +447,12 @@ class FlashActions:
                       payload_metadata=record.get('payload_metadata', []), reset_after=record['intent'].get('reset_after', False))
         return result
 
-    def plan(self, payload, device, actor='web'):
+    def plan(self, payload, device, actor='web', check=None, on_event=None):
         try:
             if not isinstance(payload, dict) or set(payload) - {
                     'key', 'serial', 'actor', 'client_id', 'binding_revision',
                     'artifact_id', 'mode', 'selections', 'verify', 'target_storage', 'reset_after',
-                    'target_id', 'target_generation'}:
+                    'target_id', 'target_generation', 'request_id'}:
                 raise TaskError('invalid flash plan request')
             device = self._device(device, payload, actor)
             binding, executor = self._target(device, actor, payload)
@@ -458,6 +464,31 @@ class FlashActions:
             if not isinstance(client, str) or client and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client):
                 raise TaskError('invalid flash client')
             maintenance = maintenance_for(self.manager)
+            if payload.get('request_id') is not None:
+                if actor != 'web':
+                    raise TaskError('asynchronous flash preview requires a Web operator', 403)
+                from .flash_store import validate_request
+                original = {key: value for key, value in payload.items() if key != 'request_id'}
+                digest = _digest({'kind': 'flash-preview', 'input': original, 'serial': device.serial})
+                validate_request(payload['request_id'], digest)
+                def run(context):
+                    def progress(value):
+                        context.progress(value.get('done', 0), value.get('total', 0), value.get('phase', 'checking-image'))
+                    result = self.plan(original, device, actor, context.check, progress)
+                    if result.status != 200:
+                        context.store.update(context.id, result=result.payload)
+                        raise TaskError(result.payload['error'], result.status)
+                    context.mark_outcome('observed')
+                    return result.payload
+                target = (binding.target_id, binding.target_generation) if binding.target_id else None
+                task = self.manager.tasks.start('flash-preview', actor, client,
+                    [{'serial': device.serial or '', 'connection_id': getattr(device, 'connection_id', '') or 'flash-preview'}],
+                    run, request_id=payload['request_id'], input_digest=digest, tracks_outcome=True, flash_target=target)
+                return response(202, {'ok': True, 'task': task})
+            def preparation_check():
+                if check is not None:
+                    check()
+                maintenance.check_preparation()
             @contextmanager
             def inspect_scope():
                 guard = (maintenance.inspect_target_scope(device.target_id, device.target_generation,
@@ -477,9 +508,9 @@ class FlashActions:
                             error.recovery_task_id = task['id']
                         raise
             try:
-                maintenance.check_preparation()
+                preparation_check()
                 record = self._make_plan(binding, executor, intent, actor, device.serial,
-                                         maintenance.check_preparation, inspection_scope=inspect_scope)
+                                         preparation_check, inspection_scope=inspect_scope, on_event=on_event)
             except BaseException as error:
                 if getattr(error, 'cleanup_confirmed', True) is False:
                     task_id = getattr(error, 'recovery_task_id', None)
@@ -911,9 +942,11 @@ class FlashActions:
                                   and source_record['intent']['artifact_id'] == intent['artifact_id']
                                   and all(value['artifact_id'] == source_record['intent']['artifact_id']
                                           for value in intent['selections']) else None)
+                        def preview_progress(value):
+                            self.store.update_details(task_id, {'preview_progress': dict(value, active=True)})
                         selected = self._make_plan(binding, executor, intent, actor, device.serial,
                                                    operation.check, task_id, prepared=cached,
-                                                   baseline_record=record)
+                                                   baseline_record=record, on_event=preview_progress)
                     except BaseException as error:
                         if getattr(error, 'stage', None) in ('image-plan', 'check-plan'):
                             self.store.append_event(task_id, {'event': 'error', 'phase': 'preview-failed',
@@ -927,6 +960,8 @@ class FlashActions:
                             finally:
                                 waiter['event'].set()
                         raise
+                    finally:
+                        self.store.update_details(task_id, {'preview_progress': {'active': False}})
                     operation.check()
                     current_layout = (selected.get('inspection') or {}).get('layout_digest') or selected['executor_plan'].get('layout_digest')
                     if full_review and (_write_scope(selected['executor_plan']) != _write_scope(record['executor_plan'])

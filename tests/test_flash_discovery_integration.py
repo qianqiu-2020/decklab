@@ -91,7 +91,7 @@ class FakeBootROMExecutor(FakeDiscoveryExecutor):
         return self.local.execution_binding(binding, profile, workspace, check)
 
     def plan(self, binding, artifact, mode, selections=None, verify='if-supported', check=lambda: None,
-             target_storage=None, inspection_scope=None):
+             target_storage=None, inspection_scope=None, on_event=None):
         check()
         self.plans.append(copy.deepcopy((artifact, mode, selections, verify, target_storage)))
         if self.preparations:
@@ -303,6 +303,22 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(code, 200, result)
             artifact = result['artifact']
         return artifact
+
+    def test_async_preview_preserves_unidentified_usb_scope_in_task_history(self):
+        with automatic_flashing() as fixture:
+            target = self.probe(fixture, self.discover(fixture)[0])['target']
+            image = self.image(fixture, target)
+            code, result = self.request(fixture, '/api/flash-plan', dict(self.scope(target),
+                artifact_id=image['id'], mode='partitions', selections=[{'storage':'emmc','partition':'rootfs','artifact_id':image['id']}], request_id='usb-preview-001'))
+            self.assertEqual(code, 202, result)
+            task_id = result['task']['id']
+            current = self.terminal(fixture, task_id)
+            self.assertEqual(current['state'], 'completed', current)
+            self.assertEqual(current['flash_targets'], [{'target_id': target['target_id'], 'generation': target['target_generation']}])
+            code, history = self.request(fixture, '/api/tasks', query={'target_id': target['target_id']})
+            self.assertEqual(code, 200, history)
+            self.assertIn(task_id, [row['id'] for row in history['tasks']])
+            self.assertEqual(fixture.executor.executions, [])
 
     def plan(self, fixture, target, image):
         payload = dict(self.scope(target), artifact_id=image['id'], mode='partitions',

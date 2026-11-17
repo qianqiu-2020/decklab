@@ -31,6 +31,7 @@ function backup(id, phase, bytes) {
       description:name==='esos'?'<img src=x onerror=window.norInjected=1>':undefined,
       built_at:!['env','bootinfo'].includes(name)?'2026-11-14T00:00:00+00:00':null}}))};
 }
+let previewTask = null;
 let current = null, upload = Buffer.alloc(0), artifact = null, preview = null, rejectPreview = true, urlDownloads = 0;
 const packageArtifact = {id:'9'.repeat(24),name:'firmware-fixture.tar.gz',size:2<<20,sha256:'a'.repeat(64),state:'ready'};
 const urlArtifact = {id:'8'.repeat(24),name:'url-fixture.itb',size:512,sha256:'b'.repeat(64),state:'ready'};
@@ -48,9 +49,12 @@ const server = http.createServer((req,res) => {
           executor:{provider:'goflash',node:'local',endpoint:'fixture-only'},console:null}});
         if(url.pathname==='/api/flash-plan') {
           assert.equal(payload.mode,'full');assert.deepEqual(payload.selections,[]);
-          return json({plan:{id:'full-package-preview',ready:false,confirm_after_prepare:true,write_layout:true,
+          assert.ok(payload.request_id);
+          previewTask={id:'browser-preview',kind:'flash-preview',state:'running',progress:{phase:'expanding-image',done:1024,total:2048}};
+          setTimeout(()=>{previewTask={id:'browser-preview',kind:'flash-preview',state:'completed',result:{plan:{id:'full-package-preview',ready:false,confirm_after_prepare:true,write_layout:true,
             writes:parts.map(([name,offset,size])=>({storage:'active',partition:name,offset,size,capacity:size})),
-            erase_ranges:[{storage:'active',offset:0,size:before.length}],warnings:['模拟整包恢复会擦除 env']}});
+            erase_ranges:[{storage:'active',offset:0,size:before.length}],warnings:['模拟整包恢复会擦除 env']}}};},1800);
+          res.statusCode=202;return json({task:previewTask});
         }
         if(url.pathname==='/api/image-download') {urlDownloads++;return json({task:{id:'url-fixture-download',state:'running'}});}
         if(url.pathname==='/api/task-start') {
@@ -96,6 +100,7 @@ const server = http.createServer((req,res) => {
       'formatBytes:n=>n>=1048576?(n/1048576).toFixed(1)+" MiB":n>=1024?(n/1024).toFixed(1)+" KiB":n+" B"});ui.open('+JSON.stringify(target)+');</script></body></html>');
   }
   if(url.pathname==='/api/tasks') return json({tasks:current?[current]:[]});
+  if(url.pathname==='/api/task' && url.searchParams.get('id')==='browser-preview') return json({task:previewTask});
   if(url.pathname==='/api/task') return json({task:url.searchParams.get('id')==='url-fixture-download'
     ? {id:'url-fixture-download',state:'completed',result:{artifact:urlArtifact}} : current});
   if(url.pathname==='/api/flash-events') return json({events:[],next_after:0});
@@ -134,6 +139,9 @@ let chrome,ws;
   assert.ok(await evaluate(fits));await shot('full-package-connect-mobile-fixture');
   await rpc('Emulation.setDeviceMetricsOverride',{width:1600,height:1100,deviceScaleFactor:1,mobile:false});
   await evaluate('document.querySelector("#fl-store").click();window.fixtureChooseFile('+JSON.stringify(packageArtifact)+');document.querySelector("#fl-plan").click()');
+  await wait('document.querySelector("#fl-progress-text").textContent.includes("解压镜像")');
+  assert.ok(await evaluate('document.querySelector("#fl-progress-text").textContent.includes("50%")'));
+  await shot('image-preview-progress-fixture');
   await wait('document.querySelector("#fl-start").disabled===false');
   assert.ok(await evaluate('document.querySelector("#fl-preview").textContent.includes("模拟整包恢复会擦除 env")'));
   assert.equal(await evaluate('document.querySelectorAll("#fl-partitions input:checked").length'),0);
@@ -227,7 +235,7 @@ let chrome,ws;
   assert.equal(await evaluate('document.querySelector("#fl-title").textContent'),'Flashing workspace');
   assert.ok(await evaluate('[...document.querySelectorAll(".fl-partition")].every(r=>r.artifactSelect.hidden===!r.checkbox.checked)'),'language changes preserve selection visibility');
   assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,
+  fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,async_preview_progress:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,
     screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
   console.log('NOR browser workflow passed: full package preview, automatic URL/file imports, persistent errors, image-free read, six partition rows, same-task confirmation, byte progress, backups, desktop/mobile and light/dark (simulated data).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});

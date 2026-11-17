@@ -73,6 +73,37 @@ test('full package is directly previewed without opening or submitting storage b
   assert.equal(h.requests.some(r=>r.payload && r.payload.kind==='nor-backup'),false);
 });
 
+test('async preview displays actual extraction progress and only returns a reviewed plan', async () => {
+  const h=harness();await open(h);
+  h.get('fl-plan').click();const submitted=h.take('/api/flash-plan');assert.ok(submitted.payload.request_id);
+  assert.match(h.get('fl-progress-text').textContent,/核对上传/);
+  submitted.resolve({task:{id:'preview-task',kind:'flash-preview',state:'running',progress:{phase:'expanding-image',done:8,total:32}}},202);await drain();
+  assert.match(h.get('fl-progress-text').textContent,/解压镜像.*25%/);
+  assert.equal(h.get('fl-start').disabled,true);assert.equal(h.get('fl-cancel').textContent,'取消预览');
+  h.take('/api/task?id=preview-task').resolve({task:{id:'preview-task',state:'completed',result:{plan:{id:'preview-plan',writes:[{storage:'disk-a',partition:'rootfs',size:32}]}}}});await drain();
+  assert.equal(h.get('fl-start').disabled,false);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('cancel during asynchronous extraction cancels only the preview task', async () => {
+  const h=harness();await open(h);h.get('fl-plan').click();
+  h.take('/api/flash-plan').resolve({task:{id:'cancel-preview',state:'running',progress:{phase:'expanding-image',done:1,total:32}}},202);await drain();
+  h.get('fl-cancel').click();const cancel=h.take('/api/task-cancel');assert.equal(cancel.payload.id,'cancel-preview');cancel.resolve({ok:true});
+  h.take('/api/task?id=cancel-preview').resolve({task:{id:'cancel-preview',state:'cancelled',error:'task cancelled'}});await drain();
+  assert.equal(h.get('fl-start').disabled,true);assert.equal(h.get('fl-plan').disabled,false);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('lost preview response recovers its original request without submitting a new preview', async () => {
+  const h=harness();await open(h);h.get('fl-plan').click();const lost=h.take('/api/flash-plan');
+  lost.reject(new Error('network response lost'));await drain();assert.equal(h.get('fl-recover').hidden,false);
+  h.get('fl-recover').click();const recovered=h.take('/api/task?request_id=');
+  assert.ok(recovered.url.includes(lost.payload.request_id));
+  recovered.resolve({task:{id:'original-preview',state:'completed',result:{plan:{id:'original-plan',writes:[{storage:'disk-a',partition:'rootfs',size:32}]}}}});await drain();
+  assert.equal(h.get('fl-start').disabled,false);assert.equal(h.get('fl-recover').hidden,true);
+  assert.equal(h.requests.some(r=>r.url==='/api/flash-plan'||r.url==='/api/task-start'),false);
+});
+
 test('selection timeout has a persistent recovery entry which only detects devices', async () => {
   const h=harness(),expired={...norReady,state:'failed',error:'flash partition selection timed out; storage was not written'};
   h.api.open(norTarget,expired);await drain();
