@@ -601,6 +601,9 @@
       (previewProgress.stages || []).forEach(function (step) {
         var elapsed = Number(step.elapsed_seconds) || 0, estimate = Number(step.estimated_seconds) || 0;
         if (step.state === 'running' && previewProgress.active) elapsed += Math.max(0, now-previewProgress.updated);
+        // A quiet hashing/layout stage can outlive its estimate. Recalibrate
+        // instead of leaving the whole preview stuck at "1 second remaining".
+        if (step.state === 'running') estimate = Math.max(estimate, elapsed*1.25);
         var left = step.state === 'pending' ? estimate : step.state === 'running' ? Math.max(1, estimate-elapsed) : 0;
         pending += left; completed += ['completed','skipped'].includes(step.state) ? estimate : step.state === 'running' ? Math.min(elapsed,estimate*.98) : 0;
         var label = {pending:'等待',running:'进行中',completed:'完成',skipped:'无需执行',failed:'未完成'}[step.state];
