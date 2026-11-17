@@ -94,6 +94,66 @@ test('cancel during asynchronous extraction cancels only the preview task', asyn
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
 });
 
+test('closing and reopening a busy preview keeps its original watcher and all stage estimates', async () => {
+  const h=harness();await open(h);h.get('fl-plan').click();
+  const current={id:'retained-preview',kind:'flash-preview',state:'running',progress:{phase:'expanding-image',done:8,total:32},
+    flash:{preview_progress:{active:true,state:'running',sample_count:0,updated:Date.now()/1000,stages:[
+      {phase:'checking-upload',state:'completed',elapsed_seconds:2,estimated_seconds:2},
+      {phase:'checking-image-sha256',state:'completed',elapsed_seconds:2,estimated_seconds:2},
+      {phase:'expanding-image',state:'running',elapsed_seconds:3,estimated_seconds:12},
+      {phase:'checking-payloads',state:'pending',estimated_seconds:10},
+      {phase:'checking-layout',state:'pending',estimated_seconds:5},
+      {phase:'reading-payload-metadata',state:'pending',estimated_seconds:3}]}}};
+  h.take('/api/flash-plan').resolve({task:current},202);await drain();
+  assert.equal(h.get('fl-preview-stages').children.length,6);
+  assert.match(h.get('fl-overall-text').textContent,/整体预览进度.*初步估算剩余/);
+  h.get('fl-close').click();h.api.open({...board});await drain();
+  assert.equal(h.get('flash-dialog').open,true);
+  assert.equal(h.requests.some(r=>r.url.startsWith('/api/tasks')||r.url.startsWith('/api/flash-capabilities')),false);
+  assert.match(h.get('fl-task-id').textContent,/retained-preview/);
+  h.take('/api/task?id=retained-preview').resolve({task:{...current,state:'completed',
+    result:{plan:{id:'retained-plan',writes:[{storage:'disk-a',partition:'rootfs',size:32}]}}}});await drain();
+  assert.equal(h.get('fl-start').disabled,false);
+  assert.equal(h.requests.some(r=>r.url==='/api/flash-plan'||r.url==='/api/task-start'),false);
+});
+
+test('page refresh recovers preview by saved request ID and restores its original image and intent', async () => {
+  const storage=new Map(),h=harness(storage);await open(h);h.get('fl-plan').click();
+  const submitted=h.take('/api/flash-plan');submitted.reject(new Error('lost response'));await drain();
+  const fresh=harness(storage);fresh.api.open(board);
+  fresh.take('/api/flash-capabilities').resolve(capabilities);await drain();
+  const lookup=fresh.take('/api/task?request_id=');assert.ok(lookup.url.includes(submitted.payload.request_id));
+  lookup.resolve({task:{id:'refresh-preview',kind:'flash-preview',state:'completed',updated:Date.now()/1000,
+    flash:{preview_intent:{artifact_id:artifact.id,mode:'full',verify:'none',reset_after:true},preview_source:artifact},
+    result:{plan:{id:'refresh-plan',verify:'none',reset_after:true,writes:[{storage:'disk-a',partition:'rootfs',size:32}]}}}});await drain();
+  assert.equal(fresh.get('fl-artifact').value,artifact.id);
+  assert.equal(fresh.get('fl-verify').value,'none');assert.equal(fresh.get('fl-reset-after').checked,true);
+  assert.equal(fresh.get('fl-start').disabled,false);
+  assert.equal(fresh.requests.some(r=>r.url==='/api/flash-plan'||r.url==='/api/task-start'),false);
+});
+
+test('server task history restores an active preview when browser storage is unavailable', async () => {
+  const h=harness();h.api.open(board);h.take('/api/flash-capabilities').resolve(capabilities);await drain();
+  h.take('/api/tasks').resolve({tasks:[{id:'server-preview',kind:'flash-preview',state:'running',
+    progress:{phase:'checking-layout'},flash:{preview_intent:{artifact_id:artifact.id,mode:'full'},preview_source:artifact}}]});await drain();
+  assert.match(h.get('fl-task-id').textContent,/server-preview/);
+  assert.equal(h.get('fl-cancel').textContent,'取消预览');
+  h.take('/api/task?id=server-preview').resolve({task:{id:'server-preview',state:'failed',error:'layout changed'}});await drain();
+  assert.match(h.get('fl-status').textContent,/layout changed/);assert.equal(h.get('fl-start').disabled,true);
+});
+
+test('refresh finds an original flash request even when it is no longer on the first history page', async () => {
+  const storage=new Map(),h=harness(storage);await open(h);h.get('fl-plan').click();
+  h.take('/api/flash-plan').resolve({plan:{id:'fixed-plan',writes:[{storage:'disk-a',partition:'rootfs',size:32}]}});await drain();
+  h.get('fl-start').click();const sent=h.take('/api/task-start');sent.reject(new Error('receipt lost'));await drain();
+  const fresh=harness(storage);fresh.api.open(board);fresh.take('/api/flash-capabilities').resolve(capabilities);await drain();
+  const lookup=fresh.take('/api/task?request_id=');assert.ok(lookup.url.includes(sent.payload.request_id));
+  lookup.resolve({task:{id:'original-write',kind:'flash',state:'running',request_id:sent.payload.request_id,
+    progress:{phase:'writing',done:16,total:32},flash:{request_id:sent.payload.request_id}}});await drain();
+  assert.match(fresh.get('fl-task-id').textContent,/original-write/);
+  assert.equal(fresh.requests.some(r=>r.url==='/api/task-start'||r.url.startsWith('/api/tasks')),false);
+});
+
 test('lost preview response recovers its original request without submitting a new preview', async () => {
   const h=harness();await open(h);h.get('fl-plan').click();const lost=h.take('/api/flash-plan');
   lost.reject(new Error('network response lost'));await drain();assert.equal(h.get('fl-recover').hidden,false);

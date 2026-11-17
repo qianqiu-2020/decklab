@@ -737,11 +737,18 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(code, 409, conflict)
             code, current = self.request(fixture, '/api/task', query={'id': task_id})
             self.assertEqual(current['task']['progress'], {'done': 8, 'total': 32, 'phase': 'expanding-image'})
+            details = current['task']['flash']
+            self.assertEqual(details['preview_source']['id'], image['id'])
+            self.assertEqual(details['preview_intent']['mode'], 'full')
+            self.assertEqual(len(details['preview_progress']['stages']), 6)
+            self.assertTrue(details['preview_progress']['active'])
             self.assertEqual(maintenance_for(fixture.manager).holds('FLASH-A'), [])
             fixture.executor.image_release.set()
             completed = self.terminal(fixture, task_id)
             self.assertEqual(completed['state'], 'completed', completed)
             self.assertTrue(completed['result']['plan']['id'])
+            self.assertEqual(completed['flash']['preview_progress']['state'], 'completed')
+            self.assertFalse(completed['flash']['preview_progress']['active'])
             self.assertNotIn('path', json.dumps(completed['result']))
             self.assertEqual(fixture.executor.executions, [])
 
@@ -758,6 +765,7 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             self.request(fixture, '/api/task-cancel', {'id': task_id})
             completed = self.terminal(fixture, task_id)
             self.assertEqual(completed['state'], 'cancelled', completed)
+            self.assertFalse(completed['flash']['preview_progress']['active'])
             self.assertFalse(fixture.executor.inspection_started.is_set())
             self.assertEqual(fixture.executor.executions, [])
 

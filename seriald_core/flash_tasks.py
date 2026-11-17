@@ -472,9 +472,22 @@ class FlashActions:
                 digest = _digest({'kind': 'flash-preview', 'input': original, 'serial': device.serial})
                 validate_request(payload['request_id'], digest)
                 def run(context):
+                    from .flash_progress import PreviewProgress
+                    source = self.manager.artifacts.get(intent['artifact_id'], actor, device.serial)
+                    self.store.initialize_details(context.id, {
+                        'preview_intent': intent,
+                        'preview_source': {key: source[key] for key in ('id', 'name', 'size', 'sha256')}})
+                    timing = PreviewProgress(self.store, context.id, source, binding.endpoint,
+                        source['name'].lower().endswith(('.gz', '.tgz', '.zip')))
                     def progress(value):
+                        timing.event(value)
                         context.progress(value.get('done', 0), value.get('total', 0), value.get('phase', 'checking-image'))
-                    result = self.plan(original, device, actor, context.check, progress)
+                    success = False
+                    try:
+                        result = self.plan(original, device, actor, context.check, progress)
+                        success = result.status == 200
+                    finally:
+                        timing.finish(success)
                     if result.status != 200:
                         context.store.update(context.id, result=result.payload)
                         raise TaskError(result.payload['error'], result.status)
@@ -927,6 +940,7 @@ class FlashActions:
                         raise TaskError('firmware confirmation cannot change the full package scope')
                     if not full_review and not intent['selections'] and not workspace_import:
                         raise TaskError('select at least one target partition')
+                    timing = None
                     try:
                         source_record = record
                         if workspace_import and payload.get('plan_id'):
@@ -942,11 +956,17 @@ class FlashActions:
                                   and source_record['intent']['artifact_id'] == intent['artifact_id']
                                   and all(value['artifact_id'] == source_record['intent']['artifact_id']
                                           for value in intent['selections']) else None)
+                        from .flash_progress import PreviewProgress
+                        source = self.manager.artifacts.get(intent['artifact_id'], actor, device.serial)
+                        timing = PreviewProgress(self.store, task_id, source, binding.endpoint,
+                            source['name'].lower().endswith(('.gz', '.tgz', '.zip')))
+                        preview_succeeded = False
                         def preview_progress(value):
-                            self.store.update_details(task_id, {'preview_progress': dict(value, active=True)})
+                            timing.event(value)
                         selected = self._make_plan(binding, executor, intent, actor, device.serial,
                                                    operation.check, task_id, prepared=cached,
                                                    baseline_record=record, on_event=preview_progress)
+                        preview_succeeded = True
                     except BaseException as error:
                         if getattr(error, 'stage', None) in ('image-plan', 'check-plan'):
                             self.store.append_event(task_id, {'event': 'error', 'phase': 'preview-failed',
@@ -961,7 +981,10 @@ class FlashActions:
                                 waiter['event'].set()
                         raise
                     finally:
-                        self.store.update_details(task_id, {'preview_progress': {'active': False}})
+                        if timing is not None:
+                            timing.finish(preview_succeeded)
+                        else:
+                            self.store.update_details(task_id, {'preview_progress': {'active': False}})
                     operation.check()
                     current_layout = (selected.get('inspection') or {}).get('layout_digest') or selected['executor_plan'].get('layout_digest')
                     if full_review and (_write_scope(selected['executor_plan']) != _write_scope(record['executor_plan'])

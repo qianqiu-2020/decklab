@@ -12,6 +12,60 @@
     var renderedBackup = '', automaticDownloadIdentity = '';
     var bootPriorityRequest = null;
     var progressSample = null, previewTask = null, previewRequestId = '';
+    var previewProgress = null;
+    function operationReference(selected, value) {
+      try {
+        if (!global.sessionStorage) return null;
+        var key = 'decklab-flash-task:' + (selected.target_id || selected.serial || selected.key);
+        if (value === undefined) return global.sessionStorage.getItem(key);
+        if (value) global.sessionStorage.setItem(key, value);
+        else global.sessionStorage.removeItem(key);
+      } catch (_) { /* Original tasks remain in server history. */ }
+      return null;
+    }
+    function previewUpdate(current) {
+      previewTask = current;
+      previewProgress = current.flash && current.flash.preview_progress || null;
+      updateControls();
+      var p = current.progress || {};
+      setProgress(p.phase || 'checking-image', p.done, p.total, ['queued','running'].includes(current.state));
+      $('fl-task-details').hidden = false;
+      $('fl-task-id').textContent = current.id + ' · ' + current.state;
+      $('fl-task-status').textContent = current.error || '';
+    }
+    function usePreview(result) {
+      var value = result.plan || result;
+      if (result.requires_prepare || value.requires_prepare) value.ready = false;
+      if (!(value.id || value.plan_id || result.plan_id)) throw new Error('刷机计划缺少写入范围，不能执行。');
+      if (value.ready !== false && (!Array.isArray(value.writes) || !value.writes.length)) throw new Error('刷机计划缺少写入范围，不能执行。');
+      if (value.mode) $('fl-mode').value = value.mode;
+      plan = value; plan.id = value.id || value.plan_id || result.plan_id; requestId = id();
+      if (result.inspection) { inspection = result.inspection; renderPartitions(); renderStorages(); }
+      previewRequestId = ''; setProgress('image-ready', 0, 0, false); renderPlan(plan);
+      status('计划已准备，请核对板卡和全部写入范围后开始。');
+    }
+    async function resumePreview(current, selected, seq) {
+      busy = true; previewRequestId = current.request_id || operationReference(selected) || '';
+      var details = current.flash || {}, intent = details.preview_intent || {};
+      if (details.preview_source) artifacts = [details.preview_source];
+      if (intent.mode) $('fl-mode').value = intent.mode;
+      if (intent.verify) $('fl-verify').value = intent.verify;
+      $('fl-reset-after').checked = !!intent.reset_after;
+      if (intent.artifact_id) artifactOptions($('fl-artifact'), intent.artifact_id);
+      if (intent.target_storage) $('fl-target-storage').value = intent.target_storage;
+      try {
+        if (!capabilities) {
+          var caps = await client.request('/api/flash-capabilities?' + query(selected).slice(1));
+          if (!same(selected, seq)) return;
+          capabilities = caps.capabilities || caps;
+        }
+        var result = await client.watch(current, {key:selected.key || '',serial:selected.serial || ''}, function (value) {
+          if (same(selected, seq)) previewUpdate(value);
+        });
+        if (same(selected, seq)) usePreview(result);
+      } catch (error) { if (same(selected, seq)) status(error.message, true); }
+      finally { if (same(selected, seq)) { busy = false; previewTask = null; updateControls(); } }
+    }
     function status(message, failed) { $('fl-status').textContent = message; $('fl-status').dataset.error = failed ? 'true' : ''; }
     function renderSource() {
       var source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
@@ -168,8 +222,10 @@
     }
     function invalidatePlan() {
       dismissDelete();
+      if (plan && board) operationReference(board, null);
       plan = null; requestId = ''; submissionUnknown = false;
       selectionPlan = null; selectionRequestId = '';
+      previewProgress = null; $('fl-preview-stages').textContent = ''; $('fl-preview-overall').hidden = true;
       $('fl-preview').textContent = '';
       $('fl-start').disabled = true;
       status('');
@@ -245,6 +301,7 @@
       $('fl-cancel').textContent = previewTask ? '取消预览' : nor && selecting ? '结束准备并保留备份' : '取消刷机';
       if (nor && selecting && !uploading) {
         var preview = task.flash && task.flash.preview_progress;
+        previewProgress = preview && preview.stages ? preview : null;
         if (preview && preview.active) setProgress(preview.phase, preview.done, preview.total, true);
         else setProgress('awaiting-selection', 0, 0, false);
       }
@@ -532,6 +589,30 @@
       }
       if (phase === 'writing') $('fl-progress-text').textContent += ' · 按展开载荷计数，非 USB 传输量';
       bar.setAttribute('aria-valuetext', $('fl-progress-text').textContent);
+      drawPreviewProgress(names);
+    }
+    function drawPreviewProgress(names) {
+      var box = $('fl-preview-stages'), overall = $('fl-preview-overall'); box.textContent = '';
+      $('fl-execution-title').textContent = translate(previewProgress ? '预览写入范围' : '刷写与校验');
+      overall.hidden = !previewProgress;
+      if (!previewProgress) return;
+      $('fl-execution').hidden = false;
+      var pending = 0, completed = 0, now = Date.now()/1000;
+      (previewProgress.stages || []).forEach(function (step) {
+        var elapsed = Number(step.elapsed_seconds) || 0, estimate = Number(step.estimated_seconds) || 0;
+        if (step.state === 'running' && previewProgress.active) elapsed += Math.max(0, now-previewProgress.updated);
+        var left = step.state === 'pending' ? estimate : step.state === 'running' ? Math.max(1, estimate-elapsed) : 0;
+        pending += left; completed += ['completed','skipped'].includes(step.state) ? estimate : step.state === 'running' ? Math.min(elapsed,estimate*.98) : 0;
+        var label = {pending:'等待',running:'进行中',completed:'完成',skipped:'无需执行',failed:'未完成'}[step.state];
+        var row = text('li', translate(names[step.phase] || step.phase) + ' · ' + translate(label)
+          + (step.state === 'completed' ? ' · ' + Math.ceil(elapsed) + ' ' + translate('秒') : ''), box);
+        row.dataset.state = step.state;
+      });
+      var percent = previewProgress.state === 'completed' ? 100 : Math.min(99, Math.floor(100*completed/Math.max(1,completed+pending)));
+      $('fl-overall-bar').value = percent;
+      var seconds = Math.ceil(pending), duration = seconds < 60 ? seconds + ' ' + translate('秒') : Math.ceil(seconds/60) + ' ' + translate('分钟');
+      $('fl-overall-text').textContent = translate('整体预览进度') + ' · ' + percent + '%'
+        + (previewProgress.active ? ' · ' + translate(previewProgress.sample_count ? '预计剩余' : '初步估算剩余') + ' ' + duration : '');
     }
     function renderPartitions() {
       var box = $('fl-partitions'), previous = {};
@@ -754,14 +835,41 @@
       select.value = board && board.target_id || '';
     }
     async function loadHistory(selected, seq, existing) {
-      if (existing) { observe(existing, selected, seq); return true; }
-      var records = await client.request(taskQuery(selected, 20));
+      if (existing) {
+        if (existing.kind === 'flash-preview') await resumePreview(existing, selected, seq);
+        else observe(existing, selected, seq);
+        return true;
+      }
+      var reference = operationReference(selected);
+      if (reference) {
+        try {
+          var original = await client.request('/api/task?request_id=' + encodeURIComponent(reference) + query(selected));
+          if (!same(selected, seq)) return true;
+          if (original.task.kind === 'flash-preview' && (['queued','running'].includes(original.task.state)
+              || Date.now()/1000-original.task.updated < 600)) {
+            await resumePreview(original.task, selected, seq); return true;
+          }
+          if (['flash','flash-inspect'].includes(original.task.kind)) {
+            observe(original.task, selected, seq); return true;
+          }
+        } catch (error) {
+          if (!same(selected, seq)) return true;
+          if (![403,404].includes(error.status)) { submissionUnknown = true; previewRequestId = reference; status(error.message,true); updateControls(); return true; }
+        }
+        operationReference(selected, null);
+      }
+      var records = await client.request(taskQuery(selected, 100));
       if (!same(selected, seq)) return true;
       var current = (records.tasks || []).find(function (entry) {
-        return (entry.kind === 'flash' || entry.kind === 'flash-inspect') && (['queued', 'running'].indexOf(entry.state) >= 0
+        return ['flash','flash-inspect','flash-preview'].includes(entry.kind) && (['queued', 'running'].indexOf(entry.state) >= 0
           || entry.flash && entry.flash.recovery_required === true);
       });
-      if (current) { observe(current, selected, seq); return true; }
+      if (!current) current = (records.tasks || []).find(function (entry) { return ['flash','flash-inspect','flash-preview'].includes(entry.kind); });
+      if (current) {
+        if (current.kind === 'flash-preview') await resumePreview(current, selected, seq);
+        else observe(current, selected, seq);
+        return true;
+      }
       return false;
     }
     async function selectTarget(target) {
@@ -915,6 +1023,7 @@
         status('请选择至少一个分区及其载荷。'); return;
       }
       invalidatePlan(); busy = true; previewTask = null; previewRequestId = id(); updateControls();
+      operationReference(selected, previewRequestId);
       setProgress('checking-upload', 0, 0, true); status('正在核对镜像和现场布局…');
       try {
         var payload = Object.assign(scope(selected), {
@@ -926,9 +1035,7 @@
         var result = await client.request('/api/flash-plan', payload); responseReceived = true;
         if (result.task) result = await client.watch(result.task, {key:selected.key || '',serial:selected.serial || ''}, function (current) {
           if (!same(selected, seq)) return;
-          previewTask = current; updateControls();
-          var p = current.progress || {};
-          setProgress(p.phase || 'checking-image', p.done, p.total, ['queued','running'].includes(current.state));
+          previewUpdate(current);
           status('正在核对镜像和现场布局…');
         });
         if (!same(selected, seq)) return;
@@ -1061,6 +1168,8 @@
     }
     function observe(current, selected, seq) {
       if (!same(selected, seq)) return;
+      var originalRequest = current.request_id || current.flash && current.flash.request_id;
+      if (originalRequest) operationReference(selected, originalRequest);
       var restoring = !capabilities && (!task || task.id !== current.id) && selected.target_id;
       restoreTaskScope(current, selected);
       renderTask(current); loadEvents(selected, seq, current);
@@ -1106,10 +1215,11 @@
       var selected = board, seq = sequence, fixed = plan;
       busy = true; updateControls(); status('正在提交刷机任务…');
       try {
+        operationReference(selected, requestId);
         var result = await client.request('/api/task-start', Object.assign(scope(selected), {
           kind: 'flash', plan_id: fixed.id, binding_revision: fixed.binding_revision === undefined
             ? capabilities.binding_revision : fixed.binding_revision, request_id: requestId }));
-        if (same(selected, seq)) { plan = null; observe(result.task, selected, seq); }
+        if (same(selected, seq)) { operationReference(selected, null); plan = null; previewProgress = null; observe(result.task, selected, seq); }
       } catch (error) {
         if (!same(selected, seq)) return;
         if (!error.result || error.status >= 500) {
@@ -1128,8 +1238,7 @@
           busy = true; submissionUnknown = false; updateControls();
           var recovered = await client.watch(original.task, {key:selected.key || '',serial:selected.serial || ''}, function (current) {
             if (!same(selected, seq)) return;
-            previewTask = current; updateControls();
-            var progress = current.progress || {}; setProgress(progress.phase, progress.done, progress.total, ['queued','running'].includes(current.state));
+            previewUpdate(current);
           });
           if (!same(selected, seq)) return;
           if (recovered.plan && (recovered.plan.id || recovered.plan.plan_id)) {
@@ -1323,6 +1432,10 @@
     }
     async function open(selected, existing) {
       if (uploading) { $('flash-dialog').show(); return; }
+      var identity = function (value) { return value && (value.target_id || value.serial || value.key); };
+      if (!existing && board && (!selected || identity(board) === identity(selected)
+          && (!selected.target_generation || !board.target_generation || selected.target_generation === board.target_generation))
+          && (busy || task || plan || submissionUnknown)) { $('flash-dialog').show(); return; }
       sourceInspection = null; sourceCatalogue = null; sourceAnalysedId=''; $('fl-package-contents').textContent='';
       board = selected || {}; selected = board; var seq = ++sequence; clearTimeout(pollTimer);
       busy = false; previewTask = null; previewRequestId = ''; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; $('fl-execution').hidden = true; cursor = 0; eventLines = []; ++eventSequence;
@@ -1343,7 +1456,8 @@
       discovered = []; renderDiscovered();
       $('flash-dialog').show(); status('正在读取刷机能力…');
       if (selected.target_id && existing) {
-        observe(existing, selected, seq);
+        if (existing.kind === 'flash-preview') await resumePreview(existing, selected, seq);
+        else observe(existing, selected, seq);
         return;
       }
       if (!selected.serial || selected.target_id) {

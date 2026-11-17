@@ -31,7 +31,7 @@ function backup(id, phase, bytes) {
       description:name==='esos'?'<img src=x onerror=window.norInjected=1>':undefined,
       built_at:!['env','bootinfo'].includes(name)?'2026-11-14T00:00:00+00:00':null}}))};
 }
-let previewTask = null;
+let previewTask = null, previewSubmissions = 0;
 let current = null, upload = Buffer.alloc(0), artifact = null, preview = null, rejectPreview = true, urlDownloads = 0;
 const packageArtifact = {id:'9'.repeat(24),name:'firmware-fixture.tar.gz',size:2<<20,sha256:'a'.repeat(64),state:'ready'};
 const urlArtifact = {id:'8'.repeat(24),name:'url-fixture.itb',size:512,sha256:'b'.repeat(64),state:'ready'};
@@ -48,12 +48,23 @@ const server = http.createServer((req,res) => {
           nor_workspace_supported:true,storage_inventory_supported:true,binding_revision:1,modes:['full','partitions'],artifacts:[],storages:[],
           executor:{provider:'goflash',node:'local',endpoint:'fixture-only'},console:null}});
         if(url.pathname==='/api/flash-plan') {
+          previewSubmissions++;
           assert.equal(payload.mode,'full');assert.deepEqual(payload.selections,[]);
           assert.ok(payload.request_id);
-          previewTask={id:'browser-preview',kind:'flash-preview',state:'running',progress:{phase:'expanding-image',done:1024,total:2048}};
-          setTimeout(()=>{previewTask={id:'browser-preview',kind:'flash-preview',state:'completed',result:{plan:{id:'full-package-preview',ready:false,confirm_after_prepare:true,write_layout:true,
+          const timing={active:true,state:'running',sample_count:0,updated:Date.now()/1000,stages:[
+            {phase:'checking-upload',state:'completed',elapsed_seconds:2,estimated_seconds:2},
+            {phase:'checking-image-sha256',state:'completed',elapsed_seconds:2,estimated_seconds:2},
+            {phase:'expanding-image',state:'running',elapsed_seconds:3,estimated_seconds:6},
+            {phase:'checking-payloads',state:'pending',estimated_seconds:4},
+            {phase:'checking-layout',state:'pending',estimated_seconds:5},
+            {phase:'reading-payload-metadata',state:'pending',estimated_seconds:3}]};
+          previewTask={id:'browser-preview',kind:'flash-preview',state:'running',request_id:payload.request_id,
+            flash:{preview_intent:{artifact_id:packageArtifact.id,mode:'full',verify:'none'},preview_source:packageArtifact,preview_progress:timing},
+            progress:{phase:'expanding-image',done:1024,total:2048}};
+          setTimeout(()=>{previewTask={...previewTask,state:'completed',flash:{...previewTask.flash,
+            preview_progress:{...timing,active:false,state:'completed',stages:timing.stages.map(step=>({...step,state:'completed',elapsed_seconds:step.estimated_seconds}))}},result:{plan:{id:'full-package-preview',ready:false,confirm_after_prepare:true,write_layout:true,
             writes:parts.map(([name,offset,size])=>({storage:'active',partition:name,offset,size,capacity:size})),
-            erase_ranges:[{storage:'active',offset:0,size:before.length}],warnings:['模拟整包恢复会擦除 env']}}};},1800);
+            erase_ranges:[{storage:'active',offset:0,size:before.length}],warnings:['模拟整包恢复会擦除 env']}}};},4000);
           res.statusCode=202;return json({task:previewTask});
         }
         if(url.pathname==='/api/image-download') {urlDownloads++;return json({task:{id:'url-fixture-download',state:'running'}});}
@@ -100,6 +111,8 @@ const server = http.createServer((req,res) => {
       'formatBytes:n=>n>=1048576?(n/1048576).toFixed(1)+" MiB":n>=1024?(n/1024).toFixed(1)+" KiB":n+" B"});ui.open('+JSON.stringify(target)+');</script></body></html>');
   }
   if(url.pathname==='/api/tasks') return json({tasks:current?[current]:[]});
+  if(url.pathname==='/api/flash-capabilities') return json({capabilities:{supported:true,preparable:true,nor_workspace_supported:true,storage_inventory_supported:true,binding_revision:1,modes:['full','partitions'],artifacts:[packageArtifact],storages:[]}});
+  if(url.pathname==='/api/task' && previewTask && url.searchParams.get('request_id')===previewTask.request_id) return json({task:previewTask});
   if(url.pathname==='/api/task' && url.searchParams.get('id')==='browser-preview') return json({task:previewTask});
   if(url.pathname==='/api/task') return json({task:url.searchParams.get('id')==='url-fixture-download'
     ? {id:'url-fixture-download',state:'completed',result:{artifact:urlArtifact}} : current});
@@ -141,8 +154,15 @@ let chrome,ws;
   await evaluate('document.querySelector("#fl-store").click();window.fixtureChooseFile('+JSON.stringify(packageArtifact)+');document.querySelector("#fl-plan").click()');
   await wait('document.querySelector("#fl-progress-text").textContent.includes("解压镜像")');
   assert.ok(await evaluate('document.querySelector("#fl-progress-text").textContent.includes("50%")'));
+  assert.equal(await evaluate('document.querySelectorAll("#fl-preview-stages li").length'),6);
+  assert.ok(await evaluate('document.querySelector("#fl-overall-text").textContent.includes("初步估算剩余")'));
+  await evaluate('document.querySelector("#fl-close").click();ui.open('+JSON.stringify(target)+')');
+  assert.equal(previewSubmissions,1);
   await shot('image-preview-progress-fixture');
+  await rpc('Page.reload');
+  await wait('document.querySelector("#fl-task-id") && document.querySelector("#fl-task-id").textContent.includes("browser-preview")');
   await wait('document.querySelector("#fl-start").disabled===false');
+  assert.equal(previewSubmissions,1,'reload resumes the original preview; no resubmission');
   assert.ok(await evaluate('document.querySelector("#fl-preview").textContent.includes("模拟整包恢复会擦除 env")'));
   assert.equal(await evaluate('document.querySelectorAll("#fl-partitions input:checked").length'),0);
   await shot('full-package-preview-light-fixture');

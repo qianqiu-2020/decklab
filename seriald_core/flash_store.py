@@ -127,6 +127,11 @@ class FlashStore:
             document['request_id'] = request['request_id']
         return public_plan(document)
 
+    def initialize_details(self, task_id, values):
+        encoded = encode_document(values)
+        with self.store.lock, self.store.db:
+            self.store.db.execute('INSERT INTO flash_details VALUES(?,?,0)', (task_id, encoded))
+
     def update_details(self, task_id, values):
         encode_document(values)
         with self.store.lock, self.store.db:

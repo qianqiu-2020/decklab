@@ -418,6 +418,9 @@
   .fl-preview>p[data-i18n-ignore]{padding:8px 12px;border-radius:7px;background:var(--surface-2);color:var(--ink-2);font-family:var(--font-mono);font-size:11.5px}
   .fl-progress-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.fl-progress-heading h3{margin-bottom:0}
   #fl-progress-text{font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums;text-align:right}
+  .fl-preview-stages{display:flex;flex-wrap:wrap;gap:8px 20px;margin:12px 0 0;padding-left:20px;color:var(--ink-2);font-size:12px}
+  .fl-preview-stages li[data-state="running"]{color:var(--accent);font-weight:600}.fl-preview-stages li[data-state="completed"]{color:var(--ink)}
+  #fl-overall-text{font-size:13px;font-variant-numeric:tabular-nums;margin:12px 0 4px}
   .flash-dialog progress{-webkit-appearance:none;appearance:none;width:100%;height:8px;margin:14px 0 4px;border:0;border-radius:99px;background:var(--surface-2);overflow:hidden;accent-color:var(--accent)}
   .flash-dialog progress::-webkit-progress-bar{background:var(--surface-2);border-radius:99px}
   .flash-dialog progress::-webkit-progress-value{background:var(--accent);border-radius:99px}

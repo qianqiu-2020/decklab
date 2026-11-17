@@ -108,7 +108,7 @@
           : task.result.serial ? 'SN ' + task.result.serial
           : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || task.progress.phase || '';
         main.appendChild(output); row.appendChild(main);
-        if ((task.kind === 'flash' || task.kind === 'flash-inspect') && options.openFlash) {
+        if (['flash','flash-inspect','flash-preview'].includes(task.kind) && options.openFlash) {
           var inspect = document.createElement('button'); inspect.type = 'button'; inspect.textContent = '查看刷机';
           inspect.addEventListener('click', function () { if (sameSelection(selected)) options.openFlash(task); });
           row.appendChild(inspect);
