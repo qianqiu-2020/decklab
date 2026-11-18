@@ -1117,6 +1117,7 @@ class LocalFlashExecutor:
                         'image-file-missing': '镜像载荷或临时缓存文件不存在，请重新预览',
                         'image-permission-denied': '控制机没有读取镜像或写入缓存的权限',
                         'system-package-loader-unsupported': '所选加载器不支持安全整包写入系统盘。可选用支持系统盘核对的 DeckLab 内置加载器',
+                        'target-permission-denied': '控制机无权打开重新连接的 USB 下载设备。请检查安装包的 USB 权限规则后重新检测',
                         'image-archive-corrupt': '镜像压缩包不完整或校验失败，请重新下载',
                         'image-invalid': '镜像格式或包内布局无效'}
                     if event.get('code') in reasons:
