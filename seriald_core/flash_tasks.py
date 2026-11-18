@@ -1222,10 +1222,8 @@ class FlashOperation:
                     self.resolved_serial = _discovery(self.manager).accept_eeprom_identity(
                         self.binding.target_id, self.final_generation, identity, context.id, self.attempt_id) or record['serial']
                     if identity.get('eeprom-serial') and identity.get('eeprom-serial') == identity.get('serialno'):
-                        profile = dict(self.binding.profile_data, identity=dict(self.binding.profile_data.get('identity') or {},
-                            **{'serialno': self.resolved_serial, 'eeprom-serial': self.resolved_serial}))
-                        self.binding = replace(self.binding, profile_data=profile)
-                        record['execution_profile'] = profile
+                        # The accepted serial belongs to this task and USB generation.
+                        # Keep the profile sealed into the imported plan intact.
                         store.update_details(context.id, {'resolved_serial': self.resolved_serial, 'serial_source': 'eeprom', 'request_serial': record['serial']})
                     store.update_details(context.id, {'execution_device': final_device,
                                                        'allowed_final_generation': self.final_generation})

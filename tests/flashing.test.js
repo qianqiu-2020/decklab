@@ -304,10 +304,10 @@ test('cached image selection explains the required NOR read instead of promising
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
 });
 
-test('OS package in a read workspace compares system partitions and previews all referenced targets without NOR checks', async () => {
+test('OS package in a read workspace previews GPT and all package payloads without selecting partitions', async () => {
   const h=harness();h.api.open(norTarget,norReady);await drain();
   h.get('fl-cache').click();h.chooseImage({id:'os-package',name:'os.tar.gz',size:1024});
-  const inspect=h.take('/api/flash-selection');assert.equal(inspect.payload.mode,'partitions');
+  const inspect=h.take('/api/flash-selection');assert.equal(inspect.payload.mode,'full');
   assert.match(h.get('fl-progress-text').textContent, /解析镜像包/);
   assert.equal(inspect.payload.artifact_id,'os-package');assert.deepEqual(inspect.payload.selections,[]);
   const os={layout_digest:'os-gpt',storages:[{id:'active',physical_device:'scsi:0',label:'System disk scsi:0',partitions:[
@@ -327,9 +327,12 @@ test('OS package in a read workspace compares system partitions and previews all
   assert.equal(h.get('fl-mode').value,'full');assert.equal(h.get('fl-partitions').children[0].partitionId,'ESP');
   h.get('fl-select').click();const preview=h.take('/api/flash-selection');
   assert.equal(preview.payload.plan_id,'catalogue-os');assert.equal(preview.payload.layout_digest,'nor-live');
-  assert.deepEqual(preview.payload.selections.map(item=>item.partition),['ESP','rootfs']);
+  assert.equal(preview.payload.mode,'full');assert.deepEqual(preview.payload.selections,[]);
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
-  preview.resolve({plan:{id:'write-os',writes:[{storage:'active',partition:'ESP',size:2},{storage:'active',partition:'rootfs',size:3}]}});await drain();
+  preview.resolve({plan:{id:'write-os',write_layout:true,confirm_after_prepare:true,writes:[
+    {storage:'active',partition:'layout',kind:'layout',target:'gpt',size:1},
+    {storage:'active',partition:'ESP',size:2},{storage:'active',partition:'rootfs',size:3}]}});await drain();
+  assert.match(h.get('fl-preview').textContent,/覆盖系统盘 GPT/);
   assert.match(h.get('fl-select').textContent,/确认包内全部/);
   h.get('fl-select').click();const commit=h.take('/api/flash-selection');assert.equal(commit.payload.plan_id,'write-os');
   assert.equal(commit.payload.preview,undefined);assert.equal(commit.payload.artifact_id,undefined);
@@ -351,7 +354,7 @@ test('NOR Firmware verification changes never inherit the default UFS system dis
   assert.equal(h.get('fl-select').disabled,false);assert.equal(h.get('fl-verify').value,'none');
   h.get('fl-select').click();const preview=h.take('/api/flash-selection');
   assert.equal('target_storage' in preview.payload,false);assert.equal(preview.payload.verify,'none');
-  assert.deepEqual(preview.payload.selections.map(x=>x.partition),['opensbi','env']);
+  assert.equal(preview.payload.mode,'full');assert.deepEqual(preview.payload.selections,[]);
 });
 
 test('missing package catalogue can be explicitly reparsed and previewed without a disabled dead end', async () => {
@@ -374,7 +377,7 @@ test('missing package catalogue can be explicitly reparsed and previewed without
   const preview=h.take('/api/flash-selection');
   assert.equal(preview.payload.preview,true);assert.equal(preview.payload.plan_id,'retry-catalogue');
   assert.equal(preview.payload.reset_after,true);
-  assert.deepEqual(preview.payload.selections.map(x=>x.partition),['opensbi','env']);
+  assert.equal(preview.payload.mode,'full');assert.deepEqual(preview.payload.selections,[]);
   preview.resolve({plan:{id:'retry-write-preview',reset_after:true,writes:[{storage:'active',partition:'opensbi',size:32}]}});await drain();
   assert.match(h.get('fl-select').textContent,/确认包内全部/);
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'||r.payload && r.url==='/api/flash-selection' && !r.payload.preview),false);
@@ -397,9 +400,12 @@ test('reparsing for a partition preview retains only the explicitly selected par
   h.api.open(norTarget,norReady);await drain();h.get('fl-cache').click();h.chooseImage(pkg);
   h.take('/api/flash-selection').resolve({error:'fixture import failed'},409);await drain();
   h.get('fl-mode').value='partitions';h.get('fl-mode').emit('change');
-  const row=h.get('fl-partitions').children[0];row.checkbox.checked=true;row.artifactSelect.value=pkg.id;row.checkbox.emit('change');
-  h.get('fl-select').click();h.take('/api/flash-selection').resolve({plan:{id:'partition-retry-catalogue',verify:'if-supported',writes:[]},
+  const refresh=h.take('/api/flash-selection');
+  assert.equal(refresh.payload.mode,'partitions');
+  refresh.resolve({plan:{id:'partition-retry-catalogue',verify:'if-supported',writes:[]},
     inspection:norReady.flash.inspection,payload_candidates:['opensbi','env'].map(partition=>({storage:'active',partition,artifact_id:pkg.id}))});await drain();
+  const row=h.get('fl-partitions').children[0];row.checkbox.checked=true;row.artifactSelect.value=pkg.id;row.checkbox.emit('change');
+  h.get('fl-select').click();
   const preview=h.take('/api/flash-selection');
   assert.equal(preview.payload.preview,true);assert.deepEqual(preview.payload.selections.map(x=>x.partition),['opensbi']);
   assert.equal(preview.payload.target_generation,'brom-original');

@@ -460,9 +460,14 @@ class LocalFlashExecutor:
             if not storages[0].get('sparse'):
                 raise FlashRunnerError('system payload transfer capability missing')
             storages[0]['sparse'] = original_storages[0].get('sparse', False)
-            if k1_active_system and storages[0].get('layout_target') == 'gpt' and storages[0].get('sector_size') == 512:
+            if (storages[0].get('layout_target') == 'gpt'
+                    and (k1_active_system and storages[0].get('sector_size') == 512
+                         or protocol == 'spacemit-ram-v1' and candidate.get('chip_family') == 'k3')):
                 storages[0].pop('layout_target')
-                storages[0]['sector_size'] = original_storages[0]['sector_size']
+                if original_storages[0].get('layout_target') == 'gpt':
+                    original_storages[0].pop('layout_target')
+                if k1_active_system:
+                    storages[0]['sector_size'] = original_storages[0]['sector_size']
         if protocol == 'spacemit-ram-v1' and storages == [nor_catalogue]:
             candidate['storages'] = baseline['storages']
         if (isinstance(storages, list) and len(storages) == 1 and isinstance(storages[0], dict)
@@ -1122,6 +1127,7 @@ class LocalFlashExecutor:
                         'image-permission-denied': '控制机没有读取镜像或写入缓存的权限',
                         'system-package-loader-unsupported': '所选加载器不支持安全整包写入系统盘。可选用支持系统盘核对的 DeckLab 内置加载器',
                         'system-disk-unavailable': 'K1 下载环境未检测到可使用 partition_universal.json 的系统盘，请检查存储介质和启动模式',
+                        'system-disk-selection-required': '请在「读取设备存储」工作区中明确选择目标系统盘',
                         'target-permission-denied': '控制机无权打开重新连接的 USB 下载设备。请检查安装包的 USB 权限规则后重新检测',
                         'image-archive-corrupt': '镜像压缩包不完整或校验失败，请重新下载',
                         'image-invalid': '镜像格式或包内布局无效'}

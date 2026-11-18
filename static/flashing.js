@@ -187,6 +187,7 @@
     function changeMode() {
       rememberImage(); invalidatePlan();
       $('fl-storage-details').open = $('fl-mode').value === 'partitions' && !task;
+      if (workspaceSelection()) inspectSource();
       renderReplacementInfo($('fl-mode').value === 'full' ? sourceCatalogue : null);
     }
     function translate(value) { return global.SerialdI18n ? global.SerialdI18n.translate(value) : value; }
@@ -413,7 +414,7 @@
       $('fl-reset-after').disabled = busy || uploading || submissionUnknown || !!active && !selecting
         || !capabilities || !capabilities.reset_after_supported;
       if (workspace) Array.from($('fl-mode').children).forEach(function (option) { option.disabled = false; });
-      $('fl-mode').title = workspace ? '整包选择刷机配置引用的全部目标分区，保留现场分区表。' : '';
+      $('fl-mode').title = '';
       $('fl-local').disabled = busy || submissionUnknown || !!active && !selecting || !uploadAvailable;
       $('fl-files').disabled = $('fl-local').disabled;
       $('fl-store').disabled = $('fl-local').disabled;
@@ -1533,9 +1534,9 @@
         await inspectSource();
         if (!same(selectedBoard, seq) || !workspaceSelection() || task.id !== taskId || !sourceCatalogue) return;
       }
-      var chosen = fullConfirmation() ? [] : workspaceSelection() && sourceCatalogue && $('fl-mode').value === 'full'
-        ? payloadCandidates.filter(function (item, index, all) { return item.storage && item.partition && all.findIndex(function (other) { return other.storage === item.storage && other.partition === item.partition; }) === index; }).map(function (item) { return {storage:item.storage, partition:item.partition, artifact_id:$('fl-artifact').value}; }) : selections();
-      if (!fullConfirmation() && (!chosen.length || chosen.some(function (entry) { return !entry.artifact_id; }))) {
+      var fullPackage = workspaceSelection() && sourceCatalogue && $('fl-mode').value === 'full';
+      var chosen = fullConfirmation() || fullPackage ? [] : selections();
+      if (!fullConfirmation() && !fullPackage && (!chosen.length || chosen.some(function (entry) { return !entry.artifact_id; }))) {
         status('请选择至少一个分区及其载荷。'); return;
       }
       var selected = board, seq = sequence, current = task;
@@ -1548,7 +1549,7 @@
           payload.reset_after = !!$('fl-reset-after').checked;
           if (workspaceSelection()) payload.verify = $('fl-verify').value;
           if (workspaceSelection() && sourceCatalogue) {
-            payload.artifact_id = $('fl-artifact').value; payload.mode = 'partitions'; payload.verify = $('fl-verify').value;
+            payload.artifact_id = $('fl-artifact').value; payload.mode = $('fl-mode').value; payload.verify = $('fl-verify').value;
             payload.plan_id = sourceCatalogue.id || sourceCatalogue.plan_id;
             if (sourceCatalogue.target_storage) payload.target_storage = sourceCatalogue.target_storage;
           }
@@ -1845,7 +1846,7 @@
     $('fl-target-storage').addEventListener('change', function () { invalidatePlan(); if (workspaceSelection()) inspectSource(); });
     $('fl-local').addEventListener('click', function () { if (!$('fl-local').disabled) $('fl-files').click(); });
     $('fl-files').addEventListener('change', upload); $('fl-plan').addEventListener('click', makePlan);
-    function sourceIdentity() { return [task && task.id, $('fl-artifact').value, $('fl-target-storage').value, $('fl-verify').value].join('/'); }
+    function sourceIdentity() { return [task && task.id, $('fl-artifact').value, $('fl-mode').value, $('fl-target-storage').value, $('fl-verify').value].join('/'); }
     async function inspectSource() {
       var artifact = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
       if (!workspaceSelection() || busy || uploading || !packageFile(artifact) || !imageReady()) return;
@@ -1867,7 +1868,7 @@
       }, 1000);
       try {
         var payload = Object.assign(scope(selected), {id: current.id, preview: true,
-          artifact_id: artifactId, mode: 'partitions', verify: $('fl-verify').value,
+          artifact_id: artifactId, mode: $('fl-mode').value, verify: $('fl-verify').value,
           selections: [], layout_digest: current.flash.inspection.layout_digest, reset_after: !!$('fl-reset-after').checked});
         if (targetStorage) payload.target_storage = targetStorage;
         var result = await client.request('/api/flash-selection', payload);
