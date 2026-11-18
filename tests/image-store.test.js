@@ -57,6 +57,14 @@ function setup(request, storage=new Map()){
   assert.equal(pairCalls.filter(c=>c.url==='/api/image-download').length,2);assert.equal(paired.watches.length,2);
   paired.watches[0].resolve({artifact:{id:'os-selected',name:pairedOS.name}});paired.watches[1].resolve({artifact:{id:'fw-selected',name:pairedFW.name}});await flush();await flush();
   assert.equal(pairChoice.id,'os-selected');assert.equal(pairChoice.firmware.id,'fw-selected');
+  let cachedPair;
+  const savedPair=setup((url,payload)=>Promise.resolve(url.startsWith('/api/image-catalog')
+    ? {entries:[{...pairedOS,download_state:'cached'},{...pairedFW,download_state:'cached'}]}
+    : {task:{id:payload.name,state:'completed',result:{artifact:{id:payload.name,name:payload.name}}}}));
+  savedPair.store.open(artifact=>{cachedPair=artifact;});await flush();
+  savedPair.buttons().find(n=>n.textContent==='使用缓存').fire();await flush();
+  assert.equal(cachedPair.id,pairedOS.name);assert.equal(cachedPair.firmware.id,pairedFW.name);
+  assert.equal(savedPair.watches.length,0);assert.equal(savedPair.ids['is-downloads'].children.length,0);
   const k1FirmwareA={...pairedFW,name:'Debian-13-Firmware-K1-v1.0rc1-202611170426.tar.gz',url:'https://repo/fw-a.tar.gz'};
   const k1FirmwareB={...pairedFW,name:'Debian-13-Firmware-K1-v1.0rc1-202611172244.tar.gz',url:'https://repo/fw-b.tar.gz'};
   const k1OsA={...pairedOS,name:'Debian-13-GNOME-K1-v1.0rc1-202611170438.tar.gz',url:'https://repo/os-a.tar.gz'};

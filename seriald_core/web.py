@@ -220,10 +220,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if route in ('/api/image-catalog', '/api/image-library'):
             try:
-                from .image_catalog import catalog, library
-                result = (library(self.manager, self.headers.get('X-Seriald-Actor', 'web'), (q.get('serial') or [None])[0]) if route == '/api/image-library' else
-                          catalog((q.get('source') or ['public'])[0], (q.get('path') or [''])[0],
-                                  (q.get('refresh') or [''])[0] == '1'))
+                from .image_catalog import catalog, library, mark_downloads
+                actor = self.headers.get('X-Seriald-Actor', 'web')
+                if route == '/api/image-library':
+                    result = library(self.manager, actor, (q.get('serial') or [None])[0])
+                else:
+                    result = catalog((q.get('source') or ['public'])[0], (q.get('path') or [''])[0],
+                                     (q.get('refresh') or [''])[0] == '1')
+                    if actor == 'web':
+                        mark_downloads(self.manager, result)
                 return self._json(200, result)
             except (TaskError, OSError, ValueError) as error:
                 return self._json(getattr(error, 'status', 503), {'error': str(error) if isinstance(error, TaskError) else '镜像商店暂不可用'})

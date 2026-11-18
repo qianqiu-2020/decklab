@@ -6,12 +6,62 @@ import json
 import re
 import socket
 import ssl
+import stat
 import sys
 import time
 from urllib.parse import unquote, urljoin, urlsplit
 
 from .results import response
 from .tasks import TaskError, TaskCancelled
+
+def download_digest(url, name, checksum=None, serial=''):
+    return hashlib.sha256(json.dumps({'kind': 'image-download', 'url': url,
+        'name': name, 'sha256': checksum, 'serial': serial}, sort_keys=True).encode()).hexdigest()
+
+
+def download_keys(url, name, checksum=None, serial=''):
+    keys = [download_digest(url, name, checksum, serial)]
+    basename = unquote(urlsplit(url).path.rsplit('/', 1)[-1]) or 'image.bin'
+    if name is None or name == basename:
+        keys.append(download_digest(url, basename if name is None else None, checksum, serial))
+    return keys
+
+
+def preferred_download(matches, keys):
+    return next((matches[key] for key in keys if key in matches and matches[key]['artifact_id']),
+                next((matches[key] for key in keys if key in matches), None))
+
+
+def download_matches(manager, actor, digests):
+    """Resolve exact historical download requests, without persisting source URLs."""
+    keys = sorted(set(digests))
+    matches = {}
+    for start in range(0, len(keys), 500):
+        batch = keys[start:start + 500]
+        with manager.store.lock:
+            rows = manager.store.db.execute(
+                "SELECT DISTINCT r.input_digest,t.id,t.state,t.created,a.id AS artifact_id,a.size "
+                "FROM flash_requests r JOIN tasks t ON t.id=r.task_id "
+                "LEFT JOIN transfer_artifacts a ON a.id=json_extract(t.result,'$.artifact.id') "
+                "WHERE r.actor=? AND t.actor=r.actor AND t.kind='image-download' "
+                "AND r.input_digest IN (" + ','.join('?' for _ in batch) + ") "
+                "AND ((t.state='completed' AND a.actor=r.actor AND a.direction='upload' "
+                "AND a.state IN ('ready','claimed') AND a.sha256=json_extract(t.result,'$.artifact.sha256')) "
+                "OR (t.state IN ('queued','running') AND t.cancel_requested=0)) "
+                "ORDER BY t.state='completed' DESC,t.created DESC,t.id DESC", (actor, *batch)).fetchall()
+        for row in rows:
+            key = row['input_digest']
+            if key in matches:
+                continue
+            if row['artifact_id']:
+                try:
+                    file = manager.artifacts._path(row['artifact_id'], '.bin').lstat()
+                except OSError:
+                    continue
+                if not stat.S_ISREG(file.st_mode) or file.st_nlink != 1 or file.st_size != row['size']:
+                    continue
+            matches[key] = row
+    return matches
 
 
 def image_url(value):
@@ -185,8 +235,8 @@ class ImageDownloads:
             if name is not None and (not isinstance(name, str) or not name or len(name.encode()) > 255
                                      or any(ord(c) < 32 or c in '/\\' for c in name)):
                 raise TaskError('invalid image filename')
-            digest = hashlib.sha256(json.dumps({'kind': 'image-download', 'url': payload['url'],
-                'name': name, 'sha256': checksum, 'serial': serial}, sort_keys=True).encode()).hexdigest()
+            keys = download_keys(payload['url'], name, checksum, serial)
+            digest = keys[0]
             from .flash_store import validate_request
             validate_request(payload.get('request_id'), digest)
             def download(context):
@@ -196,10 +246,31 @@ class ImageDownloads:
                 if prepared:
                     result['preparation_task'] = prepared
                 return result
-            task = self.manager.tasks.start('image-download', actor, payload.get('client_id', ''),
-                [{'serial': serial, 'connection_id': 'image-downloads'}],
-                download,
-                request_id=payload.get('request_id'), input_digest=digest)
-            return response(202, {'ok': True, 'task': task})
+            request_id = payload['request_id']
+            # Share the task submission lock so two requests cannot both
+            # miss the same URL before either one has recorded its task.
+            with self.manager.tasks._lock:
+                self.manager.tasks._check_actor(actor)
+                previous = self.manager.tasks.store.find_request(actor, request_id, digest)
+                if previous:
+                    return response(202, {'ok': True, 'task': self.manager.tasks.store.get(previous)})
+                match = preferred_download(download_matches(self.manager, actor, keys), keys)
+                if match is None:
+                    task = self.manager.tasks.start('image-download', actor, payload.get('client_id', ''),
+                        [{'serial': serial, 'connection_id': 'image-downloads'}], download,
+                        request_id=request_id, input_digest=digest)
+                    return response(202, {'ok': True, 'task': task})
+                # Bind this request as well, so a lost response can recover the
+                # exact same task even if the cached file is deleted afterward.
+                with self.manager.store.lock, self.manager.store.db:
+                    self.manager.store.db.execute('INSERT INTO flash_requests VALUES (?,?,?,?)',
+                        (actor, request_id, digest, match['id']))
+                task = self.manager.tasks.store.get(match['id'])
+            if task['state'] == 'completed':
+                from .image_preparation import for_manager
+                preparation = for_manager(self.manager).latest(task['result']['artifact']['id'], actor)
+                if preparation:
+                    task['result']['preparation_task'] = preparation
+            return response(202, {'ok': True, 'task': task, 'cache_hit': bool(match['artifact_id'])})
         except (TaskError, ValueError, OSError) as error:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})

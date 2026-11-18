@@ -9,7 +9,7 @@ import threading
 import time
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
-from .image_download import ImageConnection
+from .image_download import ImageConnection, download_keys, download_matches, preferred_download
 from .tasks import TaskError
 
 SOURCES = {
@@ -214,3 +214,12 @@ def library(manager, actor='web', serial=None):
             item['preparation_task'] = task
         artifacts.append(item)
     return {'artifacts': artifacts, 'tasks': [manager.tasks.store.get(i) for i in active]}
+
+
+def mark_downloads(manager, result):
+    files = [(item, download_keys(item['url'], item['name'])) for item in result['entries'] if item.get('url')]
+    matches = download_matches(manager, 'web', [key for _, keys in files for key in keys])
+    for item, keys in files:
+        match = preferred_download(matches, keys)
+        if match:
+            item['download_state'] = 'cached' if match['artifact_id'] else 'downloading'

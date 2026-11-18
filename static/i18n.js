@@ -231,6 +231,8 @@
     '当前目录没有匹配的受支持镜像。': 'No matching supported images in this folder.',
     '正在读取镜像目录…': 'Reading image directory…', '正在读取控制机缓存…': 'Reading controller cache…',
     '取消下载': 'Cancel download', '正在下载…': 'Downloading…', '使用': 'Use',
+    '已缓存': 'Cached', '使用缓存': 'Use cached image', '正在下载': 'Downloading',
+    '等待下载并使用': 'Use when downloaded', '镜像已缓存在控制机。': 'Image cached on the controller.',
     '镜像已保存到控制机，可从“已下载”中选择。': 'Image saved on the controller. Choose it from Downloaded.',
     "压缩镜像，未解析内容": "Compressed image; contents not inspected", "未找到版本文件": "No version files found",
     "Android sparse，展开后": "Android sparse, expanded", "文件系统": "Filesystem", "内核": "Kernel",

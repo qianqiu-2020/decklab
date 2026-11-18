@@ -99,6 +99,46 @@ class ImageDownloadTests(unittest.TestCase):
             row = manager.artifacts.get(task['result']['artifact']['id'])
             self.assertEqual((row['size'], row['received'], row['task_id']), (len(DATA), len(DATA), None))
 
+    def test_catalog_and_new_request_reuse_exact_cached_url_until_deleted(self):
+        from seriald_core.image_catalog import mark_downloads
+        with fixture() as (manager, url):
+            url += '/opensbi.itb'
+            response = ImageDownloads(manager).start({'url': url, 'request_id': 'legacy-plain-url'})
+            original = wait_task(manager, response.payload['task'])
+            artifact = original['result']['artifact']
+            same, other = {'url': url, 'name': artifact['name']}, {'url': url + '?other', 'name': artifact['name']}
+            mark_downloads(manager, {'entries': [same, other]})
+            self.assertEqual(same['download_state'], 'cached')
+            self.assertNotIn('download_state', other)
+            with mock.patch('seriald_core.image_download.fetch_image', side_effect=AssertionError('cache fetched again')):
+                reused = self.start(manager, url, 'use-another-request')
+            self.assertEqual(reused['id'], original['id'])
+            self.assertEqual(reused['result']['artifact']['id'], artifact['id'])
+            manager.artifacts.remove(artifact['id'])
+            same.pop('download_state')
+            mark_downloads(manager, {'entries': [same]})
+            self.assertNotIn('download_state', same)
+            self.assertEqual(self.start(manager, url, 'use-another-request')['id'], original['id'])
+            self.assertNotEqual(self.start(manager, url, 'new-after-deletion')['id'], original['id'])
+
+    def test_second_request_attaches_to_active_download(self):
+        with fixture() as (manager, url):
+            release = threading.Event()
+            def delayed(*args, **kwargs):
+                if not release.wait(3):
+                    raise AssertionError('download was not released')
+                return fetch_image(*args, **kwargs)
+            def start(request):
+                return ImageDownloads(manager).start({'url': url, 'request_id': request}).payload
+            with mock.patch('seriald_core.image_download.fetch_image', side_effect=delayed) as fetch:
+                try:
+                    first, second = start('parallel-download-a'), start('parallel-download-b')
+                    self.assertEqual(first['task']['id'], second['task']['id'])
+                finally:
+                    release.set()
+                self.assertEqual(wait_task(manager, first['task'])['state'], 'completed')
+                self.assertEqual(fetch.call_count, 1)
+
     def test_bad_checksum_truncated_denied_and_redirect_loop_never_publish(self):
         for path, checksum in (('/image', '0' * 64), ('/truncated', None), ('/denied?token=private', None), ('/loop', None)):
             with self.subTest(path=path), fixture() as (manager, url):
