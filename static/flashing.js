@@ -993,6 +993,7 @@
       status(capabilities.nor_workspace_supported ? ''
         : preparationPending() ? '已检测到 BootROM；上传刷机包后可准备临时环境并读取布局，此阶段不写存储。'
         : capabilities.supported === false ? capabilityReason()
+        : capabilities.reason === 'live-gpt-unavailable' && modes.includes('full') ? '可选择整包刷写，由镜像重建 GPT。'
         : '选择镜像并预览写入范围；预览不会复位或写入存储。');
       updateControls();
     }
@@ -1213,7 +1214,7 @@
       }
       if (prepareOnly(value)) text('p', '准备阶段仅加载临时环境并读取现场布局，不写入存储。', box);
       else if (value.confirm_after_prepare && value.ready === false) text('p', systemPlan(value)
-        ? '先加载临时环境并核对板上分区，确认写入范围后才会刷写。'
+        ? '先加载临时环境并核对目标，确认写入范围后才会刷写。'
         : '先加载临时环境并核对现场容量；完成后还需确认固件写入与擦除范围，才会写入存储。', box);
       else if (value.ready === false) text('p', '开始后先加载临时环境并核对现场，检查通过后按清单写入。', box);
       if (value.write_layout) text('p', '本计划将修改分区布局。', box);
@@ -1235,8 +1236,8 @@
         var cells = [write.partition || write.target || write.partition_id || '完整磁盘',
           format(write.write_size || write.size || write.bytes || 0)];
         if (!compact) cells.unshift((write.component ? write.component + ' · ' : '') + (write.storage || write.storage_id || '未知'));
-        if (showRanges) cells.push(write.kind === 'layout' ? translate('MTD 映射 / env 擦除')
-          : (write.offset === undefined ? '未知' : write.offset) + ' / ' + format(write.capacity || 0));
+        if (showRanges) cells.push(write.kind === 'layout' ? translate(write.target === 'gpt' ? '覆盖系统盘 GPT' : 'MTD 映射 / env 擦除')
+          : (write.offset === undefined ? '未知' : write.offset) + ' / ' + (write.capacity === -1 ? translate('磁盘剩余空间') : format(write.capacity || 0)));
         if (!compact) cells.push(write.write_sha256 || write.sha256 || '未知');
         cells.forEach(function (item) { text('td', item, row); });
         table.appendChild(row);

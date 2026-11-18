@@ -65,7 +65,8 @@ class BundleTests(unittest.TestCase):
             prepared = Binding(steps[0]['result']['execution_profile'])
             system = steps[1]['result']
             system['execution_profile'].update(chip_family='k1', system_storage='active')
-            system['inspection']['storages'] = [{'id':'active', 'layout_source_digest':'checked-gpt'}]
+            system['inspection']['storages'] = [{'id':'active', 'capacity_source':'fastboot-blk-size'}]
+            system['plan']['write_layout'] = True
             outputs = [step['result'] for step in steps]
             with mock.patch.object(runner, 'plan', side_effect=outputs):
                 preview = plan_bundle(runner, Binding(detected), os, fw, 'full', 'if-supported', lambda: None)
@@ -74,6 +75,7 @@ class BundleTests(unittest.TestCase):
                 checked = check_bundle(runner, prepared, preview['plan'], lambda: None)
             self.assertEqual([call.args[0].profile_data for call in rebind.call_args_list], [detected, detected])
             self.assertEqual([row['component'] for row in checked['plan']['writes']], ['Firmware', 'OS'])
+            self.assertTrue(checked['plan']['write_layout'])
 
     def test_unknown_second_component_is_not_replayed_or_reported_complete(self):
         with tempfile.TemporaryDirectory() as root:

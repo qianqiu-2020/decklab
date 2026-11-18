@@ -60,7 +60,8 @@ def plan_bundle(executor, binding, artifact, firmware, mode, verify, check, **op
         if label == 'OS' and not result.get('requires_prepare'):
             live = (result.get('inspection') or {}).get('storages') or []
             k1_active = (profile.get('chip_family') == 'k1' and profile.get('system_storage') == 'active'
-                         and len(live) == 1 and live[0].get('layout_source_digest'))
+                         and len(live) == 1 and (live[0].get('layout_source_digest')
+                             or result['plan'].get('write_layout') and live[0].get('capacity_source') == 'fastboot-blk-size'))
             if not k1_active and not any(s.get('physical_device') for s in live):
                 raise TaskError('OS 镜像未提供已核对的系统盘写入范围', 409)
         steps.append({'label':label, 'result':result})
