@@ -349,6 +349,10 @@
       return value && value.ready === false && $('fl-mode').value === 'partitions' && !(value.writes || []).length;
     }
     function fullConfirmation() { return task && task.flash && task.flash.confirmation_mode === 'full'; }
+    function systemPlan(value) {
+      return value && ((value.catalogue || []).some(function (table) { return table.selected && table.format === 'gpt'; })
+        || (value.components || []).some(function (component) { return component.label === 'OS'; }));
+    }
     function selectionExpired(current) {
       return current && current.state === 'failed'
         && current.error === 'flash partition selection timed out; storage was not written';
@@ -427,7 +431,9 @@
       $('fl-plan').textContent = preparable ? '预览刷机准备步骤' : '预览写入范围';
       $('fl-start').disabled = busy || uploading || !!active || !plan || submissionUnknown;
       $('fl-start').hidden = !!active || nor && $('fl-mode').value === 'partitions';
-      $('fl-start').textContent = plan && plan.confirm_after_prepare && plan.ready === false ? '准备环境并核对固件范围' : prepareOnly(plan) ? '准备刷机环境并读取布局' : '开始刷写';
+      $('fl-start').textContent = plan && plan.confirm_after_prepare && plan.ready === false
+        ? (systemPlan(plan) ? '准备环境并核对写入范围' : '准备环境并核对固件范围')
+        : prepareOnly(plan) ? '准备刷机环境并读取布局' : '开始刷写';
       $('fl-cancel').disabled = previewTask ? !['queued','running'].includes(previewTask.state) || previewTask.cancel_requested : !active || task.cancel_requested;
       $('fl-cancel').textContent = previewTask ? '取消预览' : nor && selecting ? '结束准备并保留备份' : '取消刷机';
       var verifying = active && task.flash && task.flash.can_skip_verification === true
@@ -446,7 +452,9 @@
       $('fl-select').hidden = !selecting;
       var needsCatalogue = workspace && packageFile(artifacts.find(function (item) { return item.id === $('fl-artifact').value; })) && !sourceCatalogue;
       $('fl-select').disabled = busy || uploading || submissionUnknown || !selecting || !imageReady();
-      $('fl-select').textContent = needsCatalogue ? '解析镜像并预览写入范围' : workspace && sourceCatalogue && $('fl-mode').value === 'full' ? (selectionPlan ? '确认包内全部目标分区并刷写' : '预览包内全部目标分区') : fullConfirmation() ? (selectionPlan ? '确认固件范围并刷写' : '预览固件写入与擦除范围') : selectionPlan ? (nor ? '确认分区并刷写' : '确认分区并继续') : '预览分区写入范围';
+      var packageReview = (workspace && sourceCatalogue && $('fl-mode').value === 'full')
+        || (fullConfirmation() && systemPlan(task.flash.prepared_plan));
+      $('fl-select').textContent = needsCatalogue ? '解析镜像并预览写入范围' : packageReview ? (selectionPlan ? '确认包内全部目标分区并刷写' : '预览包内全部目标分区') : fullConfirmation() ? (selectionPlan ? '确认固件范围并刷写' : '预览固件写入与擦除范围') : selectionPlan ? (nor ? '确认分区并刷写' : '确认分区并继续') : '预览分区写入范围';
       $('fl-recover').hidden = !submissionUnknown;
       var recovery = task && task.flash && task.flash.recovery_required === true;
       $('fl-expired').hidden = !selectionExpired(task);
@@ -1204,7 +1212,9 @@
         });
       }
       if (prepareOnly(value)) text('p', '准备阶段仅加载临时环境并读取现场布局，不写入存储。', box);
-      else if (value.confirm_after_prepare && value.ready === false) text('p', '先加载临时环境并核对现场容量；完成后还需确认固件写入与擦除范围，才会写入存储。', box);
+      else if (value.confirm_after_prepare && value.ready === false) text('p', systemPlan(value)
+        ? '先加载临时环境并核对板上分区，确认写入范围后才会刷写。'
+        : '先加载临时环境并核对现场容量；完成后还需确认固件写入与擦除范围，才会写入存储。', box);
       else if (value.ready === false) text('p', '开始后先加载临时环境并核对现场，检查通过后按清单写入。', box);
       if (value.write_layout) text('p', '本计划将修改分区布局。', box);
       drawWriteMaps(box, value);

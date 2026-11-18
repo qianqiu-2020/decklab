@@ -304,7 +304,7 @@ def public_plan(value):
     hidden = {'path', 'workspace', 'argv', 'device', 'profile', 'profile_data', 'prepare',
               'cache_path', 'source_path', 'source_proofs', 'image_path', 'request_path', 'files',
               'execution_profile', 'execution_device', 'initial_device', 'previous_device', 'final_device',
-              'allowed_final_generation', 'source_workspaces', 'steps'}
+              'allowed_final_generation', 'source_workspaces', 'steps', 'base_profile'}
     if isinstance(value, dict):
         return {key: public_plan(item) for key, item in value.items()
                 if key not in hidden and not key.endswith('_path')}
@@ -422,7 +422,7 @@ class LocalFlashExecutor:
         candidate = json.loads(json.dumps(profile))
         system_storage = candidate.pop('system_storage', '')
         original_system = baseline.pop('system_storage', '')
-        if system_storage and (system_storage != 'auto' and not re.fullmatch(r'(nvme|scsi|mmc|usb):[0-3]', system_storage)):
+        if system_storage and (system_storage not in ('auto', 'active') and not re.fullmatch(r'(nvme|scsi|mmc|usb):[0-3]', system_storage)):
             raise FlashRunnerError('invalid prepared system storage')
         if original_system and original_system != system_storage:
             raise FlashRunnerError('prepared system storage changed')
@@ -440,6 +440,8 @@ class LocalFlashExecutor:
         original_steps = baseline.pop('prepare', None)
         live_catalogue = (baseline_protocol == protocol == 'spacemit-ram-v1'
                           and not baseline.get('bootrom_identity') and not original_steps and not steps)
+        k1_active_system = (system_storage == 'active' and candidate.get('chip_family') == 'k1'
+                            and protocol in (None, 'stock'))
         if not live_catalogue and (not isinstance(steps, list) or len(steps) != 4
                 or [step.get('kind') if isinstance(step, dict) else None for step in steps]
                     != ['stage', 'continue', 'stage', 'continue']):
@@ -450,7 +452,9 @@ class LocalFlashExecutor:
             'layout_source': 'spacemit-gpt', 'size_getvar': '__decklab_gpt_capacity',
             'sector_size': 512, 'partitions': [], 'package_tables': ['partition_nor.json'], 'sparse': False}
         if system_storage:
-            if protocol != 'spacemit-ram-v1' or not isinstance(storages, list) or len(storages) != 1 or storages[0].get('package_tables') != ['partition_universal.json']:
+            if ((not k1_active_system and (protocol != 'spacemit-ram-v1' or system_storage == 'active'))
+                    or not isinstance(storages, list) or len(storages) != 1
+                    or storages[0].get('package_tables') != ['partition_universal.json']):
                 raise FlashRunnerError('system storage requires the fixed RAM OS catalogue')
             if not storages[0].get('sparse'):
                 raise FlashRunnerError('system payload transfer capability missing')

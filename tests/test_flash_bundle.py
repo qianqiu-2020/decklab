@@ -1,11 +1,12 @@
 """Two existing native plans under one transaction; no hardware."""
 import copy
+from dataclasses import dataclass
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core.flash_bundle import assemble, plan_bundle, execute_bundle
+from seriald_core.flash_bundle import assemble, check_bundle, plan_bundle, execute_bundle
 from seriald_core.flash_runner import LocalFlashExecutor, FlashRunnerError
 
 
@@ -52,6 +53,27 @@ class BundleTests(unittest.TestCase):
             self.assertEqual([r['plan']['artifact']['id'] for r in requests],[fw['id'],os['id']])
             self.assertEqual(result['written_bytes'],30)
             self.assertEqual(result['verify_result'],'verified')
+
+    def test_k1_combined_check_uses_original_binding_for_each_storage(self):
+        @dataclass
+        class Binding:
+            profile_data: dict
+
+        with tempfile.TemporaryDirectory() as root:
+            runner, _, fw, os, steps = self.fixture(root)
+            detected = {'chip_family': 'k1', 'storages': [{'layout_source': 'spacemit-gpt'}]}
+            prepared = Binding(steps[0]['result']['execution_profile'])
+            system = steps[1]['result']
+            system['execution_profile'].update(chip_family='k1', system_storage='active')
+            system['inspection']['storages'] = [{'id':'active', 'layout_source_digest':'checked-gpt'}]
+            outputs = [step['result'] for step in steps]
+            with mock.patch.object(runner, 'plan', side_effect=outputs):
+                preview = plan_bundle(runner, Binding(detected), os, fw, 'full', 'if-supported', lambda: None)
+            with mock.patch.object(runner, 'execution_binding') as rebind, \
+                    mock.patch.object(runner, 'check_plan', side_effect=outputs):
+                checked = check_bundle(runner, prepared, preview['plan'], lambda: None)
+            self.assertEqual([call.args[0].profile_data for call in rebind.call_args_list], [detected, detected])
+            self.assertEqual([row['component'] for row in checked['plan']['writes']], ['Firmware', 'OS'])
 
     def test_unknown_second_component_is_not_replayed_or_reported_complete(self):
         with tempfile.TemporaryDirectory() as root:

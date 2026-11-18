@@ -716,6 +716,8 @@
     "镜像正在被任务使用，任务结束后才能删除。": "The image is in use by a task and cannot be deleted until it finishes.",
     '偏移 / 分区容量': 'Offset / partition capacity', 'MTD 映射 / env 擦除': 'MTD mapping / env erase',
     "准备环境并核对固件范围": "Prepare environment and check firmware scope",
+    "准备环境并核对写入范围": "Prepare environment and check write scope",
+    "先加载临时环境并核对板上分区，确认写入范围后才会刷写。": "Load the temporary environment and check the board's partitions before confirming the write scope.",
     "预览固件写入与擦除范围": "Preview firmware write and erase scope",
     "确认固件范围并刷写": "Confirm firmware scope and flash",
     "先加载临时环境并核对现场容量；完成后还需确认固件写入与擦除范围，才会写入存储。": "Load the temporary environment and check the live capacity first. Storage writes require a second confirmation of the firmware write and erase scope.",

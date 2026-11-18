@@ -1193,8 +1193,9 @@ class FlashOperation:
             if record['requires_prepare']:
                 submitted_full_review = record['executor_plan'].get('confirm_after_prepare') is True
                 if submitted_full_review and (record['intent']['mode'] != 'full'
-                        or (self.binding.profile_data.get('storages') or [{}])[0].get('layout_source') != 'spacemit-nor'):
-                    raise TaskError('post-prepare firmware confirmation requires the NOR template', 502)
+                        or ((self.binding.profile_data.get('storages') or [{}])[0].get('layout_source') != 'spacemit-nor'
+                            and not self.binding.profile_data.get('system_storage'))):
+                    raise TaskError('post-prepare confirmation requires a checked NOR or system storage template', 502)
                 context.progress(0, 0, 'prepare')
                 previous_device = None
                 if self.binding.target_id and not record.get('execution_profile'):

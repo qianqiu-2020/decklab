@@ -1,4 +1,5 @@
 """One board task, two existing sealed native plans; no new device protocol."""
+from dataclasses import replace
 import hashlib
 import json
 
@@ -6,7 +7,7 @@ from .flash_runner import FlashRunnerError
 from .tasks import TaskError
 
 
-def assemble(steps, artifact):
+def assemble(steps, artifact, base_profile=None):
     writes, warnings, erases, metadata, layouts, roots = [], [], [], [], [], set()
     for step in steps:
         result, label = step['result'], step['label']
@@ -31,6 +32,8 @@ def assemble(steps, artifact):
         'pending_checks':sorted({value for step in steps for value in step['result']['plan'].get('pending_checks',[])}),
         'confirm_after_prepare':any(s['result']['plan'].get('confirm_after_prepare') for s in steps)}
     plan['layout_digest'] = hashlib.sha256(json.dumps([s['result']['plan'].get('layout_digest') for s in steps]).encode()).hexdigest()
+    if base_profile is not None:
+        plan['base_profile'] = base_profile
     first = steps[0]['result']
     return {'plan':plan, 'workspace':first['workspace'], 'source_workspaces':sorted(roots),
         'execution_profile':first.get('execution_profile'), 'payload_candidates':[], 'payload_metadata':metadata,
@@ -48,18 +51,30 @@ def plan_bundle(executor, binding, artifact, firmware, mode, verify, check, **op
         if label == 'Firmware':
             arguments.pop('target_storage', None)
         result = executor.plan(binding, source, 'full', [], verify, check, **arguments)
-        storages = (result.get('execution_profile') or binding.profile_data).get('storages') or []
+        profile = result.get('execution_profile') or binding.profile_data
+        storages = profile.get('storages') or []
         if label == 'Firmware' and not any(s.get('layout_source') == 'spacemit-nor' for s in storages):
             raise TaskError('配套 Firmware 镜像未提供 NOR 固件写入范围', 409)
         if label == 'OS' and not any(table.get('format') == 'gpt' and table.get('selected') for table in result['plan'].get('catalogue', [])):
             raise TaskError('OS 镜像必须包含刷机配置选中的 GPT 分区表', 409)
-        if label == 'OS' and not any(s.get('physical_device') for s in (result.get('inspection') or {}).get('storages', [])) and not result.get('requires_prepare'):
-            raise TaskError('OS 镜像未提供已核对的系统盘写入范围', 409)
+        if label == 'OS' and not result.get('requires_prepare'):
+            live = (result.get('inspection') or {}).get('storages') or []
+            k1_active = (profile.get('chip_family') == 'k1' and profile.get('system_storage') == 'active'
+                         and len(live) == 1 and live[0].get('layout_source_digest'))
+            if not k1_active and not any(s.get('physical_device') for s in live):
+                raise TaskError('OS 镜像未提供已核对的系统盘写入范围', 409)
         steps.append({'label':label, 'result':result})
-    return assemble(steps, artifact)
+    stage_digests = [[stage.get('sha256') for stage in ((step['result'].get('execution_profile') or {}).get('prepare') or [])
+                      if stage.get('kind') == 'stage'] for step in steps]
+    if stage_digests[0] != stage_digests[1]:
+        raise TaskError('组合刷写需要两个镜像共用同一对临时加载器，请选择内置加载器', 409)
+    return assemble(steps, artifact, binding.profile_data)
 
 
 def check_bundle(executor, binding, plan, check, previous_device=None):
+    base_profile = plan.get('base_profile')
+    if base_profile is not None:
+        binding = replace(binding, profile_data=base_profile)
     steps = []
     for step in plan['steps']:
         original = step['result']
@@ -68,7 +83,7 @@ def check_bundle(executor, binding, plan, check, previous_device=None):
         result.update(workspace=original['workspace'], execution_profile=original.get('execution_profile'),
                       source_workspaces=original.get('source_workspaces', []))
         steps.append({'label':step['label'], 'result':result})
-    return assemble(steps, plan['artifact'])
+    return assemble(steps, plan['artifact'], base_profile)
 
 
 def execute_bundle(executor, binding, plan, on_event, check, **options):
@@ -76,6 +91,8 @@ def execute_bundle(executor, binding, plan, on_event, check, **options):
     if (not isinstance(steps, list) or len(steps) != 2
             or [step.get('label') for step in steps] != ['Firmware','OS']):
         raise TaskError('invalid combined flash plan', 409)
+    if plan.get('base_profile') is not None:
+        binding = replace(binding, profile_data=plan['base_profile'])
     output, completed = {'ok':True, 'write_result':'completed', 'boot_result':'not-requested',
                          'written_bytes':0, 'verified_bytes':0, 'readback_bytes':0}, []
     for index, step in enumerate(steps):
