@@ -1343,10 +1343,10 @@ test('typed URL enters once on Enter and invalid or incomplete values do not sub
   assert.equal(h.take('/api/image-download').payload.url,'https://images.example/opensbi.itb');
 });
 
-test('downloaded cache and store buttons open the same picker at the requested source', async () => {
+test('downloaded cache opens local files while the store can restore its last source', async () => {
   const h=harness();await open(h);h.get('fl-cache').click();assert.equal(h.imagePicker().source,'local');
   h.chooseImage(artifact);assert.match(h.get('fl-source-summary').textContent,/image.bin.*32 B/);
-  h.get('fl-store').click();assert.equal(h.imagePicker().source,'public');
+  h.get('fl-store').click();assert.equal(h.imagePicker().source,undefined);
 });
 
 test('unified storage read starts once from full mode and requests system metadata with NOR backup', async () => {

@@ -53,15 +53,21 @@
         'checking-payloads':'校验包内文件', 'reading-payload-metadata':'读取文件系统与版本信息'};
       $('fl-image-preparation-status').textContent = current.state === 'completed' ? '镜像已准备，可复用于其他板卡'
         : active ? (phases[progress.phase] || '等待准备镜像') : current.error || '镜像准备未完成';
-      var timing = current.flash && current.flash.preview_progress;
+      box.dataset.state = current.state;
+      var timing = active && current.flash && current.flash.preview_progress;
       $('fl-image-overall').hidden = !timing;
-      if (timing) drawStageProgress(timing, phases, $('fl-image-stages'), $('fl-image-overall-bar'), $('fl-image-overall-text'), '整体准备进度');
       var bar = $('fl-image-preparation-progress'); bar.hidden = !active;
-      bar.max = progress.total || 1;
-      if (progress.total) bar.value = Math.min(progress.done || 0, progress.total);
-      else bar.removeAttribute('value');
+      if (timing) {
+        bar.max = 100;
+        drawStageProgress(timing, phases, $('fl-image-stages'), bar, $('fl-image-overall-text'), '总体', true);
+      } else {
+        bar.max = progress.total || 1;
+        if (progress.total) bar.value = Math.min(progress.done || 0, progress.total);
+        else bar.removeAttribute('value');
+      }
       $('fl-image-preparation-bytes').textContent = active && progress.total
-        ? format(progress.done || 0) + ' / ' + format(progress.total) + ' · ' + Math.floor(100*(progress.done || 0)/progress.total) + '%' : '';
+        ? format(progress.done || 0) + ' / ' + format(progress.total)
+          + (timing ? '' : ' · ' + Math.floor(100*(progress.done || 0)/progress.total) + '%') : '';
       var recovery = current.flash && current.flash.recovery_required;
       $('fl-image-recovery').hidden = !recovery;
       $('fl-image-preparation-retry').hidden = active || current.state === 'completed' || !!recovery;
@@ -730,7 +736,7 @@
       $('fl-execution').hidden = false;
       drawStageProgress(previewProgress, names, box, $('fl-overall-bar'), $('fl-overall-text'), '整体预览进度');
     }
-    function drawStageProgress(model, names, box, bar, labelNode, title) {
+    function drawStageProgress(model, names, box, bar, labelNode, title, compact) {
       box.textContent = '';
       var pending = 0, completed = 0, now = Date.now()/1000;
       (model.stages || []).forEach(function (step) {
@@ -742,8 +748,13 @@
         var left = step.state === 'pending' ? estimate : step.state === 'running' ? Math.max(1, estimate-elapsed) : 0;
         pending += left; completed += ['completed','skipped'].includes(step.state) ? estimate : step.state === 'running' ? Math.min(elapsed,estimate*.98) : 0;
         var label = {pending:'等待',running:'进行中',completed:'完成',skipped:'无需执行',failed:'未完成'}[step.state];
-        var row = text('li', translate(names[step.phase] || step.phase) + ' · ' + translate(label)
-          + (step.state === 'completed' ? ' · ' + Math.ceil(elapsed) + ' ' + translate('秒') : ''), box);
+        var name = translate(names[step.phase] || step.phase), state = translate(label);
+        var row = text('li', name + (compact ? '' : ' · ' + state
+          + (step.state === 'completed' ? ' · ' + Math.ceil(elapsed) + ' ' + translate('秒') : '')), box);
+        if (compact) {
+          row.setAttribute('aria-label', name + ' · ' + state);
+          if (step.state === 'running') row.setAttribute('aria-current', 'step');
+        }
         row.dataset.state = step.state;
       });
       var percent = model.state === 'completed' ? 100 : Math.min(99, Math.floor(100*completed/Math.max(1,completed+pending)));
@@ -910,14 +921,19 @@
     function capabilityReason() {
       var messages = {
         'target-unavailable': '无法打开 USB 下载连接。请查看连接诊断，检查数据线、权限或其他刷机程序占用后重新检测。',
-        'probe-protocol-failed': 'USB 通信失败，尚未完成设备识别。请检查数据线或 Hub，重新进入下载模式后检测。',
+        'probe-protocol-failed': 'USB 数据传输失败，尚未读取芯片型号。请检查数据线和端口，重新进入下载模式后检测。',
         'download-capability-unavailable': '设备尚未提供下载能力，无法确认下载模式。请重新进入下载模式后检测。',
         'connection-generation-unavailable': '无法确认当前 USB 连接，请重新检测。',
         'layout-discovery-unavailable': '当前下载环境没有提供可识别的存储布局。',
         'live-layout-invalid': '现场存储布局校验失败，不能生成写入计划。',
         'live-gpt-unavailable': '尚未读取到有效的现场 GPT，不能指定分区刷写。'
       };
-      return messages[capabilities && capabilities.reason] || capabilities && capabilities.reason || '此设备尚未配置刷机执行器。';
+      var reason = capabilities && capabilities.reason;
+      var message = translate(messages[reason] || reason || '此设备尚未配置刷机执行器。');
+      if (['probe-protocol-failed', 'target-unavailable'].includes(reason) && capabilities.diagnostic) {
+        message += ' (' + capabilities.diagnostic + ')';
+      }
+      return message;
     }
     function renderCapabilities() {
       var box = $('fl-connections'); box.textContent = '';
@@ -1895,7 +1911,7 @@
         } else status('已选择控制机缓存中的镜像；请核对写入范围并预览。');
       }, Object.assign({}, configuration, {serial:selected.serial || ''}));
     }
-    $('fl-store').addEventListener('click', function () { chooseSource({source:'public'}); });
+    $('fl-store').addEventListener('click', function () { chooseSource(); });
     $('fl-cache').addEventListener('click', function () { chooseSource({source:'local'}); });
     $('fl-url-toggle').addEventListener('click', function () {
       var panel = $('fl-url-panel'); panel.hidden = !panel.hidden;

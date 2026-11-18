@@ -9,10 +9,11 @@ class Element {
   fire(name='click'){return this.events[name]&&this.events[name]();}
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
-function setup(request){
+function setup(request, storage=new Map()){
   const ids={};for(const id of ['is-version-caption','is-catalog','is-platform','is-os','is-channel','is-version','is-variants','is-title','image-store-dialog','is-list','is-search','is-path','is-status','is-refresh','is-downloads','is-source','is-close'])ids[id]=new Element();
   ids['is-source'].value='public';let consent=false;const watches=[];
   const window={crypto:{randomUUID:()=> 'fixture-request'}, confirm:()=>consent,
+    localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},
     SerialdTasks:{createClient:()=>({request,watch:(task,ctx,update)=>new Promise((resolve,reject)=>watches.push({task,update,resolve,reject}))})}};
   vm.runInNewContext(fs.readFileSync('static/image-store.js','utf8'),{window,document:{createElement:()=>new Element()}});
   const store=window.SerialdImageStore.create({byId:id=>ids[id],formatBytes:n=>n+' bytes'});
@@ -56,6 +57,18 @@ function setup(request){
   assert.equal(pairCalls.filter(c=>c.url==='/api/image-download').length,2);assert.equal(paired.watches.length,2);
   paired.watches[0].resolve({artifact:{id:'os-selected',name:pairedOS.name}});paired.watches[1].resolve({artifact:{id:'fw-selected',name:pairedFW.name}});await flush();await flush();
   assert.equal(pairChoice.id,'os-selected');assert.equal(pairChoice.firmware.id,'fw-selected');
+  const k1FirmwareA={...pairedFW,name:'Debian-13-Firmware-K1-v1.0rc1-202611170426.tar.gz',url:'https://repo/fw-a.tar.gz'};
+  const k1FirmwareB={...pairedFW,name:'Debian-13-Firmware-K1-v1.0rc1-202611172244.tar.gz',url:'https://repo/fw-b.tar.gz'};
+  const k1OsA={...pairedOS,name:'Debian-13-GNOME-K1-v1.0rc1-202611170438.tar.gz',url:'https://repo/os-a.tar.gz'};
+  const k1OsB={...pairedOS,name:'Debian-13-GNOME-K1-v1.0rc1-202611172255.tar.gz',url:'https://repo/os-b.tar.gz'};
+  const versioned=setup(()=>Promise.resolve({entries:[k1FirmwareA,k1FirmwareB,k1OsA,k1OsB]}));
+  versioned.store.open();await flush();
+  for(const [os,firmware] of [[k1OsA,k1FirmwareA],[k1OsB,k1FirmwareB]]){
+    const row=versioned.ids['is-list'].children.find(node=>node.children[0].children[0].textContent===os.name);
+    assert.ok(row.textContent.includes('同时选择 '+firmware.name));
+  }
+  const ambiguous=setup(()=>Promise.resolve({entries:[k1OsB,k1FirmwareB,{...k1FirmwareB,url:'https://repo/duplicate.tar.gz'}]}));
+  ambiguous.store.open();await flush();assert.ok(!ambiguous.ids['is-list'].textContent.includes('同时选择'));
   let crossBoardChoice;
   const crossBoard=setup(()=>Promise.resolve({artifacts:[{id:'prepared-on-a',name:'Debian.tar.gz',size:100,
     serial:'BOARD-A',state:'claimed',preparation_task:{id:'preparation-a',kind:'image-prepare',state:'running'}}],tasks:[]}));
@@ -122,11 +135,13 @@ function setup(request){
     'k1/version/buildroot/v1.0/':[pkg('Buildroot-K1-v1.0.zip')]
   };
   const visited=[];
-  const browse=setup(url=>{
+  const viewStorage=new Map();
+  const catalogue=url=>{
     const target=new URL(url,'http://fixture');const path=target.searchParams.get('path')||'';
     visited.push(path);assert.ok(Object.hasOwn(tree,path),'unexpected crawl: '+path);
     return Promise.resolve({entries:tree[path]});
-  });
+  };
+  const browse=setup(catalogue,viewStorage);
   async function ready(){for(let n=0;n<20&&browse.ids['is-refresh'].disabled;n++)await flush();assert.equal(browse.ids['is-refresh'].disabled,false,browse.ids['is-status'].textContent);}
   async function clickAt(id,label){const node=browse.buttons(browse.ids[id]).find(n=>n.textContent===label);assert.ok(node,label);node.fire();await ready();}
   browse.store.open();await ready();
@@ -162,6 +177,19 @@ function setup(request){
   await clickAt('is-list','nested/');
   assert.ok(browse.ids['is-list'].textContent.includes('202611170600'));
   assert.equal(browse.ids['is-catalog'].hidden,false);
+  browse.ids['is-search'].value='cloud';
+  browse.ids['is-search'].fire('input');
+  browse.ids['is-list'].scrollTop=40;
+  browse.ids['is-close'].fire();
+  const reopened=setup(catalogue,viewStorage);
+  reopened.store.open(()=>{}, {source:'local'});
+  await flush();
+  reopened.store.open();await flush();
+  assert.equal(reopened.ids['is-version'].value,'day:20261117');
+  assert.equal(reopened.ids['is-search'].value,'cloud');
+  assert.equal(reopened.ids['is-list'].scrollTop,40);
+  assert.ok(reopened.ids['is-list'].textContent.includes('202611170600'));
+  browse.store.open();await ready();browse.ids['is-search'].value='';browse.ids['is-search'].fire('input');
   // Back to the selected day's root without changing OS, date or channel.
   const rootFolder=browse.ids['is-path'].children[0].children[0];
   rootFolder.value='';rootFolder.fire('change');await ready();

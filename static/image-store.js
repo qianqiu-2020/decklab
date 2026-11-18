@@ -4,11 +4,23 @@
   function create(options) {
     var $ = options.byId, client = global.SerialdTasks.createClient(options.fetch);
     var source = 'public', path = '', generation = 0, entries = [], choose = null;
-    var jobs = Object.create(null), indexFiles = Object.create(null);
-    var active = Object.create(null), unknown = false, opening = false;
+    var jobs = Object.create(null), pairingRows = [];
+    var active = Object.create(null), unknown = false;
     var picker = {}, selectionSession = 0;
     var platform = 'k3', operatingSystem = '', channel = 'version', version = '', variant = '';
     var guided = false, directories = Object.create(null), folderChoices = Object.create(null);
+    var viewKey = '', restoreScroll = null, views = {};
+    try {
+      var storedViews = JSON.parse(global.localStorage.getItem('decklab-image-store-views'));
+      if (storedViews && typeof storedViews === 'object') views = storedViews;
+    } catch (_) {}
+    function saveView() {
+      if (!viewKey || !$('image-store-dialog').open) return;
+      views[viewKey] = {source:source, path:path, platform:platform, os:operatingSystem, channel:channel,
+        version:version, variant:variant, folders:folderChoices, search:$('is-search').value,
+        scroll:restoreScroll || {dialog:$('image-store-dialog').scrollTop || 0, list:$('is-list').scrollTop || 0}};
+      try { global.localStorage.setItem('decklab-image-store-views', JSON.stringify(views)); } catch (_) {}
+    }
     var osNames = {bianbu:'Bianbu', debian:'Debian', ubuntu:'Ubuntu', buildroot:'Buildroot', openharmony:'OpenHarmony'};
     function osId(value) {
       var match = String(value).toLowerCase().match(/(?:^|[\/_-])(bianbu|debian|ubuntu|buildroot|openharmony)/);
@@ -27,14 +39,26 @@
       if (picker.fileOnly || picker.firmwareOnly || osId(item.name) !== 'debian' || /[-_]firmware[-_.]/i.test(item.name)) return null;
       function identity(value) {
         var info=details(value), chip=value.name.match(/(?:^|[-_])(k[13])(?=[-_.]|$)/i), major=value.name.match(/debian[-_](\d+)/i);
-        return [info.os,major&&major[1],chip&&chip[1].toLowerCase(),info.release.toLowerCase(),info.date].join('|');
+        return chip && major ? [info.os,major[1],chip[1].toLowerCase(),info.release.toLowerCase(),info.date].join('|') : '';
       }
-      var info=details(item);if(!info.date&&!info.release)return null;
-      var candidates=entries.concat.apply(entries,Object.values(indexFiles)).filter(function(value){
-        return value.url && /[-_]firmware[-_.]/i.test(value.name||'') && supported(value) && identity(value)===identity(item);
+      var info=details(item), key=identity(item);
+      if (!key || !info.date && !info.release) return null;
+      var candidates=entries.concat(pairingRows).filter(function(value){
+        return value.url && /[-_]firmware[-_.]/i.test(value.name||'') && supported(value) && identity(value)===key;
       });
       candidates=candidates.filter(function(value,index,all){return all.findIndex(function(other){return other.url===value.url;})===index;});
-      return candidates.length===1?candidates[0]:null;
+      // Published version directories can contain several builds on the same day.
+      // Choose the uniquely closest earlier firmware, within one hour of the OS build.
+      if (!info.release || !info.date) return candidates.length === 1 ? candidates[0] : null;
+      function seconds(value) {
+        var time = value.name.match(/(?:^|[-_])20\d{6}([01]\d|2[0-3])([0-5]\d)([0-5]\d)?(?=[-_.]|$)/);
+        return time ? Number(time[1])*3600 + Number(time[2])*60 + Number(time[3] || 0) : NaN;
+      }
+      var builtAt = seconds(item);
+      var ranked = candidates.map(function (row) { return {row:row, gap:builtAt-seconds(row)}; })
+        .filter(function (match) { return match.gap >= 0 && match.gap <= 3600; })
+        .sort(function (a,b) { return a.gap-b.gap; });
+      return ranked.length && (ranked.length === 1 || ranked[0].gap < ranked[1].gap) ? ranked[0].row : null;
     }
     function supported(item) { return !/\.(?:img|raw)(?:\.|$)/i.test(item.name || '') && item.kind !== 'disk-image'; }
     function newest(a, b) {
@@ -65,7 +89,7 @@
       if (!directories[key]) {
         directories[key] = client.request('/api/image-catalog?source=' + current + '&path=' + encodeURIComponent(target) + (force ? '&refresh=1' : ''));
       }
-      try { var result = await directories[key]; indexFiles[key] = result.entries || []; return result; }
+      try { return await directories[key]; }
       catch (error) { delete directories[key]; throw error; }
     }
     function catalogVisible(value) {
@@ -83,6 +107,12 @@
         rows = rows.filter(function (row) { return !variant || row.kind === 'directory' || details(row).variant === variant; });
       }
       render(rows, source === 'local');
+      if (restoreScroll !== null) {
+        $('image-store-dialog').scrollTop = Math.max(0, Number(restoreScroll.dialog) || 0);
+        $('is-list').scrollTop = Math.max(0, Number(restoreScroll.list) || 0);
+        restoreScroll = null;
+      }
+      saveView();
     }
     async function catalogView(seq, current, force) {
       var valid = function () { return seq === generation && current === source; };
@@ -181,6 +211,7 @@
       }
       if (!valid()) return;
       var folders = $('is-path'); folders.textContent = ''; folders.hidden = true;
+      var branchFiles = rows.filter(function (row) { return row.kind !== 'directory'; });
       // Traverse only the selected branch, never recursively crawl old versions/days.
       for (var depth = 0; depth < 4; depth++) {
         var children = rows.filter(function (row) { return row.kind === 'directory'; }).sort(newest);
@@ -199,7 +230,9 @@
         if (!selectedPath) break;
         rows = (await directory(current, selectedPath, force)).entries;
         if (!valid()) return;
+        branchFiles = branchFiles.concat(rows.filter(function (row) { return row.kind !== 'directory'; }));
       }
+      pairingRows = branchFiles;
       entries = rows.filter(function (row) { return row.kind === 'directory' || channel !== 'daily' || details(row).os === operatingSystem; });
       draw(); status('');
     }
@@ -215,7 +248,7 @@
     function selected(item) {
       if (!choose) return;
       ++selectionSession;
-      try { choose(item); $('image-store-dialog').close(); return true; }
+      try { choose(item); saveView(); $('image-store-dialog').close(); return true; }
       catch (error) { status(error.message); return false; }
     }
     function packageFile(item) { return /\.(tar(?:\.(?:gz|xz|bz2|zst))?|tgz|zip|7z|directory)$/i.test(item.name || ''); }
@@ -285,7 +318,7 @@
       if (force) directories = Object.create(null);
       guided = false; catalogVisible(false);
       $('is-refresh').disabled = true;
-      entries = []; $('is-list').textContent = '';
+      entries = []; pairingRows = []; $('is-list').textContent = '';
       if (current === 'local') { await loadLibrary(seq); return; }
       breadcrumbs(); status('正在读取镜像目录…');
       try {
@@ -367,17 +400,27 @@
       }
     }
     function open(onChoose, configuration) {
-      ++selectionSession; picker = configuration || {}; directories = Object.create(null); indexFiles = Object.create(null);
+      saveView();
+      ++selectionSession; picker = configuration || {}; directories = Object.create(null);
       choose = typeof onChoose === 'function' ? onChoose : null;
+      var forced = ['local', 'public', 'internal'].includes(picker.source) ? picker.source : '';
+      viewKey = picker.fileOnly ? 'partition' : picker.firmwareOnly ? 'firmware' : forced || 'store';
+      var saved = views[viewKey] || {};
+      source = forced || (['local', 'public', 'internal'].includes(saved.source) ? saved.source : picker.fileOnly ? 'local' : 'public');
+      path = saved.path || ''; platform = saved.platform === 'k1' ? 'k1' : 'k3';
+      operatingSystem = saved.os || ''; channel = saved.channel === 'daily' ? 'daily' : 'version';
+      version = saved.version || ''; variant = saved.variant || '';
+      folderChoices = Object.assign(Object.create(null), saved.folders);
+      $('is-source').value = source; $('is-platform').value = platform;
+      $('is-search').value = saved.search || '';
+      restoreScroll = saved.scroll || {};
       $('is-title').textContent = picker.firmwareOnly ? '选择配套固件' : picker.fileOnly ? '选择分区文件' + (picker.partition ? ' · ' + picker.partition : '') : '镜像商店';
       if (!$('image-store-dialog').open) $('image-store-dialog').showModal();
-      if (!opening) { opening = true; source = $('is-source').value || 'public'; }
-      if (['local', 'public', 'internal'].includes(picker.source)) { source = picker.source; path = ''; $('is-source').value = source; }
-      if (picker.fileOnly) { source = 'local'; path = ''; $('is-source').value = 'local'; }
       load();
     }
-    $('is-close').addEventListener('click', function () { ++generation; ++selectionSession; $('image-store-dialog').close(); });
-    $('image-store-dialog').addEventListener('cancel', function () { ++selectionSession; });
+    $('is-close').addEventListener('click', function () { saveView(); ++generation; ++selectionSession; $('image-store-dialog').close(); });
+    $('image-store-dialog').addEventListener('cancel', function () { saveView(); ++generation; ++selectionSession; });
+    if (global.addEventListener) global.addEventListener('pagehide', saveView);
     $('is-source').addEventListener('change', function () { source = $('is-source').value; path = ''; version = ''; directories = Object.create(null); load(); });
     $('is-refresh').addEventListener('click', function () { load(true); });
     $('is-search').addEventListener('input', draw);

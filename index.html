@@ -369,9 +369,9 @@ PasswordAuthentication yes</code></pre>
       <select id="fl-artifact" hidden aria-label="当前镜像来源"></select>
       <label id="fl-firmware-field" class="ft-field">配套 Firmware（可选）<div class="fl-firmware-row"><select id="fl-firmware"><option value="">仅刷当前镜像</option></select><button id="fl-firmware-choose" type="button">选择配套固件</button></div><small id="fl-firmware-status" role="status"></small><button id="fl-firmware-retry" type="button" hidden>重试准备配套固件</button></label>
       <section id="fl-image-preparation" hidden aria-live="polite">
-        <div class="fl-current-source"><strong id="fl-image-preparation-status"></strong><span id="fl-image-preparation-bytes"></span><button id="fl-image-preparation-cancel" type="button" hidden>取消准备</button><button id="fl-image-preparation-retry" type="button" hidden>重新准备镜像</button></div>
-        <progress id="fl-image-preparation-progress" max="1" aria-label="镜像准备进度"></progress>
-        <div id="fl-image-overall" hidden><progress id="fl-image-overall-bar" max="100" value="0" aria-label="整体镜像准备进度"></progress><p id="fl-image-overall-text"></p><ol id="fl-image-stages" class="fl-stage-list"></ol></div>
+        <div class="fl-preparation-head"><div><strong id="fl-image-preparation-status"></strong><span id="fl-image-preparation-bytes"></span></div><button id="fl-image-preparation-cancel" type="button" hidden>取消准备</button><button id="fl-image-preparation-retry" type="button" hidden>重新准备镜像</button></div>
+        <progress id="fl-image-preparation-progress" max="100" aria-label="镜像准备进度"></progress>
+        <div id="fl-image-overall" hidden><p id="fl-image-overall-text"></p><ol id="fl-image-stages"></ol></div>
         <div id="fl-image-information"></div>
         <div id="fl-image-recovery" hidden>
           <label><input id="fl-image-stopped" type="checkbox">已检查并确认原镜像准备进程停止</label>
