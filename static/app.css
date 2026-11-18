@@ -407,6 +407,20 @@
   .fl-section-foot:has(>#fl-plan[hidden]){display:none}
   .fl-preview{overflow:auto;font-size:12px}.fl-preview:empty{display:none}
   .fl-preview>strong{display:block;margin-bottom:4px}.fl-preview>p{margin:8px 0;color:var(--ink-2)}
+  .fl-map{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px}
+  .fl-map-heading{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 16px;margin-bottom:8px}
+  .fl-map-heading span,.fl-map-legend span{color:var(--ink-2)}
+  .fl-map-track{position:relative;height:32px;border:1px solid var(--line);border-radius:5px;background:var(--surface-2);overflow:hidden}
+  .fl-map-track span{position:absolute;top:0;height:100%;box-sizing:border-box}
+  .fl-map-track [data-kind="partition"],.fl-map-legend [data-kind="partition"]::before{background:#92b0ce}
+  .fl-map-track [data-kind="partition"]{border-right:1px solid var(--surface-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-indent:5px;color:#152840;font-size:10px;line-height:15px}
+  .fl-map-track [data-kind="write"],.fl-map-legend [data-kind="write"]::before{background:#16806f}
+  .fl-map-track [data-kind="write"]{top:auto;bottom:0;height:62%}
+  .fl-map-track [data-kind="erase"],.fl-map-legend [data-kind="erase"]::before{background:repeating-linear-gradient(135deg,#cf8a32 0 3px,#f6d296 3px 6px)}
+  .fl-map-track [data-kind="erase"]{height:24%}
+  .fl-map-legend{display:flex;flex-wrap:wrap;gap:6px 16px;list-style:none;padding:0;margin:9px 0 0}
+  .fl-map-legend li{display:flex;flex-wrap:wrap;align-items:center;gap:3px 6px;font-size:11px;font-variant-numeric:tabular-nums}
+  .fl-map-legend li::before{content:"";width:.65rem;height:.65rem;border-radius:2px}
   .fl-preview table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;font-variant-numeric:tabular-nums}
   .fl-preview th{padding:8px 12px;text-align:left;color:var(--ink-3);background:var(--surface-2);font-size:11px;font-weight:600;border-bottom:1px solid var(--line)}
   .fl-preview td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line)}

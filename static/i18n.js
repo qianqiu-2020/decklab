@@ -339,6 +339,8 @@
     '后端 TLS 证书文件': 'Backend TLS certificate file', '后端 TLS 私钥文件': 'Backend TLS private key file',
     '后端节点配置': 'Backend settings', '配置所属节点': 'Settings node', 'Web 节点': 'Web node', '后端节点': 'Backend node',
     '预备刷机环境清单': 'Prepared RAM loader manifest', '临时刷机环境（仅内存）': 'Temporary flashing environment (RAM only)', '下载刷机镜像': 'Download flash image',
+    '临时刷机加载器': 'Temporary flash loader', 'DeckLab 内置': 'Built into DeckLab', '镜像自带': 'From the image',
+    '范围参考': 'Extent shown', '擦除范围': 'Erase range', '将写入': 'Will write',
     '目标系统盘': 'Target system disk', '系统盘目标分区': 'System disk target partitions',
     'NOR 目标分区': 'NOR target partitions', 'NOR · 本次保留': 'NOR · preserved',
     '本次不写入': 'Not written by this operation', '未附带载荷': 'payload not bundled',

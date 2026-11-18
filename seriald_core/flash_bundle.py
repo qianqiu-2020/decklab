@@ -7,13 +7,16 @@ from .tasks import TaskError
 
 
 def assemble(steps, artifact):
-    writes, warnings, erases, metadata, roots = [], [], [], [], set()
+    writes, warnings, erases, metadata, layouts, roots = [], [], [], [], [], set()
     for step in steps:
         result, label = step['result'], step['label']
         plan = result['plan']
         writes.extend(dict(value, storage=('NOR' if label == 'Firmware' else value.get('storage')),
                            component=label, image_name=plan.get('artifact', {}).get('name', '')) for value in plan.get('writes', []))
-        erases.extend(dict(value, component=label) for value in plan.get('erase_ranges', []))
+        erases.extend(dict(value, storage=('NOR' if label == 'Firmware' else value['storage']),
+                           component=label) for value in plan.get('erase_ranges', []))
+        layouts.extend(dict(value, id=('NOR' if label == 'Firmware' else value['id']), component=label)
+                       for value in (result.get('inspection') or {}).get('storages', []))
         warnings.extend(label + ': ' + value for value in plan.get('warnings', []))
         metadata.extend(result.get('payload_metadata') or [])
         roots.add(result['workspace'])
@@ -22,7 +25,8 @@ def assemble(steps, artifact):
     plan = {'version':1, 'image_type':'bundle', 'artifact':artifact, 'mode':'full',
         'verify':steps[0]['result']['plan'].get('verify', 'if-supported'), 'ready':ready,
         'writes':writes, 'write_layout':any(s['result']['plan'].get('write_layout') for s in steps),
-        'erase_ranges':erases, 'warnings':warnings, 'steps':steps,
+        'erase_ranges':erases, 'warnings':warnings, 'steps':steps, 'storage_layouts':layouts,
+        'ram_loaders':steps[0]['result']['plan'].get('ram_loaders', []),
         'components':[dict({key:step['result']['plan'].get('artifact',{}).get(key) for key in ('id','name','size','sha256')}, label=step['label'],ready=step['result']['plan'].get('ready') is not False) for step in steps],
         'pending_checks':sorted({value for step in steps for value in step['result']['plan'].get('pending_checks',[])}),
         'confirm_after_prepare':any(s['result']['plan'].get('confirm_after_prepare') for s in steps)}

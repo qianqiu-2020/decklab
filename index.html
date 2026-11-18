@@ -351,6 +351,7 @@ PasswordAuthentication yes</code></pre>
     <h3 id="fl-replace-title">镜像与刷写范围</h3>
     <div class="fl-inputs">
     <label class="ft-field fl-mode-field">刷写方式<select id="fl-mode"><option value="full">整包刷写</option><option value="partitions">指定分区</option></select></label>
+    <label id="fl-loader-field" class="ft-field" hidden>临时刷机加载器<select id="fl-loader-source"><option value="builtin">DeckLab 内置</option><option value="image">镜像自带</option></select></label>
       <label class="ft-field" id="fl-target-storage-field">目标系统盘<select id="fl-target-storage"></select><small>系统盘包按配置列出目标分区；多盘时须明确选择，不按枚举顺序选盘。</small></label>
     </div>
     <div id="fl-sources" class="fl-sources">
@@ -388,6 +389,7 @@ PasswordAuthentication yes</code></pre>
     <fieldset id="fl-partitions-field" hidden><legend class="visually-hidden">分区内容与替换文件</legend>
       <div id="fl-partition-tools" class="fl-partition-tools"><label><input id="fl-all-partitions" type="checkbox"><span id="fl-all-label">全选分区</span></label></div>
       <div class="fl-partition-heading" aria-hidden="true"><span>分区</span><span id="fl-current-heading">板上现有内容</span><span>替换文件</span></div>
+      <div id="fl-current-layout"></div>
       <div id="fl-partitions"></div>
     </fieldset>
     <details id="fl-advanced" class="fl-details"><summary>校验与刷后复位</summary><div class="fl-inputs">

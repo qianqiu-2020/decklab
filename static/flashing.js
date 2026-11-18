@@ -19,7 +19,8 @@
       var source = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
       if (!source) return;
       rememberedImage = source ? {id:source.id, mode:$('fl-mode').value, verify:$('fl-verify').value,
-        reset_after:$('fl-reset-after').checked, firmware:$('fl-firmware').value} : null;
+        reset_after:$('fl-reset-after').checked, firmware:$('fl-firmware').value,
+        loader_source:$('fl-loader-source').value} : null;
       try {
         if (global.sessionStorage) {
           if (rememberedImage) global.sessionStorage.setItem('decklab-flash-image', JSON.stringify(rememberedImage));
@@ -136,6 +137,7 @@
       if (!(value.id || value.plan_id || result.plan_id)) throw new Error('刷机计划缺少写入范围，不能执行。');
       if (value.ready !== false && (!Array.isArray(value.writes) || !value.writes.length)) throw new Error('刷机计划缺少写入范围，不能执行。');
       if (value.mode) $('fl-mode').value = value.mode;
+      if (value.loader_source) $('fl-loader-source').value = value.loader_source;
       if(value.firmware_artifact_id){(value.components||[]).forEach(function(component){if(component.id&&!artifacts.some(function(item){return item.id===component.id;}))artifacts.push(component);});renderFirmwareOptions(value.firmware_artifact_id);}
 
       plan = value; plan.id = value.id || value.plan_id || result.plan_id; requestId = id();
@@ -150,6 +152,7 @@
       if(details.preview_firmware)artifacts.push(details.preview_firmware);
       if (intent.mode) $('fl-mode').value = intent.mode;
       if (intent.verify) $('fl-verify').value = intent.verify;
+      if (intent.loader_source) $('fl-loader-source').value = intent.loader_source;
       $('fl-reset-after').checked = !!intent.reset_after;
       if (intent.artifact_id) artifactOptions($('fl-artifact'), intent.artifact_id);
       if(intent.firmware_artifact_id)renderFirmwareOptions(intent.firmware_artifact_id);
@@ -360,6 +363,12 @@
       $('fl-all-label').textContent = nor ? '全选 NOR 分区' : '全选分区';
       renderSource(); renderPreparation();
       var primary = artifacts.find(function(item){return item.id===$('fl-artifact').value;});
+      var loader = $('fl-loader-source'), loaderSources = preparable && capabilities.loader_sources || [];
+      var choices = loaderSources.filter(function (source) { return source !== 'image' || !primary || packageFile(primary); });
+      $('fl-loader-field').hidden = !loaderSources.length || !!active;
+      Array.from(loader.children).forEach(function (option) { option.disabled = !choices.includes(option.value); });
+      if (!choices.includes(loader.value)) loader.value = choices[0] || '';
+      loader.disabled = busy || uploading || !!active || submissionUnknown || !choices.length;
       $('fl-firmware-field').hidden = $('fl-mode').value !== 'full' || !packageFile(primary) || /(?:^|[-_])firmware(?:[-_.]|$)/i.test(primary.name);
       $('fl-firmware-choose').disabled = busy || uploading || !!active || submissionUnknown || !options.openImageStore;
       $('fl-firmware').disabled = busy || uploading || !!active || submissionUnknown;
@@ -608,6 +617,7 @@
       var parts = $('fl-system-parts'); parts.textContent = '';
       var disk = disks.find(function (item) { return item.id === select.value; });
       if (!disk) return;
+      drawStorageMap(parts, disk, [], []);
       (disk.partitions || []).forEach(function (part) {
         var row = document.createElement('div'); row.className = 'fl-system-part';
         var title = document.createElement('div');
@@ -750,7 +760,9 @@
       var after = task && task.flash && task.flash.nor_after;
       var existing = after || task && task.flash && task.flash.nor_before;
       $('fl-current-heading').textContent = after ? '写后回读内容' : '板上现有内容';
+      var layout = $('fl-current-layout'); layout.textContent = '';
       ((inspection || capabilities || {}).storages || []).forEach(function (storage) {
+        drawStorageMap(layout, storage, [], []);
         (storage.partitions || []).forEach(function (partition) {
           var row = document.createElement('div'); row.className = 'fl-partition';
           var label = document.createElement('label');
@@ -948,6 +960,7 @@
       $('fl-mode').value = saved && modes.includes(saved.mode) ? saved.mode : modes.indexOf('full') >= 0 ? 'full' : modes[0] || 'full';
       if (saved && $('fl-artifact').value === saved.id) {
         $('fl-verify').value = saved.verify || 'if-supported';
+        $('fl-loader-source').value = saved.loader_source || '';
         $('fl-reset-after').checked = !!saved.reset_after;
       }
       var retainedSource = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
@@ -1091,6 +1104,74 @@
       } catch (error) { if (same(selected, seq)) status(error.message); }
       finally { if (same(selected, seq)) { busy = false; updateControls(); } }
     }
+    function drawStorageMap(parent, storage, writes, erases) {
+      function extent(offset, size) {
+        return Number.isSafeInteger(offset) && Number.isSafeInteger(size) && offset >= 0 && size > 0
+          && Number.isSafeInteger(offset + size);
+      }
+      var partitions = (storage.partitions || []).filter(function (part) { return extent(part.offset, part.size); });
+      var regions = writes.filter(function (write) {
+        return write.kind !== 'layout' && extent(write.offset, write.write_size || write.size);
+      });
+      erases = erases.filter(function (range) { return extent(range.offset, range.size); });
+      if (!partitions.length && !regions.length && !erases.length) return;
+      var end = Math.max.apply(null, partitions.map(function (part) { return part.offset + part.size; })
+        .concat(regions.map(function (write) { return write.offset + (write.write_size || write.size); }),
+          erases.map(function (range) { return range.offset + range.size; })));
+      var known = extent(0, storage.size) && storage.size >= end;
+      var total = known ? storage.size : end;
+      var box = text('div', '', parent); box.className = 'fl-map';
+      var heading = text('div', '', box); heading.className = 'fl-map-heading';
+      text('strong', storage.physical_device || storage.label || storage.id, heading).dataset.i18nIgnore = '';
+      text('span', (known && storage.capacity_verified !== false ? '' : translate('范围参考') + ' · ') + format(total), heading).dataset.i18nIgnore = '';
+      var track = text('div', '', box); track.className = 'fl-map-track';
+      track.setAttribute('aria-hidden', 'true');
+      var legend = text('ul', '', box); legend.className = 'fl-map-legend';
+      function segment(kind, name, offset, size, label) {
+        var block = text('span', '', track);
+        block.dataset.kind = kind;
+        block.style.left = (100 * offset / total) + '%';
+        block.style.width = (100 * size / total) + '%';
+        var range = format(offset) + '–' + format(offset + size);
+        block.title = name + ' · ' + label + ' ' + format(size) + ' · ' + range;
+        if (kind === 'partition' && size / total >= .12) {
+          block.textContent = name;
+          block.dataset.i18nIgnore = '';
+        }
+        var item = text('li', '', legend); item.dataset.kind = kind;
+        text('strong', name, item).dataset.i18nIgnore = '';
+        text('span', label + ' ' + format(size) + ' · ' + range, item).dataset.i18nIgnore = '';
+      }
+      partitions.forEach(function (part) {
+        segment('partition', part.name || part.id, part.offset, part.size, translate('分区'));
+      });
+      regions.forEach(function (write) {
+        if (extent(write.offset, write.capacity) && !partitions.some(function (part) {
+          return part.offset === write.offset && part.size === write.capacity;
+        })) segment('partition', write.partition || write.target, write.offset, write.capacity, translate('分区'));
+      });
+      erases.forEach(function (range) {
+        segment('erase', translate('擦除范围'), range.offset, range.size, '');
+      });
+      regions.forEach(function (write) {
+        var size = write.write_size || write.size;
+        segment('write', write.partition || write.target || translate('完整磁盘'), write.offset, size, translate('将写入'));
+      });
+    }
+    function drawWriteMaps(box, value) {
+      var groups = new Map();
+      function group(id, component) {
+        var key = (component || '') + '/' + id;
+        if (!groups.has(key)) groups.set(key, {storage:{id:id, label:[component, id].filter(Boolean).join(' · ')}, writes:[], erases:[]});
+        return groups.get(key);
+      }
+      (value.storage_layouts || []).forEach(function (storage) { group(storage.id, storage.component).storage = storage; });
+      (value.writes || []).forEach(function (write) { group(write.storage || write.storage_id, write.component).writes.push(write); });
+      (value.erase_ranges || []).forEach(function (range) { group(range.storage, range.component).erases.push(range); });
+      groups.forEach(function (entry) {
+        if (entry.writes.length || entry.erases.length) drawStorageMap(box, entry.storage, entry.writes, entry.erases);
+      });
+    }
     function renderPlan(value) {
       if (value.reset_after) status('本次写入和所选校验成功后，将自动复位；复位请求不自动重发。');
       renderReplacementInfo(value);
@@ -1100,7 +1181,8 @@
         + ' · 刷后复位：' + (value.reset_after ? '自动复位' : '保持当前模式'), box);
       if (value.physical_storage) text('p', translate('目标系统盘') + ' · ' + value.physical_storage, box).dataset.i18nIgnore='';
       if ((value.ram_loaders || []).length) {
-        text('strong', '临时刷机环境（仅内存）', box);
+        var source = {builtin:'DeckLab 内置',image:'镜像自带'}[value.loader_source];
+        text('strong', translate('临时刷机环境（仅内存）') + (source ? ' · ' + translate(source) : ''), box).dataset.i18nIgnore = '';
         (value.ram_loaders || []).forEach(function (loader) {
           text('p', loader.name + ' · ' + format(loader.size) + ' · SHA-256 ' + loader.sha256, box).dataset.i18nIgnore = '';
         });
@@ -1109,6 +1191,7 @@
       else if (value.confirm_after_prepare && value.ready === false) text('p', '先加载临时环境并核对现场容量；完成后还需确认固件写入与擦除范围，才会写入存储。', box);
       else if (value.ready === false) text('p', '开始后先加载临时环境并核对现场，检查通过后按清单写入。', box);
       if (value.write_layout) text('p', '本计划将修改分区布局。', box);
+      drawWriteMaps(box, value);
       var table = document.createElement('table');
       var heading = document.createElement('tr');
       var showRanges = value.confirm_after_prepare === true || !!(value.erase_ranges || []).length;
@@ -1184,6 +1267,7 @@
         if (payload.mode === 'full' && $('fl-target-storage').value) payload.target_storage = $('fl-target-storage').value;
         payload.request_id = previewRequestId;
         if ($('fl-mode').value === 'full' && $('fl-firmware').value) payload.firmware_artifact_id = $('fl-firmware').value;
+        if (!$('fl-loader-field').hidden && $('fl-loader-source').value) payload.loader_source = $('fl-loader-source').value;
         var result = await client.request('/api/flash-plan', payload); responseReceived = true;
         if (result.task) result = await client.watch(result.task, {key:selected.key || '',serial:selected.serial || ''}, function (current) {
           if (!same(selected, seq)) return;
@@ -1729,6 +1813,7 @@
     $('fl-delete-confirm').addEventListener('click', confirmDelete);
     $('fl-delete-cancel').addEventListener('click', dismissDelete);
     $('fl-verify').addEventListener('change', function () { rememberImage(); invalidatePlan(); if (workspaceSelection()) inspectSource(); });
+    $('fl-loader-source').addEventListener('change', function () { rememberImage(); invalidatePlan(); });
     $('fl-reset-after').addEventListener('change', function () { rememberImage(); invalidatePlan(); });
     $('fl-target-storage').addEventListener('change', function () { invalidatePlan(); if (workspaceSelection()) inspectSource(); });
     $('fl-local').addEventListener('click', function () { if (!$('fl-local').disabled) $('fl-files').click(); });

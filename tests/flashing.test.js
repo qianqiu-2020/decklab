@@ -7,7 +7,7 @@ const source = ['tasks.js', 'flashing.js'].map(name =>
   fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
 
 class Element {
-  constructor() { this.children = []; this.events = {}; this.dataset = {}; this.value = ''; this.files = []; }
+  constructor() { this.children = []; this.events = {}; this.dataset = {}; this.style = {}; this.value = ''; this.files = []; }
   set textContent(value) { this.content = value; this.children = []; }
   get textContent() { return String(this.content || '') + this.children.map(item => item.textContent).join(''); }
   appendChild(child) { this.children.push(child); return child; }

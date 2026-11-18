@@ -236,6 +236,9 @@ class FlashActions:
                     storage.get('verify') is True for storage in result['storages'])
                 result['verification'] = {'required': result['readback_supported']}
                 profile = data.get('profile') or {}
+                if result['preparable']:
+                    from .flash_loaders import installed_for
+                    result['loader_sources'] = (['builtin'] if installed_for(profile.get('chip_family')) else []) + ['image']
                 result['nor_workspace_supported'] = bool(
                     getattr(_services(self.manager)[1], 'supports_nor_snapshot', False)
                     and profile.get('id') == 'auto-spacemit-gpt-v1' and profile.get('chip_family') == 'k3'
@@ -312,6 +315,10 @@ class FlashActions:
                   'target_storage': target_storage}
         if companion:
             result['firmware_artifact_id'] = companion
+        if 'loader_source' in payload:
+            if payload['loader_source'] not in ('builtin', 'image'):
+                raise TaskError('invalid flash loader source')
+            result['loader_source'] = payload['loader_source']
         if payload.get('reset_after'):
             result['reset_after'] = True
         return result
@@ -379,6 +386,8 @@ class FlashActions:
                                    artifact=artifacts[value['artifact_id']]) for value in intent['selections']]
                 check()
                 arguments = {'target_storage': intent['target_storage']} if intent.get('target_storage') else {}
+                if intent.get('loader_source'):
+                    arguments['loader_source'] = intent['loader_source']
                 if on_event is not None:
                     arguments['on_event'] = on_event
                 if inspection_scope is not None:
@@ -469,6 +478,9 @@ class FlashActions:
         result = _public(record['executor_plan'])
         if record['intent'].get('firmware_artifact_id'):
             result['firmware_artifact_id'] = record['intent']['firmware_artifact_id']
+        if record['intent'].get('loader_source'):
+            result['loader_source'] = record['intent']['loader_source']
+        result.setdefault('storage_layouts', _public((record.get('inspection') or {}).get('storages', [])))
         result.update(id=record['plan_id'], plan_id=record['plan_id'], digest=record['digest'],
                       binding_revision=record['binding_revision'],
                       target_id=record.get('target_id'), target_generation=record.get('target_generation'),
@@ -480,7 +492,7 @@ class FlashActions:
         try:
             if not isinstance(payload, dict) or set(payload) - {
                     'key', 'serial', 'actor', 'client_id', 'binding_revision',
-                    'artifact_id', 'firmware_artifact_id', 'mode', 'selections', 'verify', 'target_storage', 'reset_after',
+                    'artifact_id', 'firmware_artifact_id', 'mode', 'selections', 'verify', 'target_storage', 'reset_after', 'loader_source',
                     'target_id', 'target_generation', 'request_id'}:
                 raise TaskError('invalid flash plan request')
             device = self._device(device, payload, actor)

@@ -803,13 +803,13 @@ class LocalFlashExecutor:
                     self._active_workspaces.discard(str(workspace))
 
     def plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
-             target_storage=None, inspection_scope=None, on_event=None):
+             target_storage=None, inspection_scope=None, on_event=None, loader_source=None):
         with self.image_guard(artifact, check):
             return self._plan(binding, artifact, input_mode, selections, verify, check,
-                              target_storage, inspection_scope, on_event)
+                              target_storage, inspection_scope, on_event, loader_source)
 
     def _plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
-              target_storage=None, inspection_scope=None, on_event=None):
+              target_storage=None, inspection_scope=None, on_event=None, loader_source=None):
         if input_mode not in ('full', 'partitions') or verify not in ('none', 'if-supported', 'optional', 'required'):
             raise TaskError('invalid flash mode or verification policy')
         if not isinstance(artifact, dict) or not re.fullmatch(r'[0-9a-f]{64}', str(artifact.get('sha256', ''))):
@@ -817,6 +817,12 @@ class LocalFlashExecutor:
         if target_storage is not None and (not isinstance(target_storage, str)
                 or not re.fullmatch(r'(?:[A-Za-z0-9_.-]{1,128}|(?:nvme|scsi|mmc|usb):[0-3])', target_storage)):
             raise TaskError('invalid flash target storage')
+        bootrom = (binding.profile_data.get('id') == 'auto-spacemit-gpt-v1'
+                   and binding.profile_data.get('bootrom_identity') and not binding.profile_data.get('prepare'))
+        if loader_source not in (None, 'builtin', 'image'):
+            raise TaskError('invalid flash loader source')
+        if loader_source and not bootrom:
+            raise TaskError('设备已运行刷机环境；如需更换加载器，请重新进入 BootROM 下载模式', 409)
         preparation = self.prepare_image(binding.argv, artifact, on_event, check,
             max_expanded_bytes=binding.max_expanded_bytes, max_cache_bytes=binding.max_cache_bytes)
         source_workspaces = []
@@ -838,12 +844,13 @@ class LocalFlashExecutor:
             request['target_storage'] = target_storage
         stage = 'image-plan'
         try:
-            if (binding.profile_data.get('id') == 'auto-spacemit-gpt-v1'
-                    and binding.profile_data.get('bootrom_identity')
-                    and not binding.profile_data.get('prepare')):
-                from .flash_loaders import manifest_path, prepare_materials
-                package = artifact.get('name', '').lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip'))
-                if manifest_path().is_file() or input_mode == 'partitions' and not package:
+            if bootrom:
+                from .flash_loaders import installed_for, prepare_materials
+                package = bool(preparation.get('catalogue')) or artifact.get('name', '').lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip', '.directory'))
+                if loader_source == 'image' and not package:
+                    raise TaskError('此镜像不含刷机加载器，请选择内置加载器', 409)
+                if loader_source == 'builtin' or loader_source is None and (
+                        installed_for(binding.profile_data.get('chip_family')) or input_mode == 'partitions' and not package):
                     request['boot_materials'] = prepare_materials(binding, workspace, check)
             image = self._run(binding, 'image-plan', request, on_event=on_event, check=check)
             if (not isinstance(image.get('plan'), dict)
@@ -1105,6 +1112,7 @@ class LocalFlashExecutor:
                     reasons = {'host-storage-full': '控制机磁盘空间不足，镜像未能解压完成',
                         'image-file-missing': '镜像载荷或临时缓存文件不存在，请重新预览',
                         'image-permission-denied': '控制机没有读取镜像或写入缓存的权限',
+                        'system-package-loader-unsupported': '所选加载器不支持安全整包写入系统盘。可选用支持系统盘核对的 DeckLab 内置加载器',
                         'image-archive-corrupt': '镜像压缩包不完整或校验失败，请重新下载',
                         'image-invalid': '镜像格式或包内布局无效'}
                     if event.get('code') in reasons:

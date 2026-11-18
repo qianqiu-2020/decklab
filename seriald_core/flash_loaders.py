@@ -16,8 +16,7 @@ def manifest_path():
     return Path(STATIC) / 'flash-loaders' / 'manifest.json'
 
 
-def prepare_materials(binding, workspace, check):
-    family = binding.profile_data.get('chip_family')
+def _manifest():
     path = manifest_path()
     if not path.is_file():
         raise TaskError('后端尚未安装预备刷机环境（FSBL / 临时 U-Boot），请安装包含 flash-loaders 的后端包', 503)
@@ -27,7 +26,20 @@ def prepare_materials(binding, workspace, check):
     document = json.loads(raw)
     if document.get('version') != 1 or not isinstance(document.get('families'), dict):
         raise TaskError('invalid RAM loader manifest', 503)
-    material = document['families'].get(family)
+    return path, raw, document['families']
+
+
+def installed_for(family):
+    try:
+        return family in _manifest()[2]
+    except (OSError, ValueError, TaskError):
+        return False
+
+
+def prepare_materials(binding, workspace, check):
+    family = binding.profile_data.get('chip_family')
+    path, raw, families = _manifest()
+    material = families.get(family)
     if not isinstance(material, dict) or material.get('protocol') not in ('stock', 'spacemit-ram-v1'):
         raise TaskError('预备刷机环境不支持当前芯片', 409)
     root = path.parent.resolve()
