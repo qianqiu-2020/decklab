@@ -59,9 +59,10 @@ class FakeDiscoveryExecutor(FakeFlashExecutor):
         self.discoveries = []
         self.probe_failure = None
 
-    def discover(self, argv, probe=False, device=None, check=lambda: None):
+    def discover(self, argv, probe=False, device=None, check=lambda: None, link_token=None):
         check()
         self.discoveries.append({'probe': probe, 'device': copy.deepcopy(device)})
+        self.link_tokens = getattr(self, 'link_tokens', []) + ([link_token] if link_token else [])
         if probe and self.probe_failure:
             raise self.probe_failure
         devices = self.candidates

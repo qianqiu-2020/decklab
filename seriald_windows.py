@@ -130,6 +130,9 @@ def main():
                 ControlHandler.default_language = read_ui_language(BASE)
                 ControlHandler.grant_store = grants
                 ControlHandler.trust_loopback = os.environ.get('SERIALD_TRUST_LOOPBACK') == '1'
+                # Closing the console window must not leave COM handles busy.
+                from seriald_core.console_close_windows import install as install_close_handler
+                install_close_handler(manager.release_ports, after=control.shutdown)
                 scanner = threading.Thread(target=manager.loop, daemon=True)
                 scanner.start()
                 worker = threading.Thread(target=collector.serve_forever, daemon=True)

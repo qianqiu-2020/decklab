@@ -361,6 +361,14 @@ PasswordAuthentication yes</code></pre>
         <details class="fl-details"><summary>校验 SHA-256（可选，请先填写）</summary><label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label></details>
         <button id="fl-download" type="button" hidden>重试下载</button>
       </div>
+      <details id="fl-fast" class="fl-details" hidden>
+        <summary>极速刷写系统盘（边下载边写入，不落盘）</summary>
+        <p class="fl-hint">直接从 URL 流式下载 K3 系统包，在内存中解压后写入系统盘，不经过预览。按包内分区表重建 GPT，系统盘原有数据全部覆盖；结束时按包内 SHA256SUMS 核对，未刷 NOR 固件。</p>
+        <label class="ft-field">系统包 URL（.tar.gz）<input id="fl-fast-url" type="url" spellcheck="false" placeholder="https://…/Debian-13-GNOME-K3-….tar.gz"></label>
+        <label class="ft-field">目标系统盘<input id="fl-fast-storage" type="text" value="auto" spellcheck="false" placeholder="auto 或 nvme:0 / scsi:0"></label>
+        <label class="ft-check"><input id="fl-fast-confirm" type="checkbox">我确认覆盖该板系统盘的全部内容</label>
+        <button id="fl-fast-start" type="button" disabled>开始极速刷写</button>
+      </details>
       <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
       <select id="fl-artifact" hidden aria-label="当前镜像来源"></select>
       <div id="fl-firmware-field" class="ft-field" hidden>

@@ -1,4 +1,4 @@
-goflash binary component for DeckLab 1.17.33
-Source revision: daf5ea8552b8896a397b69adf6a7b24a46f67b8c
+goflash binary component for DeckLab 1.17.38
+Source revision: daf5ea8552b8896a397b69adf6a7b24a46f67b8c plus DeckLab console-link, stream-flash and bulk-write changes (local patch SHA-256 cc0843c204cd3ac87d552f3659a4e7acf713f447617b83aef84a4c9c67a6914a)
 Build: Go 1.25.0, CGO_ENABLED=0, GOARCH=amd64, -trimpath -buildvcs=false -tags remote -ldflags="-s -w"
 Source is not included in this binary distribution.

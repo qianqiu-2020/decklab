@@ -576,6 +576,37 @@ test('NOR Firmware verification changes never inherit the default UFS system dis
   assert.equal(preview.payload.mode,'full');assert.deepEqual(preview.payload.selections,[]);
 });
 
+test('a USB workspace task reached from its serial board keeps the task USB scope', async () => {
+  const h=harness(),pkg={id:'firmware-usb',name:'Firmware.tar.gz',size:1024};
+  const ready={...norReady,board_targets:['SN-1'],flash:{...norReady.flash,request_serial:''}};
+  h.api.open(board);h.take('/api/flash-capabilities?key=').resolve({supported:false,
+    reason:'flashing is not configured for this board',board_serial:'SN-1'});await drain();
+  h.take('/api/tasks').resolve({tasks:[ready]});await drain();
+  const restored=h.take('/api/flash-capabilities');assert.match(restored.url,/target_id=nor-fixture/);
+  restored.resolve({...capabilities,reset_after_supported:true});await drain();
+  h.get('fl-cache').click();h.chooseImage(pkg);
+  const inspect=h.take('/api/flash-selection');
+  assert.equal(inspect.payload.target_id,'nor-fixture');assert.equal(inspect.payload.target_generation,'brom-original');
+  assert.equal('key' in inspect.payload,false);
+});
+
+test('a failed automatic package inspection is not retried on every task poll', async () => {
+  const h=harness(),pkg={id:'firmware-fail',name:'Firmware.tar.gz',size:1024};
+  const ready={...norReady,flash:{...norReady.flash,storage_inventory:{default_storage:'scsi:0',
+    priority_source:'eeprom:UFS',storages:[{id:'scsi:0',size:128*1024**3,partitions:[]}]}}};
+  h.api.open(norTarget,ready);await drain();
+  h.get('fl-cache').click();h.chooseImage(pkg);
+  h.take('/api/flash-selection').resolve({error:'flashing is not configured for this board'},404);await drain();
+  for (let round=0;round<3;round++) {
+    for (const [id,fn] of [...h.timers]) { h.timers.delete(id); fn(); }
+    await drain();
+    while (h.requests.some(r=>r.url.startsWith('/api/task?id='))) h.take('/api/task?id=').resolve({task:ready});
+    await drain();
+  }
+  assert.equal(h.requests.some(r=>r.url==='/api/flash-selection'),false);
+  assert.match(h.get('fl-status').textContent,/not configured/);
+});
+
 test('waiting storage read accepts a manual firmware and requests both scopes before confirming', async () => {
   const h=harness(); h.api.open(norTarget,JSON.parse(JSON.stringify(norReady))); await drain();
   h.get('fl-cache').click(); h.chooseImage({id:'os',name:'os.zip',size:1024});
@@ -1042,6 +1073,33 @@ test('multiple USB candidates require an explicit target and pin its generation'
   selected.resolve({target: second, capabilities: {...capabilities, supported: false, reason: 'layout-unavailable'}}); await drain();
   assert.match(h.get('fl-status').textContent, /layout-unavailable/);
   assert.equal(h.get('fl-start').disabled, true);
+});
+
+test('a serial board without a fixed binding probes only its console-paired USB port', async () => {
+  const h = harness();
+  h.api.open(board);
+  h.take('/api/flash-capabilities?key=').resolve({supported:false,reason:'flashing is not configured for this board',board_serial:'SN-1'});await drain();
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  const other = {target_id: 'usb-a', target_generation: 'first', label: 'k3 · 1.2', usb: {port_path: [1, 2]},
+    console_link: {state: 'linked', serial: 'OTHER-SN'}};
+  const mine = {target_id: 'usb-b', target_generation: 'second', label: 'Pico', usb: {port_path: [1, 3]},
+    console_link: {state: 'linked', serial: 'SN-1', serial_label: 'Pico'}};
+  h.take('/api/flash-discover').resolve({targets: [other, mine]}); await drain();
+  assert.match(h.get('fl-device').textContent, /SN SN-1 · 串口已配对/);
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  const probe = h.take('/api/flash-target');
+  assert.equal(probe.payload.target_id, 'usb-b');assert.equal(probe.payload.target_generation, 'second');
+  assert.equal(h.requests.some(entry => entry.url === '/api/flash-target'), false);
+});
+
+test('a console pairing that names another board asks for an explicit board swap', async () => {
+  const h = harness(); h.api.discover();
+  const target = {target_id: 'usb-c', target_generation: 'third', label: 'old', usb: {port_path: [1, 4]}};
+  h.take('/api/flash-discover').resolve({targets: [target]}); await drain();
+  h.take('/api/tasks').resolve({tasks: []}); await drain();
+  h.take('/api/flash-target').resolve({target: {...target, serial: 'NEW-SN', console_link: {state: 'mismatch',
+    serial: 'OLD-SN', serial_label: 'old', usb_serial: 'NEW-SN'}}, capabilities}); await drain();
+  assert.match(h.get('fl-status').textContent, /old · SN OLD-SN.*SN NEW-SN.*准备换板/);
 });
 
 test('late USB discovery does not replace another board and absent devices keep an actionable explanation', async () => {

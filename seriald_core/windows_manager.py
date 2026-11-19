@@ -1,6 +1,7 @@
 """Windows COM collector; one pySerial handle owns both input and output."""
 import hashlib
 import re
+import threading
 import time
 
 import serial
@@ -53,6 +54,41 @@ class WindowsManager(Manager):
                    and device.by_path == (port.device if keys.count(key) > 1 else key)
                    and port_identity(port) == device.identity
                    for port, key in zip(ports, keys))
+
+    def release_ports(self, budget=3.0):
+        """Free every COM handle quickly, e.g. before the console window closes.
+
+        Readers are stopped and their pending overlapped read is cancelled so
+        each reader closes its own handle; any reader still busy after the
+        budget is closed here (pySerial cancels pending I/O before CloseHandle).
+        """
+        self.stopping.set()
+        with self.lock:
+            views = [self._board_view(board) for board in self.boards.values()]
+            devices = list({id(d): d for d in list(self.devices.values()) + views}.values())
+        for device in devices:
+            device.stop.set()
+            handle = device.fd
+            for cancel in ('cancel_read', 'cancel_write'):
+                try:
+                    getattr(handle, cancel, lambda: None)()
+                except (OSError, serial.SerialException, AttributeError):
+                    pass
+        deadline = time.monotonic() + budget
+        for device in devices:
+            thread = device.thread
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(max(0.0, deadline - time.monotonic()))
+        released = 0
+        for device in devices:
+            if device.fd is not None:
+                self._close_reader(device)
+            released += 1
+            try:
+                device.close_log()
+            except OSError:
+                pass
+        return released
 
     @staticmethod
     def _close_reader(device):

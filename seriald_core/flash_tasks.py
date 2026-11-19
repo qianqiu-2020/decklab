@@ -308,6 +308,9 @@ class FlashActions:
                     getattr(_services(self.manager)[1], 'supports_nor_snapshot', False)
                     and profile.get('id') == 'auto-spacemit-gpt-v1' and profile.get('chip_family') == 'k3'
                     and (profile.get('ram_loader_protocol') == 'spacemit-ram-v1' or result['preparable']))
+                result['stream_flash_supported'] = bool(profile.get('id') == 'auto-spacemit-gpt-v1'
+                    and profile.get('chip_family') == 'k3'
+                    and getattr(_services(self.manager)[1], 'supports_stream_flash', False))
                 result['storage_inventory_supported'] = bool(result['nor_workspace_supported']
                     and getattr(_services(self.manager)[1], 'supports_storage_metadata', False))
                 if device.serial and self.manager.store.has_conflict(device.serial):
@@ -743,6 +746,93 @@ class FlashActions:
                         'boot_result': 'not-requested'}, resources=_resources(binding),
                     maintenance=maintenance_for(self.manager), target_id=binding.target_id,
                     target_generation=binding.target_generation)
+            return response(202, {'ok': True, 'task': task})
+        except (TaskError, TransactionError, ValueError, OSError) as error:
+            return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
+
+    def stream(self, payload, device, actor='web'):
+        """Fast mode: stream an HTTP(S) K3 system package straight to the disk.
+
+        Download, decompression and writing overlap in the executor's memory;
+        nothing is staged on the host disk. The executor writes the package
+        GPT first and checks member digests against SHA256SUMS at the end.
+        """
+        try:
+            if actor != 'web':
+                raise TaskError('fast flashing is limited to the human web operator', 403)
+            if not isinstance(payload, dict) or set(payload) - {
+                    'actor', 'client_id', 'request_id', 'target_id', 'target_generation', 'serial',
+                    'url', 'sha256', 'system_storage', 'reset_after', 'memory_budget'}:
+                raise TaskError('invalid fast flashing request')
+            from .image_download import image_url
+            parsed = image_url(payload.get('url'))
+            if not parsed.path.lower().endswith(('.tar.gz', '.tgz', '.tar')):
+                raise TaskError('fast flashing streams .tar.gz or .tar system packages')
+            checksum = payload.get('sha256') or ''
+            if checksum and not re.fullmatch('[a-f0-9]{64}', checksum):
+                raise TaskError('invalid expected image SHA-256')
+            storage = payload.get('system_storage') or 'auto'
+            if storage != 'auto' and not re.fullmatch(r'(nvme|scsi|mmc|usb):[0-3]', storage):
+                raise TaskError('invalid system disk')
+            reset_after = payload.get('reset_after', True)
+            budget = payload.get('memory_budget', 1 << 30)
+            if type(reset_after) is not bool or type(budget) is not int or not 128 << 20 <= budget <= 64 << 30:
+                raise TaskError('invalid fast flashing options')
+            client = payload.get('client_id', '')
+            if not isinstance(client, str) or client and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client):
+                raise TaskError('invalid flash client')
+            _services(self.manager)  # initializes the shared plan lock on a fresh service
+            identity = {key: payload.get(key) for key in ('target_id', 'target_generation', 'url', 'sha256')}
+            identity.update(operation='stream', system_storage=storage, reset_after=reset_after, memory_budget=budget)
+            input_digest = _digest(identity)
+            with self.manager._flash_plans_lock:
+                previous = self.store.find_request(actor, payload.get('request_id'), input_digest)
+                if previous:
+                    return response(202, {'ok': True, 'task': self.manager.tasks.store.get(previous)})
+                if not payload.get('target_id'):
+                    raise TaskError('fast flashing requires a detected USB target')
+                device = self._device(device, payload, actor)
+                binding, executor = self._target(device, actor, payload)
+                if (binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
+                        or binding.profile_data.get('chip_family') != 'k3'
+                        or not getattr(executor, 'supports_stream_flash', False)):
+                    raise TaskError('fast flashing requires a detected K3 USB target and updated executor', 409)
+                url, store = payload['url'], self.store
+                def run(context):
+                    from .flash_loaders import prepare_materials
+                    request = {'version': 1, 'device': binding.device, 'chip_family': 'k3', 'source_url': url,
+                               'system_storage': storage, 'reset_after': reset_after, 'memory_budget': budget}
+                    if checksum:
+                        request['archive_sha256'] = checksum
+                    if binding.profile_data.get('bootrom_identity'):
+                        materials = prepare_materials(binding, executor.stream_loader_workspace(), context.check)
+                        request['loader'] = {key: {name: materials[key][name] for name in ('id', 'name', 'path', 'size', 'sha256')}
+                                             for key in ('fsbl', 'uboot')}
+                    started = {'writing': False}
+                    def event(value):
+                        store.append_event(context.id, value)
+                        phase = value.get('phase', 'flash')
+                        started['writing'] = started['writing'] or phase in ('writing-gpt', 'writing')
+                        done, total = value.get('done', 0), value.get('total', 0)
+                        if type(done) is int and type(total) is int and 0 <= done <= max(total, done):
+                            context.progress(done, max(total, done), phase)
+                    try:
+                        result = executor.stream_flash(binding, request, event, context.check)
+                    except BaseException:
+                        store.update_details(context.id, {'write_result': 'partial-or-unknown' if started['writing'] else 'not-started'})
+                        raise
+                    store.update_details(context.id, {'write_result': result.get('write_result', 'completed'),
+                        'verify_result': result.get('verify_result', 'not-requested'),
+                        'boot_result': result.get('boot_result', 'not-requested')})
+                    return result
+                task = self.manager.tasks.start_board('flash', actor, client, device.serial, run,
+                    request_id=payload.get('request_id'), input_digest=input_digest,
+                    details={'operation': 'stream', 'source_url': url, 'system_storage': storage,
+                        'target_id': binding.target_id, 'target_generation': binding.target_generation,
+                        'executor': binding.endpoint, 'write_result': 'not-started',
+                        'verify_result': 'not-started', 'boot_result': 'not-requested'},
+                    resources=_resources(binding), maintenance=maintenance_for(self.manager),
+                    target_id=binding.target_id, target_generation=binding.target_generation)
             return response(202, {'ok': True, 'task': task})
         except (TaskError, TransactionError, ValueError, OSError) as error:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})

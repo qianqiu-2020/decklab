@@ -565,6 +565,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = flash.selection(payload, None, actor)
             elif route == '/api/flash-recovery':
                 result = flash.recovery(payload, None, actor)
+            elif route == '/api/flash-stream':
+                result = flash.stream(payload, None, actor)
             elif route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup'):
                 result = (flash.backup(payload, None, actor) if payload['kind'] == 'nor-backup'
                           else flash.start(payload, None, actor))

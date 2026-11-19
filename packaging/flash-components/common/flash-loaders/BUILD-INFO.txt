@@ -1,5 +1,5 @@
 K3 RAM-only FSBL and U-Boot for DeckLab
 U-Boot source revision: d9bce64dfcd2920ef397adca1a466a3e1a1aee98
-Source patches: none. Native Kconfig disables board late-init and persistent environment.
+Source patches: none. Native Kconfig disables board late-init and persistent environment, and enables CONFIG_PCI_INIT_R so PCIe is enumerated once rather than on every nvme command.
 Build configuration paths normalized for distribution; RAM-ENV.txt contains the exact environment bytes.
 K1 stock RAM loaders are included. See k1/BUILD-INFO.txt and k1/SOURCE-OFFER.txt.

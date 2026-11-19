@@ -393,6 +393,7 @@ not the flash target. Other connection-bound operations keep their existing guar
 | Method and route | Parameters / behavior |
 | --- | --- |
 | GET `/api/flash-discover` | Human-only USB download-device discovery; returns candidate target IDs and observed target generations, without resetting or writing storage |
+| POST `/api/flash-stream` | Human-only fast mode for a detected K3 target: `target_id`, `target_generation`, `url` (`.tar.gz`/`.tgz`/`.tar`), optional `sha256`, `system_storage` (`auto` or `nvme:N`/`scsi:N`), `reset_after`, `memory_budget`, `request_id`. Streams, decompresses and writes in executor memory; writes the package GPT first; returns a durable `flash` task with `operation: stream` |
 | POST `/api/flash-target` | Human-only target selection with `target_id` and expected `target_generation`; reads supported device identity/layout information and rejects a changed or ambiguous target |
 | GET `/api/flash-capabilities` | `key`, expected `serial`; configured execution location, supported modes and ready artifacts; no reset or storage write |
 | POST `/api/image-prepare` | Prepare a controller-cached image without a connected board. The returned `image-prepare` task reports extraction, payload checks and filesystem metadata. |
@@ -622,6 +623,14 @@ string alongside their stable `reason` code, including `target-unavailable` or
 `probe-protocol-failed`. The string explains the opening/read-only probe error;
 it never changes `supported`, grants preparation/writes or triggers retries.
 Absent layout/readback information during a failed connection remains unknown.
+
+Automatic flash targets also return `console_link` (or `null`). A probe sends
+one read-only `getvar:decklab-link-<nonce>`; the console that echoes the nonce
+is paired with that USB attachment. `state` is `linked`, `paired`, `mismatch`,
+`ambiguous` or `bind-failed`, with `serial`/`serial_label` for the console's
+board and `usb_serial`/`usb_label` for a differing USB identity. Pairing never
+changes the target's flashing `serial`; see
+[hardware identity](HARDWARE_ID.md#usb-刷机线配对串口).
 
 ## Split Web/backend and image imports
 

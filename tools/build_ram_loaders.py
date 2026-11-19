@@ -65,7 +65,10 @@ def main():
                                'CROS_EC', 'CROS_EC_ESPI', 'I2C_CROS_EC_TUNNEL',
                                'PWM_CROS_EC', 'CROS_EC_KEYB'):
                     configure += ['-d', symbol]
-                for symbol in ('ENV_IS_NOWHERE', 'CMD_NVME', 'CMD_SCSI', 'USE_DEFAULT_ENV_FILE'):
+                # PCI_INIT_R enumerates PCIe once after relocation. Without it
+                # every `nvme` command re-runs pci_init() (~1.1 s on K3 boards
+                # with absent PCIe links), which dominates block writes.
+                for symbol in ('ENV_IS_NOWHERE', 'CMD_NVME', 'CMD_SCSI', 'USE_DEFAULT_ENV_FILE', 'PCI_INIT_R'):
                     configure += ['-e', symbol]
                 configure += ['--set-str', 'DEFAULT_ENV_FILE', str(ROOT / 'packaging/flash-loaders/k3-ram.env'),
                               '--set-str', 'LOCALVERSION', '-seriald-ram',
@@ -80,7 +83,7 @@ def main():
                                  '# CONFIG_ENV_IS_IN_MTD is not set',
                                  'CONFIG_ENV_IS_NOWHERE=y', 'CONFIG_USE_DEFAULT_ENV_FILE=y',
                                  'CONFIG_FASTBOOT_UUU_SUPPORT=y',
-                                 'CONFIG_BOOTDELAY=-2',
+                                 'CONFIG_BOOTDELAY=-2', 'CONFIG_PCI_INIT_R=y',
 ):
                     if expected not in configuration:
                         raise RuntimeError('required stock RAM configuration missing: ' + expected)

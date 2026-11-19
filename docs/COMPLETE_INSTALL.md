@@ -45,4 +45,4 @@ Windows 完整安装提供勾选安装 USB 驱动和稍后安装入口。优先�
 
 本地交付包直接放 `dist/`，使用版本文件名；不额外套交付目录。正式 GitHub 1.9.0 历史附件保持原样；1.14.0 提供 x86_64 Linux 与 Windows x64 完整包，预装 RAM 材料仅含 K3。
 
-1.17.33 的 Linux amd64 与 Windows x64 完整包均内置 K1、K3 RAM 材料。K1 对应源码索取方式见随包的 `flash-loaders/k1/SOURCE-OFFER.txt`。
+1.17.33 起 Linux amd64 与 Windows x64 完整包均内置 K1、K3 RAM 材料；1.17.38 起 K3 RAM U-Boot 另启用原生 `CONFIG_PCI_INIT_R`。K1 对应源码索取方式见随包的 `flash-loaders/k1/SOURCE-OFFER.txt`。

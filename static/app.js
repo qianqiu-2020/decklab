@@ -1148,6 +1148,7 @@
     box.textContent = '';
     var sources = { 'eeprom-onie': '板载 EEPROM（ONIE TLV 0x23）',
       'uboot-injected': '板载 EEPROM（U-Boot 注入）',
+      'usb-link': 'USB 刷机线配对（编号由 USB 读取）',
       'soc-sysfs': 'SoC / eFuse（内核只读接口）', 'device-tree': '开发板固件',
       'boot-marker': '/boot 软件标记（随系统文件保留）',
       'verified-correction': '管理员核实并更正', 'verified-manual': '管理员核实' };

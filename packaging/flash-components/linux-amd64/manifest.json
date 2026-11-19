@@ -3,18 +3,18 @@
   "platform": "linux-amd64",
   "executor": {
     "path": "decklab-flash",
-    "sha256": "9b23b32e9105cfea5dcd54ce477866ebdb318619460b02adc6a63232ba0554cd"
+    "sha256": "b5d1f693ccd6561922acdea7afcf2980a504b1d94c94dc0f3d22f4c2ae0b4267"
   },
   "loaders": {
     "path": "flash-loaders",
     "files": {
       "BUILD-INFO.txt": {
-        "sha256": "9674582b3386919a841fb47287b5eb714ee0e75530e6bc91238c05f49fea205b",
-        "size": 382
+        "sha256": "868dbba820ae117762e4ea353093ba0589b996342dbb764bc31a1cc5db567dca",
+        "size": 474
       },
       "CONFIGURATION.txt": {
-        "sha256": "ee8252950453c5c7ab0688195722ea8908447d992ef42277f0703ccb63ebcfbb",
-        "size": 56181
+        "sha256": "0954364df188ea875e313d05d5dc076b3902e39448fb448ae8d2f28861b6362b",
+        "size": 56170
       },
       "COPYING.txt": {
         "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
@@ -53,11 +53,11 @@
         "size": 465504
       },
       "k3/u-boot.itb": {
-        "sha256": "ee8db84f993faea435482f569a907ea24565113e0dc4b1c3f1b9a76c60f5d5df",
-        "size": 781562
+        "sha256": "1bc52e418044b4c772662ea890333afdb0663e71b654a67c0ea98c62fc2f7718",
+        "size": 781614
       },
       "manifest.json": {
-        "sha256": "7b299d7336bd031b51a149a5f6a2e94d9e3f3717693aa806ac4cb289eb106184",
+        "sha256": "b7781339eab5fba1f16876f95a3df80eb547bd6cf842707c399fe267b805ad74",
         "size": 709
       }
     }
@@ -66,8 +66,8 @@
     "path": "notices",
     "files": {
       "BUILD-INFO.txt": {
-        "sha256": "c899a3982fe92988bc239b723b26afdcc72565978818f13d5eb8f4199345bcd5",
-        "size": 258
+        "sha256": "c581bfc5b5978243fad193f779a0061745ee7aa5c1cdafa7826b1716529fd714",
+        "size": 408
       },
       "Go-LICENSE": {
         "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",

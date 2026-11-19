@@ -320,6 +320,7 @@ class LocalFlashExecutor:
     supports_storage_metadata = True
     supports_skip_verification = True
     supports_image_preparation = True
+    supports_stream_flash = True
 
     def __init__(self, work_dir):
         # Canonicalize the administrator-selected root once. On Windows, TEMP
@@ -390,12 +391,21 @@ class LocalFlashExecutor:
             request.update(target_id=binding.target_id, target_generation=binding.target_generation)
         return request
 
-    def discover(self, argv, probe=False, device=None, check=lambda: None):
+    def discover(self, argv, probe=False, device=None, check=lambda: None, link_token=None):
         request = {'version': 1, 'probe': probe}
         if device is not None:
             request['device'] = device
+        if link_token:
+            request['link_token'] = link_token
         return self._run(SimpleNamespace(argv=tuple(argv), timeout=20 if probe else 10),
                          'discover', request, check=check)
+
+    def stream_flash(self, binding, request, on_event=None, check=lambda: None):
+        """Fast mode; the executor downloads, decompresses and writes in memory."""
+        return self._run(binding, 'stream-flash', request, on_event, check, timeout=4 * 3600)
+
+    def stream_loader_workspace(self):
+        return self.root / 'images' / 'stream'
 
     def inspect(self, binding, check=lambda: None):
         return self._run(binding, 'inspect', self._request(binding), check=check, timeout=min(binding.timeout, 60))

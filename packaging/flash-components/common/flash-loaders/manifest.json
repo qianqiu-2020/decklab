@@ -9,7 +9,7 @@
       },
       "uboot": {
         "file": "k3/u-boot.itb",
-        "sha256": "ee8db84f993faea435482f569a907ea24565113e0dc4b1c3f1b9a76c60f5d5df"
+        "sha256": "1bc52e418044b4c772662ea890333afdb0663e71b654a67c0ea98c62fc2f7718"
       }
     },
     "k1": {

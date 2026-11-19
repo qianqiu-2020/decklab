@@ -28,7 +28,7 @@ class WorkspaceExecutor(nor_fixture.SnapshotExecutor):
             mode='bootrom' if bootrom else 'fastboot', inspection=None if bootrom else self.inspect(None))
         self.discoveries, self.workspaces = [], []
 
-    def discover(self, argv, probe=False, device=None, check=lambda: None):
+    def discover(self, argv, probe=False, device=None, check=lambda: None, link_token=None):
         check()
         self.discoveries.append((probe, device))
         return {'devices': copy.deepcopy(self.candidates)}
@@ -274,6 +274,47 @@ class NORWorkspaceTests(unittest.TestCase):
             self.request(fixture, '/api/task-cancel', {'id': task['id']})
             self.terminal(fixture, task['id'])
             self.assertEqual(maintenance_for(fixture.manager).holds(serial), [])
+
+    def test_bootrom_paired_console_is_bound_when_ram_loader_reads_eeprom(self):
+        from seriald_core import device as device_module, devices
+        from seriald_core.console_link import LINK_PREFIX
+        serial = 'BOARD-LINKED-01'
+        with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root, \
+                mock.patch.object(devices, 'LOG_ROOT', str(Path(root) / 'logs')), \
+                mock.patch.object(device_module, 'LOG_ROOT', str(Path(root) / 'logs')):
+            console = devices.Device('usb-COM9', 'COM9', fixture.manager)
+            console.present, console.fd = True, 98765
+            fixture.manager.devices[console.by_path] = console
+            self.addCleanup(console.close_log)
+            executor = WorkspaceExecutor(root, bootrom=True)
+            discover = executor.discover
+            def echoing(argv, probe=False, device=None, check=lambda: None, link_token=None):
+                result = discover(argv, probe, device, check)
+                if probe and link_token:
+                    console.append(('fastboot_handle_command: ' + LINK_PREFIX + link_token + '\r\n').encode())
+                    for candidate in result['devices']:
+                        candidate['link_sent'] = True
+                return result
+            executor.discover = echoing
+            fixture.manager.flash_executor = executor
+            result = self.probe(fixture, self.discover(fixture)[0])
+            target = result['target']
+            self.assertEqual(target['console_link']['state'], 'paired')
+            self.assertEqual(console.serial, '')
+            prepare = executor.prepare
+            def prepared(*args, **kwargs):
+                result = prepare(*args, **kwargs)
+                result['final_identity'] = {'serialno': serial, 'eeprom-serial': serial}
+                return result
+            executor.prepare = prepared
+            task, _ = self.begin(fixture, target)
+            self.phase(fixture, task['id'], 'awaiting-selection')
+            self.assertEqual(console.serial, serial)
+            self.assertEqual(fixture.store.get(serial)['last_path'], console.by_path)
+            link = fixture.manager.flash_discovery.get(target['id'])['document']['uart_link']
+            self.assertEqual((link['state'], link['serial']), ('linked', serial))
+            self.request(fixture, '/api/task-cancel', {'id': task['id']})
+            self.terminal(fixture, task['id'])
 
     def test_eeprom_conflict_after_prepare_stops_before_backup_or_flash(self):
         with usb_fixture.automatic_flashing(known=[('BOARD-SAMPLE-01', 'cloud-board')]) as fixture, tempfile.TemporaryDirectory() as root:
