@@ -16,6 +16,7 @@ const savedSshCredentials = new Map(), sshAuthentications = [], fixtureSshSessio
 // Flash fixtures exercise the real UI only. No executor or physical board runs.
 const flashPlans = [], flashSubmissions = [], flashRecords = [], flashRecoveryPosts = [];
 const flashTargetReads = [];
+const flashCalibrations = [];
 const hardwarePosts = [];
 const flashDeletedArtifacts = new Set(), flashDeletePosts = [];
 const flashUsbTargets = [2, 3].map(port => ({target_id:'fixture-usb-' + port,
@@ -69,7 +70,17 @@ const server = http.createServer((req, res) => {
           profile:'自动识别 · 模拟 K3 下载环境',console:null,
           executor:{provider:'goflash',node:'local',endpoint:target.target_id},
           artifacts:[flashArtifact].filter(item=>!flashDeletedArtifacts.has(item.id)),storages:preparable?[]:flashStorages,
-          modes:preparable&&!target.nor?['partitions']:['full','partitions']}});
+          modes:preparable&&!target.nor?['partitions']:['full','partitions'],
+          stream_flash_supported:true,calibrate_supported:true,flash_configuration:{scope:'port',port:'1-8-2',
+            board_serial:'FIXTURE-SN',measured_at:1795125430,
+            measured:{usb_bps:43357871,dlz_bps:982910182,gzip_bps:167339624,write_bps:587894365,command_s:0.000244},
+            tuning:{codec:'dlz',zstd_level:2,run_bytes:134217728,background:true,usb_bps:43357871},
+            predicted:{data_s_per_gb:11.025,zero_s_per_gb:1.701}}}});
+      }); return;
+    }
+    if (u.pathname === '/api/flash-calibrate') {
+      let body=''; req.on('data', chunk => body += chunk); req.on('end', () => {
+        flashCalibrations.push(JSON.parse(body)); res.statusCode=409; json({ok:false,error:'simulated: board busy'});
       }); return;
     }
     if (u.pathname === '/api/artifact-delete') {
@@ -929,6 +940,20 @@ let chrome, ws;
   assert.equal(flashTargetReads[0].target_generation,'fixture-generation-3');
   assert.equal(Object.hasOwn(flashTargetReads[0],'serial'),false,'USB-only target must not invent a serial');
   assert.equal(flashSubmissions.length,1,'automatic detection and probing must not flash storage');
+  assert.ok(await evaluate('!document.querySelector("#fl-tuning").hidden'), 'measured configuration panel is shown');
+  await evaluate('document.querySelector("#fl-tuning").open=true');
+  assert.ok(await evaluate('document.querySelector("#fl-tuning-summary").textContent.includes("11.0 s")'));
+  assert.ok(await evaluate('document.querySelector("#fl-tuning-state").textContent.includes("此 USB 口已实测")'));
+  assert.ok(await evaluate('!document.querySelector("#fl-tuning-forget").hidden'));
+  const tuningShot=await rpc('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync(path.join(out,'ui-flash-tuning.png'),Buffer.from(tuningShot.data,'base64'));
+  await evaluate('document.querySelector("#fl-tuning-run").click()');
+  for(let n=0;n<40 && !flashCalibrations.length;n++)await delay(50);
+  assert.equal(flashCalibrations[0].target_id,'fixture-usb-3');
+  assert.equal(flashCalibrations[0].action,'measure');
+  assert.equal(flashCalibrations[0].measure_write,true);
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-status").textContent.includes("board busy")');n++)await delay(50);
+  await evaluate('document.querySelector("#fl-tuning").open=false');
   await evaluate('document.querySelector("#fl-artifact").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-artifact").dispatchEvent(new Event("change"))');
   for(let n=0;n<40 && await evaluate('document.querySelector("#fl-plan").disabled');n++)await delay(50);
   await evaluate('document.querySelector("#fl-plan").click()');

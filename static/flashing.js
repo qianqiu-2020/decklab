@@ -664,6 +664,12 @@
       $('fl-all-label').textContent = nor ? '全选 NOR 分区' : '全选分区';
       var fast = !!(board && board.target_id && capabilities && capabilities.stream_flash_supported && !board.observingTask);
       $('fl-fast').hidden = !fast;
+      var tuning = !!(board && board.target_id && capabilities && capabilities.calibrate_supported && !board.observingTask);
+      $('fl-tuning').hidden = !tuning;
+      $('fl-tuning-run').disabled = !tuning || busy || uploading || submissionUnknown || !!active;
+      $('fl-tuning-forget').hidden = !(tuning && capabilities.flash_configuration && capabilities.flash_configuration.scope === 'port');
+      $('fl-tuning-forget').disabled = $('fl-tuning-run').disabled;
+      if (tuning) renderTuning(capabilities.flash_configuration);
       $('fl-fast-start').disabled = !fast || busy || uploading || submissionUnknown || !!active
         || !$('fl-fast-confirm').checked || !/^https?:\/\/\S+\.(tar\.gz|tgz|tar)$/i.test($('fl-fast-url').value.trim());
       renderSource(); renderPreparation();
@@ -1029,7 +1035,7 @@
         'expanding-image': '解压镜像（压缩包读取）', 'checking-payloads': '核对包内载荷',
         'checking-layout': '核对现场布局', 'reading-payload-metadata': '读取分区文件系统信息', 'reading-nor': '读取整片 NOR', 'checking-nor-baseline': '检查备份后板上内容是否变化',
         'checking-image': '核对写入计划与载荷', 'verifying': '回读校验', 'verifying-nor': '回读整片 NOR 并校验', 'verifying-system': '回读所选系统盘分区', 'writing': '整体写入', 'resetting': '刷写完成，正在复位',
-        'preparing-loader': '加载临时刷机器', 'prepare': '准备临时刷机器',
+        'preparing-loader': '加载临时刷机器', 'prepare': '准备临时刷机器', 'calibrating': '实测刷写参数',
         'awaiting-selection': '等候核对写入范围', 'image-download': '后端下载镜像',
         'image-ready': '镜像已准备', 'uploading-image': '上传替换文件',
         'reading-system-layout': '读取系统盘分区表', 'reading-system-metadata': '读取系统盘版本信息'};
@@ -1040,7 +1046,7 @@
       bar.max = Math.max(1, total);
       if (active && !total && phase !== 'awaiting-selection' && bar.removeAttribute) bar.removeAttribute('value');
       else bar.value = total ? Math.min(done, total) : 0;
-      var counts = total ? ((phase === 'prepare' || phase === 'preparing-loader')
+      var counts = total ? ((phase === 'prepare' || phase === 'preparing-loader' || phase === 'calibrating')
         ? done + ' / ' + total + ' ' + translate('步骤') : format(done) + ' / ' + format(total)) : done ? format(done) : '';
       $('fl-progress-text').textContent = translate(label) + (counts ? ' · ' + counts : '')
         + (total ? ' · ' + Math.floor(Math.min(done, total) / total * 100) + '%' : '');
@@ -1862,6 +1868,8 @@
       }
       task = current; $('flash-dialog').dataset.taskState = current.state;
       var p = current.progress || {}, result = current.result || {}, details = current.flash || {};
+      if (details.operation === 'calibrate' && current.state === 'completed' && details.configuration && capabilities)
+        capabilities.flash_configuration = details.configuration;
       if (!awaitingSelection(current)) previewProgress = null;
       renderBackups(); renderSystemInventory();
       if (workspaceSelection() && details.storage_inventory) renderStorages();
@@ -2609,6 +2617,51 @@
         if (same(selected, seq)) status(error.result ? error.message : '提交结果未确认；请勿重复提交，刷新后在任务历史中查看。', true);
       } finally { if (same(selected, seq)) { busy = false; updateControls(); } }
     }
+    function rate(value) { return value ? (value >= 1e9 ? (value / 1e9).toFixed(2) + ' GB/s' : (value / 1e6).toFixed(1) + ' MB/s') : '—'; }
+    function renderTuning(configuration) {
+      var box = $('fl-tuning-summary'), state = $('fl-tuning-state');
+      box.textContent = '';
+      if (!configuration) { state.textContent = translate('（尚未实测，使用内置默认值）'); return; }
+      var m = configuration.measured || {}, t = configuration.tuning || {}, predicted = configuration.predicted || {};
+      var when = new Date((configuration.measured_at || 0) * 1000).toLocaleString();
+      state.textContent = configuration.scope === 'port' ? translate('（此 USB 口已实测）') : translate('（沿用同型号其他 USB 口的实测）');
+      var codec = {dlz: translate('zstd 帧，板上多核解压'), gzip: translate('gzip，板上单核解压'), raw: translate('不压缩')}[t.codec] || t.codec;
+      [['实测时间', when + (configuration.board_serial ? ' · SN ' + configuration.board_serial : '') + ' · USB ' + (configuration.port || '')],
+       ['USB 下载', rate(m.usb_bps)],
+       ['板上解压', 'zstd ' + rate(m.dlz_bps) + ' · gzip ' + rate(m.gzip_bps)],
+       ['写盘', m.write_bps ? rate(m.write_bps) : translate('未测（按 550 MB/s 估算）')],
+       ['命令开销', m.command_s !== undefined ? (m.command_s * 1000).toFixed(1) + ' ms' : '—'],
+       ['选用配置', codec + (t.zstd_level ? ' · ' + translate('级别') + ' ' + t.zstd_level : '') + (t.gzip_level ? ' · ' + translate('级别') + ' ' + t.gzip_level : '')
+         + ' · ' + translate('每段') + ' ' + Math.round((t.run_bytes || 0) / 1048576) + ' MiB · ' + (t.background ? translate('写盘与下载重叠') : translate('同步写盘'))],
+       ['预计耗时', translate('每 GB 非零数据') + ' ' + (predicted.data_s_per_gb || 0).toFixed(1) + ' s · ' + translate('每 GB 全零') + ' ' + (predicted.zero_s_per_gb || 0).toFixed(1) + ' s']
+      ].forEach(function (row) { text('dt', translate(row[0]), box); text('dd', row[1], box); });
+    }
+    var tuningRequest = null;
+    async function calibrate(action) {
+      if (!board || $('fl-tuning-run').disabled) return;
+      var selected = board, seq = sequence, measureWrite = $('fl-tuning-write').checked;
+      var identity = action + '\n' + measureWrite + '\n' + JSON.stringify(scope(selected));
+      if (!tuningRequest || tuningRequest.identity !== identity) tuningRequest = {identity: identity, id: id()};
+      busy = true; updateControls();
+      status(action === 'forget' ? '正在清除刷写配置…' : '正在提交实测任务…');
+      try {
+        var result = await client.request('/api/flash-calibrate', Object.assign(scope(selected), {
+          action: action, measure_write: measureWrite, request_id: tuningRequest.id, client_id: options.clientId || ''}));
+        if (!same(selected, seq)) return;
+        tuningRequest = null;
+        if (action === 'forget') {
+          capabilities.flash_configuration = result.configuration || null;
+          status('已清除此 USB 口的刷写配置。');
+        } else {
+          busy = false; observe(result.task, selected, seq);
+          status('正在实测：装入临时刷机环境后测量 USB、解压和写盘速度，约 20 秒。');
+        }
+      } catch (error) {
+        if (same(selected, seq)) status(error.result ? error.message : '提交结果未确认；刷新后在任务历史中查看。', true);
+      } finally { if (same(selected, seq)) { busy = false; updateControls(); } }
+    }
+    $('fl-tuning-run').addEventListener('click', function () { calibrate('measure'); });
+    $('fl-tuning-forget').addEventListener('click', function () { calibrate('forget'); });
     $('fl-fast-start').addEventListener('click', fastFlash);
     ['fl-fast-url', 'fl-fast-storage', 'fl-fast-confirm'].forEach(function (name) {
       $(name).addEventListener('input', updateControls); $(name).addEventListener('change', updateControls);

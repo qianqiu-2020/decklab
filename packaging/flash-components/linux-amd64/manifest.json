@@ -3,7 +3,7 @@
   "platform": "linux-amd64",
   "executor": {
     "path": "decklab-flash",
-    "sha256": "7e9e087a30ac4123bf831dc4c4ee6fb7d3d1b3968b9286abfe0cfc46dbf14d97"
+    "sha256": "ddbef2b1aa825e9e902701f71d91e017cb11189fd27a3e2868998714caea44e8"
   },
   "loaders": {
     "path": "flash-loaders",
@@ -90,8 +90,8 @@
     "path": "notices",
     "files": {
       "BUILD-INFO.txt": {
-        "sha256": "76ac3a8683bfab32f6c2164566dad6667d69e30d9a1a47122cecaf7064c39ebe",
-        "size": 408
+        "sha256": "eb38eef08044b4c866eef6690e29a923e5044bdf0e8490d9ae9278e6ee443110",
+        "size": 421
       },
       "Go-LICENSE": {
         "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",

@@ -109,6 +109,23 @@ class FlashStreamTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
             self.assertEqual(code, 403, result)
             self.assertEqual(fixture.executor.streams, [])
 
+    def test_finished_fast_flash_releases_the_board_and_unconfirmed_stop_keeps_recovery(self):
+        from seriald_core.board_maintenance import maintenance_for
+        with usb_fixture.automatic_flashing() as fixture:
+            target = self.target(fixture)
+            body = dict(self.scope(target), url=self.URL, system_storage='nvme:0', request_id='fast-release-001')
+            code, result = self.request(fixture, '/api/flash-stream', body)
+            self.assertEqual(self.terminal(fixture, result['task']['id'])['state'], 'completed')
+            self.assertEqual(maintenance_for(fixture.manager).holds(), [])
+            target = self.probe(fixture, target)['target']
+            fixture.executor.stream_failure = FlashRunnerError('executor stop unknown', cleanup_confirmed=False)
+            code, result = self.request(fixture, '/api/flash-stream', dict(body, request_id='fast-release-002'))
+            task = self.terminal(fixture, result['task']['id'])
+            self.assertEqual(task['state'], 'failed')
+            holds = maintenance_for(fixture.manager).holds()
+            self.assertTrue(holds and all(hold['state'] == 'recovery' for hold in holds), holds)
+            self.assertTrue(task['flash'].get('recovery_required'), task['flash'])
+
 
 # The base class's own tests are not repeated here.
 for name in list(vars(usb_fixture.FlashDiscoveryHTTPIntegrationTests)):

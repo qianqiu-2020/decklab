@@ -314,6 +314,17 @@ def public_plan(value):
     return value
 
 
+def _with_configuration(result, configuration):
+    """Record which measured configuration, if any, a write used."""
+    if not isinstance(result, dict):
+        return result
+    summary = None
+    if configuration:
+        summary = {key: configuration.get(key) for key in ('measured_at', 'scope', 'port', 'board_serial')}
+        summary['tuning'] = configuration.get('tuning')
+    return dict(result, flash_configuration=summary)
+
+
 class LocalFlashExecutor:
     supports_nor_snapshot = True
     supports_reset_after = True
@@ -321,6 +332,7 @@ class LocalFlashExecutor:
     supports_skip_verification = True
     supports_image_preparation = True
     supports_stream_flash = True
+    supports_calibrate = True
 
     def __init__(self, work_dir):
         # Canonicalize the administrator-selected root once. On Windows, TEMP
@@ -402,7 +414,28 @@ class LocalFlashExecutor:
 
     def stream_flash(self, binding, request, on_event=None, check=lambda: None):
         """Fast mode; the executor downloads, decompresses and writes in memory."""
-        return self._run(binding, 'stream-flash', request, on_event, check, timeout=4 * 3600)
+        configuration = self.tuning(binding)
+        if configuration:
+            request = dict(request, tuning=configuration['tuning'])
+        result = self._run(binding, 'stream-flash', request, on_event, check, timeout=4 * 3600)
+        return _with_configuration(result, configuration)
+
+    def calibrate(self, binding, request, on_event=None, check=lambda: None):
+        """Measure this board connection and keep the derived configuration."""
+        from . import flash_tuning
+        result = self._run(binding, 'calibrate', request, on_event, check, timeout=600)
+        return dict(result, configuration=flash_tuning.record(self.root, binding, result))
+
+    def tuning(self, binding):
+        """The measured configuration later K3 flashes of this connection use."""
+        from . import flash_tuning
+        if binding.profile_data.get('id') != 'auto-spacemit-gpt-v1' or binding.profile_data.get('chip_family') != 'k3':
+            return None
+        return flash_tuning.lookup(self.root, binding)
+
+    def forget_tuning(self, binding):
+        from . import flash_tuning
+        return flash_tuning.forget(self.root, binding)
 
     def stream_loader_workspace(self):
         return self.root / 'images' / 'stream'
@@ -1003,6 +1036,9 @@ class LocalFlashExecutor:
     def execute(self, binding, plan, on_event=None, check=lambda: None, task_id='', attempt_id='',
                 workspace=None, nor_baseline=None, reset_after=False, skip_verification=None):
         request = dict(self._request(binding), plan=plan, task_id=task_id, attempt_id=attempt_id)
+        configuration = self.tuning(binding)
+        if configuration:
+            request['tuning'] = configuration['tuning']
         if reset_after:
             request['reset_after'] = True
         if workspace is not None:
@@ -1012,7 +1048,8 @@ class LocalFlashExecutor:
                 raise TaskError('invalid NOR baseline')
             self._owned_workspace(Path(nor_baseline['path']).parent)
             request['nor_baseline'] = {key: nor_baseline[key] for key in ('id', 'path', 'size', 'sha256')}
-        return self._run(binding, 'execute', request, on_event, check, skip_verification=skip_verification)
+        result = self._run(binding, 'execute', request, on_event, check, skip_verification=skip_verification)
+        return _with_configuration(result, configuration)
 
     def check_plan(self, binding, plan, payload_candidates=None, check=lambda: None, selections=None,
                    previous_device=None):

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from types import SimpleNamespace
 import secrets
 import threading
 import time
@@ -138,6 +139,26 @@ def _source_ids(intent):
     sources = {item['artifact_id'] for item in intent['selections']}
     sources.update(value for value in (intent['artifact_id'], intent.get('firmware_artifact_id')) if value)
     return sources
+
+
+@contextmanager
+def _release_when_stopped(manager, task_id):
+    """Release a direct executor operation's board holds once it has ended.
+
+    Holds stay in recovery when the executor reports that its process could
+    not be confirmed stopped; a person must then confirm recovery.
+    """
+    maintenance = maintenance_for(manager)
+    try:
+        yield
+    except BaseException as error:
+        if getattr(error, 'cleanup_confirmed', True):
+            maintenance.release(task_id, confirmed=True)
+        else:
+            maintenance.keep_recovery(task_id)
+            FlashStore(manager.store).update_details(task_id, {'recovery_required': True})
+        raise
+    maintenance.release(task_id, confirmed=True)
 
 
 class FlashActions:
@@ -311,6 +332,15 @@ class FlashActions:
                 result['stream_flash_supported'] = bool(profile.get('id') == 'auto-spacemit-gpt-v1'
                     and profile.get('chip_family') == 'k3'
                     and getattr(_services(self.manager)[1], 'supports_stream_flash', False))
+                result['calibrate_supported'] = bool(result['stream_flash_supported']
+                    and getattr(_services(self.manager)[1], 'supports_calibrate', False))
+                if result['calibrate_supported']:
+                    try:
+                        configuration = _services(self.manager)[1].tuning(
+                            SimpleNamespace(profile_data=profile, device=data['device']))
+                    except (OSError, ValueError, KeyError):
+                        configuration = None
+                    result['flash_configuration'] = configuration
                 result['storage_inventory_supported'] = bool(result['nor_workspace_supported']
                     and getattr(_services(self.manager)[1], 'supports_storage_metadata', False))
                 if device.serial and self.manager.store.has_conflict(device.serial):
@@ -817,7 +847,8 @@ class FlashActions:
                         if type(done) is int and type(total) is int and 0 <= done <= max(total, done):
                             context.progress(done, max(total, done), phase)
                     try:
-                        result = executor.stream_flash(binding, request, event, context.check)
+                        with _release_when_stopped(self.manager, context.id):
+                            result = executor.stream_flash(binding, request, event, context.check)
                     except BaseException:
                         store.update_details(context.id, {'write_result': 'partial-or-unknown' if started['writing'] else 'not-started'})
                         raise
@@ -831,6 +862,78 @@ class FlashActions:
                         'target_id': binding.target_id, 'target_generation': binding.target_generation,
                         'executor': binding.endpoint, 'write_result': 'not-started',
                         'verify_result': 'not-started', 'boot_result': 'not-requested'},
+                    resources=_resources(binding), maintenance=maintenance_for(self.manager),
+                    target_id=binding.target_id, target_generation=binding.target_generation)
+            return response(202, {'ok': True, 'task': task})
+        except (TaskError, TransactionError, ValueError, OSError) as error:
+            return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
+
+    def calibrate(self, payload, device, actor='web'):
+        """Measure a K3 board connection and keep its flashing configuration.
+
+        Only RAM and an unchanged rewrite of one disk range are touched; the
+        board's storage content is the same afterwards.
+        """
+        try:
+            if set(payload) - {'key', 'serial', 'actor', 'client_id', 'request_id', 'target_id', 'target_generation',
+                               'system_storage', 'measure_write', 'action'}:
+                raise TaskError('unsupported calibration option')
+            action = payload.get('action', 'measure')
+            if action not in ('measure', 'forget'):
+                raise TaskError('invalid calibration action')
+            storage = payload.get('system_storage') or 'auto'
+            if storage != 'auto' and not re.fullmatch(r'(nvme|scsi|mmc|usb):[0-3]', storage):
+                raise TaskError('invalid system disk')
+            measure_write = payload.get('measure_write', True)
+            if type(measure_write) is not bool:
+                raise TaskError('measure_write must be boolean')
+            client = payload.get('client_id', '')
+            if not isinstance(client, str) or client and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client):
+                raise TaskError('invalid flash client')
+            _services(self.manager)
+            identity = {key: payload.get(key) for key in ('target_id', 'target_generation')}
+            identity.update(operation='calibrate', system_storage=storage, measure_write=measure_write)
+            input_digest = _digest(identity)
+            with self.manager._flash_plans_lock:
+                if action == 'measure':
+                    previous = self.store.find_request(actor, payload.get('request_id'), input_digest)
+                    if previous:
+                        return response(202, {'ok': True, 'task': self.manager.tasks.store.get(previous)})
+                if not payload.get('target_id'):
+                    raise TaskError('calibration requires a detected USB target')
+                device = self._device(device, payload, actor)
+                binding, executor = self._target(device, actor, payload)
+                if (binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
+                        or binding.profile_data.get('chip_family') != 'k3'
+                        or not getattr(executor, 'supports_calibrate', False)):
+                    raise TaskError('flash calibration requires a detected K3 USB target and updated executor', 409)
+                if action == 'forget':
+                    executor.forget_tuning(binding)
+                    return response(200, {'ok': True, 'configuration': executor.tuning(binding)})
+                store = self.store
+                def run(context):
+                    from .flash_loaders import prepare_materials
+                    request = {'version': 1, 'device': binding.device, 'chip_family': 'k3',
+                               'system_storage': storage, 'measure_write': measure_write}
+                    if binding.profile_data.get('bootrom_identity'):
+                        materials = prepare_materials(binding, executor.stream_loader_workspace(), context.check)
+                        request['loader'] = {key: {name: materials[key][name] for name in ('id', 'name', 'path', 'size', 'sha256')}
+                                             for key in ('fsbl', 'uboot')}
+                    def event(value):
+                        store.append_event(context.id, value)
+                        done, total = value.get('done', 0), value.get('total', 0)
+                        if type(done) is int and type(total) is int and 0 <= done <= max(total, done):
+                            context.progress(done, max(total, done), value.get('phase', 'calibrating'))
+                    with _release_when_stopped(self.manager, context.id):
+                        result = executor.calibrate(binding, request, event, context.check)
+                    store.update_details(context.id, {'configuration': result['configuration']})
+                    return result
+                task = self.manager.tasks.start_board('flash', actor, client, device.serial, run,
+                    request_id=payload.get('request_id'), input_digest=input_digest,
+                    details={'operation': 'calibrate', 'system_storage': storage, 'measure_write': measure_write,
+                        'target_id': binding.target_id, 'target_generation': binding.target_generation,
+                        'executor': binding.endpoint, 'write_result': 'not-started',
+                        'verify_result': 'not-requested', 'boot_result': 'not-requested'},
                     resources=_resources(binding), maintenance=maintenance_for(self.manager),
                     target_id=binding.target_id, target_generation=binding.target_generation)
             return response(202, {'ok': True, 'task': task})

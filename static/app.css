@@ -464,6 +464,10 @@
   .flash-dialog progress::-webkit-progress-value{background:var(--accent);border-radius:99px}
   .flash-dialog progress::-moz-progress-bar{background:var(--accent);border-radius:99px}
   #fl-results{margin-top:12px;padding:10px 12px;background:var(--ground);border-radius:8px}
+  .fl-tuning-summary{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 16px;margin:8px 0;padding:10px 12px;background:var(--ground);border-radius:8px}
+  .fl-tuning-summary:empty{display:none}
+  .fl-tuning-summary dd{margin:0;overflow-wrap:anywhere}
+  .fl-tuning-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
   .fl-alert{min-inline-size:0;margin:14px 0 0;padding:12px 14px;border:1px solid var(--idle);border-radius:8px;background:var(--idle-soft);font-size:12px}
   .fl-alert legend{float:left;width:100%;padding:0;margin-bottom:6px;font-size:13px;font-weight:650;color:var(--idle)}
   .fl-alert p{margin:0 0 10px;color:var(--ink)}

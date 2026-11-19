@@ -369,6 +369,13 @@ PasswordAuthentication yes</code></pre>
         <label class="ft-check"><input id="fl-fast-confirm" type="checkbox">我确认覆盖该板系统盘的全部内容</label>
         <button id="fl-fast-start" type="button" disabled>开始极速刷写</button>
       </details>
+      <details id="fl-tuning" class="fl-details" hidden>
+        <summary>刷写配置 <span id="fl-tuning-state"></span></summary>
+        <p class="fl-hint">在这块板上实测 USB、板上解压、写盘和控制机压缩速度，按耗时模型选出编码、压缩级别和写盘方式。之后经此 USB 口的普通刷写和极速刷写都使用这套配置。配置只影响速度，不改变写入内容。</p>
+        <dl id="fl-tuning-summary" class="fl-tuning-summary"></dl>
+        <label class="ft-check"><input id="fl-tuning-write" type="checkbox" checked>同时测写盘速度（读出 128 MiB 后原样写回，内容不变）</label>
+        <div class="fl-tuning-actions"><button id="fl-tuning-run" type="button" disabled>实测并生成配置</button><button id="fl-tuning-forget" type="button" hidden>清除此 USB 口的配置</button></div>
+      </details>
       <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
       <select id="fl-artifact" hidden aria-label="当前镜像来源"></select>
       <div id="fl-firmware-field" class="ft-field" hidden>
