@@ -9,3 +9,6 @@ vendor/novnc/** -text -whitespace
 vendor/python/** -text
 # The prepared desktop SDK records these source bytes on both build hosts.
 native/freerdp/** text eol=lf
+
+# Binary build inputs and their notices are authenticated byte for byte.
+packaging/flash-components/** -text

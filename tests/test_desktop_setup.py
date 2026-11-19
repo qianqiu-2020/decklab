@@ -179,6 +179,8 @@ class SetupTests(unittest.TestCase):
                     {'host':host,'port':port,'provider':provider} if port==5900 else None) as call:
                 first=setup.discover(device); self.assertEqual(len(first['candidates']),1)
                 self.assertEqual(call.call_count,5)
+                self.assertIn(mock.call('10.0.0.2', 3389, 'rdp'), call.call_args_list)
+                self.assertIn(mock.call('10.0.0.2', 3390, 'rdp'), call.call_args_list)
                 self.assertEqual(setup.discover(device),first); self.assertEqual(call.call_count,5)
                 device.probe_info['ips']=['eth0 10.0.0.3/24']
                 with self.assertRaises(TaskError) as error:
@@ -186,6 +188,23 @@ class SetupTests(unittest.TestCase):
                 self.assertEqual(error.exception.status,409)
                 second=setup.discover(device)
                 self.assertEqual(second['hosts'],['10.0.0.3']);self.assertEqual(call.call_count,10)
+
+    def test_rdp_recheck_includes_both_default_ports_and_keeps_custom_ports_exact(self):
+        with self.setup() as (f, device, settings, _):
+            setup = f.manager.desktop.setup
+            with mock.patch('seriald_core.desktop_setup.probe', side_effect=lambda host, port, provider:
+                    {'host': host, 'port': port, 'provider': provider, 'certificate_sha256': 'a' * 64}) as network:
+                for port in (3389, 3390):
+                    network.reset_mock()
+                    result = setup.discover(device, ('10.0.0.9', port, 'rdp'))
+                    self.assertCountEqual(network.call_args_list, [mock.call('10.0.0.9', p, 'rdp') for p in (3389, 3390)])
+                    self.assertEqual([item['port'] for item in result['candidates']], [3389, 3390])
+                candidate = result['candidates'][1]
+                setup.configure(device, self.payload(settings, provider='rdp', host='10.0.0.9', port=3390,
+                    username='rdp', certificate_sha256='a' * 64, trust_certificate=True, candidate_id=candidate['id']))
+                network.reset_mock()
+                setup.discover(device, ('10.0.0.9', 3391, 'rdp'))
+                network.assert_called_once_with('10.0.0.9', 3391, 'rdp')
 
     def test_new_certificate_requires_explicit_trust_and_password_is_not_reused_on_target_change(self):
         with self.setup() as (f, device, settings, _):

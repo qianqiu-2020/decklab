@@ -260,6 +260,24 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(connection.request.call_args.kwargs['headers']['X-Seriald-Connection'], 'attachment-1')
         self.assertEqual(connection.request.call_args.kwargs['headers']['X-Seriald-Actor'], grant['actor'])
 
+    def test_scoped_device_list_omits_unrelated_controller_usb_warnings(self):
+        store = AgentGrantStore(':memory:')
+        self.addCleanup(store.close)
+        token, _ = store.issue('device', serial='SN1')
+        handler = self.control_handler('/api/devices')
+        handler.command, handler.auth_token, handler.grant_store = 'GET', 'owner', store
+        handler.headers = {'Authorization': 'Bearer ' + token}
+        connection = mock.Mock()
+        reply = connection.getresponse.return_value
+        reply.status = 200
+        reply.read.return_value = json.dumps({'devices': [{'serial': 'SN1'}], 'usb_serial_warnings': [
+            {'port': '2-1', 'chip': 'CH340', 'brltty_rule': True}]}).encode()
+        with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
+            handler.do_GET()
+        status, data = self.result(handler)
+        self.assertEqual(status, 200)
+        self.assertNotIn('usb_serial_warnings', data)
+
     def test_connection_grant_pins_reads_and_writes_against_forged_target_fields(self):
         store = AgentGrantStore(':memory:')
         self.addCleanup(store.close)

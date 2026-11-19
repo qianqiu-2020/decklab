@@ -66,9 +66,9 @@
     var $ = options.byId, client = createClient(options.fetch), request = client.request;
     var selection = '', offset = 0, sequence = 0;
     var names = { 'desktop-input': '桌面输入', identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH', 'file-copy': '板间复制',
-                  'file-upload': '上传文件', 'file-download': '下载文件', 'image-download': '下载刷机镜像',
+                  'file-upload': '上传文件', 'file-download': '下载文件', 'image-download': '下载刷机镜像', 'image-prepare': '准备刷机镜像',
                   'hardware-power-on': '硬件上电', 'hardware-power-off': '硬件断电',
-                  'hardware-reset': '硬件复位', 'hardware-enter-download': '进入下载模式', 'hardware-flash': '外部刷机', flash: '刷机', 'flash-inspect': '刷机预检' };
+                  'hardware-reset': '硬件复位', 'hardware-enter-download': '进入下载模式', 'hardware-flash': '外部刷机', flash: '刷机', 'flash-inspect': '刷机预检', 'flash-preview': '预览刷写范围' };
     function scope(ctx) { return ctx ? ctx.serial ? 'serial:' + ctx.serial
       : 'connection:' + (ctx.connectionId || ctx.key) : ''; }
     function sameSelection(selected) { return !!selected && scope(options.getView()) === selected; }
@@ -97,24 +97,29 @@
         detail.textContent = task.actor + ' · ' + options.age(task.created)
           + (task.cancel_requested ? ' · 已请求取消' : '');
         main.appendChild(title); main.appendChild(detail);
+        var reported = task.progress || {};
         if (active(task)) {
           var progress = document.createElement('progress'); progress.className = 'task-progress';
-          progress.max = Math.max(1, task.progress.total || 1); progress.value = task.progress.done || 0;
+          if (reported.total > 0) {
+            progress.max = reported.total;
+            progress.value = reported.done || 0;
+          }
           progress.setAttribute('aria-label', '任务进度'); main.appendChild(progress);
         }
         var output = document.createElement('code');
         output.textContent = task.error || task.result && (task.result.artifact ? task.result.artifact.name + ' · ' + task.result.artifact.size + ' B'
           : task.result.sid ? '会话 ' + task.result.sid
           : task.result.serial ? 'SN ' + task.result.serial
-          : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || task.progress.phase || '';
+          : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || reported.phase || '';
         main.appendChild(output); row.appendChild(main);
-        if ((task.kind === 'flash' || task.kind === 'flash-inspect') && options.openFlash) {
+        if (['flash','flash-inspect','flash-preview'].includes(task.kind) && options.openFlash) {
           var inspect = document.createElement('button'); inspect.type = 'button'; inspect.textContent = '查看刷机';
           inspect.addEventListener('click', function () { if (sameSelection(selected)) options.openFlash(task); });
           row.appendChild(inspect);
         }
         if (active(task)) {
-          var cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '取消';
+          var cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = task.cancel_requested ? '已请求取消' : '取消';
+          cancel.disabled = !!task.cancel_requested;
           cancel.addEventListener('click', function () {
             if (!sameSelection(selected)) return;
             cancel.disabled = true;
@@ -158,6 +163,7 @@
         box.appendChild(row);
       });
       if (!tasks.length) box.textContent = '尚无后台任务；任务结果在刷新或重新打开页面后仍可查看。';
+      $('task-pager').hidden = offset === 0 && !more;
       $('task-prev').disabled = offset === 0;
       $('task-next').disabled = !more;
       $('task-page').textContent = '第 ' + (offset / 10 + 1) + ' 页';
@@ -167,6 +173,7 @@
       var ctx = options.getView(), selected = scope(ctx);
       if (!ctx) return;
       if (selection !== selected) {
+        $('task-pager').hidden = true;
         selection = selected; offset = 0; $('d-tasks').textContent = '';
         $('task-status').textContent = '正在读取任务…';
         $('task-prev').disabled = true; $('task-next').disabled = true; $('task-page').textContent = '';

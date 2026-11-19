@@ -88,3 +88,11 @@ offset checks and input ownership. `manual`/`custom` probe modes send no Linux
 size setup; their HTTP 409 uses `terminal-mode-disabled`, distinct from
 `not-idle`. A local BusyBox 1.30.1 ash/stty PTY check exercises 140 columns by
 42 rows; it is not physical-board acceptance.
+
+Image preparation is host-only and content-addressed under flashing/images/<SHA-256>.
+A prepared receipt seals extraction and payload digests independently of USB/board
+identity. Reconnection retains the chosen image, but invalidates board facts and
+write plans. Never reuse a previous board's authorization or skip execute-time
+payload validation. Preparation uses the existing task/resource registry; unknown
+workers retain image/source data until explicit human recovery. GC must protect
+fresh plans, active tasks and recovery holds, including alternate payload roots.

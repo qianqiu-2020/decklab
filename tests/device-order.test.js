@@ -45,7 +45,7 @@ function harness(storage = new Map()) {
     formatBytes: number => String(number || 0), age: () => 'now', open: key => opened.push(key),
     getView: () => null, isCurrent: () => false, loadSessions() {}, loadActivity() {}, renderInfo() {} });
   return { byId, controller, opened, storage,
-    async poll(devices) { controller.poll(); requests.shift()({ devices }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); },
+    async poll(devices, warnings) { controller.poll(); requests.shift()({ devices, usb_serial_warnings:warnings }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); },
     cards: () => byId('grid').children,
     order: () => byId('grid').children.map(card => card.dataset.key),
     button(key, control) {
@@ -62,6 +62,56 @@ const pending = (path, values = {}) => ({ key: 'pending-' + path, label: 'pendin
 
 const tests = [];
 function test(name, run) { tests.push([name, run]); }
+
+test('USB driver warning stays separate from board history and clears after reattachment', async () => {
+  const h = harness(), devices = [board('history', {alive:false})];
+  const ch = {port:'2-3',chip:'CH340',brltty_rule:true}, ft = {port:'2-4',chip:'FTDI FT232',brltty_rule:false};
+  await h.poll(devices, [ch, ft]);
+  assert.equal(h.byId('serial-warning').hidden,false);
+  assert.match(h.byId('serial-warning-ports').textContent,/CH340.*FTDI/);
+  assert.equal(h.byId('serial-brltty-ports').textContent,'CH340 · USB 2-3');
+  h.byId('serial-warning').open = true;
+  await h.poll(devices, [ft]);
+  assert.equal(h.byId('serial-warning').open,true);
+  assert.equal(h.byId('serial-warning-brltty').hidden,true);
+  await h.poll(devices);
+  assert.equal(h.byId('serial-warning').hidden,true);
+  assert.equal(h.byId('serial-warning').open,false);
+  assert.deepEqual(h.order(), ['history']);
+});
+
+test('status order refreshes legacy saved positions and the combined filter tracks live changes', async () => {
+  const storage = new Map([['decklab.device-order.v1', JSON.stringify({version:1,ids:['board:H','board:B','board:A']})]]);
+  const h = harness(storage), historical = board('H', {alive:false,state:'offline'});
+  const port = pending('slot', {attachment_label:'lab port'}), a = board('A', {label:'lab A'}), b = board('B');
+  await h.poll([historical, a, b, port]);
+  assert.equal(h.byId('device-sort').value,'status');
+  assert.deepEqual(h.order(), [port.key,'B','A','H']);
+  const filter=h.byId('device-filter');filter.value='active';filter.emit('change');
+  assert.deepEqual(h.order(), [port.key,'B','A']);
+  const search=h.byId('device-search');search.value='lab';search.emit('input');
+  assert.deepEqual(h.order(), [port.key,'A']);
+  await h.poll([board('H',{label:'lab reconnected'}),board('A',{state:'offline',alive:false}),b,port]);
+  assert.deepEqual(h.order(),[port.key,'H']);
+  search.value='';search.emit('input');filter.value='all';filter.emit('change');
+  assert.deepEqual(h.order(),[port.key,'H','B','A']);
+  const sort=h.byId('device-sort');sort.value='manual';sort.emit('change');
+  assert.deepEqual(h.order(),['H','B','A',port.key]);
+  sort.value='status';sort.emit('change');
+  const reopened=harness(storage);await reopened.poll([historical,a,b,port]);
+  assert.deepEqual(reopened.order(),[port.key,'B','A','H']);
+});
+
+test('a filtered manual move starts from the displayed status order and keeps hidden slots', async () => {
+  const h=harness(), archived=board('H',{alive:false,state:'offline'}), port=pending('new');
+  await h.poll([archived,board('A'),board('B'),port]);
+  const filter=h.byId('device-filter');filter.value='active';filter.emit('change');
+  h.button('A','up').click();assert.equal(h.byId('device-sort').value,'manual');
+  filter.value='all';filter.emit('change');
+  assert.deepEqual(h.order(),['A',port.key,'B','H']);
+  h.byId('device-sort').value='status';h.byId('device-sort').emit('change');
+  assert.deepEqual(h.order(),[port.key,'A','B','H']);
+});
 
 test('move buttons save personal order across reload and online changes without selecting a board', async () => {
   const storage = new Map(), h = harness(storage);
@@ -92,9 +142,26 @@ test('filtered moves preserve hidden positions and keyboard movement keeps focus
   assert.deepEqual(h.opened, []);
 });
 
+test('device shortcuts follow visible personal order, wrap, and ignore missing slots', async () => {
+  const h = harness();
+  await h.poll([board('A'), board('B', {alive:false,state:'offline'}), board('C')]);
+  h.button('C', 'up').click(); h.button('C', 'up').click();
+  h.byId('device-filter').value = 'online'; h.byId('device-filter').emit('change');
+  assert.deepEqual(h.order(), ['C','A']);
+  assert.equal(h.controller.jump(0, 1), true);
+  h.controller.selectionChanged('A');
+  assert.equal(h.controller.jump(1), true);
+  h.controller.selectionChanged('C');
+  assert.equal(h.controller.jump(-1), true);
+  assert.equal(h.controller.jump(0, 8), false);
+  assert.equal(h.controller.jump(0, 0), false);
+  assert.deepEqual(h.opened, ['A','C','A']);
+});
+
 test('pending aliases remain visible and identification adopts attachment order without following stale offline paths', async () => {
   const h = harness();
   await h.poll([board('A'), pending('slot2', { attachment_label: '左侧板' }), board('OLD', { alive: false, state: 'offline', last_path: 'slot2' })]);
+  h.byId('device-sort').value = 'manual'; h.byId('device-sort').emit('change');
   h.button('pending-slot2', 'up').click();
   assert.ok(h.cards()[0].textContent.includes('左侧板'));
   assert.deepEqual(h.order(), ['pending-slot2', 'A', 'OLD']);
@@ -129,6 +196,17 @@ test('download USB badges preserve serial-offline state and personal order acros
   assert.ok(h.cards()[0].textContent.includes('历史设备'));
   assert.ok(!h.cards()[0].textContent.includes('USB 下载模式'));
   assert.ok(h.cards()[0].textContent.includes('上次检测刷机 USB：now'));
+});
+
+test('search matches the visible temporary label and the historical serial port', async () => {
+  const h = harness();
+  const named = pending('p1', {attachment_label: '工位样板'});
+  await h.poll([named, board('A', {state: 'offline', alive: false, last_dev: 'COM9'})]);
+  const search = h.byId('device-search');
+  search.value = ' 工位 '; search.emit('input');
+  assert.deepEqual(h.order(), [named.key]);
+  search.value = 'com9'; search.emit('input');
+  assert.deepEqual(h.order(), ['A']);
 });
 
 test('drag handles reorder exact visible targets while polling cannot replace an active drag', async () => {

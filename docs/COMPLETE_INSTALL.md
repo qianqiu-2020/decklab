@@ -4,7 +4,7 @@
 
 goflash 是独立的非开源组件，DeckLab 的 Apache-2.0 不授予其源码或二进制再分发权。本次公开完整包已获 goflash 二进制及 RAM 材料的独立分发授权，不附 goflash 源码。RAM U-Boot 的对应源码、构建配置和许可证另行提供；FSBL 和 USB 驱动遵守各自许可。
 
-材料仅是构建输入，放在 `build/install-components/<平台>/`，1.14.0 交付平台为 `linux-amd64`、`windows-amd64`。主程序不要求用户填写包内路径；已有显式外部组件设置继续优先，便于已有部署升级。
+材料仅是构建输入，放在 `build/install-components/<平台>/`，正式版交付平台为 `linux-amd64`、`windows-amd64`。主程序不要求用户填写包内路径；已有显式外部组件设置继续优先，便于已有部署升级。
 
 `manifest.json` 示例：
 
@@ -39,8 +39,10 @@ Windows 完整安装提供勾选安装 USB 驱动和稍后安装入口。优先�
 
 仅做软件 CI 或明确不需要刷机时，Linux 使用 `--core-only`、Windows 使用 `-CoreOnly`，安装元数据明确标为 `core`。这种包不应作为完整单机安装交付。
 
-正式版及软件 CI 都下载经过审核、固定 SHA-256 的 [1.14.0 组件输入](https://github.com/qianqiu-2020/decklab/releases/tag/components-1.14.0)。ZIP 根目录包含 `manifest.json`、刷机材料和 `desktop-runtime/`；图形 SDK 另有逐文件清单。默认公开 URL 和摘要固定在工作流，不需要设置 secrets。组织可用同名 Actions variables 或 secrets 覆盖 `COMPONENTS_LINUX_AMD64_URL` / `COMPONENTS_LINUX_AMD64_SHA256`、`COMPONENTS_WINDOWS_AMD64_URL` / `COMPONENTS_WINDOWS_AMD64_SHA256`。下载必须 HTTPS，缺失或摘要不符立即停止，不回退精简包，也不从可变的 latest 地址构建。
+正式版及软件 CI 都下载经过审核、固定 SHA-256 的 [1.14.0 组件输入](https://github.com/qianqiu-2020/decklab/releases/tag/components-1.14.0)。构建器校验此基础归档后合入当前标签下的 `packaging/flash-components`，并按平台清单复核执行器、K1/K3 加载器及许可文件。自定义摘要的完整归档使用其自带材料。ZIP 根目录包含 `manifest.json`、刷机材料和 `desktop-runtime/`；图形 SDK 另有逐文件清单。默认公开 URL 和摘要固定在工作流，不需要设置 secrets。组织可用同名 Actions variables 或 secrets 覆盖 `COMPONENTS_LINUX_AMD64_URL` / `COMPONENTS_LINUX_AMD64_SHA256`、`COMPONENTS_WINDOWS_AMD64_URL` / `COMPONENTS_WINDOWS_AMD64_SHA256`。下载必须 HTTPS，缺失或摘要不符立即停止，不回退精简包，也不从可变的 latest 地址构建。
 
 在 Linux 构建机下载公开输入时，将工作流里的固定 URL 与 SHA-256 分别设为 `DECKLAB_COMPONENTS_URL` 和 `DECKLAB_COMPONENTS_SHA256`，运行 `python3 tools/fetch_install_components.py --platform linux-amd64`。然后执行 `python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime`，再按上文组装。Windows 同理使用 `--platform windows-amd64`，构建时传 `-DesktopRuntime .\build\install-components\windows-amd64\desktop-runtime`。
 
 本地交付包直接放 `dist/`，使用版本文件名；不额外套交付目录。正式 GitHub 1.9.0 历史附件保持原样；1.14.0 提供 x86_64 Linux 与 Windows x64 完整包，预装 RAM 材料仅含 K3。
+
+1.17.32 的 Linux amd64 与 Windows x64 完整包均内置 K1、K3 RAM 材料。K1 对应源码索取方式见随包的 `flash-loaders/k1/SOURCE-OFFER.txt`。

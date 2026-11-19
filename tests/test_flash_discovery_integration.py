@@ -91,7 +91,7 @@ class FakeBootROMExecutor(FakeDiscoveryExecutor):
         return self.local.execution_binding(binding, profile, workspace, check)
 
     def plan(self, binding, artifact, mode, selections=None, verify='if-supported', check=lambda: None,
-             target_storage=None, inspection_scope=None):
+             target_storage=None, inspection_scope=None, on_event=None):
         check()
         self.plans.append(copy.deepcopy((artifact, mode, selections, verify, target_storage)))
         if self.preparations:
@@ -184,7 +184,9 @@ class FakeNORExecutor(FakeBootROMExecutor):
                      'target': 'mtd', 'size': 123, 'sha256': 'a' * 64},
                     {'storage': 'active', 'partition': 'fsbl', 'kind': 'partition',
                      'target': 'fsbl', 'size': 456, 'sha256': 'b' * 64}])
-        profile = result['execution_profile']
+        if self.preparations:
+            result['plan']['ready'] = True
+        profile = result.setdefault('execution_profile', copy.deepcopy(binding.profile_data))
         profile['storages'] = [{'id': 'active', 'label': 'MTD (NOR firmware package)',
             'layout_source': 'spacemit-nor', 'size_getvar': 'mtd-size', 'sector_size': 512,
             'partitions': None, 'package_tables': ['partition_nor.json'], 'layout_target': 'mtd', 'sparse': False}]
@@ -249,6 +251,23 @@ def automatic_flashing(known=None):
 
 
 class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
+    def test_debian_image_pair_with_another_chip_is_rejected_before_native_preview(self):
+        with automatic_flashing() as fixture:
+            candidate = fixture.executor.candidates[0]
+            candidate.update(chip='k1', modes=['full', 'partitions'])
+            candidate['profile']['chip_family'] = 'k1'
+            target = self.probe(fixture, self.discover(fixture)[0])['target']
+            wrong = self.image(fixture, target, name='Debian-13-GNOME-K3-v1.0rc1-202611170510.tar.gz')
+            good = self.image(fixture, target, name='Debian-13-Firmware-K1-v1.0rc1-202611172244.tar.gz')
+            for first, second in [(wrong, good), (good, wrong)]:
+                code, result = self.request(fixture, '/api/flash-plan', dict(self.scope(target),
+                    artifact_id=first['id'], firmware_artifact_id=second['id'], mode='full'))
+                self.assertEqual(code, 409, result)
+                self.assertIn(wrong['name'], result['error'])
+                self.assertIn('设备为 K1', result['error'])
+            self.assertFalse(fixture.executor.plans)
+            self.assertFalse(fixture.executor.executions)
+
     def test_unavailable_target_keeps_diagnostic_without_granting_a_write_plan(self):
         with automatic_flashing() as fixture:
             fixture.executor.candidates[0].update(mode='unknown', identity={}, supported=False,
@@ -303,6 +322,22 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(code, 200, result)
             artifact = result['artifact']
         return artifact
+
+    def test_async_preview_preserves_unidentified_usb_scope_in_task_history(self):
+        with automatic_flashing() as fixture:
+            target = self.probe(fixture, self.discover(fixture)[0])['target']
+            image = self.image(fixture, target)
+            code, result = self.request(fixture, '/api/flash-plan', dict(self.scope(target),
+                artifact_id=image['id'], mode='partitions', selections=[{'storage':'emmc','partition':'rootfs','artifact_id':image['id']}], request_id='usb-preview-001'))
+            self.assertEqual(code, 202, result)
+            task_id = result['task']['id']
+            current = self.terminal(fixture, task_id)
+            self.assertEqual(current['state'], 'completed', current)
+            self.assertEqual(current['flash_targets'], [{'target_id': target['target_id'], 'generation': target['target_generation']}])
+            code, history = self.request(fixture, '/api/tasks', query={'target_id': target['target_id']})
+            self.assertEqual(code, 200, history)
+            self.assertIn(task_id, [row['id'] for row in history['tasks']])
+            self.assertEqual(fixture.executor.executions, [])
 
     def plan(self, fixture, target, image):
         payload = dict(self.scope(target), artifact_id=image['id'], mode='partitions',
@@ -413,8 +448,9 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
             code, selected = self.request(fixture, '/api/flash-selection', payload)
             self.assertEqual(code, 409, selected)
             fixture.executor.mutate_review = False
-            code, selected = self.request(fixture, '/api/flash-selection', payload)
+            code, selected = self.request(fixture, '/api/flash-selection', dict(payload, verify='none'))
             self.assertEqual(code, 200, selected)
+            self.assertEqual(selected['plan']['verify'], 'none')
             self.assertEqual(fixture.executor.executions, [])
             commit = dict(self.scope(target), id=task_id, layout_digest=layout,
                 plan_id=selected['plan']['id'], request_id='nor-full-final-confirmation-001')
@@ -423,6 +459,32 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(self.terminal(fixture, task_id)['state'], 'completed')
             code, repeated = self.request(fixture, '/api/flash-selection', commit)
             self.assertEqual(code, 200, repeated)
+            self.assertEqual(len(fixture.executor.executions), 1)
+            self.assertEqual(len(fixture.executor.preparations), 1)
+
+    def test_prepare_for_review_stops_before_writing_and_accepts_the_prepared_plan(self):
+        with automatic_flashing() as fixture:
+            fixture.manager.flash_executor = fixture.executor = FakeNORExecutor(
+                fixture.manager.artifacts.root.parent / 'flashing')
+            target = self.probe(fixture, self.discover(fixture)[0])['target']
+            image = self.image(fixture, target, bootrom_package(), 'nor-review.zip')
+            scope = self.scope(target)
+            code, preview = self.request(fixture, '/api/flash-plan',
+                dict(scope, artifact_id=image['id'], mode='full', verify='none'))
+            self.assertEqual(code, 200, preview)
+            start = dict(scope, kind='flash', plan_id=preview['plan']['id'], binding_revision=1,
+                         request_id='prepare-only-for-full-review', prepare_for_review=True)
+            code, started = self.request(fixture, '/api/task-start', start)
+            self.assertEqual(code, 202, started)
+            task_id = started['task']['id']
+            waiting = self.phase(fixture, task_id, 'awaiting-selection')['flash']
+            self.assertTrue(waiting['prepared_plan']['ready'])
+            self.assertEqual(fixture.executor.executions, [])
+            commit = dict(scope, id=task_id, layout_digest=waiting['inspection']['layout_digest'],
+                plan_id=waiting['prepared_plan']['id'], request_id='confirm-prepared-plan-once')
+            code, result = self.request(fixture, '/api/flash-selection', commit)
+            self.assertEqual(code, 200, result)
+            self.assertEqual(self.terminal(fixture, task_id)['state'], 'completed')
             self.assertEqual(len(fixture.executor.executions), 1)
             self.assertEqual(len(fixture.executor.preparations), 1)
 

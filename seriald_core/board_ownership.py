@@ -95,7 +95,7 @@ class BoardInputOwnership:
                 task = context.store.get(context.id)
                 serials = set(task.get('board_targets', [])) | {
                     value.get('serial') for value in task.get('targets', []) if value.get('serial')}
-                if task['kind'] == 'image-download':
+                if task['kind'] in ('image-download', 'image-prepare'):
                     serials.clear()
                 def check():
                     original_check()

@@ -53,6 +53,7 @@ const server = http.createServer((req, res) => {
   const json = data => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); };
   if (req.method === 'POST') {
     posts.push(u.pathname);
+    if (u.pathname === '/api/desktop/discover') return json({candidates:[]});
     if (u.pathname === '/api/flash-target') {
       let body = ''; req.on('data', chunk => {body += chunk;});
       req.on('end', () => {
@@ -181,6 +182,7 @@ const server = http.createServer((req, res) => {
     }
     json(u.pathname === '/api/session-send' && serialPayload ? {ok:true} : { ok: false, error: 'read-only fixture' }); return;
   }
+  if (u.pathname === '/api/desktop/sessions') return json({supported:false,sessions:[],setup:{hosts:['192.0.2.42'],revision:'fixture'}});
   if (u.pathname === '/api/devices') return json({ devices: fixtures });
   if (u.pathname === '/api/hardware') return json({supported:true,actions:['reset'],providers:{reset:'bmc'}});
   if (u.pathname === '/api/session') {
@@ -225,7 +227,7 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/api/flash-discover') return json({available:true,targets:flashUsbTargets});
   if (u.pathname === '/api/image-catalog') {
     if(u.searchParams.get('source') === 'internal') {res.statusCode=502;return json({error:'内部镜像源暂不可访问（模拟）'});}
-    return json({entries:u.searchParams.get('path') ? [{name:'模拟固件.img',path:'k3/模拟固件.img',kind:'disk-image',size:1024,url:'https://example.test/fixture.img'}] : [{name:'k3',path:'k3/',kind:'directory'}]});
+    return json({entries:u.searchParams.get('path') ? [{name:'模拟固件.tar.gz',path:'fixtures/模拟固件.tar.gz',kind:'package',size:1024,url:'https://example.test/fixture.tar.gz'}] : [{name:'fixtures',path:'fixtures/',kind:'directory'}]});
   }
   if (u.pathname === '/api/image-library') return json({artifacts:[flashArtifact],tasks:[]});
   if (u.pathname === '/api/flash-capabilities') return json({supported:true,board_serial:fixtures[1].serial,
@@ -235,10 +237,15 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/api/flash-events') return json({events:Number(u.searchParams.get('after') || 0) < 1
     ? [{seq:1,type:'progress',phase:'writing',done:524288,total:1048576,
       message:'模拟事件 <script>window.flashInjected=true</script>'}] : [],next_after:1,truncated_before:0});
-  if (u.pathname === '/api/task' && flashRecords.length) return json({task:flashRecords[0]});
+  if (u.pathname === '/api/task') {
+    const task = flashRecords.find(item => u.searchParams.has('request_id')
+      ? item.flash.request_id === u.searchParams.get('request_id') : item.id === u.searchParams.get('id'));
+    if (task) return json({task});
+    res.statusCode=404; return json({error:'fixture task not found'});
+  }
   if (u.pathname === '/api/tasks') return json({tasks:flashRecords});
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/desktop.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, route)));
 });
@@ -269,7 +276,7 @@ let chrome, ws;
   await evaluate('document.querySelector("#b-image-store").click()');
   for(let n=0;n<30 && !await evaluate('document.querySelectorAll("#is-list .is-row").length === 1');n++)await delay(50);
   await evaluate('document.querySelector("#is-list button").click()');
-  for(let n=0;n<30 && !await evaluate('document.querySelector("#is-list").textContent.includes("模拟固件.img")');n++)await delay(50);
+  for(let n=0;n<30 && !await evaluate('document.querySelector("#is-list").textContent.includes("模拟固件.tar.gz")');n++)await delay(50);
   assert.ok(await evaluate('document.querySelector("#is-list").textContent.includes("下载到控制机")'));
   const storeShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-image-store-fixture.png'),Buffer.from(storeShot.data,'base64'));
@@ -381,15 +388,11 @@ let chrome, ws;
   assert.ok(await evaluate('testTerm.getSelection().includes("uname -a")'));
   const inputNavShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-input-nav.png'),Buffer.from(inputNavShot.data,'base64'));
-  await evaluate('document.querySelector("#record-tab-logs").click()');
-  assert.ok(await evaluate('document.querySelectorAll("#d-logs .boot-row").length >= 2'),
-    'date view lists the boots touching the selected day');
-  await evaluate('document.querySelectorAll("#d-logs .boot-row")[1].querySelector("button").click()');
-  assert.equal(await evaluate('document.querySelector("#archive-mode-boot").getAttribute("aria-pressed")'), 'true');
-  assert.equal(await evaluate('document.querySelectorAll("#d-logs .archive-date-links button").length'), 2,
-    'cross-day boot links back to both daily archives');
-  await evaluate('document.querySelector("#d-logs .archive-date-links button").click()');
-  assert.equal(await evaluate('document.querySelector("#archive-mode-date").getAttribute("aria-pressed")'), 'true');
+  await evaluate('document.querySelector("#b-records").click()');
+  assert.ok(await evaluate('document.querySelectorAll("#d-logs details[open] .boot-row").length >= 2'));
+  await evaluate('document.querySelector("#d-logs details:nth-child(2) summary").click()');
+  for(let n=0;n<30 && !await evaluate('!!document.querySelector("#d-logs details:nth-child(2) .boot-row")');n++)await delay(50);
+  assert.ok(await evaluate('document.querySelector("#d-logs details:nth-child(2)").textContent.includes("启动 #")'));
   await evaluate('document.querySelector("#b-records").click()');
   await delay(100);
   assert.ok(await evaluate(`new Promise(resolve => {
@@ -700,6 +703,16 @@ let chrome, ws;
   await evaluate('document.querySelector("#ssh-root-guide").open=true;document.querySelector("#ssh-root-copy-passwd").click()');
   assert.ok(await evaluate('document.querySelector("#ssh-root-copy-status").textContent.includes("分步执行")'));
   assert.equal(posts.filter(route=>route==='/api/session-send').length,serialWrites,'root guide must only copy');
+  await evaluate(`document.querySelector('#ssh-credentials-user').value='ubuntu';
+    document.querySelector('#ssh-credentials-password').value='fixture-draft';
+    document.querySelector('#d-in').value='existing draft';
+    document.querySelector('#ssh-root-stage-passwd').click()`);
+  assert.equal(await evaluate('document.querySelector("#d-in").value'),'existing draft');
+  await evaluate('document.querySelector("#d-in").value=""; document.querySelector("#ssh-root-stage-passwd").click()');
+  assert.deepEqual(await evaluate(`[document.activeElement.id, document.querySelector('#d-in').value,
+    document.querySelector('#ssh-credentials-password').value,document.querySelector('#ssh-credentials-dialog').matches(':modal')]`),
+    ['d-in','sudo passwd root','fixture-draft',false]);
+  assert.equal(posts.filter(route=>route==='/api/session-send').length,serialWrites);
   const rootGuideShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-ssh-root-guide.png'),Buffer.from(rootGuideShot.data,'base64'));
   await evaluate('document.querySelector("#ssh-root-guide").open=false;document.querySelector("#ssh-credentials-user").value="ubuntu";document.querySelector("#ssh-credentials-password").value="simulated-password-only";document.querySelector("#ssh-credentials-form").requestSubmit()');
@@ -773,6 +786,23 @@ let chrome, ws;
   assert.equal(sshAuthentications.at(-1).password,'simulated-saved-password-only');
   for(let n=0;n<30 && !await evaluate('document.querySelector("#d-status").textContent.includes("192.0.2.42")');n++)await delay(50);
   assert.equal(await evaluate('document.querySelector("#ssh-credentials-dialog").open'),false);
+  await evaluate('document.querySelector("#b-desktop").click()');
+  for(let n=0;n<40 && await evaluate('document.querySelector("#desktop-connection").hidden');n++)await delay(50);
+  const beforeCommand=posts.filter(route=>route==='/api/session-send').length;
+  await evaluate(`document.querySelector('#desktop-user').value='rdp';
+    document.querySelector('#desktop-password').value='fixture-only';
+    document.querySelector('#desktop-credentials-stage').click()`);
+  assert.deepEqual(await evaluate(`[document.activeElement.id,document.querySelector('#d-in').value,
+    document.querySelector('#desktop-password').value,document.querySelector('#desktop-connection').hidden]`),
+    ['d-in','sudo grdctl --system status --show-credentials','fixture-only',false]);
+  assert.equal(posts.filter(route=>route==='/api/session-send').length,beforeCommand);
+  await evaluate('document.querySelector("#b-send").click()');
+  for(let n=0;n<30 && posts.filter(route=>route==='/api/session-send').length===beforeCommand;n++)await delay(50);
+  assert.equal(posts.filter(route=>route==='/api/session-send').length,beforeCommand+1);
+  await evaluate('document.querySelector("#desktop-password").focus()');
+  assert.equal(await evaluate('document.activeElement.value'),'fixture-only');
+  await evaluate('document.querySelector("#desktop-setup-close").click()');
+  assert.equal(await evaluate('document.querySelector("#desktop-password").value'),'');
   await evaluate('Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.startsWith("SSH 设置")).click();document.querySelector("#ssh-credentials-password").value="must-not-reach-replacement"');
   rememberedBoard.connection_id = 'test-musepi2-replacement';
   for(let n=0;n<80 && await evaluate('document.querySelector("#ssh-credentials-dialog").open');n++)await delay(50);
@@ -798,7 +828,7 @@ let chrome, ws;
   assert.equal(Object.hasOwn(flashPlans[0],'connection_id'),false);
   assert.ok(await evaluate('document.querySelector("#fl-preview table").textContent.includes("rootfs")'));
   assert.ok(await evaluate('!document.querySelector("#fl-review").hidden'));
-  assert.equal(await evaluate('document.querySelectorAll("#fl-preview tr").length'),2,'partition preview must contain exactly the selected write');
+  assert.equal(await evaluate('document.querySelectorAll("#fl-preview .fl-scope-table tr").length'),2,'partition preview must contain exactly the selected write');
   assert.equal(flashSubmissions.length,0,'preview must not submit a write');
   const flashPreviewShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-flash-preview.png'),Buffer.from(flashPreviewShot.data,'base64'));
@@ -821,7 +851,7 @@ let chrome, ws;
   await evaluate('SerialdI18n.setLocale("zh-CN");document.querySelector("#b-flash").click()');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-task-id").textContent.includes("cccccccc")');n++)await delay(50);
   assert.equal(flashSubmissions.length,1,'reload must recover the original task without submitting again');
-  await evaluate('document.querySelector("#flash-dialog details").open=true');
+  await evaluate('document.querySelector("#fl-task-details").open=true');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-events").textContent.includes("模拟事件")');n++)await delay(50);
   assert.equal(await evaluate('window.flashInjected === true'),false,'events must be rendered as text');
   const flashTaskShot=await rpc('Page.captureScreenshot',{format:'png'});
@@ -888,7 +918,7 @@ let chrome, ws;
   // Detection/probing is data-only in this fixture; no hardware tool is executed.
   await rpc('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
   flashRecords.splice(0);
-  await evaluate('document.querySelector("#b-flash-discover").click()');
+  await evaluate('document.querySelector("#b-flash-discover").click();document.querySelector("#fl-discover").click()');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length === 3');n++)await delay(50);
   assert.equal(flashTargetReads.length,0,'multiple USB targets must not choose the first device');
   assert.ok(await evaluate('document.querySelector("#fl-status").textContent.includes("多个下载设备")'));
@@ -919,11 +949,12 @@ let chrome, ws;
   await evaluate('document.querySelector("#fl-close").click()');
   flashUsbTargets[1].mode='bootrom'; flashUsbTargets[1].target_generation='fixture-brom-generation';
   await evaluate('document.querySelector("#b-flash-discover").click()');
+  await evaluate('document.querySelector("#fl-discover").click()');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length === 3');n++)await delay(50);
   await evaluate('document.querySelector("#fl-device").value="fixture-usb-3";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
-  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-mode").value === "partitions"');n++)await delay(50);
+  for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-status").textContent.includes("BootROM")');n++)await delay(50);
   assert.equal(await evaluate('document.querySelector("#fl-mode").disabled'),true);
-  assert.ok(await evaluate('document.querySelector("#fl-status").textContent.includes("BootROM")'));
+  assert.match(await evaluate('document.querySelector("#fl-status").textContent'), /BootROM/);
   await evaluate('document.querySelector("#fl-artifact").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-artifact").dispatchEvent(new Event("change"))');
   for(let n=0;n<40 && await evaluate('document.querySelector("#fl-plan").disabled');n++)await delay(50);
   await evaluate('document.querySelector("#fl-plan").click()');
@@ -945,7 +976,7 @@ let chrome, ws;
   assert.equal(flashRecords[0].flash.write_result,'not-started');
   const readsBeforeTaskRefresh=flashTargetReads.length;
   flashUsbTargets[1].mode='loader'; flashUsbTargets[1].target_generation='fixture-new-loader-generation';
-  await evaluate('document.querySelector("#fl-close").click();document.querySelector("#b-flash-discover").click()');
+  await evaluate('document.querySelector("#fl-close").click();document.querySelector("#b-flash-discover").click();document.querySelector("#fl-discover").click()');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length === 3');n++)await delay(50);
   await evaluate('document.querySelector("#fl-device").value="fixture-usb-3";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-task-id").textContent.includes("awaiting-selection")');n++)await delay(50);
@@ -959,7 +990,11 @@ let chrome, ws;
   await evaluate('document.querySelector("#fl-close").click()');
   flashRecords.splice(0); flashUsbTargets[1].mode='bootrom';flashUsbTargets[1].nor=true;
   flashUsbTargets[1].target_generation='fixture-nor-brom';
-  await evaluate('document.querySelector("#b-flash-discover").click()');
+  // A separate fixture scenario replaces the backend tasks. Drop the old in-page observer too.
+  await rpc('Page.reload',{ignoreCache:true});
+  for(let n=0;n<50 && !await evaluate('document.querySelectorAll("#grid>.dev").length===5');n++)await delay(100);
+
+  await evaluate('document.querySelector("#b-flash-discover").click();document.querySelector("#fl-discover").click()');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length===3');n++)await delay(50);
   await evaluate('document.querySelector("#fl-device").value="fixture-usb-3";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
   for(let n=0;n<40 && await evaluate('document.querySelector("#fl-mode").disabled');n++)await delay(50);
@@ -988,7 +1023,11 @@ let chrome, ws;
   assert.equal(flashSubmissions.length,norSubmissions,'final confirmation continues the same task');
   // Deletion touches this fixture's in-memory artifact list only.
   await evaluate('document.querySelector("#fl-close").click()');flashRecords.splice(0);
-  await evaluate('document.querySelector("#b-flash-discover").click()');
+  // A separate fixture scenario replaces the backend tasks. Drop the old in-page observer too.
+  await rpc('Page.reload',{ignoreCache:true});
+  for(let n=0;n<50 && !await evaluate('document.querySelectorAll("#grid>.dev").length===5');n++)await delay(100);
+
+  await evaluate('document.querySelector("#b-flash-discover").click();document.querySelector("#fl-discover").click()');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-device").options.length===3');n++)await delay(50);
   await evaluate('document.querySelector("#fl-device").value="fixture-usb-3";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-artifact").options.length===2');n++)await delay(50);

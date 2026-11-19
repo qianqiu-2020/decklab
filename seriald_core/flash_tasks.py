@@ -19,6 +19,24 @@ from .transactions import TransactionError
 _INIT_LOCK = threading.Lock()
 
 
+def _check_package_chip(binding, artifacts, preparations=None, actor='web'):
+    """Catch an explicitly labelled Debian package for another SoC before USB inspection."""
+    chip = (binding.profile_data or {}).get('chip_family')
+    if chip not in ('k1', 'k3'):
+        return
+    for artifact in artifacts:
+        name = artifact['name']
+        job = preparations.latest(artifact['id'], actor) if preparations else None
+        families = ((job or {}).get('result') or {}).get('preparation', {}).get('chip_families', [])
+        if families:
+            if chip not in families:
+                raise TaskError(f'当前设备为 {chip.upper()}，镜像 {name} 的刷机配置支持 {", ".join(families).upper()}。请选择与设备匹配的镜像。', 409)
+            continue
+        declared = re.fullmatch(r'Debian-[0-9]+-[a-z0-9]+-(K[13])(?:-v[a-z0-9.]+)?(?:-[0-9]{8,14})?\.(?:tar\.gz|tgz|zip)', name, re.I)
+        if declared and declared[1].lower() != chip:
+            raise TaskError(f'当前设备为 {chip.upper()}，所选镜像 {name} 标注为 {declared[1].upper()}。请选择与设备匹配的镜像。', 409)
+
+
 def _digest(document):
     return hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':'),
                                     allow_nan=False).encode()).hexdigest()
@@ -73,6 +91,53 @@ def _write_scope(plan):
     return [{key: value.get(key) for key in ('storage', 'partition', 'target', 'kind', 'sha256',
                                             'write_sha256', 'size', 'write_size', 'sector_size', 'offset')}
             for value in plan.get('writes', [])]
+
+
+def _snapshot_inspection(record):
+    """Use only the inspected NOR medium handled by the snapshot adapter."""
+    inspection = record.get('inspection') or {}
+    plan = record['executor_plan']
+    if plan.get('image_type') == 'bundle':
+        firmware = next((step['result'] for step in plan.get('steps', []) if step['label'] == 'Firmware'), {})
+        inspection = firmware.get('inspection') or {}
+    storages = inspection.get('storages') or []
+    if (len(storages) == 1 and not storages[0].get('physical_device')
+            and storages[0].get('capacity_source') == 'spacemit-ram-v1'
+            and storages[0].get('verify') is True):
+        return inspection
+    return None
+
+
+def _selection_layout_matches(record, selected, digest):
+    plan = selected['executor_plan']
+    if record.get('operation') == 'nor-workspace':
+        if plan.get('image_type') == 'bundle':
+            snapshot = _snapshot_inspection(selected) or {}
+            if snapshot.get('layout_digest') == digest:
+                return True
+            before = record.get('inspection') or {}
+            if (not selected['intent'].get('firmware_table') or before.get('layout_digest') != digest
+                    or not (plan['steps'][0]['result'].get('execution_profile') or {}).get('nor_fill_tail')
+                    or not snapshot or len(before.get('storages') or []) != 1):
+                return False
+            # The selected volatile NOR mapping may extend only the last uboot partition.
+            old, new = before['storages'][0], snapshot['storages'][0]
+            previous, current = old.get('partitions') or [], new.get('partitions') or []
+            if not previous or not current or current[-1].get('name') != 'uboot':
+                return False
+            tail = current[-1]
+            return (before.get('identity') == snapshot.get('identity')
+                    and tail['offset'] + tail['size'] == new['size']
+                    and old == dict(new, partitions=[*current[:-1], dict(tail, size=previous[-1]['size'])]))
+        if (selected.get('execution_profile') or {}).get('system_storage'):
+            return True
+    return ((selected.get('inspection') or {}).get('layout_digest') or plan.get('layout_digest')) == digest
+
+
+def _source_ids(intent):
+    sources = {item['artifact_id'] for item in intent['selections']}
+    sources.update(value for value in (intent['artifact_id'], intent.get('firmware_artifact_id')) if value)
+    return sources
 
 
 class FlashActions:
@@ -236,6 +301,9 @@ class FlashActions:
                     storage.get('verify') is True for storage in result['storages'])
                 result['verification'] = {'required': result['readback_supported']}
                 profile = data.get('profile') or {}
+                if result['preparable']:
+                    from .flash_loaders import installed_for
+                    result['loader_sources'] = (['builtin'] if installed_for(profile.get('chip_family')) else []) + ['image']
                 result['nor_workspace_supported'] = bool(
                     getattr(_services(self.manager)[1], 'supports_nor_snapshot', False)
                     and profile.get('id') == 'auto-spacemit-gpt-v1' and profile.get('chip_family') == 'k3'
@@ -251,17 +319,22 @@ class FlashActions:
                 result = dict(book.available(device.serial, actor))
             result.setdefault('board_serial', device.serial)
             result['reset_after_supported'] = bool(getattr(_services(self.manager)[1], 'supports_reset_after', False))
+            result['skip_verification_supported'] = bool(getattr(_services(self.manager)[1], 'supports_skip_verification', False))
+            result['image_preparation_supported'] = bool(getattr(_services(self.manager)[1], 'supports_image_preparation', False))
             result['artifacts'] = []
             artifacts = self.manager.artifacts
             with self.manager.store.lock:
                 rows = self.manager.store.db.execute(
-                    ("SELECT id FROM transfer_artifacts WHERE serial IN (?, '') AND direction='upload' AND state='ready' " if actor == 'web' else
+                    ("SELECT id FROM transfer_artifacts WHERE direction='upload' AND state IN ('ready','claimed') " if actor == 'web' else
                      "SELECT id FROM transfer_artifacts WHERE serial=? AND direction='upload' AND state='ready' ")
                     + ('' if actor == 'web' else 'AND actor=? ') + 'ORDER BY updated DESC LIMIT 100',
-                    (device.serial,) if actor == 'web' else (device.serial, actor)).fetchall()
+                    () if actor == 'web' else (device.serial, actor)).fetchall()
             for row in rows:
-                metadata = artifacts.get(row['id'], actor, device.serial)
-                result['artifacts'].append({key: metadata[key] for key in ('id', 'name', 'size', 'sha256')})
+                metadata = artifacts.get(row['id'], actor, None if actor == 'web' else device.serial)
+                item = {key:metadata[key] for key in ('id','name','size','sha256')}
+                from .image_workspaces import public_directory_info
+                item.update(public_directory_info(artifacts._path(metadata['id'], '.bin')))
+                result['artifacts'].append(item)
             result['maintenance'] = (maintenance_for(self.manager).target_holds(target_id) if target_id
                                      else maintenance_for(self.manager).holds(device.serial))
             return response(200, result)
@@ -300,27 +373,51 @@ class FlashActions:
             normalized.append(dict(storage=target[0], partition=target[1], artifact_id=source))
         if mode == 'full' and normalized:
             raise TaskError('full image mode does not accept partition selections')
+        companion = payload.get('firmware_artifact_id')
+        if companion is not None and (mode != 'full' or not isinstance(companion, str) or not re.fullmatch(r'[0-9a-f]{24}', companion) or companion == artifact_id):
+            raise TaskError('invalid companion firmware image')
         result = {'artifact_id': artifact_id, 'mode': mode, 'selections': normalized, 'verify': verify,
                   'target_storage': target_storage}
+        table = payload.get('firmware_table')
+        if table is not None:
+            if (mode != 'full' or companion or not isinstance(table, str)
+                    or not re.fullmatch(r'partition_[a-zA-Z0-9_-]{1,80}\.json', table) or table == 'partition_flash.json'):
+                raise TaskError('请选择 OS 包内的一张 NOR 分区表')
+            result['firmware_table'] = table
+        if companion:
+            result['firmware_artifact_id'] = companion
+        if 'loader_source' in payload:
+            if payload['loader_source'] not in ('builtin', 'image'):
+                raise TaskError('invalid flash loader source')
+            result['loader_source'] = payload['loader_source']
         if payload.get('reset_after'):
             result['reset_after'] = True
         return result
 
-    def _artifacts(self, intent, actor, serial, stack, task_id=None, check=lambda: None):
-        ids = {intent['artifact_id']} | {value['artifact_id'] for value in intent['selections']}
+    def _artifacts(self, intent, actor, serial, stack, task_id=None, check=lambda: None, on_event=None):
         output = {}
-        for artifact_id in sorted(ids):
-            row = self.manager.artifacts.get(artifact_id, actor, serial)
+        for artifact_id in sorted(_source_ids(intent)):
+            row = self.manager.artifacts.get(artifact_id, actor, None if actor == 'web' else serial)
             if row['direction'] != 'upload' or row['state'] not in ('ready', 'claimed'):
                 raise TaskError('flash image is not sealed and ready', 409)
-            source = stack.enter_context(self.manager.artifacts.open(artifact_id, actor, serial, task_id))
-            digest = hashlib.sha256()
+            source = stack.enter_context(self.manager.artifacts.open(artifact_id, actor, None if actor == 'web' else serial, task_id))
+            if getattr(self.manager.flash_executor, 'supports_image_preparation', False):
+                # The host preparation task verifies this source once; cached
+                # previews validate its seal and members instead of rescanning.
+                output[artifact_id] = dict(id=artifact_id, name=row['name'], size=row['size'], sha256=row['sha256'],
+                    path=str(self.manager.artifacts._path(artifact_id, '.bin')))
+                continue
+            digest, done, last = hashlib.sha256(), 0, 0
             while True:
                 check()
                 chunk = source.read(1024 * 1024)
                 if not chunk:
                     break
                 digest.update(chunk)
+                done += len(chunk)
+                if on_event and (time.monotonic() - last >= .25 or done == row['size']):
+                    on_event({'event': 'progress', 'phase': 'checking-upload', 'done': done, 'total': row['size']})
+                    last = time.monotonic()
             if digest.hexdigest() != row['sha256']:
                 raise TaskError('flash image checksum changed', 409)
             output[artifact_id] = dict(id=artifact_id, name=row['name'], size=row['size'],
@@ -328,7 +425,7 @@ class FlashActions:
         return output
 
     def _make_plan(self, binding, executor, intent, actor, serial, check=lambda: None, task_id=None,
-                   inspection_scope=None, prepared=None, previous_device=None, baseline_record=None):
+                   inspection_scope=None, prepared=None, previous_device=None, baseline_record=None, on_event=None):
         if intent.get('reset_after') and not getattr(executor, 'supports_reset_after', False):
             raise TaskError('刷机执行器不支持刷后自动复位')
         if prepared is not None and hasattr(executor, 'check_plan'):
@@ -341,23 +438,36 @@ class FlashActions:
             checked_binding = binding
             if prepared.get('execution_profile'):
                 checked_binding = executor.execution_binding(binding, prepared['execution_profile'], prepared['workspace'], check)
-            result = executor.check_plan(checked_binding, prepared['executor_plan'],
-                prepared.get('executor_candidates', []), check, selections=selections, **arguments)
+            if prepared['executor_plan'].get('image_type') == 'bundle':
+                from .flash_bundle import check_bundle
+                result = check_bundle(executor, checked_binding, prepared['executor_plan'], check, previous_device)
+            else:
+                result = executor.check_plan(checked_binding, prepared['executor_plan'],
+                    prepared.get('executor_candidates', []), check, selections=selections, **arguments)
             result['workspace'] = prepared.get('workspace')
             if binding.target_id:
                 result['execution_device'] = dict(binding.device)
         else:
             with ExitStack() as stack:
-                artifacts = self._artifacts(intent, actor, serial, stack, task_id, check)
+                artifacts = self._artifacts(intent, actor, serial, stack, task_id, check, on_event)
+                _check_package_chip(binding, artifacts.values(), getattr(self.manager, 'image_preparations', None), actor)
                 selections = [dict(storage=value['storage'], partition=value['partition'],
                                    artifact=artifacts[value['artifact_id']]) for value in intent['selections']]
                 check()
                 arguments = {'target_storage': intent['target_storage']} if intent.get('target_storage') else {}
+                if intent.get('loader_source'):
+                    arguments['loader_source'] = intent['loader_source']
+                if on_event is not None:
+                    arguments['on_event'] = on_event
                 if inspection_scope is not None:
                     arguments['inspection_scope'] = inspection_scope
                 try:
-                    result = executor.plan(binding, artifacts[intent['artifact_id']], intent['mode'], selections,
-                                           intent['verify'], check, **arguments)
+                    if intent.get('firmware_artifact_id') or intent.get('firmware_table'):
+                        from .flash_bundle import plan_bundle
+                        result = plan_bundle(executor, binding, artifacts[intent['artifact_id']], artifacts[intent.get('firmware_artifact_id') or intent['artifact_id']], intent['mode'], intent['verify'], check, firmware_table=intent.get('firmware_table'), **arguments)
+                    else:
+                        result = executor.plan(binding, artifacts[intent['artifact_id']], intent['mode'], selections,
+                                               intent['verify'], check, **arguments)
                 except BaseException as error:
                     if getattr(error, 'cleanup_confirmed', True) is False:
                         # Keep source files pinned until a durable task owns them.
@@ -399,6 +509,7 @@ class FlashActions:
             if len(actual) != len(expected) or set(actual) != expected:
                 raise TaskError('flash plan differs from selected partition scope', 502)
         source_workspaces = set((prepared or {}).get('source_workspaces') or [])
+        source_workspaces.update(result.get('source_workspaces') or [])
         if (prepared or {}).get('workspace') and prepared['workspace'] != result.get('workspace'):
             source_workspaces.add(prepared['workspace'])
         metadata = result.get('payload_metadata') or []
@@ -434,6 +545,15 @@ class FlashActions:
     @staticmethod
     def _preview(record):
         result = _public(record['executor_plan'])
+        if record['intent'].get('firmware_table'):
+            result['firmware_table'] = record['intent']['firmware_table']
+        if record['intent'].get('firmware_artifact_id'):
+            result['firmware_artifact_id'] = record['intent']['firmware_artifact_id']
+        if record['intent'].get('loader_source'):
+            result['loader_source'] = record['intent']['loader_source']
+        if record.get('workspace') and record['executor_plan'].get('ready') and _snapshot_inspection(record):
+            result['can_backup_nor'] = True
+        result.setdefault('storage_layouts', _public((record.get('inspection') or {}).get('storages', [])))
         result.update(id=record['plan_id'], plan_id=record['plan_id'], digest=record['digest'],
                       binding_revision=record['binding_revision'],
                       target_id=record.get('target_id'), target_generation=record.get('target_generation'),
@@ -441,12 +561,12 @@ class FlashActions:
                       payload_metadata=record.get('payload_metadata', []), reset_after=record['intent'].get('reset_after', False))
         return result
 
-    def plan(self, payload, device, actor='web'):
+    def plan(self, payload, device, actor='web', check=None, on_event=None):
         try:
             if not isinstance(payload, dict) or set(payload) - {
                     'key', 'serial', 'actor', 'client_id', 'binding_revision',
-                    'artifact_id', 'mode', 'selections', 'verify', 'target_storage', 'reset_after',
-                    'target_id', 'target_generation'}:
+                    'artifact_id', 'firmware_artifact_id', 'firmware_table', 'mode', 'selections', 'verify', 'target_storage', 'reset_after', 'loader_source',
+                    'target_id', 'target_generation', 'request_id'}:
                 raise TaskError('invalid flash plan request')
             device = self._device(device, payload, actor)
             binding, executor = self._target(device, actor, payload)
@@ -458,6 +578,47 @@ class FlashActions:
             if not isinstance(client, str) or client and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client):
                 raise TaskError('invalid flash client')
             maintenance = maintenance_for(self.manager)
+            if payload.get('request_id') is not None:
+                if actor != 'web':
+                    raise TaskError('asynchronous flash preview requires a Web operator', 403)
+                from .flash_store import validate_request
+                original = {key: value for key, value in payload.items() if key != 'request_id'}
+                digest = _digest({'kind': 'flash-preview', 'input': original, 'serial': device.serial})
+                validate_request(payload['request_id'], digest)
+                def run(context):
+                    from .flash_progress import PreviewProgress
+                    source = self.manager.artifacts.get(intent['artifact_id'], actor, None if actor == 'web' else device.serial)
+                    self.store.initialize_details(context.id, {
+                        'preview_intent': intent,
+                        'preview_source': {key: source[key] for key in ('id', 'name', 'size', 'sha256')}})
+                    if intent.get('firmware_artifact_id'):
+                        firmware = self.manager.artifacts.get(intent['firmware_artifact_id'], actor, None if actor == 'web' else device.serial)
+                        self.store.update_details(context.id, {'preview_firmware':{key:firmware[key] for key in ('id','name','size','sha256')}})
+                    timing = PreviewProgress(self.store, context.id, source, binding.endpoint,
+                        source['name'].lower().endswith(('.gz', '.tgz', '.zip')))
+                    def progress(value):
+                        timing.event(value)
+                        context.progress(value.get('done', 0), value.get('total', 0), value.get('phase', 'checking-image'))
+                    success = False
+                    try:
+                        result = self.plan(original, device, actor, context.check, progress)
+                        success = result.status == 200
+                    finally:
+                        timing.finish(success)
+                    if result.status != 200:
+                        context.store.update(context.id, result=result.payload)
+                        raise TaskError(result.payload['error'], result.status)
+                    context.mark_outcome('observed')
+                    return result.payload
+                target = (binding.target_id, binding.target_generation) if binding.target_id else None
+                task = self.manager.tasks.start('flash-preview', actor, client,
+                    [{'serial': device.serial or '', 'connection_id': getattr(device, 'connection_id', '') or 'flash-preview'}],
+                    run, request_id=payload['request_id'], input_digest=digest, tracks_outcome=True, flash_target=target)
+                return response(202, {'ok': True, 'task': task})
+            def preparation_check():
+                if check is not None:
+                    check()
+                maintenance.check_preparation()
             @contextmanager
             def inspect_scope():
                 guard = (maintenance.inspect_target_scope(device.target_id, device.target_generation,
@@ -477,9 +638,9 @@ class FlashActions:
                             error.recovery_task_id = task['id']
                         raise
             try:
-                maintenance.check_preparation()
+                preparation_check()
                 record = self._make_plan(binding, executor, intent, actor, device.serial,
-                                         maintenance.check_preparation, inspection_scope=inspect_scope)
+                                         preparation_check, inspection_scope=inspect_scope, on_event=on_event)
             except BaseException as error:
                 if getattr(error, 'cleanup_confirmed', True) is False:
                     task_id = getattr(error, 'recovery_task_id', None)
@@ -508,9 +669,9 @@ class FlashActions:
         try:
             for artifact_id in getattr(error, 'artifact_ids', []):
                 if artifact_id not in claimed:
-                    row = self.manager.artifacts.get(artifact_id, actor, serial)
+                    row = self.manager.artifacts.get(artifact_id, actor, None if actor == 'web' else serial)
                     if row['state'] != 'claimed' or row['task_id'] != task_id:
-                        self.manager.artifacts.claim(artifact_id, task_id, actor, serial)
+                        self.manager.artifacts.claim(artifact_id, task_id, actor, None if actor == 'web' else serial)
                     claimed.append(artifact_id)
         except BaseException:
             # A registry failure must not close the only remaining expiry pin.
@@ -526,13 +687,18 @@ class FlashActions:
         try:
             if not isinstance(payload, dict) or set(payload) - {
                     'kind', 'key', 'serial', 'actor', 'client_id', 'request_id',
-                    'binding_revision', 'target_id', 'target_generation', 'read_system'}:
+                    'binding_revision', 'target_id', 'target_generation', 'read_system', 'temporary_snapshot'}:
                 raise TaskError('NOR backup accepts only the fixed USB target')
             _services(self.manager)
             read_system = payload.get('read_system', False)
             if type(read_system) is not bool:
                 raise TaskError('read_system must be boolean')
             identity = {key: payload.get(key) for key in ('serial', 'binding_revision', 'target_id', 'target_generation')}
+            temporary = payload.get('temporary_snapshot', False)
+            if type(temporary) is not bool:
+                raise TaskError('temporary_snapshot must be boolean')
+            if temporary:
+                identity['temporary_snapshot'] = True
             if read_system:
                 identity['read_system'] = True
             input_digest = _digest(dict(identity, operation='nor-workspace'))
@@ -569,7 +735,7 @@ class FlashActions:
                 operation = FlashOperation(self, binding, executor, record, actor)
                 task = self.manager.tasks.start_board('flash', actor, client, device.serial, operation.run,
                     request_id=payload.get('request_id'), input_digest=input_digest,
-                    details={'operation': 'nor-workspace', 'plan_id': record['plan_id'],
+                    details={'operation': 'nor-workspace', 'temporary_snapshot': temporary, 'plan_id': record['plan_id'],
                         'plan_digest': record['digest'], 'binding_revision': binding.binding_revision,
                         'target_id': binding.target_id, 'target_generation': binding.target_generation,
                         'attempt_id': operation.attempt_id, 'executor': binding.endpoint,
@@ -592,9 +758,14 @@ class FlashActions:
     def _start(self, payload, device, actor='web'):
         try:
             if set(payload) - {'kind', 'key', 'serial', 'actor', 'client_id', 'plan_id',
-                               'binding_revision', 'request_id', 'target_id', 'target_generation'}:
+                               'binding_revision', 'request_id', 'target_id', 'target_generation', 'retain_backup', 'temporary_snapshot', 'prepare_for_review'}:
                 raise TaskError('flash tasks accept only a fixed plan and board binding')
             identity = {key: payload.get(key) for key in ('serial', 'plan_id', 'binding_revision')}
+            for option in ('retain_backup', 'temporary_snapshot', 'prepare_for_review'):
+                if type(payload.get(option, False)) is not bool:
+                    raise TaskError(option + ' must be boolean')
+                if payload.get(option):
+                    identity[option] = True
             if payload.get('target_id'):
                 identity.update(target_id=payload['target_id'], target_generation=payload.get('target_generation'))
             input_digest = _digest(identity)
@@ -613,8 +784,16 @@ class FlashActions:
                 raise TaskError('flash binding changed; create a new preview', 409)
             if time.time() - record['created'] > 3600:
                 raise TaskError('flash plan expired; create a new preview', 409)
+            if payload.get('prepare_for_review') and not (
+                    record['requires_prepare'] and record['intent']['mode'] == 'full'
+                    and record['executor_plan'].get('ready') is False
+                    and record['executor_plan'].get('confirm_after_prepare') is True):
+                raise TaskError('准备设备需要可在写入前暂停确认的计划，请重新预览', 409)
             if record['intent']['mode'] == 'full' and not record['executor_plan'].get('writes'):
                 raise TaskError('full image preview must list all affected write ranges', 409)
+            if payload.get('retain_backup') and (not getattr(executor, 'supports_nor_snapshot', False)
+                    or not record.get('workspace') or not record['executor_plan'].get('ready') or not _snapshot_inspection(record)):
+                raise TaskError('this plan cannot read a verified NOR snapshot', 409)
             client = payload.get('client_id', '') if actor == 'web' else ''
             if not isinstance(client, str) or client and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client):
                 raise TaskError('invalid flash client')
@@ -622,6 +801,8 @@ class FlashActions:
             task = self.manager.tasks.start_board('flash', actor, client, serial, operation.run,
                 request_id=payload.get('request_id'), input_digest=input_digest,
                 details={'plan_id': record['plan_id'], 'plan_digest': record['digest'],
+                         'retain_backup': payload.get('retain_backup', False),
+                         'temporary_snapshot': payload.get('temporary_snapshot', False),
                          'workspace': record.get('workspace'),
                          'source_workspaces': record.get('source_workspaces', []),
                          'target_id': binding.target_id, 'target_generation': binding.target_generation,
@@ -693,7 +874,7 @@ class FlashActions:
         except (TaskError, TransactionError, ValueError, OSError) as error:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
 
-    def expire(self):
+    def expire(self, image_sha256=None):
         """Follow the collector's existing maintenance tick; keep active/recovery data."""
         executor = getattr(self.manager, 'flash_executor', None)
         if executor is None or not hasattr(executor, 'cleanup_plan'):
@@ -734,6 +915,23 @@ class FlashActions:
                 executor.cleanup_plan(document)
                 # Retain immutable receipt metadata and digests, remove only expired payloads.
                 removed += 1
+            if hasattr(executor, 'cleanup_image'):
+                # Same task/plan registry protects image data used by writers,
+                # including unknown helpers retained for human recovery.
+                pool = self.manager.store.db.execute("SELECT 1 FROM flash_resource_holds WHERE resource='flash-cache-pool:local' OR (resource LIKE 'flash-image:%' AND state='recovery')").fetchone()
+                if not pool:
+                    active_images = self.manager.store.db.execute(
+                        "SELECT a.sha256 FROM tasks t JOIN task_targets s ON s.task_id=t.id "
+                        "JOIN transfer_artifacts a ON s.connection_id='image-prepare:' || a.id "
+                        "WHERE t.kind='image-prepare' AND t.state IN ('queued','running')").fetchall()
+                    workspaces.update(str(executor.root / 'images' / value[0]) for value in active_images)
+                    cutoff = time.time() - self.manager.artifacts.policy.ready_seconds
+                    for image in (executor.root / 'images').glob('*'):
+                        if str(image) in workspaces or not re.fullmatch(r'[0-9a-f]{64}', image.name):
+                            continue
+                        if image_sha256 != image.name and image.stat().st_mtime >= cutoff:
+                            continue
+                        removed += bool(executor.cleanup_image(image))
         return removed
 
     def boot_priority(self, payload, actor='web'):
@@ -815,14 +1013,40 @@ class FlashActions:
         except (TaskError, TransactionError, ValueError, OSError) as error:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
 
+    def skip_verification(self, payload, actor='web'):
+        try:
+            if set(payload) - {'id', 'action', 'key', 'serial', 'actor', 'client_id', 'target_id', 'target_generation'}:
+                raise TaskError('invalid skip verification request')
+            with self.manager.store.lock:
+                task = self._owned_task(payload.get('id'), actor, payload.get('serial'))
+                if task['kind'] != 'flash':
+                    raise TaskError('not a flash execution task', 409)
+                if task.get('flash_targets') and not any(
+                        row['target_id'] == payload.get('target_id') and row['generation'] == payload.get('target_generation')
+                        for row in task['flash_targets']):
+                    raise TaskError('flash verification USB target changed', 409)
+                details = self.store.details(task['id'])
+                if not details.get('verify_skip_requested'):
+                    if (task['state'] != 'running' or task.get('cancel_requested')
+                            or task.get('progress', {}).get('phase') not in ('verifying', 'verifying-system', 'verifying-nor')
+                            or details.get('can_skip_verification') is not True):
+                        raise TaskError('flash task is not in skippable readback verification', 409)
+                    self.store.update_details(task['id'], {'verify_skip_requested': True,
+                        'verify_skip_requested_by': actor, 'verify_skip_requested_at': time.time()})
+                return response(200, {'ok': True, 'task': self.manager.tasks.store.get(task['id'])})
+        except (TaskError, TransactionError, ValueError, OSError) as error:
+            return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
+
     def selection(self, payload, device, actor='web'):
+        if isinstance(payload, dict) and payload.get('action') == 'skip-verification':
+            return self.skip_verification(payload, actor)
         if isinstance(payload, dict) and payload.get('action') == 'boot-priority':
             return self.boot_priority(payload, actor)
         try:
             if not isinstance(payload, dict) or set(payload) - {
                     'id', 'key', 'serial', 'actor', 'client_id', 'layout_digest', 'selections',
                     'preview', 'plan_id', 'request_id', 'target_id', 'target_generation',
-                    'artifact_id', 'mode', 'target_storage', 'verify', 'reset_after'}:
+                    'artifact_id', 'firmware_artifact_id', 'firmware_table', 'mode', 'target_storage', 'verify', 'reset_after', 'retain_backup'}:
                 raise TaskError('invalid flash selection request')
             task_id = payload.get('id')
             historical_target = None
@@ -840,9 +1064,14 @@ class FlashActions:
             if visible.status != 200:
                 return visible
             details = self.store.details(task_id)
+            retain = payload.get('retain_backup', False)
+            if type(retain) is not bool or retain and payload.get('preview') is True:
+                raise TaskError('retaining a backup requires a confirmed NOR snapshot')
+            identity = {key: payload.get(key) for key in ('plan_id', 'request_id', 'layout_digest')}
+            if retain:
+                identity['retain_backup'] = True
             submitted = details.get('selection_request')
             if submitted and payload.get('preview') is not True:
-                identity = {key: payload.get(key) for key in ('plan_id', 'request_id', 'layout_digest')}
                 if submitted != identity:
                     raise TaskError('flash selection already submitted with different input', 409)
                 return response(200, {'ok': True, 'task': self.manager.tasks.store.get(task_id)})
@@ -868,10 +1097,14 @@ class FlashActions:
                     for option in ('verify', 'reset_after'):
                         if option in payload:
                             intent[option] = payload[option]
-                    if record.get('operation') != 'nor-workspace' and any(key in payload for key in ('artifact_id', 'mode', 'target_storage', 'verify')):
+                    if record.get('operation') != 'nor-workspace' and any(key in payload for key in ('artifact_id', 'mode', 'target_storage')):
                         raise TaskError('source import is only available in a storage reading workspace')
                     workspace_import = record.get('operation') == 'nor-workspace' and payload.get('artifact_id')
+                    if ('firmware_artifact_id' in payload or 'firmware_table' in payload) and not workspace_import:
+                        raise TaskError('companion firmware requires a full workspace image preview')
                     if workspace_import:
+                        intent['firmware_table'] = payload.get('firmware_table')
+                        intent['firmware_artifact_id'] = payload.get('firmware_artifact_id')
                         intent.update(artifact_id=payload['artifact_id'], mode=payload.get('mode', 'partitions'),
                                       verify=payload.get('verify', record['intent']['verify']), target_storage=payload.get('target_storage', ''))
                         intent = self._intent(intent)
@@ -886,7 +1119,7 @@ class FlashActions:
                         # Choosing the package as the import anchor makes this
                         # independent of the visual order of partition rows.
                         for item in intent['selections']:
-                            candidate = self.manager.artifacts.get(item.get('artifact_id'), actor, device.serial)
+                            candidate = self.manager.artifacts.get(item.get('artifact_id'), actor, None if actor == 'web' else device.serial)
                             if candidate['name'].lower().endswith(('.tar.gz', '.tgz', '.tar', '.zip')):
                                 intent['artifact_id'] = candidate['id']
                                 break
@@ -896,24 +1129,40 @@ class FlashActions:
                         raise TaskError('firmware confirmation cannot change the full package scope')
                     if not full_review and not intent['selections'] and not workspace_import:
                         raise TaskError('select at least one target partition')
+                    timing = None
                     try:
                         source_record = record
                         if workspace_import and payload.get('plan_id'):
                             source_record = self.store.get_plan(payload['plan_id'], actor, device.serial, target_id=binding.target_id or None)
                             if (source_record.get('selection_task_id') != task_id or source_record['binding_digest'] != record['binding_digest']
                                     or source_record['intent']['artifact_id'] != intent['artifact_id']
+                                    or source_record['intent'].get('firmware_artifact_id') != intent.get('firmware_artifact_id')
+                                    or source_record['intent'].get('firmware_table') != intent.get('firmware_table')
                                     or source_record['intent']['mode'] != intent['mode']
                                     or source_record['intent']['verify'] != intent['verify']
                                     or source_record['intent'].get('target_storage', '') != intent.get('target_storage', '')
                                     or time.time() - source_record['created'] > 600):
                                 raise TaskError('source image preview changed or expired', 409)
-                        cached = (source_record if source_record['executor_plan'].get('image_type') in ('package', 'payload', 'payload.gz')
+                        cached = (source_record if source_record['executor_plan'].get('image_type') in ('package', 'payload', 'payload.gz', 'bundle')
+                                  and source_record['intent']['verify'] == intent['verify']
                                   and source_record['intent']['artifact_id'] == intent['artifact_id']
+                                  and source_record['intent'].get('firmware_artifact_id') == intent.get('firmware_artifact_id')
+                                  and source_record['intent'].get('firmware_table') == intent.get('firmware_table')
                                   and all(value['artifact_id'] == source_record['intent']['artifact_id']
                                           for value in intent['selections']) else None)
+                        from .flash_progress import PreviewProgress
+                        source = self.manager.artifacts.get(intent['artifact_id'], actor, None if actor == 'web' else device.serial)
+                        timing = PreviewProgress(self.store, task_id, source, binding.endpoint,
+                            source['name'].lower().endswith(('.gz', '.tgz', '.zip')))
+                        preview_succeeded = False
+                        def preview_progress(value):
+                            timing.event(value)
+                        if not cached and source_record['executor_plan'].get('base_profile') is not None:
+                            binding = replace(binding, profile_data=source_record['executor_plan']['base_profile'])
                         selected = self._make_plan(binding, executor, intent, actor, device.serial,
                                                    operation.check, task_id, prepared=cached,
-                                                   baseline_record=record)
+                                                   baseline_record=record, on_event=preview_progress)
+                        preview_succeeded = True
                     except BaseException as error:
                         if getattr(error, 'stage', None) in ('image-plan', 'check-plan'):
                             self.store.append_event(task_id, {'event': 'error', 'phase': 'preview-failed',
@@ -927,13 +1176,16 @@ class FlashActions:
                             finally:
                                 waiter['event'].set()
                         raise
+                    finally:
+                        if timing is not None:
+                            timing.finish(preview_succeeded)
+                        else:
+                            self.store.update_details(task_id, {'preview_progress': {'active': False}})
                     operation.check()
-                    current_layout = (selected.get('inspection') or {}).get('layout_digest') or selected['executor_plan'].get('layout_digest')
                     if full_review and (_write_scope(selected['executor_plan']) != _write_scope(record['executor_plan'])
                             or selected['executor_plan'].get('erase_ranges') != record['executor_plan'].get('erase_ranges')):
                         raise TaskError('firmware confirmation changed its reviewed scope', 409)
-                    system_transition = record.get('operation') == 'nor-workspace' and (selected.get('execution_profile') or {}).get('system_storage')
-                    if selected['requires_prepare'] or current_layout != actual and not system_transition:
+                    if selected['requires_prepare'] or not _selection_layout_matches(record, selected, actual):
                         raise TaskError('flash target layout changed during preview', 409)
                     return response(200, {'ok': True, 'plan': self._preview(selected),
                         'inspection': _public(selected.get('inspection') or {}),
@@ -948,22 +1200,23 @@ class FlashActions:
                         or selected['executor_plan'].get('ready') is False
                         or not selected['executor_plan'].get('writes')):
                     raise TaskError('flash selection plan changed or expired', 409)
-                selected_layout = (selected.get('inspection') or {}).get('layout_digest') or selected['executor_plan'].get('layout_digest')
-                system_transition = record.get('operation') == 'nor-workspace' and (selected.get('execution_profile') or {}).get('system_storage')
-                if selected_layout != actual and not system_transition:
+                if retain and not details.get('nor_before') and (not getattr(executor, 'supports_nor_snapshot', False)
+                        or not selected.get('workspace') or not _snapshot_inspection(selected)):
+                    raise TaskError('this plan cannot read a verified NOR snapshot', 409)
+                if not _selection_layout_matches(record, selected, actual):
                     raise TaskError('flash selection layout differs from prepared target', 409)
                 if record['intent']['mode'] == 'full' and (
-                        selected['intent'] != record['intent']
+                        {k: v for k, v in selected['intent'].items() if k not in ('verify', 'reset_after')}
+                        != {k: v for k, v in record['intent'].items() if k not in ('verify', 'reset_after')}
                         or _write_scope(selected['executor_plan']) != _write_scope(record['executor_plan'])
                         or selected['executor_plan'].get('erase_ranges') != record['executor_plan'].get('erase_ranges')):
                     raise TaskError('firmware confirmation differs from the prepared scope', 409)
                 added = []
                 try:
-                    for artifact_id in sorted({selected['intent']['artifact_id']} | {value['artifact_id'] for value in selected['intent']['selections']}):
+                    for artifact_id in sorted(_source_ids(selected['intent'])):
                         if artifact_id not in waiter['claimed']:
-                            self.manager.artifacts.claim(artifact_id, task_id, actor, device.serial)
+                            self.manager.artifacts.claim(artifact_id, task_id, actor, None if actor == 'web' else device.serial)
                             added.append(artifact_id)
-                    identity = {key: payload.get(key) for key in ('plan_id', 'request_id', 'layout_digest')}
                     self.store.update_details(task_id, {'selection_request': identity})
                 except BaseException:
                     for artifact_id in added:
@@ -991,6 +1244,7 @@ class FlashOperation:
         actions, record = self.actions, self.record
         store, maintenance = actions.store, maintenance_for(self.manager)
         claimed, cleanup_confirmed, write_started, outcome = [], True, False, {}
+        write_progress = None
         submitted_full_review = False
         nor_baseline = None
         def check():
@@ -1023,7 +1277,10 @@ class FlashOperation:
             done, total = value.get('done', 0), value.get('total', 0)
             if type(done) is int and type(total) is int and 0 <= done and (done <= total
                     or total == 0 and phase == 'reading-system-metadata'):
-                context.progress(done, total, phase)
+                progress = {}
+                if write_progress is not None and phase == 'writing' and 'total' in value:
+                    done, total, progress = write_progress.measure(value)
+                context.progress(done, total, phase, **progress)
         self.check = check
         try:
             check()
@@ -1036,18 +1293,17 @@ class FlashOperation:
                 record['requires_prepare'] = bool(self.binding.profile_data.get('bootrom_identity'))
                 record = store.put_plan(record)
                 store.update_details(context.id, {'workspace': record['workspace'], 'plan_id': record['plan_id']})
-            initial_artifacts = {record['intent']['artifact_id']} | {
-                value['artifact_id'] for value in record['intent']['selections']}
-            for artifact_id in sorted(value for value in initial_artifacts if value):
-                self.manager.artifacts.claim(artifact_id, context.id, self.actor, record['serial'])
+            for artifact_id in sorted(_source_ids(record['intent'])):
+                self.manager.artifacts.claim(artifact_id, context.id, self.actor, None if self.actor == 'web' else record['serial'])
                 claimed.append(artifact_id)
             if record['serial']:
                 self.manager.store.event(record['serial'], self.actor, 'flash-start', context.id)
             if record['requires_prepare']:
                 submitted_full_review = record['executor_plan'].get('confirm_after_prepare') is True
                 if submitted_full_review and (record['intent']['mode'] != 'full'
-                        or (self.binding.profile_data.get('storages') or [{}])[0].get('layout_source') != 'spacemit-nor'):
-                    raise TaskError('post-prepare firmware confirmation requires the NOR template', 502)
+                        or ((self.binding.profile_data.get('storages') or [{}])[0].get('layout_source') != 'spacemit-nor'
+                            and not self.binding.profile_data.get('system_storage'))):
+                    raise TaskError('post-prepare confirmation requires a checked NOR or system storage template', 502)
                 context.progress(0, 0, 'prepare')
                 previous_device = None
                 if self.binding.target_id and not record.get('execution_profile'):
@@ -1074,10 +1330,8 @@ class FlashOperation:
                     self.resolved_serial = _discovery(self.manager).accept_eeprom_identity(
                         self.binding.target_id, self.final_generation, identity, context.id, self.attempt_id) or record['serial']
                     if identity.get('eeprom-serial') and identity.get('eeprom-serial') == identity.get('serialno'):
-                        profile = dict(self.binding.profile_data, identity=dict(self.binding.profile_data.get('identity') or {},
-                            **{'serialno': self.resolved_serial, 'eeprom-serial': self.resolved_serial}))
-                        self.binding = replace(self.binding, profile_data=profile)
-                        record['execution_profile'] = profile
+                        # The accepted serial belongs to this task and USB generation.
+                        # Keep the profile sealed into the imported plan intact.
                         store.update_details(context.id, {'resolved_serial': self.resolved_serial, 'serial_source': 'eeprom', 'request_serial': record['serial']})
                     store.update_details(context.id, {'execution_device': final_device,
                                                        'allowed_final_generation': self.final_generation})
@@ -1110,27 +1364,10 @@ class FlashOperation:
                 record['pending_checks'] = ['partition-selection']
                 record = store.put_plan(record)
                 store.update_details(context.id, {'plan_id': record['plan_id'], 'inspection': _public(record['inspection'])})
-            nor_storages = (record.get('inspection') or {}).get('storages') or []
-            if (record['intent']['mode'] == 'partitions' and len(nor_storages) == 1
-                    and nor_storages[0].get('capacity_source') == 'spacemit-ram-v1'
-                    and nor_storages[0].get('verify') is True
+            inspected_nor = _snapshot_inspection(record)
+            if (record['intent']['mode'] == 'partitions' and inspected_nor
                     and getattr(self.executor, 'supports_nor_snapshot', False)):
-                # Finish and publish the full backup BEFORE the selection wait
-                # or any write. It remains downloadable if the flash later fails.
-                from .nor_backups import publish_backup
-                snapshot = snapshot or self.executor.snapshot(self.binding, record.get('workspace'), event, check,
-                    task_id=context.id, attempt_id=self.attempt_id)
-                if not isinstance(snapshot, dict) or snapshot.get('ok') is not True:
-                    raise TaskError('whole NOR backup did not complete; storage was not written', 502)
-                raw = snapshot.get('snapshot')
-                if (not isinstance(raw, dict) or raw.get('size') != nor_storages[0].get('size')
-                        or raw.get('layout_digest') != record['inspection'].get('layout_digest')):
-                    raise TaskError('NOR backup does not cover the checked live storage', 502)
-                backup = publish_backup(self.manager.artifacts, raw, record.get('workspace'),
-                                        context.id, self.attempt_id, record['serial'], check=check, actor=self.actor)
-                nor_baseline = dict(id=backup['artifact']['id'], path=raw['path'],
-                                    size=raw['size'], sha256=raw['sha256'])
-                store.update_details(context.id, {'nor_before': backup})
+                nor_baseline = self._backup_before(context.id, record, inspected_nor, snapshot, event, check)
             if workspace_mode and record.get('read_system'):
                 inventory = self.executor.storage_inventory(self.binding, check, event)
                 store.update_details(context.id, {'storage_inventory': inventory})
@@ -1148,21 +1385,37 @@ class FlashOperation:
             plan = record['executor_plan']
             if plan.get('ready') is False or not plan.get('writes'):
                 raise TaskError('flash plan is not ready to write', 409)
+            details = store.details(context.id)
+            if not details.get('nor_before') and (details.get('retain_backup')
+                    or (details.get('selection_request') or {}).get('retain_backup')):
+                inspected_nor = _snapshot_inspection(record)
+                if not inspected_nor:
+                    raise TaskError('confirmed NOR backup scope is no longer available', 409)
+                self._backup_before(context.id, record, inspected_nor, None, event, check)
             store.update_details(context.id, {'plan_id': record['plan_id'], 'plan_digest': record['digest'],
                                              'workspace': record.get('workspace'),
                                              'source_workspaces': record.get('source_workspaces', []),
                                              'plan': actions._preview(record), 'write_inspection': _public(record.get('inspection') or {}),
                                              'payload_candidates': _public(record.get('payload_candidates') or []), 'write_result': 'running'})
             context.progress(0, 0, 'checking-image')
+            from .flash_progress import FlashWriteProgress
+            write_progress = FlashWriteProgress(plan)
             write_started = True
             execution_args = dict(task_id=context.id, attempt_id=self.attempt_id)
+            if getattr(self.executor, 'supports_skip_verification', False):
+                store.update_details(context.id, {'can_skip_verification': True})
+                execution_args['skip_verification'] = lambda: store.details(context.id).get('verify_skip_requested') is True
             if record['intent'].get('reset_after'):
                 if not getattr(self.executor, 'supports_reset_after', False):
                     raise TaskError('刷机执行器不支持刷后自动复位')
                 execution_args['reset_after'] = True
             if getattr(self.executor, 'supports_nor_snapshot', False):
                 execution_args.update(workspace=record.get('workspace'), nor_baseline=nor_baseline)
-            result = self.executor.execute(self.binding, plan, event, check, **execution_args)
+            if plan.get('image_type') == 'bundle':
+                from .flash_bundle import execute_bundle
+                result = execute_bundle(self.executor, self.binding, plan, event, check, **execution_args)
+            else:
+                result = self.executor.execute(self.binding, plan, event, check, **execution_args)
             if not isinstance(result, dict):
                 raise TaskError('flash executor did not confirm success', 502)
             output = {key: result[key] for key in ('write_result', 'verify_result', 'boot_result',
@@ -1179,7 +1432,11 @@ class FlashOperation:
                 raise TaskError('flash executor did not confirm success', 502)
             if output.get('write_result') != 'completed':
                 raise TaskError('flash executor did not confirm all planned writes', 502)
-            if record['intent']['verify'] == 'required' and output.get('verify_result') != 'verified':
+            skipped = output.get('verify_result') == 'skipped'
+            if skipped and store.details(context.id).get('verify_skip_requested') is not True:
+                outcome['verify_result'] = 'unavailable'
+                raise TaskError('flash verification skipped without an operator request', 502)
+            if record['intent']['verify'] == 'required' and output.get('verify_result') != 'verified' and not skipped:
                 raise TaskError('required flash verification did not pass', 502)
             output.setdefault('boot_result', 'not-requested')
             output.update(ok=True, plan_id=record['plan_id'], plan_digest=record['digest'])
@@ -1235,6 +1492,22 @@ class FlashOperation:
                     raise
             else:
                 maintenance.keep_recovery(context.id)
+
+    def _backup_before(self, task_id, record, inspection, snapshot, event, check):
+        from .nor_backups import publish_backup
+        workspace = record['workspace']
+        snapshot = snapshot or self.executor.snapshot(self.binding, workspace, event, check,
+            task_id=task_id, attempt_id=self.attempt_id)
+        if not isinstance(snapshot, dict) or snapshot.get('ok') is not True:
+            raise TaskError('whole NOR backup did not complete; storage was not written', 502)
+        raw = snapshot.get('snapshot')
+        if (not isinstance(raw, dict) or raw.get('size') != inspection['storages'][0].get('size')
+                or raw.get('layout_digest') != inspection.get('layout_digest')):
+            raise TaskError('NOR backup does not cover the checked live storage', 502)
+        backup = publish_backup(self.manager.artifacts, raw, workspace, task_id, self.attempt_id,
+                                record['serial'], check=check, actor=self.actor)
+        self.actions.store.update_details(task_id, {'nor_before': backup})
+        return dict(id=backup['artifact']['id'], path=raw['path'], size=raw['size'], sha256=raw['sha256'])
 
     def _wait_selection(self, context, record, event, check, claimed):
         waiter = {'lock': threading.RLock(), 'event': threading.Event(), 'record': record,

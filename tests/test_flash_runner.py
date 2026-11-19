@@ -123,6 +123,12 @@ class FlashRunnerTests(unittest.TestCase):
         config['boards']['board-a']['flash']['timeout'] = timeout
         return FlashBook(config).binding('board-a')
 
+    def prepared_image_fixture(self, argv, artifact, *args, **kwargs):
+        # Plan tests below isolate the live-check coordinator. The dedicated
+        # preparation tests exercise the host-only import/cache contract.
+        workspace = self.runner._directory(self.runner.image_workspace(artifact))
+        return {'artifact_sha256': artifact['sha256'], 'workspace': str(workspace)}
+
     def test_nor_snapshot_uses_only_its_managed_workspace_and_fixed_identity(self):
         workspace = self.runner._directory(self.runner.root / 'cache' / 'plan-nor-test')
         binding = self.binding("assert sys.argv[-3]=='snapshot-nor'\n"
@@ -274,7 +280,8 @@ class FlashRunnerTests(unittest.TestCase):
             self.assertEqual(current.profile_data, derived)
             self.assertEqual(request['profile'], derived)
             return {'plan': {'ready': False}, 'requires_prepare': True}
-        with mock.patch.object(self.runner, '_run', side_effect=run):
+        with mock.patch.object(self.runner, '_run', side_effect=run), \
+                mock.patch.object(self.runner, 'prepare_image', side_effect=self.prepared_image_fixture):
             result = self.runner.plan(binding, artifact, 'partitions')
         self.assertEqual(result['execution_profile'], derived)
         self.assertNotIn('prepare', binding.profile_data, 'the source binding must remain fixed')
@@ -411,6 +418,27 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertEqual(events, [{'event': 'progress', 'phase': 'write', 'done': 4, 'total': 4}])
         self.assertEqual(list((self.root / 'workspace' / 'requests').iterdir()), [])
 
+    def test_skip_control_preserves_required_plan_and_cleans_private_sidecar(self):
+        binding = self.binding("control=Path(sys.argv[-1]+'.skip-verification')\n"
+            "print(json.dumps({'event':'progress','phase':'verifying-system','done':0,'total':32}),flush=True)\n"
+            "deadline=time.monotonic()+1\n"
+            "while not control.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+            "assert control.exists() and control.read_bytes()==b''\n"
+            "assert request['plan']=={'verify':'required'}\n"
+            "print(json.dumps({'event':'result','result':{'ok':True,'write_result':'completed','verify_result':'skipped'}}))\n")
+        requested = []
+        result = self.runner.execute(binding, {'verify': 'required'},
+            on_event=lambda value: requested.append(value), skip_verification=lambda: bool(requested))
+        self.assertEqual(result['verify_result'], 'skipped')
+        self.assertEqual(list((self.runner.root / 'requests').iterdir()), [])
+
+    def test_executor_cannot_claim_skip_without_an_operator_request(self):
+        binding = self.binding("print(json.dumps({'event':'result','result':"
+            "{'ok':True,'write_result':'completed','verify_result':'skipped'}}))\n")
+        with self.assertRaisesRegex(FlashRunnerError, 'without an operator request') as error:
+            self.runner.execute(binding, {'verify': 'if-supported'})
+        self.assertEqual(error.exception.outcome['verify_result'], 'unavailable')
+
     def test_error_and_failed_result_keep_only_confirmed_domain_outcomes(self):
         report = {'write_result': 'completed', 'verify_result': 'failed', 'boot_result': 'not-requested',
                   'written_bytes': 4096, 'password': 'host-secret', 'argv': ['/private/helper'],
@@ -482,23 +510,25 @@ class FlashRunnerTests(unittest.TestCase):
                 self.assertNotIn('host-secret', str(error.exception))
                 self.assertTrue(error.exception.cleanup_confirmed)
 
-    def test_plan_workspace_is_unique_and_retained_only_after_success(self):
+    def test_plan_workspace_is_shared_by_image_and_survives_live_check_failure(self):
         binding = self.binding("print(json.dumps({'event':'result','result':{'workspace':request['workspace'],"
                                "'mode':request['mode'],'budget':request['max_cache_bytes'],"
                                "'target':request.get('target_storage'),'plan':{'mode':request['mode']}}}))")
         artifact = {'id': 'image', 'sha256': 'a' * 64, 'size': 1, 'path': '/managed/image', 'name': 'image.raw'}
-        first = self.runner.plan(binding, artifact, 'full', target_storage='nvme')
-        second = self.runner.plan(binding, artifact, 'full')
-        self.assertNotEqual(first['workspace'], second['workspace'])
+        with mock.patch.object(self.runner, 'prepare_image', side_effect=self.prepared_image_fixture):
+            first = self.runner.plan(binding, artifact, 'full', target_storage='nvme')
+            second = self.runner.plan(binding, artifact, 'full')
+        self.assertEqual(first['workspace'], second['workspace'])
+        self.assertEqual(Path(first['workspace']).name, artifact['sha256'])
         self.assertTrue(Path(first['workspace']).is_dir())
         self.assertGreater(first['budget'], 0)
         self.assertEqual(first['target'], 'nvme')
-        before = set((self.root / 'workspace' / 'cache').iterdir())
+        self.assertFalse(self.runner.cleanup_plan(first))
+        self.assertTrue(Path(first['workspace']).is_dir())
         binding = self.binding('sys.exit(1)')
-        with self.assertRaises(FlashRunnerError):
+        with mock.patch.object(self.runner, 'prepare_image', side_effect=self.prepared_image_fixture), self.assertRaises(FlashRunnerError):
             self.runner.plan(binding, artifact, 'partitions')
-        self.assertEqual(set((self.root / 'workspace' / 'cache').iterdir()), before)
-        self.assertTrue(self.runner.cleanup_plan(first))
+        self.assertTrue(Path(first['workspace']).is_dir())
         self.assertFalse(self.runner.cleanup_plan(first))
         self.assertTrue(Path(second['workspace']).exists())
 
@@ -506,7 +536,8 @@ class FlashRunnerTests(unittest.TestCase):
         binding = self.binding("print(json.dumps({'event':'result','result':{'target':request['target_storage'],'plan':{}}}))")
         artifact = {'id': 'image', 'sha256': 'a' * 64, 'size': 1, 'path': '/managed/image', 'name': 'os.tar.gz'}
         for name in ('scsi:0', 'nvme:1', 'mmc:2', 'usb:3'):
-            result = self.runner.plan(binding, artifact, 'partitions', target_storage=name)
+            with mock.patch.object(self.runner, 'prepare_image', side_effect=self.prepared_image_fixture):
+                result = self.runner.plan(binding, artifact, 'partitions', target_storage=name)
             self.assertEqual(result['target'], name)
             self.runner.cleanup_plan(result)
         for name in ('scsi:4', 'scsi:-1', 'scsi:0;erase', 'host:0', 'scsi:0/../1'):
@@ -533,8 +564,10 @@ class FlashRunnerTests(unittest.TestCase):
                 self.assertEqual(request['plan'], {'digest': 'fixed'})
                 self.assertEqual(request['payload_candidates'], [{'partition': 'rootfs'}])
             return {'plan': {'digest': 'fixed'}, 'payload_candidates': [{'partition': 'rootfs'}]}
-        with mock.patch.object(self.runner, '_run', side_effect=run):
+        with mock.patch.object(self.runner, '_run', side_effect=run), \
+                mock.patch.object(self.runner, 'prepare_image', side_effect=self.prepared_image_fixture) as prepare:
             self.runner.plan(binding, artifact, 'full', inspection_scope=scope)
+        prepare.assert_called_once()
         self.assertEqual(events, [('image-plan', False), 'enter', ('check-plan', True), 'leave'])
 
     def test_unknown_plan_process_identifies_which_resources_need_recovery(self):
@@ -546,6 +579,7 @@ class FlashRunnerTests(unittest.TestCase):
                     raise FlashRunnerError('cleanup could not be confirmed', 503, False)
                 return {'plan': {'digest': 'fixed'}, 'payload_candidates': []}
             with self.subTest(failed=failed), mock.patch.object(self.runner, '_run', side_effect=run), \
+                    mock.patch.object(self.runner, 'prepare_image', side_effect=self.prepared_image_fixture), \
                     self.assertRaises(FlashRunnerError) as error:
                 self.runner.plan(binding, artifact, 'full')
             self.assertEqual(error.exception.operation, failed)
@@ -588,11 +622,11 @@ class FlashRunnerTests(unittest.TestCase):
             self.runner.plan(binding, artifact, 'full')
         workspace = Path(error.exception.workspace)
         self.assertTrue(workspace.is_dir())
-        self.assertEqual(workspace.parent, self.root / 'workspace' / 'cache')
+        self.assertEqual(workspace.parent, self.root / 'workspace' / 'images')
         self.assertEqual(self.runner._cache_reserved, 0)
         # Explicit cleanup is only allowed after the coordinator has proved
         # there are no active processes or recovery references.
-        self.assertTrue(self.runner.cleanup_plan(workspace))
+        self.assertFalse(self.runner.cleanup_plan(workspace), 'a task cleanup cannot remove a shared image')
 
     def test_workspace_cleanup_rejects_foreign_path_and_link(self):
         foreign = self.root / 'plan-abcdefgh'

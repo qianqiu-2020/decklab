@@ -231,7 +231,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     share_seconds = SHARE_SECONDS
     default_language = ''
     settings = None
-    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/desktop.js',
+    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/desktop.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
     try:
@@ -721,6 +721,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     devices_payload = json.loads(data)
                 except ValueError:
                     return self._json(502, {'error': 'collector returned invalid device list'})
+                devices_payload.pop('usb_serial_warnings', None)
                 devices_payload['devices'] = [item for item in devices_payload.get('devices', [])
                     if (item.get('serial') == grant['serial'] if grant['scope'] == 'device' else
                         item.get('connection_id') == grant['connection_id'] and item.get('alive') is True)]
@@ -899,7 +900,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         if urlparse(self.path).path.startswith('/vendor/novnc/'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
-        if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
+        if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
                                         '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()

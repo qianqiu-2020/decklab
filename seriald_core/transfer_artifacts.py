@@ -323,7 +323,7 @@ class TransferArtifacts:
             self._unlink(artifact_id)
 
     def _unlink(self, artifact_id):
-        for suffix in ('.part', '.bin'):
+        for suffix in ('.part', '.bin', '.directory.json'):
             self._path(artifact_id, suffix).unlink(missing_ok=True)
 
     def _maintenance_protected(self, task_id):
@@ -371,6 +371,19 @@ class TransferArtifacts:
         with self.store.lock:
             rows = [dict(row) for row in self.store.db.execute(
                 "SELECT * FROM transfer_artifacts WHERE state IN ('receiving','ready','available')")]
+            # An explicit inventory read can publish a working snapshot. Reclaim only
+            # that task's exact pre-write artifact after a clean terminal outcome.
+            temporary = {row[0] for row in self.store.db.execute("""
+                SELECT a.id FROM transfer_artifacts a JOIN flash_details f ON f.task_id=a.task_id
+                JOIN tasks t ON t.id=f.task_id
+                WHERE a.direction='download' AND a.state='available'
+                  AND json_extract(f.document,'$.temporary_snapshot')=1
+                  AND a.id=json_extract(f.document,'$.nor_before.artifact.id')
+                  AND coalesce(json_extract(f.document,'$.retain_backup'),0)=0
+                  AND coalesce(json_extract(f.document,'$.selection_request.retain_backup'),0)=0
+                  AND coalesce(json_extract(f.document,'$.recovery_required'),0)=0
+                  AND (t.state='completed' OR (t.state IN ('failed','cancelled')
+                       AND json_extract(f.document,'$.write_result')='not-started'))""")}
         for row in rows:
             with self._lock(row['id']):
                 with self._guard:
@@ -380,7 +393,7 @@ class TransferArtifacts:
                 if self._maintenance_protected(current['task_id']):
                     continue
                 ttl = self.policy.idle_seconds if current['state'] == 'receiving' else self.policy.ready_seconds
-                if current['state'] not in ('receiving', 'ready', 'available') or current['updated'] + ttl > now:
+                if current['state'] not in ('receiving', 'ready', 'available') or (row['id'] not in temporary and current['updated'] + ttl > now):
                     continue
                 self._update(row['id'], state='expired', updated=now)
                 self._unlink(row['id'])

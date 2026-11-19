@@ -18,7 +18,7 @@ from .queries import ArchiveQueries, ArchiveDownload, SessionQueries, open_archi
 from . import __version__
 from .results import response as api_response
 from .transactions import transactions_for, TransactionError
-from .maintenance import disk_status, diagnostic_summary
+from .maintenance import disk_status, diagnostic_summary, usb_serial_warnings
 from .task_actions import TaskActions
 from .artifact_actions import ArtifactActions, body_limit
 from .tasks import TaskError
@@ -220,10 +220,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if route in ('/api/image-catalog', '/api/image-library'):
             try:
-                from .image_catalog import catalog, library
-                result = (library(self.manager, self.headers.get('X-Seriald-Actor', 'web'), (q.get('serial') or [None])[0]) if route == '/api/image-library' else
-                          catalog((q.get('source') or ['public'])[0], (q.get('path') or [''])[0],
-                                  (q.get('refresh') or [''])[0] == '1'))
+                from .image_catalog import catalog, library, mark_downloads
+                actor = self.headers.get('X-Seriald-Actor', 'web')
+                if route == '/api/image-library':
+                    result = library(self.manager, actor, (q.get('serial') or [None])[0])
+                else:
+                    result = catalog((q.get('source') or ['public'])[0], (q.get('path') or [''])[0],
+                                     (q.get('refresh') or [''])[0] == '1')
+                    if actor == 'web':
+                        mark_downloads(self.manager, result)
                 return self._json(200, result)
             except (TaskError, OSError, ValueError) as error:
                 return self._json(getattr(error, 'status', 503), {'error': str(error) if isinstance(error, TaskError) else '镜像商店暂不可用'})
@@ -326,6 +331,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             devs.sort(key=lambda x: x['key'])
             return self._json(200, {'devices': devs, 'by_path': BY_PATH,
                                     'storage': disk_status(LOG_ROOT, self.manager.maintenance.policy),
+                                    'usb_serial_warnings': usb_serial_warnings(),
                                     'server_time': time.time()})
 
         if route in ('/api/desktop/sessions', '/api/desktop/frame'):
@@ -500,6 +506,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(error.status, {'ok': False, 'error': str(error), 'code': error.code})
 
     def _post_payload(self, route, payload):
+        if route == '/api/image-workspace':
+            from .image_workspaces import ImageWorkspaces
+            result = ImageWorkspaces(self.manager).request(payload, payload.get('actor') or 'web')
+            return self._json(result.status, result.payload)
+        if route == '/api/image-prepare':
+            from .image_preparation import for_manager
+            result = for_manager(self.manager).request(payload, payload.get('actor') or 'web')
+            return self._json(result.status, result.payload)
         if route == '/api/task-recovery':
             from .board_maintenance import maintenance_for
             try:

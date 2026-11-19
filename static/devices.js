@@ -6,11 +6,61 @@
     var selKey = null, lastDevices = [], lastInfoIdentity = '';
     var ownershipRevision = 0, pollSeq = 0, requestedDevice = '';
     var orderStorageKey = 'decklab.device-order.v1', deviceOrder = [], visibleOrder = [];
+    var directoryOrder = [], manualOrder = false;
     var orderElements = {}, draggedId = '', renderAfterDrag = false;
     var dragPreview = null, dragAnimations = [];
+    var grid = $('grid'), edgeTimer = null, dragPoint = null;
+    function stopEdgeScroll() {
+      if (edgeTimer !== null) global.clearInterval(edgeTimer);
+      edgeTimer = null; dragPoint = null;
+    }
+    function edgeStep(position, start, end) {
+      var band = Math.min(48, (end - start) / 4);
+      var depth = position < start + band ? position - start - band : Math.max(0, position - end + band);
+      return band > 0 ? Math.round(24 * Math.max(-1, Math.min(1, depth / band))) : 0;
+    }
+    function scrollAtEdge() {
+      if (!draggedId || !dragPoint) return stopEdgeScroll();
+      var rect = grid.getBoundingClientRect(), left = grid.scrollLeft, top = grid.scrollTop;
+      var dx = grid.scrollWidth > grid.clientWidth ? edgeStep(dragPoint.clientX, rect.left, rect.left + grid.clientWidth) : 0;
+      var dy = grid.scrollHeight > grid.clientHeight ? edgeStep(dragPoint.clientY, rect.top, rect.top + grid.clientHeight) : 0;
+      grid.scrollBy(dx, dy);
+      if (dx || dy) previewGrid(dragPoint, false);
+      if (grid.scrollLeft === left && grid.scrollTop === top) stopEdgeScroll();
+    }
+    function nearGridEdge(event) {
+      var rect = grid.getBoundingClientRect(), x = event.clientX, y = event.clientY;
+      var nearVerticalEdge = grid.scrollHeight > grid.clientHeight && x >= rect.left && x <= rect.right
+        && y >= rect.top - 32 && y <= rect.bottom + 32;
+      var nearHorizontalEdge = grid.scrollWidth > grid.clientWidth && y >= rect.top && y <= rect.bottom
+        && x >= rect.left - 32 && x <= rect.right + 32;
+      return nearVerticalEdge || nearHorizontalEdge;
+    }
+    // Native dragover can pause while the pointer stays still. Keep scrolling
+    // the list and recompute its landing slot as new cards come into view.
+    if (grid.parentElement) {
+      var pane = grid.parentElement;
+      pane.addEventListener('dragover', function (event) {
+        if (!draggedId) return;
+        var inGrid = grid.contains(event.target);
+        if (!inGrid && !nearGridEdge(event)) return stopEdgeScroll();
+        dragPoint = {clientX:event.clientX, clientY:event.clientY};
+        if (!inGrid) { event.preventDefault(); previewGrid(dragPoint, false); }
+        if (edgeTimer === null) edgeTimer = global.setInterval(scrollAtEdge, 24);
+      }, true);
+      pane.addEventListener('dragleave', function (event) {
+        if (!pane.contains(event.relatedTarget)) stopEdgeScroll();
+      });
+      pane.addEventListener('drop', function (event) {
+        if (draggedId && !grid.contains(event.target) && nearGridEdge(event)) {
+          event.preventDefault(); previewGrid(event, false); commitDrag();
+        }
+      });
+    }
     try {
       var savedOrder = JSON.parse(global.localStorage && global.localStorage.getItem(orderStorageKey) || 'null');
       if (savedOrder && savedOrder.version === 1 && Array.isArray(savedOrder.ids)) {
+        manualOrder = savedOrder.manual === true;
         deviceOrder = savedOrder.ids.filter(function (id, index, ids) {
           return typeof id === 'string' && id.length <= 2048 && /^(board|port|connection|key):/.test(id)
             && ids.indexOf(id) === index;
@@ -21,6 +71,7 @@
       var sharedMatch = /^#device=(.*)$/.exec(global.location && global.location.hash || '');
       if (sharedMatch) requestedDevice = decodeURIComponent(sharedMatch[1]);
     } catch (_) { /* A malformed bookmark must not break device discovery. */ }
+    $('device-sort').value = manualOrder ? 'manual' : 'status';
     function orderId(device) {
       return device.serial ? 'board:' + device.serial : device.by_path ? 'port:' + device.by_path
         : device.connection_id ? 'connection:' + device.connection_id : 'key:' + device.key;
@@ -28,7 +79,7 @@
     function saveOrder() {
       try {
         if (global.localStorage) global.localStorage.setItem(orderStorageKey,
-          JSON.stringify({ version: 1, ids: deviceOrder }));
+          JSON.stringify({ version: 1, ids: deviceOrder, manual: manualOrder }));
       } catch (_) { /* The current page still keeps its layout when storage is unavailable. */ }
     }
     function reconcileOrder(devices) {
@@ -43,10 +94,7 @@
         if (deviceOrder.indexOf(identifiedId) < 0) deviceOrder[position] = identifiedId;
         else deviceOrder.splice(position, 1);
       });
-      devices.slice().sort(function (a, b) {
-        function rank(device) { return device.alive ? (device.state === 'pending' ? 1 : 0) : 2; }
-        return rank(a) - rank(b);
-      }).forEach(function (device) {
+      devices.forEach(function (device) {
         var id = orderId(device);
         if (deviceOrder.indexOf(id) < 0) deviceOrder.push(id);
       });
@@ -64,10 +112,14 @@
       target.focus(preventScroll ? { preventScroll: true } : undefined);
     }
     function applyVisibleOrder(next, id, control) {
-      var previous = visibleOrder.slice(), cursor = 0;
-      deviceOrder = deviceOrder.map(function (item) {
-        return previous.indexOf(item) >= 0 ? next[cursor++] : item;
-      });
+      // Start a manual move from the order on screen, including filtered-out
+      // rows. Keep saved slots for attachments absent from this poll.
+      var visible = new Set(visibleOrder), present = new Set(directoryOrder), cursor = 0;
+      var reordered = directoryOrder.map(function (item) { return visible.has(item) ? next[cursor++] : item; });
+      cursor = 0;
+      deviceOrder = deviceOrder.map(function (item) { return present.has(item) ? reordered[cursor++] : item; });
+      manualOrder = true;
+      $('device-sort').value = 'manual';
       saveOrder(); renderDevices(lastDevices); focusOrder(id, control);
     }
     function moveDevice(id, direction, control) {
@@ -79,13 +131,14 @@
     }
     function finishDrag() {
       var id = draggedId;
+      stopEdgeScroll(); grid.classList.remove('reordering');
       draggedId = ''; dragPreview = null;
       dragAnimations.forEach(function (animation) { animation.cancel(); }); dragAnimations = [];
       if (renderAfterDrag || id) {
         renderAfterDrag = false; renderDevices(lastDevices); focusOrder(id, 'drag');
       }
     }
-    function previewDrag(card, event) {
+    function previewDrag(card, event, animate) {
       if (!draggedId || card.dataset.orderId === draggedId) return;
       var moving = orderElements[draggedId] && orderElements[draggedId].card;
       if (!moving) return;
@@ -99,18 +152,18 @@
         var other = orderElements[id].card.getBoundingClientRect();
         return id !== card.dataset.orderId && Math.abs(other.top - rect.top) < 2 && Math.abs(other.left - rect.left) > 2;
       });
-      var after = horizontal && typeof event.clientX === 'number' && event.clientX >= rect.left && event.clientX <= rect.right
+      var after = horizontal && typeof event.clientX === 'number' && event.clientY >= rect.top && event.clientY <= rect.bottom
         ? event.clientX > rect.left + rect.width / 2 : event.clientY > rect.top + rect.height / 2;
       if (after) target++;
       next.splice(target, 0, draggedId);
       if (JSON.stringify(next) === JSON.stringify(dragPreview || visibleOrder)) return;
       var before = {};
-      visibleOrder.forEach(function (id) { before[id] = orderElements[id].card.getBoundingClientRect(); });
+      if (animate !== false) visibleOrder.forEach(function (id) { before[id] = orderElements[id].card.getBoundingClientRect(); });
       dragAnimations.forEach(function (animation) { animation.cancel(); }); dragAnimations = [];
       var following = next[next.indexOf(draggedId) + 1];
       $('grid').insertBefore(moving, following ? orderElements[following].card : null);
       dragPreview = next;
-      if (global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      if (animate === false || global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       visibleOrder.forEach(function (id) {
         var node = orderElements[id].card, end = node.getBoundingClientRect(), start = before[id];
         if (id === draggedId || !node.animate || start.left === end.left && start.top === end.top) return;
@@ -124,11 +177,12 @@
       if (!draggedId) return;
       var moving = draggedId, next = (dragPreview || visibleOrder).slice();
       if (JSON.stringify(next) === JSON.stringify(visibleOrder)) { finishDrag(); return; }
+      stopEdgeScroll(); grid.classList.remove('reordering');
       draggedId = ''; dragPreview = null; renderAfterDrag = false;
       dragAnimations.forEach(function (animation) { animation.cancel(); }); dragAnimations = [];
       applyVisibleOrder(next, moving, 'drag');
     }
-    function previewGrid(event) {
+    function previewGrid(event, animate) {
       var closest = null, distance = Infinity;
       visibleOrder.forEach(function (id) {
         if (id === draggedId) return;
@@ -137,7 +191,7 @@
         var dy = Math.max(r.top - event.clientY, 0, event.clientY - r.bottom);
         if (dx * dx + dy * dy < distance) { closest = card; distance = dx * dx + dy * dy; }
       });
-      if (closest) previewDrag(closest, event);
+      if (closest) previewDrag(closest, event, animate);
     }
     $('grid').addEventListener('dragover', function (event) {
       if (!draggedId) return;
@@ -162,13 +216,18 @@
       $('count-pending').textContent = list.filter(function (d) { return d.state === 'pending'; }).length;
       if (draggedId) { renderAfterDrag = true; return; }
       reconcileOrder(list);
-      var query = $('device-search').value.toLowerCase();
+      var query = $('device-search').value.trim().toLowerCase();
       var filter = $('device-filter').value || 'all';
-      list = list.filter(function (d) {
-        return (filter === 'all' || d.state === filter) &&
-          [d.label, d.serial, d.hostname, d.by_path, d.last_path, d.dev].join(' ').toLowerCase().includes(query);
+      var position = new Map(deviceOrder.map(function (id, index) { return [id, index]; }));
+      function priority(d) { return d.state === 'pending' ? 0 : d.state === 'online' ? 1 : 2; }
+      list = list.slice().sort(function (a, b) {
+        return (manualOrder ? 0 : priority(a) - priority(b)) || position.get(orderId(a)) - position.get(orderId(b));
       });
-      list = list.slice().sort(function (a, b) { return deviceOrder.indexOf(orderId(a)) - deviceOrder.indexOf(orderId(b)); });
+      directoryOrder = list.map(orderId);
+      list = list.filter(function (d) {
+        return (filter === 'all' || d.state === filter || (filter === 'active' && priority(d) < 2)) &&
+          [d.attachment_label, d.label, d.key, d.serial, d.hostname, d.by_path, d.last_path, d.dev, d.last_dev].join(' ').toLowerCase().includes(query);
+      });
       var focusBefore = null;
       Object.keys(orderElements).some(function (id) {
         return Object.keys(orderElements[id]).some(function (control) {
@@ -178,7 +237,12 @@
       });
       visibleOrder = list.map(orderId); orderElements = {};
       var g = $('grid');
-      if (!list.length) { g.innerHTML = '<p class="empty">没有匹配的设备。新串口连接后将显示在待识别列表。</p>'; return; }
+      if (!list.length) {
+        g.innerHTML = query || filter !== 'all'
+          ? '<p class="empty">没有符合当前搜索和筛选条件的设备。</p>'
+          : '<p class="empty">等待连接开发板串口。</p>';
+        return;
+      }
       g.textContent = '';
       list.forEach(function (d, index) {
         var health = d.serial_health || {};
@@ -243,14 +307,15 @@
 
         var last = document.createElement('div'); last.className = 'last' + (d.last_line ? '' : ' empty-output');
         last.textContent = d.last_line || '（暂无输出）';
-        card.appendChild(last);
+        var activity = document.createElement('div'); activity.className = 'device-activity';
+        activity.appendChild(last); card.appendChild(activity);
 
         var stat = document.createElement('div'); stat.className = 'stat';
         var s1 = document.createElement('span'); s1.textContent = fmt(d.bytes) + ' 记录';
         var s2 = document.createElement('span'); s2.textContent = '末次 ' + ago(d.last_rx || d.last_seen);
         var s3 = document.createElement('span'); s3.className = 'attachment'; s3.textContent = d.by_path || d.last_path || '';
         stat.appendChild(s1); stat.appendChild(s2); stat.appendChild(s3);
-        card.appendChild(stat);
+        activity.appendChild(stat);
         if (d.alive && (d.last_rx || d.capture_started)
             && Date.now() / 1000 - (d.last_rx || d.capture_started) > 300) {
           var quiet = document.createElement('div'); quiet.className = 'quiet-note';
@@ -287,13 +352,9 @@
         }
         // 板子序列号(device-tree)比 hostname 可靠:hostname 可能是出厂默认名、还会重复
         if (inf.ips && inf.ips.length) {
-          var idl = document.createElement('div'); idl.className = 'stat';
-          if (inf.ips && inf.ips.length) {
-            var s5 = document.createElement('span');
-            s5.textContent = inf.ips.map(function (x) { return x.split(' ')[1].split('/')[0]; }).join(' ');
-            idl.appendChild(s5);
-          }
-          card.appendChild(idl);
+          var addresses = document.createElement('span'); addresses.className = 'device-addresses';
+          addresses.textContent = inf.ips.map(function (x) { return x.split(' ')[1].split('/')[0]; }).join(' ');
+          meta.appendChild(addresses);
         }
 
         var controls = document.createElement('div'); controls.className = 'dev-order-controls';
@@ -316,7 +377,7 @@
         }
         var drag = orderButton('drag', '↕', '拖动调整设备顺序'); drag.draggable = true;
         drag.addEventListener('dragstart', function (e) {
-          draggedId = id; dragPreview = null;
+          draggedId = id; dragPreview = null; grid.classList.toggle('reordering', true);
           if (e.dataTransfer) {
             e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id);
             if (e.dataTransfer.setDragImage) {
@@ -339,6 +400,18 @@
       if (focusBefore) focusOrder(focusBefore.id, focusBefore.control, true);
     }
 
+    function showSerialWarnings(rows) {
+      var panel = $('serial-warning');
+      if (!panel) return;
+      var matched = rows.filter(function (row) { return row.brltty_rule; });
+      function ports(items) { return items.map(function (row) { return row.chip + ' · USB ' + row.port; }).join(' / '); }
+      panel.hidden = !rows.length;
+      if (panel.hidden) panel.open = false;
+      $('serial-warning-ports').textContent = ports(rows);
+      $('serial-warning-brltty').hidden = !matched.length;
+      $('serial-brltty-ports').textContent = ports(matched);
+    }
+
     function pollDevices() {
       var seq = ++pollSeq;
       var ownerRevision = ownershipRevision;
@@ -353,6 +426,7 @@
             $('conn-txt').textContent += d.storage.available ? ' · 日志磁盘空间不足' : ' · 日志磁盘状态不可用';
             $('conn-dot').className = 'dot bad';
           }
+          showSerialWarnings(d.usb_serial_warnings || []);
           lastDevices = d.devices || [];
           renderDevices(lastDevices);
           if (requestedDevice) {
@@ -399,6 +473,7 @@
         .catch(function () {
           if (seq !== pollSeq) return;
           $('conn-dot').className = 'dot bad';
+          showSerialWarnings([]);
           $('conn-txt').textContent = '服务不可达';
         });
     }
@@ -442,9 +517,24 @@
         info && info.serial_source || '', info && info.identity_status || ''].join('|') : '';
     }
     $('device-search').addEventListener('input', function () { renderDevices(lastDevices); });
+    $('device-sort').addEventListener('change', function () {
+      manualOrder = $('device-sort').value === 'manual';
+      saveOrder(); renderDevices(lastDevices);
+    });
     $('device-filter').addEventListener('change', function () { renderDevices(lastDevices); });
+    function jump(direction, position) {
+      if (draggedId || !visibleOrder.length) return false;
+      var current = visibleOrder.findIndex(function (id) { return orderElements[id].card.dataset.key === selKey; });
+      var count = visibleOrder.length;
+      var index = position != null ? position : current < 0 ? (direction > 0 ? 0 : count - 1) : (current + direction + count) % count;
+      if (index >= count || index === current) return false;
+      var card = orderElements[visibleOrder[index]].card;
+      options.open(card.dataset.key);
+      if (card.scrollIntoView) card.scrollIntoView({block:'nearest', inline:'nearest'});
+      return true;
+    }
     var controller = {
-      poll: pollDevices, markSelected: markSelected, adopt: adoptKey,
+      jump: jump, poll: pollDevices, markSelected: markSelected, adopt: adoptKey,
       selectionChanged: function (key) { selKey = key; requestedDevice = ''; },
       rememberInfo: rememberInfo,
       advanceOwnership: function () { ownershipRevision++; },
@@ -454,5 +544,92 @@
     Object.defineProperty(controller, 'selected', { get: function () { return selKey; } });
     return controller;
   }
-  global.SerialdDevices = { create: create };
+  function bindShortcuts($, jump) {
+    var storageKey = 'decklab.device-shortcuts.v1';
+    var defaults = {prev:'Alt+Shift+ArrowLeft', next:'Alt+Shift+ArrowRight', number:'Alt+Shift'};
+    var dialog = $('device-shortcuts'), status = $('shortcuts-status'), recording = '';
+    var bindings = Object.assign({}, defaults);
+    var modifiers = ['Ctrl', 'Alt', 'Shift', 'Meta'];
+    var keyPattern = /^(?:[A-Z0-9]|Arrow(?:Left|Right|Up|Down)|PageUp|PageDown|Home|End|F(?:[1-9]|1[0-2]))$/;
+    function matchesNumber(combo, number) {
+      return number && /^[1-9]$/.test(combo.slice(-1)) && combo.slice(0, -1) === number + '+';
+    }
+    function load() {
+      var value;
+      try { value = JSON.parse(global.localStorage.getItem(storageKey)); } catch (_) {}
+      bindings = Object.assign({}, defaults);
+      if (!value || typeof value !== 'object') return;
+      if (!['prev','next'].every(function (name) {
+        if (value[name] === '') return true;
+        if (typeof value[name] !== 'string') return false;
+        var parts = value[name].split('+'), key = parts.pop();
+        return parts.length && parts.join('+') === modifiers.filter(function (m) { return parts.includes(m); }).join('+')
+          && keyPattern.test(key);
+      }) || !['', 'Alt', 'Alt+Shift', 'Ctrl+Alt', 'Ctrl+Shift'].includes(value.number)
+        || value.prev && value.prev === value.next || matchesNumber(value.prev,value.number) || matchesNumber(value.next,value.number)) return;
+      bindings = {prev:value.prev, next:value.next, number:value.number};
+    }
+    function render() {
+      ['prev','next'].forEach(function (name) {
+        var button = $('shortcut-' + name);
+        button.textContent = recording === name ? '请按组合键' : (bindings[name] || '未设置').replace(/\+/g, ' + ')
+          .replace('ArrowLeft','←').replace('ArrowRight','→').replace('ArrowUp','↑').replace('ArrowDown','↓');
+        button.setAttribute('aria-pressed', String(recording === name));
+      });
+      $('shortcut-number').value = bindings.number;
+    }
+    function save(next) {
+      if ((next.prev && next.prev === next.next) || matchesNumber(next.prev,next.number) || matchesNumber(next.next,next.number)) {
+        status.textContent = '组合键已用于其他切换操作'; render(); return;
+      }
+      try { global.localStorage.setItem(storageKey, JSON.stringify(next)); }
+      catch (_) { status.textContent = '浏览器未能保存快捷键'; render(); return; }
+      bindings = next; recording = ''; status.textContent = '快捷键已保存'; render();
+    }
+    load();
+    $('b-shortcuts').addEventListener('click', function () {
+      load(); recording = ''; status.textContent = ''; render(); dialog.showModal();
+    });
+    $('shortcuts-close').addEventListener('click', function () { dialog.close(); });
+    ['prev','next'].forEach(function (name) {
+      var button = $('shortcut-' + name);
+      button.addEventListener('click', function () { recording = name; status.textContent = ''; render(); });
+      button.addEventListener('blur', function () { if (recording === name) { recording = ''; render(); } });
+    });
+    $('shortcut-number').addEventListener('change', function () { save(Object.assign({}, bindings, {number:this.value})); });
+    $('shortcuts-reset').addEventListener('click', function () { save(Object.assign({}, defaults)); });
+    if (global.addEventListener) global.addEventListener('storage', function (event) {
+      if (event.key === storageKey || event.key === null) { load(); recording = ''; render(); }
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.isComposing || event.keyCode === 229 || event.getModifierState && event.getModifierState('AltGraph')) return;
+      var pressed = [event.ctrlKey, event.altKey, event.shiftKey, event.metaKey];
+      var mods = modifiers.filter(function (_, index) { return pressed[index]; }).join('+');
+      var physical = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(event.code || '');
+      var key = physical ? physical[1] || physical[2] : event.key || '';
+      var combo = mods + '+' + key;
+      function consume() { event.preventDefault(); event.stopImmediatePropagation(); }
+      if (dialog.open && recording) {
+        if (event.key === 'Tab') return;
+        consume();
+        if (event.repeat || ['Control','Alt','Shift','Meta'].includes(key)) return;
+        if (key === 'Escape') { recording = ''; status.textContent = ''; render(); return; }
+        if (key === 'Delete' && !mods) combo = '';
+        else if (!mods || mods === 'Shift' || !keyPattern.test(key) || ['Ctrl+F','Meta+F','Alt+ArrowUp','Alt+ArrowDown'].includes(combo)) {
+          status.textContent = '请换一个含 Ctrl、Alt 或 Meta 的组合键'; return;
+        }
+        var next = Object.assign({}, bindings); next[recording] = combo; save(next);
+        return;
+      }
+      var direction = combo === bindings.next ? 1 : combo === bindings.prev ? -1 : 0;
+      var position = matchesNumber(combo, bindings.number) ? Number(key) - 1 : null;
+      if (!direction && position === null) return;
+      var target = event.target;
+      if (document.querySelector('dialog[open], :popover-open') || target && target.closest &&
+          !target.closest('#d-term') && (target.isContentEditable || target.closest('input, textarea, select, #desktop-panel'))) return;
+      consume();
+      if (!event.repeat) jump(direction, position);
+    }, true);
+  }
+  global.SerialdDevices = { create: create, bindShortcuts: bindShortcuts };
 })(window);

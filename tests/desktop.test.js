@@ -30,6 +30,7 @@ function fixture(configuration = {}) {
     setPointerCapture(id) { this.capture = id; }
     hasPointerCapture(id) { return this.capture === id; }
     releasePointerCapture(id) { if (this.capture === id) this.capture = null; }
+    contains(node) { return this.id === 'desktop-panel' && node.id === 'desktop-image'; }
     requestFullscreen() { document.fullscreenElement = this; return Promise.resolve(); }
     fire(name, extra = {}) { for (const fn of [...(this.listeners[name] || [])]) fn(Object.assign({preventDefault() {}}, extra)); }
   }
@@ -167,8 +168,13 @@ function fixture(configuration = {}) {
   canvas.fire('wheel', {clientX: 20, clientY: 10, deltaY: 120, deltaMode: 0}); ws.ackAll();
   assert.strictEqual(ws.inputs().at(-1).event.steps, 3);
   $('desktop-scale').value = '1.5'; $('desktop-scale').fire('change'); assert.strictEqual(f.displays[0].scale, 1.5);
+  const locks = [];
+  f.window.navigator.keyboard = {lock: async codes => { locks.push(Array.from(codes)); }, unlock: () => locks.push('released')};
   $('desktop-fullscreen').fire('click'); await tick(); assert.strictEqual(f.document.fullscreenElement, $('desktop-panel'));
   f.fireGlobal('fullscreenchange'); assert.strictEqual($('desktop-fullscreen').textContent, '退出全屏');
+  assert.deepEqual(locks, [['MetaLeft', 'MetaRight', 'Tab']]);
+  f.document.fullscreenElement = null; f.fireGlobal('fullscreenchange');
+  assert.strictEqual(locks.at(-1), 'released');
   assert.deepStrictEqual(f.clipboard(), {reads: 0, writes: 0, copied: ''});
   $('desktop-clipboard-read').fire('click'); ws.ackAll(); ws.server({type: 'clipboard', text: 'REMOTE', encoding: 'unicode'});
   assert.strictEqual($('desktop-text').value, 'REMOTE'); assert.strictEqual(f.clipboard().writes, 0, 'remote clipboard never auto-writes the host clipboard');
@@ -304,6 +310,8 @@ function fixture(configuration = {}) {
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/discover').length,1);
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/open').length,0,'discovery never logs in');
   setup.$('desktop-services').value='rdp-service'; setup.$('desktop-services').fire('change');
+  assert.strictEqual(setup.$('desktop-trust').checked,true,'new RDP fingerprints default to pinning when the user saves');
+  setup.$('desktop-trust').checked=false;
   setup.$('desktop-password').value='server-only'; setup.$('desktop-connection').fire('submit'); await tick();
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/configure').length,0,'observed pins need explicit human trust');
   setup.$('desktop-trust').checked=true; setup.$('desktop-connection').fire('submit'); await tick(); await tick();

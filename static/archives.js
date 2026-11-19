@@ -5,7 +5,7 @@
     var $ = options.byId, fmt = options.formatBytes;
     var fetch = options.fetch, isCurrent = options.isCurrent;
     var bootSearch = { seq: 0, key: '', serial: '', query: '', offset: 0 };
-    var archiveState = { key: '', serial: '', mode: 'date', date: '', bootId: '', connection: '' };
+    var archiveState = { key: '', serial: '', connection: '' };
     function connectionQuery(ctx) {
       return !ctx.serial && ctx.archiveConnection ? '&archive_connection=' + encodeURIComponent(ctx.archiveConnection) : '';
     }
@@ -89,17 +89,59 @@
       options.openArchive(ctx, archiveName(ctx, boot.id), '启动 #' + boot.number + ' · ' + (boot.started || ''), url);
     }
 
-    function archiveHeading(box, title) {
-      var heading = document.createElement('div');
-      heading.className = 'log-subhead'; heading.textContent = title;
-      box.appendChild(heading);
+    function dailyFileRow(ctx, file, singleFile) {
+      var row = document.createElement('div'); row.className = 'log-row';
+      var url = '/api/log?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
+        + '&file=' + encodeURIComponent(file.name) + connectionQuery(ctx);
+      var open = document.createElement('button'); open.type = 'button';
+      open.textContent = singleFile ? '查看全天日志' : file.name;
+      if (!singleFile) open.dataset.i18nIgnore = '';
+      open.title = file.name;
+      open.dataset.entry = 'file:' + file.name;
+      if (ctx.sid === 'log:' + archiveName(ctx, file.name)) open.setAttribute('aria-current', 'true');
+      var connection = ctx.archiveConnection;
+      open.addEventListener('click', function () {
+        if (isCurrent(ctx) && archiveState.connection === connection)
+          options.openArchive(ctx, archiveName(ctx, file.name), '串口日志 · ' + archiveDate(file), url + '&full=1');
+      });
+      var size = document.createElement('span'); size.className = 'log-size'; size.textContent = fmt(file.size);
+      var download = document.createElement('a'); download.className = 'log-download';
+      download.dataset.entry = 'download:' + file.name;
+      download.href = url + '&download=1'; download.download = file.name; download.textContent = '下载';
+      row.appendChild(open); row.appendChild(size); row.appendChild(download);
+      return row;
+    }
+
+    function appendDayEntries(day, ctx, date, entries) {
+      entries.files.forEach(function (file) {
+        day.appendChild(dailyFileRow(ctx, file, entries.files.length === 1));
+      });
+      var connection = ctx.archiveConnection;
+      entries.boots.forEach(function (boot) {
+        var button = document.createElement('button'); button.type = 'button'; button.className = 'boot-row';
+        button.dataset.entry = 'boot:' + boot.id;
+        if (ctx.sid === 'log:' + archiveName(ctx, boot.id)) button.setAttribute('aria-current', 'true');
+        var label = document.createElement('strong'); label.textContent = '启动 #' + boot.number;
+        var time = document.createElement('span');
+        time.textContent = bootStartDate(boot) === date ? (boot.started || '').slice(11)
+          : '跨日延续 · 起于 ' + (boot.started || '时间未知');
+        var marker = document.createElement('small'); marker.textContent = boot.marker || '';
+        marker.dataset.i18nIgnore = '';
+        button.appendChild(label); button.appendChild(time); button.appendChild(marker);
+        button.addEventListener('click', function () {
+          if (archiveState.connection === connection) openBootLog(ctx, boot);
+        });
+        day.appendChild(button);
+      });
     }
 
     function renderArchive(ctx) {
       if (!isCurrent(ctx)) return;
-      var box = $('d-logs'), picker = $('archive-picker');
-      box.textContent = ''; picker.textContent = '';
-      var files = ctx.archiveFiles || [], boots = ctx.archiveBoots || [];
+      var box = $('d-logs');
+      var focused = document.activeElement;
+      var focusedDay = focused && focused.closest && focused.closest('#d-logs .archive-day');
+      var previous = new Map(Array.from(box.children).map(function (day) { return [day.dataset.date, day.open]; }));
+      box.textContent = '';
       var connections = $('archive-connections'); connections.textContent = '';
       connections.hidden = !ctx.archiveConnections || !ctx.archiveConnections.length;
       if (!connections.hidden) {
@@ -113,136 +155,42 @@
         captures.value = ctx.archiveConnection;
         captures.addEventListener('change', function () {
           if (!isCurrent(ctx)) return;
-          archiveState.connection = captures.value; archiveState.date = ''; archiveState.bootId = '';
-          clearBootSearch(); $('d-logs').textContent = '正在读取日志…'; $('archive-picker').textContent = '';
+          archiveState.connection = captures.value;
+          clearBootSearch(); $('d-logs').textContent = '正在读取日志…';
           loadLogs();
         });
         connections.appendChild(captures);
       }
-      var dates = Array.from(new Set(files.map(archiveDate))).sort().reverse();
-      var hasBoots = boots.length > 0;
-      if (!hasBoots) archiveState.mode = 'date';
-      ['date', 'boot'].forEach(function (mode) {
-        var button = $('archive-mode-' + mode);
-        button.classList.toggle('on', archiveState.mode === mode);
-        button.setAttribute('aria-pressed', archiveState.mode === mode ? 'true' : 'false');
-        button.disabled = mode === 'boot' && !hasBoots;
-      });
-      if (!files.length) { box.textContent = '还没有串口日志文件'; return; }
-      var select = document.createElement('select');
-      select.setAttribute('aria-label', archiveState.mode === 'date' ? '选择日志日期' : '选择启动次数');
-      picker.appendChild(select);
-      var summary = document.createElement('div');
-      summary.className = 'archive-summary'; picker.appendChild(summary);
-      if (archiveState.mode === 'date') {
-        if (dates.indexOf(archiveState.date) < 0) archiveState.date = dates[0];
-        dates.forEach(function (date) {
-          var starts = boots.filter(function (boot) { return bootStartDate(boot) === date; }).length;
-          var related = boots.filter(function (boot) { return (boot.dates || []).indexOf(date) >= 0; }).length;
-          var option = document.createElement('option');
-          option.value = date;
-          option.textContent = date + ' · 启动 ' + starts + ' 次'
-            + (related > starts ? ' · 延续 ' + (related - starts) + ' 次' : '');
-          select.appendChild(option);
-        });
-        select.value = archiveState.date;
-        select.addEventListener('change', function () {
-          if (!isCurrent(ctx)) return;
-          archiveState.date = select.value; renderArchive(ctx);
-        });
-        var linked = boots.filter(function (boot) {
-          return (boot.dates || []).indexOf(archiveState.date) >= 0;
-        });
-        var startedHere = linked.filter(function (boot) {
-          return bootStartDate(boot) === archiveState.date;
-        }).length;
-        summary.textContent = '当天启动 ' + startedHere + ' 次'
-          + (linked.length > startedHere ? ' · 跨日延续 ' + (linked.length - startedHere) + ' 次' : '');
-        archiveHeading(box, '当日日志');
-        files.filter(function (file) { return archiveDate(file) === archiveState.date; }).forEach(function (file) {
-          var row = document.createElement('div'); row.className = 'log-row';
-          var date = document.createElement('span'); date.className = 'log-date';
-          date.textContent = archiveDate(file);
-          var open = document.createElement('button'); open.type = 'button';
-          open.textContent = file.name;
-          open.dataset.i18nIgnore = '';
-          open.addEventListener('click', function () {
-            if (!isCurrent(ctx)) return;
-            var url = '/api/log?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
-              + '&file=' + encodeURIComponent(file.name) + '&full=1' + connectionQuery(ctx);
-            options.openArchive(ctx, archiveName(ctx, file.name), '串口日志 · ' + archiveDate(file), url);
-          });
-          var size = document.createElement('span'); size.className = 'log-size';
-          size.textContent = fmt(file.size);
-          var download = document.createElement('a'); download.className = 'log-download';
-          download.href = '/api/log?key=' + encodeURIComponent(ctx.key)
-            + '&serial=' + encodeURIComponent(ctx.serial || '') + '&file=' + encodeURIComponent(file.name)
-            + '&download=1' + connectionQuery(ctx);
-          download.download = file.name; download.textContent = '下载';
-          row.appendChild(date); row.appendChild(open); row.appendChild(size);
-          row.appendChild(download); box.appendChild(row);
-        });
-        archiveHeading(box, '相关启动 · ' + linked.length);
-        linked.forEach(function (boot) {
-          var row = document.createElement('div'); row.className = 'log-row boot-row';
-          var relation = document.createElement('span'); relation.className = 'log-date';
-          relation.textContent = bootStartDate(boot) === archiveState.date
-            ? '本日启动 · ' + (boot.started || '时间未知') : '跨日延续 · 起于 ' + (boot.started || '时间未知');
-          var show = document.createElement('button'); show.type = 'button';
-          show.textContent = '启动 #' + boot.number + ' · ' + (boot.marker || '启动标志');
-          show.addEventListener('click', function () {
-            if (!isCurrent(ctx)) return;
-            archiveState.bootId = boot.id; archiveState.mode = 'boot'; renderArchive(ctx);
-          });
-          var open = document.createElement('button'); open.type = 'button';
-          open.className = 'archive-open'; open.textContent = '终端打开';
-          open.addEventListener('click', function () { openBootLog(ctx, boot); });
-          row.appendChild(relation); row.appendChild(show); row.appendChild(open); box.appendChild(row);
-        });
-        if (!linked.length) {
-          var empty = document.createElement('div'); empty.className = 'log-note';
-          empty.textContent = '这一天没有检测到 Boot ROM / U-Boot 启动标志；完整日期日志仍可查看。';
-          box.appendChild(empty);
-        }
-      } else {
-        var boot = boots.filter(function (item) { return item.id === archiveState.bootId; })[0] || boots[0];
-        archiveState.bootId = boot.id;
-        boots.forEach(function (item) {
-          var option = document.createElement('option');
-          option.value = item.id;
-          option.textContent = '启动 #' + item.number + ' · ' + (item.started || '时间未知');
-          select.appendChild(option);
-        });
-        select.value = boot.id;
-        select.addEventListener('change', function () {
-          if (!isCurrent(ctx)) return;
-          archiveState.bootId = select.value; renderArchive(ctx);
-        });
-        summary.textContent = (boot.marker || '启动标志') + ' · ' + fmt(boot.size)
-          + (boot.cross_day ? ' · 跨日运行' : '');
-        var card = document.createElement('div'); card.className = 'boot-detail';
-        var title = document.createElement('strong');
-        title.textContent = '启动 #' + boot.number + ' · ' + (boot.started || '时间未知');
-        card.appendChild(title);
-        var datesLabel = document.createElement('span'); datesLabel.className = 'log-note';
-        datesLabel.textContent = '涉及日期 · 点击日期返回当日日志';
-        card.appendChild(datesLabel);
-        var links = document.createElement('div'); links.className = 'archive-date-links';
-        (boot.dates || []).forEach(function (date) {
-          var link = document.createElement('button'); link.type = 'button';
-          link.textContent = date;
-          link.addEventListener('click', function () {
-            if (!isCurrent(ctx)) return;
-            archiveState.date = date; archiveState.mode = 'date'; renderArchive(ctx);
-          });
-          links.appendChild(link);
-        });
-        card.appendChild(links);
-        var openBoot = document.createElement('button'); openBoot.type = 'button';
-        openBoot.className = 'pri'; openBoot.textContent = '在终端打开本次启动';
-        openBoot.addEventListener('click', function () { openBootLog(ctx, boot); });
-        card.appendChild(openBoot); box.appendChild(card);
+      var days = new Map();
+      function entries(date) {
+        if (!days.has(date)) days.set(date, {files: [], boots: []});
+        return days.get(date);
       }
+      ctx.archiveFiles.forEach(function (file) { entries(archiveDate(file)).files.push(file); });
+      ctx.archiveBoots.forEach(function (boot) {
+        var dates = boot.dates && boot.dates.length ? boot.dates : [bootStartDate(boot) || '日期未知'];
+        new Set(dates).forEach(function (date) { entries(date).boots.push(boot); });
+      });
+      var dates = Array.from(days.keys()).sort().reverse();
+      dates.forEach(function (date, index) {
+        var day = document.createElement('details'); day.className = 'archive-day'; day.dataset.date = date;
+        day.open = previous.has(date) ? previous.get(date) : index === 0;
+        var summary = document.createElement('summary'); summary.textContent = date;
+        day.appendChild(summary);
+        function populate() {
+          if (day.open && day.children.length === 1) appendDayEntries(day, ctx, date, days.get(date));
+        }
+        populate();
+        day.addEventListener('toggle', populate);
+        box.appendChild(day);
+        if (focusedDay && focusedDay.dataset.date === date) {
+          var entry = Array.from(day.querySelectorAll('[data-entry]')).find(function (node) {
+            return node.dataset.entry === focused.dataset.entry;
+          });
+          (entry || summary).focus({preventScroll:true});
+        }
+      });
+      if (!dates.length) box.textContent = '还没有串口日志文件';
     }
 
     function loadLogs() {
@@ -250,9 +198,11 @@
       if (!isCurrent(ctx)) return;
       if (archiveState.key !== ctx.key || archiveState.serial !== (ctx.serial || '')
           || archiveState.liveConnection !== ctx.connectionId) {
-        archiveState = { key: ctx.key, serial: ctx.serial || '', mode: 'date', date: '', bootId: '', connection: '',
+        archiveState = { key: ctx.key, serial: ctx.serial || '', connection: '',
           liveConnection: ctx.connectionId };
         $('archive-connections').hidden = true; $('archive-connections').textContent = '';
+        $('d-logs').textContent = '';
+        $('log-location').textContent = '';
       }
       var seq = ++ctx.logsSeq;
       var requestedConnection = archiveState.connection;
@@ -266,16 +216,10 @@
           ctx.archiveConnection = d.archive_connection || '';
           ctx.archiveConnections = d.connections || [];
           archiveState.connection = ctx.archiveConnection;
-          var oldDates = (ctx.archiveFiles || []).map(archiveDate).sort().reverse();
-          var followedDate = archiveState.date && archiveState.date === oldDates[0];
-          var followedBoot = archiveState.bootId && (ctx.archiveBoots || []).length
-            && archiveState.bootId === ctx.archiveBoots[0].id;
           ctx.archiveFiles = (d.files || []).filter(function (file) {
             return (file.kind || (file.name.indexOf('ssh-') === 0 ? 'ssh' : 'serial')) === 'serial';
           });
           ctx.archiveBoots = d.boots || [];
-          if (followedDate && ctx.archiveFiles.length) archiveState.date = archiveDate(ctx.archiveFiles[0]);
-          if (followedBoot && ctx.archiveBoots.length) archiveState.bootId = ctx.archiveBoots[0].id;
           $('log-location').textContent = d.archive
             ? 'logs/' + d.archive + '/' : '待识别连接的临时日志';
           renderArchive(ctx);
@@ -284,13 +228,6 @@
         });
     }
 
-    ['date', 'boot'].forEach(function (mode) {
-      $('archive-mode-' + mode).addEventListener('click', function () {
-        var ctx = options.getView();
-        if (!isCurrent(ctx)) return;
-        archiveState.mode = mode; renderArchive(ctx);
-      });
-    });
     $('boot-search-prev').addEventListener('click', function () {
       $('terminal-search').value = bootSearch.query;
       searchBootLogs(Math.max(0, bootSearch.offset - 20));

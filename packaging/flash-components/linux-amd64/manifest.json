@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "platform": "linux-amd64",
+  "executor": {
+    "path": "decklab-flash",
+    "sha256": "9b23b32e9105cfea5dcd54ce477866ebdb318619460b02adc6a63232ba0554cd"
+  },
+  "loaders": {
+    "path": "flash-loaders",
+    "files": {
+      "BUILD-INFO.txt": {
+        "sha256": "9674582b3386919a841fb47287b5eb714ee0e75530e6bc91238c05f49fea205b",
+        "size": 382
+      },
+      "CONFIGURATION.txt": {
+        "sha256": "ee8252950453c5c7ab0688195722ea8908447d992ef42277f0703ccb63ebcfbb",
+        "size": 56181
+      },
+      "COPYING.txt": {
+        "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "size": 18092
+      },
+      "RAM-ENV.txt": {
+        "sha256": "90e5414d0885c9ef30388a0b6f766f065a0a2b20cc14d6eb07d9927fc28081f8",
+        "size": 110
+      },
+      "SAFETY-CHECK.txt": {
+        "sha256": "c074d6647c775c7c0c07851616e71c31a1f32b0d3debbe888659cd5b946a9f3b",
+        "size": 170
+      },
+      "SOURCE.txt": {
+        "sha256": "8b1d8a3c6c04786297fc3397d1e45728fad7650ff3f8df0faf558885534c7d1e",
+        "size": 582
+      },
+      "k1/BUILD-INFO.txt": {
+        "sha256": "18592e6c43631962fb47ca18588bd8a7b019cde6e7a80ed87b4a4aaa17522982",
+        "size": 1048
+      },
+      "k1/FSBL.bin": {
+        "sha256": "9c04391720bbe729c48ebb9cce6043fa14e4147e05baf653203e2e91b91dc26b",
+        "size": 198208
+      },
+      "k1/SOURCE-OFFER.txt": {
+        "sha256": "e7e5d48bf8dca2551d5fc0dfe8395af885b6aa88cee079822176ca3cbecfbeba",
+        "size": 997
+      },
+      "k1/u-boot.itb": {
+        "sha256": "28e04e5cd73b5fc7e342b41cdcb2d3c5105aa2bf47558c460a65061c406e4522",
+        "size": 1982070
+      },
+      "k3/FSBL.bin": {
+        "sha256": "cfeeeee18728ef34a2d257311440a1bab8723cb554079de77dcf514d1b2bfdb0",
+        "size": 465504
+      },
+      "k3/u-boot.itb": {
+        "sha256": "ee8db84f993faea435482f569a907ea24565113e0dc4b1c3f1b9a76c60f5d5df",
+        "size": 781562
+      },
+      "manifest.json": {
+        "sha256": "7b299d7336bd031b51a149a5f6a2e94d9e3f3717693aa806ac4cb289eb106184",
+        "size": 709
+      }
+    }
+  },
+  "notices": {
+    "path": "notices",
+    "files": {
+      "BUILD-INFO.txt": {
+        "sha256": "deadd1f4ea7b00b60401d3900c73a42ec879556f2284c7e1812133a574a6750d",
+        "size": 258
+      },
+      "Go-LICENSE": {
+        "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+        "size": 1479
+      },
+      "Go-PATENTS": {
+        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc",
+        "size": 1303
+      },
+      "PRIVATE-COMPONENT.txt": {
+        "sha256": "e74bd6070800b5823ac7dda6ab7de8cc54e391f8b93e34d1c277797147f1e2b8",
+        "size": 266
+      },
+      "compress-LICENSE": {
+        "sha256": "0d9e582ee4bff57bf1189c9e514e6da7ce277f9cd3bc2d488b22fbb39a6d87cf",
+        "size": 16733
+      },
+      "libusb-COPYING.txt": {
+        "sha256": "5df07007198989c622f5d41de8d703e7bef3d0e79d62e24332ee739a452af62a",
+        "size": 26436
+      },
+      "libusb-SOURCE.txt": {
+        "sha256": "00d5e320245857c09eae9c2af70ae73c1d5083d6df9cebad9d4fb03cff10a07a",
+        "size": 231
+      },
+      "pgzip-LICENSE": {
+        "sha256": "7709cc030f078b17809884f92f33a2016944e1180312dc3f1371b02313d313ed",
+        "size": 1078
+      },
+      "purego-LICENSE": {
+        "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+        "size": 11357
+      },
+      "yaml-v3-LICENSE": {
+        "sha256": "d18f6323b71b0b768bb5e9616e36da390fbd39369a81807cca352de4e4e6aa0b",
+        "size": 2151
+      }
+    }
+  }
+}

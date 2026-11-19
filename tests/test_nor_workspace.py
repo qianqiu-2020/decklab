@@ -131,6 +131,43 @@ class NORWorkspaceTests(unittest.TestCase):
             self.assertEqual(len(executor.snapshots), 1)
             self.assertEqual(executor.data, b'\xff' * (8 << 20))
 
+    def test_read_workspace_can_confirm_manual_firmware_and_os_in_same_task(self):
+        from test_flash_bundle import BundleHTTPTests
+        with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:
+            executor, target = self.setup_workspace(fixture, root)
+            task, _ = self.begin(fixture, target)
+            waiting = self.phase(fixture, task['id'], 'awaiting-selection')
+            os_id = self.upload(fixture, waiting, target, b'os', 'os.zip')
+            fw_id = self.upload(fixture, waiting, target, b'firmware', 'Firmware.zip')
+            fixture.executor = executor
+            BundleHTTPTests().setup(fixture)
+            calls = []
+
+            def execute(binding, plan, on_event, check, **options):
+                image_id = plan['artifact']['id']
+                self.assertEqual(bool(options.get('nor_baseline')), image_id == fw_id)
+                for claimed_id in (fw_id, os_id):
+                    self.assertEqual(fixture.manager.artifacts.get(claimed_id)['state'], 'claimed')
+                calls.append(image_id)
+                return {'ok': True, 'write_result': 'completed', 'verify_result': 'verified'}
+
+            executor.execute = execute
+            scope = dict(self.scope(target), id=task['id'], layout_digest=waiting['flash']['inspection']['layout_digest'])
+            params = dict(scope, preview=True, mode='full', artifact_id=os_id, firmware_artifact_id=fw_id)
+            code, preview = self.request(fixture, '/api/flash-selection', params)
+            self.assertEqual(code, 200, preview)
+            self.assertEqual([part['label'] for part in preview['plan']['components']], ['Firmware', 'OS'])
+            code, stale = self.request(fixture, '/api/flash-selection',
+                dict(params, firmware_artifact_id=None, plan_id=preview['plan']['id']))
+            self.assertEqual(code, 409, stale)
+            self.assertEqual(calls, [])
+            code, submitted = self.request(fixture, '/api/flash-selection',
+                dict(scope, plan_id=preview['plan']['id'], request_id='manual-companion-confirm-001'))
+            self.assertEqual(code, 200, submitted)
+            final = self.terminal(fixture, task['id'])
+            self.assertEqual(final['state'], 'completed', final)
+            self.assertEqual(calls, [fw_id, os_id])
+
     def test_unified_read_keeps_nor_backup_and_system_metadata_in_one_task(self):
         with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:
             executor, target = self.setup_workspace(fixture, root, bootrom=True)
@@ -390,14 +427,14 @@ class NORWorkspaceTests(unittest.TestCase):
         self.assertTrue(result['capabilities']['nor_workspace_supported'])
         return executor, result['target']
 
-    def begin(self, fixture, target, request_id='read-nor-workspace-001'):
-        body = dict(self.scope(target), kind='nor-backup', binding_revision=1, request_id=request_id)
+    def begin(self, fixture, target, request_id='read-nor-workspace-001', **options):
+        body = dict(self.scope(target), kind='nor-backup', binding_revision=1, request_id=request_id, **options)
         code, result = self.request(fixture, '/api/task-start', body)
         self.assertEqual(code, 202, result)
         return result['task'], body
 
-    def upload(self, fixture, task, target, data=b'new opensbi fixture'):
-        body = dict(self.scope(target), task_id=task['id'], name='opensbi.itb', size=len(data))
+    def upload(self, fixture, task, target, data=b'new opensbi fixture', name='opensbi.itb'):
+        body = dict(self.scope(target), task_id=task['id'], name=name, size=len(data))
         code, result = self.request(fixture, '/api/artifact-create', body)
         self.assertEqual(code, 200, result)
         artifact_id = result['artifact']['id']
@@ -438,6 +475,38 @@ class NORWorkspaceTests(unittest.TestCase):
             self.assertEqual(len(executor.snapshots), 1)
             self.assertEqual(executor.executions, [])
             self.request(fixture, '/api/task-cancel', {'id': task['id']})
+
+    def test_inventory_snapshot_retention_reuses_file_and_honors_active_download(self):
+        for retain in (False, True):
+            with self.subTest(retain=retain), usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:
+                executor, target = self.setup_workspace(fixture, root)
+                task, _ = self.begin(fixture, target, temporary_snapshot=True)
+                ready = self.phase(fixture, task['id'], 'awaiting-selection')
+                artifacts = fixture.manager.artifacts
+                file_id = ready['flash']['nor_before']['artifact']['id']
+                artifacts.expire()
+                for _ in range(2):
+                    with artifacts.open(file_id) as stream:
+                        self.assertEqual(stream.read(8), executor.data[:8])
+                source = self.upload(fixture, task, target)
+                scope = dict(self.scope(target), id=task['id'], layout_digest='1' * 64)
+                code, result = self.request(fixture, '/api/flash-selection', dict(scope, preview=True,
+                    selections=[dict(storage='active', partition='opensbi', artifact_id=source)]))
+                self.assertEqual(code, 200, result)
+                confirmation = dict(scope, plan_id=result['plan']['id'], request_id='confirm-retention', retain_backup=retain)
+                with artifacts.open(file_id):
+                    code, result = self.request(fixture, '/api/flash-selection', confirmation)
+                    self.assertEqual(code, 200, result)
+                    final = self.terminal(fixture, task['id'])
+                    self.assertEqual(final['state'], 'completed', final)
+                    artifacts.expire()
+                    self.assertEqual(artifacts.get(file_id)['state'], 'available')
+                artifacts.expire()
+                self.assertEqual(artifacts.get(file_id)['state'], 'available' if retain else 'expired')
+                self.assertEqual(artifacts.get(final['flash']['nor_after']['artifact']['id'])['state'], 'available')
+                self.assertEqual(len(executor.snapshots), 1)
+                self.assertEqual(self.request(fixture, '/api/flash-selection', confirmation)[0], 200)
+                self.assertEqual(self.request(fixture, '/api/flash-selection', dict(confirmation, retain_backup=not retain))[0], 409)
 
     def test_read_without_image_then_upload_and_select_in_same_task(self):
         with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:
@@ -531,7 +600,9 @@ class NORWorkspaceTests(unittest.TestCase):
             task, _ = self.begin(fixture, target)
             self.phase(fixture, task['id'], 'awaiting-selection')
             def download(artifacts, context, url, serial, name=None, sha256=None, actor='web'):
-                return {'fixture': True, 'serial': serial}
+                row = artifacts.create('upload', name or 'opensbi.itb', 4, actor, serial)
+                artifacts.append(row['id'], 0, b'test', actor, serial)
+                return {'artifact': artifacts.seal(row['id'], actor, serial)}
             with mock.patch('seriald_core.image_download.fetch_image', side_effect=download):
                 body = dict(self.scope(target), task_id=task['id'], url='https://firmware.example/opensbi.itb',
                             request_id='nor-url-import-001')

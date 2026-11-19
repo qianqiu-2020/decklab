@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "families": {
+    "k3": {
+      "protocol": "spacemit-ram-v1",
+      "fsbl": {
+        "file": "k3/FSBL.bin",
+        "sha256": "cfeeeee18728ef34a2d257311440a1bab8723cb554079de77dcf514d1b2bfdb0"
+      },
+      "uboot": {
+        "file": "k3/u-boot.itb",
+        "sha256": "ee8db84f993faea435482f569a907ea24565113e0dc4b1c3f1b9a76c60f5d5df"
+      }
+    },
+    "k1": {
+      "protocol": "stock",
+      "fsbl": {
+        "file": "k1/FSBL.bin",
+        "sha256": "9c04391720bbe729c48ebb9cce6043fa14e4147e05baf653203e2e91b91dc26b"
+      },
+      "uboot": {
+        "file": "k1/u-boot.itb",
+        "sha256": "28e04e5cd73b5fc7e342b41cdcb2d3c5105aa2bf47558c460a65061c406e4522"
+      }
+    }
+  }
+}

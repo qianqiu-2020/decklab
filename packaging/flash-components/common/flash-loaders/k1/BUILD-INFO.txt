@@ -1,0 +1,32 @@
+{
+  "board": "k1",
+  "components": {
+    "bootinfo": {
+      "bytes": 80,
+      "input": "bootinfo_spinor.bin",
+      "sha256": "49b63bcbcdcf2e0bbcaabbc1f2a01959ab56ed70c16a3594b25bc1183d92efae"
+    },
+    "env": {
+      "bytes": 16384,
+      "input": "env.bin",
+      "sha256": "f91f8d85420e54329cd0ecf97239bebeb22f6d058c7ea2a95a08d9de10681f90"
+    },
+    "fsbl": {
+      "bytes": 198208,
+      "input": "FSBL.bin",
+      "sha256": "9c04391720bbe729c48ebb9cce6043fa14e4147e05baf653203e2e91b91dc26b"
+    },
+    "uboot": {
+      "bytes": 1982070,
+      "input": "u-boot.itb",
+      "sha256": "28e04e5cd73b5fc7e342b41cdcb2d3c5105aa2bf47558c460a65061c406e4522"
+    }
+  },
+  "config_sha256": "ce3e877d3dce57b5170ecf18862064ddc1662423062cb3540a0c3e697ced0f59",
+  "defconfig": "k1_defconfig",
+  "schema_version": 1,
+  "source_commit": "4a312b002711317ccf8c0ab9abea1e5ebe029413",
+  "spl_release_version": 5,
+  "archive": "Debian-13-Firmware-K1-202611180323.tar.gz",
+  "archive_sha256": "54a1ead6d50c813618ea7b496386e83c2ad225319c55d9cb0aaeb36798a2962e"
+}

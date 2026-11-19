@@ -160,6 +160,13 @@ let chrome, ws;
   assert.ok(inputs.some(e=>e.type==='pointer' && e.buttons===0));
   assert.deepEqual(inputs.filter(e=>e.type==='key').map(e=>[e.code,e.down]), [['ControlLeft',true],['KeyA',true],['KeyA',false],['ControlLeft',false]]);
   assert.ok(inputs.some(e=>e.type==='wheel' && e.steps===3));
+  for (const type of ['keyDown', 'keyUp']) {
+    await rpc('Input.dispatchKeyEvent', {type, key:'Meta', code:'MetaLeft', location:1, windowsVirtualKeyCode:91});
+  }
+  await evaluate('document.getElementById("desktop-super").click()');
+  await until('fixture.sent.filter(m=>m.event?.code==="MetaLeft").length===4','one Win key press/release from the keyboard and one from the toolbar');
+  assert.deepEqual(await evaluate('fixture.sent.filter(m=>m.event?.code==="MetaLeft").map(m=>[m.event.keysym,m.event.down])'),
+    [[0xffeb,true],[0xffeb,false],[0xffeb,true],[0xffeb,false]]);
   await evaluate('fixture.streams.at(-1).emit("background ssh\\r\\n"); window.dispatchEvent(new Event("resize"))');
   await rpc('Emulation.setDeviceMetricsOverride', {width: 1280, height: 900, deviceScaleFactor: 1, mobile: false});
   await delay(700);
@@ -235,9 +242,17 @@ let chrome, ws;
   await evaluate('document.getElementById("b-desktop").click()');
   await until('document.getElementById("desktop-services").options.length===3 && !document.getElementById("desktop-detect").disabled', 'automatic VNC and RDP discovery');
   assert.equal(await evaluate('document.getElementById("desktop-connection").hidden'),false);
+  assert.equal(await evaluate('document.getElementById("desktop-rdp-help").hidden'),false);
+  const credentialsCommand = 'sudo grdctl --system status --show-credentials';
+  assert.equal(await evaluate('document.querySelector("#desktop-rdp-help code").textContent'),credentialsCommand);
+  await evaluate('SerialdI18n.setLocale("en")');
+  assert.ok(await evaluate('document.getElementById("desktop-rdp-help").textContent.includes("Current user")'));
+  assert.equal(await evaluate('document.querySelector("#desktop-rdp-help code").textContent'),credentialsCommand);
+  await evaluate('SerialdI18n.setLocale("zh-CN")');
   const beforeConfigure=await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").length');
-  await evaluate('document.getElementById("desktop-services").value="rdp-found";document.getElementById("desktop-services").dispatchEvent(new Event("change"));document.getElementById("desktop-password").value="fixture-only-password";document.getElementById("desktop-connection").requestSubmit()');
-  await delay(50);assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").length'),beforeConfigure,'untrusted certificate never causes connection');
+  await evaluate('document.getElementById("desktop-services").value="rdp-found";document.getElementById("desktop-services").dispatchEvent(new Event("change"));document.getElementById("desktop-password").value="fixture-only-password"');
+  assert.equal(await evaluate('document.getElementById("desktop-trust").checked'),true);
+  assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").length'),beforeConfigure,'detecting a fingerprint never saves trust or connects by itself');
   for (const [name,width,height] of [['setup-desktop',1280,900],['setup-mobile',390,844]]) {
     await rpc('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});await delay(80);
     assert.ok(await evaluate('document.documentElement.scrollWidth<=document.documentElement.clientWidth+1'),name+' setup fits');
@@ -250,11 +265,13 @@ let chrome, ws;
   await evaluate('document.getElementById("desktop-trust").checked=true;document.getElementById("desktop-connection").requestSubmit()');
   await until('fixture.sockets.length===2 && document.getElementById("desktop-overlay").hidden','save RDP settings and connect through existing viewer');
   assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").at(-1).body.provider'),'rdp');
+  assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").at(-1).body.trust_certificate'),true);
   assert.equal(await evaluate('document.getElementById("desktop-password").value'),'');
   await evaluate('fixture.desktop.close();fixture.configured=false;fixture.connection={};fixture.discovered=[];fixture.desktop.refresh(null);fixture.desktop.refresh(fixture.controller.current);document.getElementById("b-desktop").click()');
   await until('!document.getElementById("desktop-connection").hidden && document.getElementById("desktop-detect-status").textContent.includes("未发现")','manual fallback with no detected server');
   await evaluate('document.getElementById("desktop-protocol").value="vnc";document.getElementById("desktop-protocol").dispatchEvent(new Event("change"));document.getElementById("desktop-host").value="10.0.0.89";document.getElementById("desktop-port").value="5905";document.getElementById("desktop-connection").requestSubmit()');
   await until('fixture.sockets.length===3 && document.getElementById("desktop-overlay").hidden','manual VNC connects through same viewer');
+  assert.equal(await evaluate('document.getElementById("desktop-rdp-help").hidden'),true);
   assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").at(-1).body.provider'),'vnc');
   assert.equal(requests.filter(r=>r.startsWith('/api/desktop/frame')).length,0, 'viewer must never poll screenshots');
   assert.ok(requests.includes('/vendor/novnc/core/display.js') && requests.includes('/vendor/novnc/core/input/keyboard.js'));

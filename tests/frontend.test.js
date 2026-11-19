@@ -138,8 +138,8 @@ function harness(options = {}) {
     }
   }
   const document = {
-    getElementById: get, createElement: tag => new Element(tag),
-    body: new Element('body'), events: {}, activeElement: null,
+    getElementById: get, createElement: tag => new Element(tag), querySelectorAll: () => [],
+    documentElement: new Element('html'), body: new Element('body'), events: {}, activeElement: null,
     addEventListener(name, fn) { (this.events[name] ||= []).push(fn); },
     emit(name, event = {}) { for (const fn of this.events[name] || []) fn(event); },
     visibilityState: 'visible',
@@ -606,7 +606,7 @@ test('switching pending and confirmed devices never reuses identity details', as
       info: {} },
   ] });
   await drain();
-  const pendingCard = h.get('grid').children[1];
+  const pendingCard = h.get('grid').children.find(card => card.dataset.key === 'pending');
   assert.ok(pendingCard.children[0].children[0].textContent.includes('待识别'));
   assert.ok(!pendingCard.children.some(x => x.textContent.includes('EEPROM 尚未写入')),
     'unprobed USB reconnect is not proof of missing EEPROM');
@@ -1141,11 +1141,25 @@ test('selecting and replaying the third board never writes cursor position repli
   assert.equal(h.sends()[0].body.data, 'uname -a\r', 'explicit keyboard input still works');
 });
 
+function archiveDay(h, index = 0) {
+  return h.get('d-logs').children[index];
+}
+function expandDay(day) {
+  day.open = true; day.emit('toggle');
+  return day;
+}
+function dailyRow(day) {
+  return day.children.find(row => row.className === 'log-row');
+}
+function bootRows(day) {
+  return day.children.filter(row => row.className === 'boot-row');
+}
+
 test('archived log terminal is isolated from late responses after switching devices', async () => {
   const h = await setup(); h.select('A');
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [{ name: 'serial-test.log', size: 20 }] });
   await drain();
-  const button = h.get('d-logs').children.find(row => row.className === 'log-row').children[1];
+  const button = dailyRow(archiveDay(h)).children[0];
   assert.equal(button.tagName, 'button'); button.click();
   const archived = h.terminals.at(-1);
   assert.ok(h.get('d-term').scrolled);
@@ -1166,7 +1180,7 @@ test('multiple archived logs open as cached read-only terminal tabs', async () =
   ];
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files });
   await drain();
-  h.get('d-logs').children.find(row => row.className === 'log-row').children[1].click();
+  dailyRow(archiveDay(h)).children[0].click();
   const newest = h.terminals.at(-1);
   assert.equal(newest.options.convertEol, true);
   h.take('/api/log').resolve({ data_b64: Buffer.from('new log').toString('base64'),
@@ -1175,9 +1189,7 @@ test('multiple archived logs open as cached read-only terminal tabs', async () =
   await drain();
   newest.flush();
   assert.equal(newest.parsed, 'new log');
-  const dateSelect = h.get('archive-picker').children[0];
-  dateSelect.value = '2026-09-19'; dateSelect.emit('change');
-  h.get('d-logs').children.find(row => row.className === 'log-row').children[1].click();
+  dailyRow(expandDay(archiveDay(h, 1))).children[0].click();
   const oldest = h.terminals.at(-1);
   h.take('/api/log').resolve({ data_b64: Buffer.from('old log').toString('base64'),
     data: 'old log', start_off: 0, off: 7, size: 7, more: false });
@@ -1210,9 +1222,9 @@ test('unidentified attachment captures have separate selectors, URLs and cached 
   const oldRequest = h.take('/api/logs');
   assert.ok(oldRequest.url.includes('archive_connection=old'));
   oldRequest.resolve(result('old')); await drain();
-  let row = h.get('d-logs').children.find(item => item.className === 'log-row');
-  assert.ok(row.children[3].href.includes('archive_connection=old'));
-  row.children[1].click();
+  let row = dailyRow(archiveDay(h));
+  assert.ok(row.children.find(child => child.tagName === 'a').href.includes('archive_connection=old'));
+  row.children.find(child => child.tagName === 'button').click();
   const previous = h.terminals.at(-1);
   let log = h.take('/api/log'); assert.ok(log.url.includes('archive_connection=old'));
   log.resolve({data: 'previous', off: 8, start_off: 0, size: 8});
@@ -1221,7 +1233,7 @@ test('unidentified attachment captures have separate selectors, URLs and cached 
   const oldPicker = h.get('archive-connections').children[0];
   oldPicker.value = 'new'; oldPicker.emit('change');
   h.take('/api/logs').resolve(result('new')); await drain();
-  row = h.get('d-logs').children.find(item => item.className === 'log-row'); row.children[1].click();
+  row = dailyRow(archiveDay(h)); row.children[0].click();
   const current = h.terminals.at(-1);
   log = h.take('/api/log'); assert.ok(log.url.includes('archive_connection=new'));
   log.resolve({data: 'current', off: 7, start_off: 0, size: 7}); await drain(); current.flush();
@@ -1242,17 +1254,12 @@ test('daily logs are downloadable and detected boot epochs open in terminal tabs
   ], boots: [{ id: 'boot-abc', number: 3, started: '2026-09-21 08:00:00',
     marker: 'U-Boot SPL', size: 70, files: 1, dates: ['2026-09-21'], cross_day: false }] });
   await drain();
-  const rows = h.get('d-logs').children;
-  const dailyRow = rows.find(row => row.className === 'log-row');
-  assert.ok(dailyRow.children[3].href.includes('download=1'));
-  assert.equal(dailyRow.children[3].download, 'serial-20260921.log');
-  const bootRow = rows.find(row => row.className.includes('boot-row'));
-  bootRow.children[1].click();
-  assert.equal(h.get('archive-mode-boot').attributes['aria-pressed'], 'true');
-  const bootCard = h.get('d-logs').children.find(row => row.className === 'boot-detail');
-  bootCard.children[2].children[0].click();
-  assert.equal(h.get('archive-mode-date').attributes['aria-pressed'], 'true');
-  h.get('d-logs').children.find(row => row.className.includes('boot-row')).children[2].click();
+  const day = archiveDay(h);
+  assert.equal(day.open, true);
+  const link = dailyRow(day).children.find(child => child.tagName === 'a');
+  assert.ok(link.href.includes('download=1'));
+  assert.equal(link.download, 'serial-20260921.log');
+  bootRows(day)[0].click();
   const request = h.take('/api/boot-log');
   assert.ok(request.url.includes('id=boot-abc'));
   request.resolve({ data: 'one boot', start_off: 0, off: 8, size: 8, more: false });
@@ -1260,7 +1267,7 @@ test('daily logs are downloadable and detected boot epochs open in terminal tabs
   assert.equal(h.terminals.at(-1).parsed, 'one boot');
 });
 
-test('open log panel refreshes boot counts and keeps following the newest boot', async () => {
+test('refresh includes new boots and preserves collapsed dates', async () => {
   const h = await setup(); h.select('A');
   const file = { name: 'serial-20261010.log', kind: 'serial', date: '2026-10-10', size: 100 };
   const boot = number => ({ id: 'boot-' + number, number, started: '2026-10-10 08:00:00',
@@ -1268,13 +1275,13 @@ test('open log panel refreshes boot counts and keeps following the newest boot',
   h.take('/api/logs').resolve({ key: 'A', files: [file], boots: [boot(1)] }); await drain();
   h.get('b-records').click();
   h.take('/api/logs').resolve({ key: 'A', files: [file], boots: [boot(1)] }); await drain();
-  h.get('archive-mode-boot').click();
-  assert.equal(h.get('archive-picker').children[0].value, 'boot-1');
+  assert.equal(bootRows(archiveDay(h)).length, 1);
+  archiveDay(h).open = false;
   h.intervals.find(item => item.delay === 15000).fn();
   h.take('/api/logs').resolve({ key: 'A', files: [file], boots: [boot(2), boot(1)] }); await drain();
-  assert.equal(h.get('archive-picker').children[0].value, 'boot-2');
-  h.get('archive-mode-date').click();
-  assert.ok(h.get('archive-picker').children[1].textContent.includes('当天启动 2 次'));
+  const day = archiveDay(h);
+  assert.equal(day.open, false, 'refresh preserves a collapsed day');
+  assert.deepEqual(bootRows(expandDay(day)).map(row => row.children[0].textContent), ['启动 #2', '启动 #1']);
 });
 
 test('older log-list responses cannot replace a newer refresh', async () => {
@@ -1285,7 +1292,7 @@ test('older log-list responses cannot replace a newer refresh', async () => {
   const file = { name: 'serial-20261010.log', kind: 'serial', date: '2026-10-10', size: 100 };
   fresh.resolve({ key: 'A', files: [file], boots: [] }); await drain();
   old.resolve({ key: 'A', files: [], boots: [] }); await drain();
-  assert.equal(h.get('archive-picker').children[0].value, '2026-10-10');
+  assert.equal(archiveDay(h).dataset.date, '2026-10-10');
 });
 
 test('opening archived logs keeps the picker visible for quick switching', async () => {
@@ -1297,12 +1304,10 @@ test('opening archived logs keeps the picker visible for quick switching', async
   h.take('/api/logs').resolve({ key: 'A', files }); await drain();
   h.get('b-records').click();
   h.take('/api/logs').resolve({ key: 'A', files }); await drain();
-  h.get('d-logs').children.find(row => row.className === 'log-row').children[1].click();
+  dailyRow(archiveDay(h)).children[0].click();
   assert.equal(h.get('d-records').hidden, false);
   assert.equal(h.get('console-layout').classList.contains('records-open'), true);
-  const picker = h.get('archive-picker').children[0];
-  picker.value = '2026-10-09'; picker.emit('change');
-  h.get('d-logs').children.find(row => row.className === 'log-row').children[1].click();
+  dailyRow(expandDay(archiveDay(h, 1))).children[0].click();
   assert.equal(h.get('d-records').hidden, false);
   assert.equal(h.get('console-layout').classList.contains('records-open'), true);
 });
@@ -1317,7 +1322,10 @@ test('record tabs avoid scrolling through unrelated history', async () => {
   assert.equal(h.get('record-panel-sessions').hidden, false);
   h.get('record-tab-events').click();
   assert.equal(h.get('record-panel-events').hidden, false);
-  h.get('record-tab-commands').click();
+  assert.equal(h.get('b-records').attributes['aria-pressed'], 'true');
+  h.get('b-commands').click();
+  assert.equal(h.get('history-tabs').hidden, true);
+  assert.equal(h.get('records-heading').textContent, '常用命令');
   assert.equal(h.get('record-panel-commands').hidden, false);
 });
 
@@ -1336,7 +1344,7 @@ test('log and input shortcuts open their own panel and can close it', async () =
   assert.equal(h.get('b-records').attributes['aria-pressed'], 'false');
 });
 
-test('online boards precede pending ports and historical boards', async () => {
+test('pending ports precede online boards and historical boards sort last', async () => {
   const h = harness();
   h.take('/api/devices').resolve({ devices: [
     { key: 'old', label: 'old', serial: 'SN-OLD', state: 'offline', alive: false },
@@ -1346,7 +1354,7 @@ test('online boards precede pending ports and historical boards', async () => {
   ] });
   await drain();
   assert.deepEqual(h.get('grid').children.map(card => card.dataset.key),
-    ['live-a', 'live-b', 'pending', 'old']);
+    ['pending', 'live-a', 'live-b', 'old']);
 });
 
 test('input navigator jumps to echoed commands without sending input', async () => {
@@ -1400,7 +1408,7 @@ test('queued command navigation and old buttons cannot change a replacement term
   assert.equal(h.sends().length, 0);
 });
 
-test('dates and boot numbers navigate in both directions across midnight', async () => {
+test('a cross-midnight boot opens directly from either date', async () => {
   const h = await setup(); h.select('A');
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [
     { name: 'serial-20260921.log', kind: 'serial', date: '2026-09-21', size: 100 },
@@ -1414,19 +1422,17 @@ test('dates and boot numbers navigate in both directions across midnight', async
       dates: ['2026-09-20'], size: 40 },
   ] });
   await drain();
-  assert.ok(h.get('archive-picker').children[1].textContent.includes('当天启动 1 次'));
-  assert.ok(h.get('archive-picker').children[1].textContent.includes('跨日延续 1 次'));
-  const linked = h.get('d-logs').children.filter(row => row.className.includes('boot-row'));
-  assert.equal(linked.length, 2);
-  assert.ok(linked[1].children[0].textContent.includes('跨日延续'));
-  linked[1].children[1].click();
-  assert.equal(h.get('archive-mode-boot').attributes['aria-pressed'], 'true');
-  const dates = h.get('d-logs').children.find(row => row.className === 'boot-detail').children[2].children;
-  assert.deepEqual(dates.map(button => button.textContent), ['2026-09-20', '2026-09-21']);
-  dates[0].click();
-  assert.equal(h.get('archive-mode-date').attributes['aria-pressed'], 'true');
-  assert.equal(h.get('archive-picker').children[0].value, '2026-09-20');
-  assert.ok(h.get('archive-picker').children[1].textContent.includes('当天启动 2 次'));
+  assert.deepEqual(h.get('d-logs').children.map(day => day.dataset.date), ['2026-09-21', '2026-09-20']);
+  const latest = bootRows(archiveDay(h));
+  assert.equal(latest.length, 2);
+  assert.match(latest[1].textContent, /跨日延续/);
+  const older = archiveDay(h, 1);
+  assert.equal(older.open, false);
+  assert.equal(older.children.length, 1, 'older dates render their entries on demand');
+  const earlier = bootRows(expandDay(older));
+  assert.deepEqual(earlier.map(row => row.children[0].textContent), ['启动 #2', '启动 #1']);
+  earlier[0].click();
+  assert.ok(h.take('/api/boot-log').url.includes('id=boot-2'));
 });
 
 test('all-boot search pages results and opens a complete read-only boot', async () => {
@@ -1461,14 +1467,12 @@ test('detached archive controls cannot change another board selection', async ()
   ], boots: [{ id: key + '-boot', number: 1, started: '2026-10-12 10:00:00',
     dates: ['2026-10-12'], size: 100 }] });
   h.take('/api/logs').resolve(logs('A')); await drain();
-  const oldShow = h.get('d-logs').children.find(row => row.className.includes('boot-row')).children[1];
-  const oldPicker = h.get('archive-picker').children[0];
+  const oldShow = bootRows(archiveDay(h))[0];
   h.select('B'); h.take('/api/logs').resolve(logs('B')); await drain();
-  oldShow.click(); oldPicker.value = '2026-01-01'; oldPicker.emit('change');
-  assert.equal(h.get('archive-mode-date').attributes['aria-pressed'], 'true');
-  assert.equal(h.get('archive-picker').children[0].value, '2026-10-12');
-  h.get('archive-mode-boot').click();
-  assert.equal(h.get('archive-picker').children[0].value, 'B-boot');
+  oldShow.click();
+  assert.ok(!h.requests.some(request => request.url.startsWith('/api/boot-log')));
+  bootRows(archiveDay(h))[0].click();
+  assert.ok(h.take('/api/boot-log').url.includes('id=B-boot'));
 });
 
 test('superseded boot-search result buttons cannot open old archives', async () => {
@@ -1548,6 +1552,8 @@ test('SSH sessions and key events have independent bounded pages', async () => {
   await drain();
   assert.equal(h.get('d-activity').children.length, 10);
   assert.equal(h.get('d-events').children.length, 10);
+  assert.equal(h.get('d-events').children[0].children[0].children[0].textContent, '识别完成');
+  assert.ok(h.get('d-activity').children[0].textContent.includes('已完成 · 退出码 0'));
   assert.ok(h.get('activity-page').textContent.includes('25 条'));
   assert.ok(h.get('event-page').textContent.includes('12 条'));
 
@@ -1588,6 +1594,23 @@ test('completed SSH transcript opens in a read-only terminal tab', async () => {
   assert.equal(h.sends().length, 0);
   assert.ok(h.get('d-tabs').children.some(child => child.textContent.includes('SSH 记录 · claude-code')));
   assert.equal(h.get('b-takeover').hidden, true);
+});
+
+test('multi-day SSH transcript opens the selected day for the exact session', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/logs').resolve({files: []});
+  h.take('/api/activity').resolve({sessions: [{sid: 's1', started: 1, status: 'closed'}], events: []});
+  await drain();
+  const row = h.get('d-activity').children[0];
+  assert.ok(!row.textContent.includes('退出码'));
+  row.children.at(-1).click();
+  h.take('/api/logs').resolve({files: ['ssh-s1-20260919.log', 'ssh-s1-other-20260919.log',
+    'ssh-s1-20260920.log'].map(name => ({name}))});
+  await drain();
+  const dates = row.children[0].children.at(-1).children;
+  assert.deepEqual(dates.map(button => button.textContent), ['2026-09-20', '2026-09-19']);
+  dates[1].click();
+  assert.ok(h.take('/api/log').url.includes('file=ssh-s1-20260919.log'));
 });
 
 test('agent SSH activity opens read-only without input or resize writes', async () => {
@@ -2434,6 +2457,19 @@ test('task history filters by involvement without narrowing multi-board cancella
   const cancel = h.take('/api/task-cancel');
   assert.equal(cancel.body.id, 'copy');
   assert.equal(Object.hasOwn(cancel.body, 'serial'), false);
+});
+
+test('tasks awaiting cancellation show unknown progress and cannot be cancelled twice', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: [{key: 'A', serial: 'SN-A', alive: true}]});
+  await drain(); h.select('A');
+  h.take('/api/tasks').resolve({tasks: [{id: 'pending', kind: 'file-copy', state: 'running',
+    actor: 'agent', cancel_requested: true, created: 1, progress: {done: 1024, total: 0}}]});
+  await drain();
+  const row = h.get('d-tasks').children[0];
+  assert.equal(row.children[1].disabled, true);
+  assert.equal(row.children[0].children.find(child => child.className === 'task-progress').max, undefined);
+  assert.equal(h.get('task-pager').hidden, true);
 });
 
 test('custom probe settings work before identification and save without running a command', async () => {

@@ -94,6 +94,11 @@ async function main() {
   byId('agent-share-address-mode').value = 'lan';
   byId('agent-share-address-mode').change();
   await byId('agent-share-create').click();
+  assert.equal(byId('agent-share-create').hidden, true);
+  assert.equal(byId('agent-share-copy').hidden, false);
+  assert.equal(byId('agent-share-text').hidden, false);
+  await byId('agent-share-create').click();
+  assert.equal(active.length, 1, 'copying an issued grant must not mint another token');
   const request = calls.find(call => call.route === '/api/agent-share');
   assert.deepEqual(JSON.parse(request.options.body), { scope: 'device', serial: 'SN1' });
   const mcp = JSON.parse(byId('agent-share-text').value);
@@ -163,6 +168,7 @@ async function main() {
   const sharing = byId('b-device-share').click();
   assert.equal(byId('b-device-share').disabled, true);
   assert.equal(byId('b-share').disabled, true);
+  selected = {key: 'b', serial: 'SN2'};
   await sharing;
   assert.equal(clipboard.at(-1), 'http://192.0.2.161:8898/share/browser-token#device=SN1');
   assert.equal(byId('device-share-status').textContent, '链接已复制，24 小时有效');

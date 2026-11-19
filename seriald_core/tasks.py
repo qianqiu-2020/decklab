@@ -131,7 +131,7 @@ class TaskStore:
             raise TaskError('task request ID was already used with different input', 409)
         return row['task_id'] if row else None
 
-    def create(self, kind, actor, client_id, targets, request_id=None, input_digest=None):
+    def create(self, kind, actor, client_id, targets, request_id=None, input_digest=None, flash_target=None):
         if not all(isinstance(value, str) and value and len(value) <= 80 for value in (kind, actor)):
             raise TaskError('invalid task kind or actor')
         if not isinstance(client_id, str) or len(client_id) > 80:
@@ -152,11 +152,21 @@ class TaskStore:
             if request_id is not None:
                 from .flash_store import validate_request
                 validate_request(request_id, input_digest)
+            if flash_target is not None:
+                target_id, generation = flash_target
+                row = self.store.db.execute('SELECT generation,present,serial FROM flash_targets WHERE id=?', (target_id,)).fetchone()
+                if (len(normalized) != 1 or row is None or not row['present'] or row['generation'] != generation
+                        or (row['serial'] or '') != next(iter(normalized))[0]):
+                    raise TaskError('flash USB target generation changed', 409)
             self.store.db.execute('INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                                   (task_id, kind, actor, client_id if actor == 'web' else '',
                                    'queued', '{}', json.dumps({_OUTCOME_FIELD: 'not-issued'}), '', now, now, 0))
             self.store.db.executemany('INSERT INTO task_targets VALUES (?,?,?)',
                                      [(task_id, serial, connection) for serial, connection in normalized])
+            if flash_target is not None:
+                self.store.db.execute('INSERT INTO task_flash_targets VALUES(?,?,?)', (task_id, *flash_target))
+                if row['serial']:
+                    self.store.db.execute('INSERT INTO task_board_targets VALUES(?,?)', (task_id, row['serial']))
             if request_id is not None:
                 self.store.db.execute('INSERT INTO flash_requests VALUES (?,?,?,?)',
                                       (actor, request_id, input_digest, task_id))
@@ -329,13 +339,20 @@ class TaskStore:
         if state is not None and state not in ('running', 'completed', 'failed', 'cancelled'):
             raise TaskError('invalid task state')
         if progress is not None:
-            if not isinstance(progress, dict) or set(progress) - {'done', 'total', 'phase'}:
+            if not isinstance(progress, dict):
                 raise TaskError('invalid task progress')
-            for name in ('done', 'total'):
+            counts, labels = {'done', 'total'}, {'phase'}
+            if progress.get('phase') == 'writing':
+                counts.update(('partition_done', 'partition_total', 'bytes_per_second'))
+                labels.update(('component', 'storage', 'partition'))
+            if set(progress) - counts - labels:
+                raise TaskError('invalid task progress')
+            for name in counts:
                 if name in progress and (type(progress[name]) is not int or progress[name] < 0):
                     raise TaskError('invalid task progress count')
-            if 'phase' in progress and (not isinstance(progress['phase'], str) or len(progress['phase']) > 160):
-                raise TaskError('invalid task phase')
+            for name in labels:
+                if name in progress and (not isinstance(progress[name], str) or len(progress[name]) > 160):
+                    raise TaskError('invalid task progress label')
         if outcome is not None and outcome not in OUTCOMES:
             raise TaskError('invalid physical outcome')
         if isinstance(result, dict) and _OUTCOME_FIELD in result:
@@ -445,9 +462,9 @@ class TaskContext:
     def retain_cleanup_failure(self, serial):
         self.store.retain_cleanup_failure(self.id, serial)
 
-    def progress(self, done, total, phase=''):
+    def progress(self, done, total, phase='', **details):
         self.check()
-        self.store.update(self.id, progress={'done': done, 'total': total, 'phase': phase})
+        self.store.update(self.id, progress=dict(details, done=done, total=total, phase=phase))
 
     def on_cancel(self, hook):
         with self._lock:
@@ -489,7 +506,7 @@ class TaskManager:
         return hook(run, actor, client_id) if hook is not None else run
 
     def start(self, kind, actor, client_id, targets, run, *, request_id=None, input_digest=None,
-              tracks_outcome=False):
+              tracks_outcome=False, flash_target=None):
         if not callable(run):
             raise TaskError('task runner must be callable')
         with self._lock:
@@ -504,7 +521,7 @@ class TaskManager:
             if len(self._active) >= self.max_active:
                 raise TaskError('too many active tasks', 429)
             run = self._execution_runner(run, actor, client_id)
-            task_id = self.store.create(kind, actor, client_id, targets, request_id, input_digest)
+            task_id = self.store.create(kind, actor, client_id, targets, request_id, input_digest, flash_target)
             context = TaskContext(task_id, self.store, lambda: self._check_actor(actor), tracks_outcome)
             worker = threading.Thread(target=self._run, args=(context, run), daemon=True)
             self._active[task_id] = (context, worker)

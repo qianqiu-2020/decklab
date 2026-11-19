@@ -7,7 +7,7 @@ from .tasks import TaskError
 
 
 def body_limit(route):
-    if route in ('/api/settings', '/api/backend-settings'):
+    if route in ('/api/settings', '/api/backend-settings', '/api/image-workspace'):
         return 2 * 1024 ** 2
     if route == '/api/device-preferences':
         return 1024 ** 2
@@ -57,11 +57,25 @@ class ArtifactActions:
                 elif action == 'seal':
                     artifact = self.artifacts.seal(artifact_id, actor, serial)
                 elif action == 'delete':
+                    sha256 = artifact.get('sha256')
                     self.artifacts.remove(artifact_id, actor, serial)
+                    if sha256:
+                        with self.manager.store.lock:
+                            referenced = self.manager.store.db.execute(
+                                "SELECT 1 FROM transfer_artifacts WHERE sha256=? AND state IN ('ready','claimed') LIMIT 1", (sha256,)).fetchone()
+                        if not referenced:
+                            from .flash_tasks import FlashActions
+                            FlashActions(self.manager).expire(image_sha256=sha256)
                     artifact = self.artifacts.get(artifact_id, actor, serial)
                 else:
                     raise TaskError('unknown artifact action', 404)
-            return response(200, {'ok': True, 'artifact': artifact})
+            result = {'ok': True, 'artifact': artifact}
+            if action == 'seal' and payload.get('prepare_image') is True:
+                from .image_preparation import for_manager
+                task = for_manager(self.manager).after_upload(artifact, actor, payload.get('client_id', ''))
+                if task:
+                    result['preparation_task'] = task
+            return response(200, result)
         except (TaskError, OSError) as error:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
 

@@ -16,6 +16,9 @@
   var sessions = [{ sid: 'serial', kind: 'serial' }];
   var sessionPage = 0, eventPage = 0;
   var recordsTab = 'logs';
+  var historyTabs = ['logs', 'sessions', 'events'];
+  var toolPanels = {inputs: '输入导航', commands: '常用命令', tasks: '后台任务'};
+  var panelTriggers = {history: 'b-records', inputs: 'b-command-nav', commands: 'b-commands', tasks: 'b-tasks'};
   var ACTIVITY_PAGE_SIZE = 10;
   var takenOver = {};
   var deviceDirectory = window.SerialdDevices.create({
@@ -98,16 +101,19 @@
   });
   var imageStore = window.SerialdImageStore && window.SerialdImageStore.create({byId:$,fetch:fetch,formatBytes:fmt});
   $('b-image-store').addEventListener('click', function () { if (imageStore) imageStore.open(); });
+  var imageWorkspaces = window.SerialdImageWorkspaces && window.SerialdImageWorkspaces.create({byId:$,fetch:fetch,copyText:copyText,formatBytes:fmt});
   var flashing = window.SerialdFlashing && window.SerialdFlashing.create({
-    byId: $, fetch: fetch, formatBytes: fmt,
-    openImageStore: function (choose, picker) { if (imageStore) imageStore.open(choose, picker); }
+    byId: $, fetch: fetch, formatBytes: fmt, copyText: copyText,
+    openImageStore: function (choose, picker) { if (imageStore) imageStore.open(choose, picker); },
+    openImageWorkspace: function (artifact, choose) { if (imageWorkspaces) imageWorkspaces.open(artifact, choose); }
   });
   var boardControl = window.SerialdBoardControl && window.SerialdBoardControl.create({
     byId: $, fetch: fetch, getView: function () { return terminalView.current; },
     onTask: function () { taskUI.refresh(); }
   });
   var desktop = window.SerialdDesktop && window.SerialdDesktop.create({byId:$,fetch:fetch,
-    clientId:UI.clientId,copyText:copyText,getView:function () { return terminalView.current; }});
+    clientId:UI.clientId,copyText:copyText,stageSerialCommand:stageSerialCommand,
+    prepareSetup:function () { closeSshCredentials(); selectSetupSerial(); },getView:function () { return terminalView.current; }});
   window.SerialdShareSelection = function () {
     return deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0] || null;
   };
@@ -116,6 +122,7 @@
     ['b-serial-size', 'd-in', 'd-kbd', 'd-slow-paste', 'b-send', 'b-cr', 'b-ctrlc', 'b-paste'].forEach(function (id) {
       $(id).disabled = ctx.readonly;
     });
+    $('input-options-trigger').hidden = ctx.sid !== 'serial';
     $('slow-paste-option').hidden = ctx.sid !== 'serial';
     $('b-takeover').hidden = !ctx.canTakeover;
     $('b-input-owner').hidden = ctx.sid !== 'serial';
@@ -188,8 +195,9 @@
   // 没先点一下终端就按 Ctrl+V)，paste 事件的目标是 body，挂在 d-term 上的监听器
   // 根本收不到,表现就是"按了完全没反应"。但同时要给页面自己的输入框让路。
   document.addEventListener('paste', function (e) {
-    if (!deviceDirectory.selected) return;
+    if (!deviceDirectory.selected || $('detail').classList.contains('desktop-active')) return;
     var ae = document.activeElement;
+    if (ae && ae.closest && ae.closest('#desktop-connection,#ssh-credentials-dialog')) return;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')
         && String(ae.className).indexOf('xterm-helper-textarea') < 0) return;   // 发送命令框等,照常粘贴
     var cb = e.clipboardData || window.clipboardData;
@@ -238,6 +246,7 @@
     $('d-in').value = '';
     $('d-logs').textContent = '';
     sessionPage = 0; eventPage = 0;
+    $('event-pager').hidden = $('activity-pager').hidden = true;
     $('d-activity').textContent = '';
     $('d-events').textContent = '';
     $('d-commands').textContent = '';
@@ -270,6 +279,7 @@
     loadSessions();
     loadLogs();
     loadCommands();
+    if (!$('d-records').hidden && (recordsTab === 'sessions' || recordsTab === 'events')) loadActivity();
     var selected = sessions.filter(function (s) { return s.sid === sid; })[0];
     if (selected && selected.kind === 'log') loadArchivedLog(ctx, selected);
     else startStream(ctx);
@@ -372,8 +382,23 @@
   function checkSshCredentials() {
     if (sshCredentials && !sshConnectionCurrent(sshCredentials.ctx, sshCredentials.connectionId)) closeSshCredentials();
   }
+  function selectSetupSerial() {
+    if (curSid !== 'serial') switchSession('serial');
+  }
+  function stageSerialCommand(command) {
+    var ctx = terminalView.current, input = $('d-in');
+    if (!ctx || ctx.sid !== 'serial') return '请连接当前设备的串口';
+    if (!sshConnectionCurrent(ctx, ctx.connectionId)) return '设备连接已变化，请重新选择设备';
+    if (ctx.readonly || input.disabled) return '当前串口为只读';
+    if (input.value && input.value !== command) return '串口输入框已有内容，请先发送或清空';
+    input.value = command;
+    input.focus();
+    return '已填入串口，按回车执行';
+  }
   function openSshCredentials(ctx, user, message) {
     if (!ctx || ctx.connecting || !sshConnectionCurrent(ctx, ctx.connectionId)) return;
+    if (desktop) desktop.showTerminal();
+    selectSetupSerial(); ctx = terminalView.current;
     closeSshCredentials();
     sshCredentials = { ctx: ctx, connectionId: ctx.connectionId };
     var board = deviceDirectory.find(ctx.key);
@@ -388,7 +413,7 @@
     $('ssh-credentials-status').textContent = message || '';
     $('ssh-root-copy-status').textContent = '';
     $('ssh-root-guide').open = false;
-    $('ssh-credentials-dialog').showModal();
+    $('ssh-credentials-dialog').open = true;
     $('ssh-credentials-user').focus();
   }
   function connectSSH(ctx, credentials) {
@@ -454,6 +479,11 @@
     connectSSH(state.ctx, credentials);
   });
   ['passwd', 'edit', 'config', 'restart', 'check'].forEach(function (name) {
+    if (name !== 'config') $('ssh-root-stage-' + name).addEventListener('click', function () {
+      if (sshCredentials && sshConnectionCurrent(sshCredentials.ctx, sshCredentials.connectionId)) {
+        $('ssh-root-copy-status').textContent = stageSerialCommand($('ssh-root-command-' + name).textContent);
+      }
+    });
     $('ssh-root-copy-' + name).addEventListener('click', function () {
       if (!sshCredentials || !sshConnectionCurrent(sshCredentials.ctx, sshCredentials.connectionId)) {
         closeSshCredentials(); return;
@@ -555,9 +585,20 @@
 
   function setPager(prefix, page, total, count) {
     var pages = Math.max(1, Math.ceil(total / ACTIVITY_PAGE_SIZE));
+    $(prefix + '-pager').hidden = pages === 1 && page === 0;
     $(prefix + '-page').textContent = '第 ' + (page + 1) + ' / ' + pages + ' 页 · ' + total + ' 条';
     $(prefix + '-prev').disabled = page === 0;
     $(prefix + '-next').disabled = (page * ACTIVITY_PAGE_SIZE + count) >= total;
+  }
+
+  function activityMeta(timestamp, actor, result) {
+    var line = document.createElement('div'); line.className = 'activity-meta';
+    var who = document.createElement('span'); who.className = 'actor'; who.textContent = actor || 'service';
+    var when = document.createElement('span');
+    when.textContent = ' · ' + new Date(timestamp * 1000).toLocaleString(document.documentElement.lang || undefined)
+      + (result ? ' · ' + result : '');
+    line.appendChild(who); line.appendChild(when);
+    return line;
   }
 
   function loadActivity() {
@@ -572,18 +613,17 @@
     fetch('/api/activity?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
       + '&session_offset=' + sessionOffset + '&event_offset=' + eventOffset + '&limit=' + ACTIVITY_PAGE_SIZE)
       .then(function (r) { return r.json(); }).then(function (d) {
-        if (!isCurrent(ctx) || seq !== ctx.activitySeq || !d.sessions) return;
+        if (!isCurrent(ctx) || seq !== ctx.activitySeq) return;
+        if (!Array.isArray(d.sessions)) throw new Error(d.error || '返回数据不完整');
         var box = $('d-activity');
         box.textContent = '';
         d.sessions.forEach(function (entry) {
           var row = document.createElement('div'); row.className = 'activity-row';
           var main = document.createElement('div'); main.className = 'activity-main';
-          var actor = document.createElement('span'); actor.className = 'actor'; actor.textContent = entry.actor;
-          var meta = document.createElement('span'); meta.className = 'activity-meta';
-          meta.textContent = ' · ' + new Date(entry.started * 1000).toLocaleString('zh-CN') + ' · ' + entry.status
-            + (entry.exit_code === null ? '' : ' · 退出码 ' + entry.exit_code);
-          var title = document.createElement('code'); title.textContent = entry.title || entry.sid;
-          main.appendChild(actor); main.appendChild(meta); main.appendChild(title); row.appendChild(main);
+          var states = {active: '已连接', closed: '已关闭', completed: '已完成', interrupted: '已中断', unknown: '结果未知'};
+          var result = (states[entry.status] || entry.status || '') + (Number.isInteger(entry.exit_code) ? ' · 退出码 ' + entry.exit_code : '');
+          var title = document.createElement('code'); title.textContent = entry.title || entry.ip || entry.sid;
+          main.appendChild(title); main.appendChild(activityMeta(entry.started, entry.actor, result)); row.appendChild(main);
           var button = document.createElement('button'); button.type = 'button';
           button.textContent = entry.status === 'active' ? '实时查看' : '查看记录';
           button.addEventListener('click', function () {
@@ -592,13 +632,33 @@
               if (!sessions.some(function (s) { return s.sid === entry.sid; })) sessions.push(Object.assign({ kind: 'ssh' }, entry));
               switchSession(entry.sid); return;
             }
+            button.disabled = true;
+            var feedback = document.createElement('div');
+            feedback.className = 'activity-files'; feedback.setAttribute('role', 'status');
+            main.appendChild(feedback);
             fetch('/api/logs?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || ''))
               .then(function (r) { return r.json(); }).then(function (logs) {
-                if (!isCurrent(ctx)) return;
-                var file = (logs.files || []).filter(function (f) { return f.name.indexOf('ssh-' + entry.sid + '-') === 0; })[0];
-                if (file) openArchivedLog(ctx, file.name, 'SSH 记录 · ' + (entry.actor || entry.sid));
-                else $('d-status').textContent = ' 该会话没有可用日志';
-              }).catch(function (e) { if (isCurrent(ctx)) $('d-status').textContent = e.message; });
+                if (!isCurrent(ctx) || seq !== ctx.activitySeq) return;
+                if (!Array.isArray(logs.files)) throw new Error(logs.error || '返回数据不完整');
+                var prefix = 'ssh-' + entry.sid + '-';
+                var days = logs.files.map(function (file) { return file.name; }).filter(function (name) {
+                  return name.startsWith(prefix) && /^\d{8}\.log$/.test(name.slice(prefix.length));
+                }).sort().reverse();
+                var label = 'SSH 记录 · ' + (entry.actor || entry.sid);
+                if (days.length === 1) { openArchivedLog(ctx, days[0], label); return; }
+                if (!days.length) { feedback.textContent = '该会话没有可用日志'; return; }
+                days.forEach(function (file) {
+                  var day = file.slice(prefix.length, -4).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3');
+                  var open = document.createElement('button'); open.type = 'button'; open.textContent = day;
+                  open.addEventListener('click', function () { openArchivedLog(ctx, file, label + ' · ' + day); });
+                  feedback.appendChild(open);
+                });
+                button.hidden = true; feedback.children[0].focus();
+              }).catch(function (error) {
+                if (!isCurrent(ctx) || seq !== ctx.activitySeq) return;
+                feedback.remove(); button.disabled = false;
+                $('d-status').textContent = '读取归档失败：' + error.message;
+              });
           });
           row.appendChild(button); box.appendChild(row);
         });
@@ -616,19 +676,22 @@
         (d.events || []).forEach(function (entry) {
           var row = document.createElement('div'); row.className = 'activity-row';
           var main = document.createElement('div'); main.className = 'activity-main';
-          var actor = document.createElement('span'); actor.className = 'actor';
-          actor.textContent = entry.actor || 'service';
-          var meta = document.createElement('span'); meta.className = 'activity-meta';
-          meta.textContent = ' · ' + new Date(entry.ts * 1000).toLocaleString('zh-CN') + ' · '
-            + (actionNames[entry.action] || entry.action);
-          var detail = document.createElement('code'); detail.textContent = entry.detail || '';
-          main.appendChild(actor); main.appendChild(meta); main.appendChild(detail);
+          var action = document.createElement('strong'); action.textContent = actionNames[entry.action] || entry.action;
+          main.appendChild(action); main.appendChild(activityMeta(entry.ts, entry.actor));
+          if (entry.detail) {
+            var detail = document.createElement('code'); detail.textContent = entry.detail;
+            main.appendChild(detail);
+          }
           row.appendChild(main); eventBox.appendChild(row);
         });
         if (!eventBox.children.length) eventBox.textContent = '尚无关键操作记录';
         var eventTotal = d.event_total === undefined ? (d.events || []).length : d.event_total;
         setPager('event', eventPage, eventTotal, (d.events || []).length);
-      }).catch(function () {});
+      }).catch(function (error) {
+        if (!isCurrent(ctx) || seq !== ctx.activitySeq) return;
+        $('d-activity').textContent = $('d-events').textContent = '读取记录失败：' + error.message;
+        $('activity-pager').hidden = $('event-pager').hidden = true;
+      });
   }
   $('activity-prev').addEventListener('click', function () { if (sessionPage) { sessionPage--; loadActivity(); } });
   $('activity-next').addEventListener('click', function () { sessionPage++; loadActivity(); });
@@ -638,6 +701,20 @@
   $('terminal-search-prev').addEventListener('click', function () { searchTerminal(-1); });
   $('b-serial-size').addEventListener('click', terminalView.syncSerialSize);
   $('b-redraw').addEventListener('click', redrawTerminal);
+  function setDevicePaneCollapsed(collapsed) {
+    $('workspace').classList.toggle('pane-collapsed', collapsed);
+    var toggle = $('b-device-pane');
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.title = collapsed ? '展开设备列表' : '收起设备列表';
+    toggle.setAttribute('aria-label', toggle.title);
+  }
+  try { setDevicePaneCollapsed(localStorage.getItem('decklab-pane-collapsed') === '1'); } catch (_) {}
+  $('b-device-pane').addEventListener('click', function () {
+    var collapsed = !$('workspace').classList.contains('pane-collapsed');
+    setDevicePaneCollapsed(collapsed);
+    try { localStorage.setItem('decklab-pane-collapsed', collapsed ? '1' : '0'); } catch (_) {}
+    resizeTerm();
+  });
   $('b-info').addEventListener('click', function () {
     var open = $('detail').classList.toggle('info-open');
     $('b-info').setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -674,50 +751,72 @@
     $('terminal-search').focus();
     if ($('terminal-search').select) $('terminal-search').select();
   });
+  function recordsGroup() {
+    return historyTabs.includes(recordsTab) ? 'history' : recordsTab;
+  }
+  function syncPanelTriggers() {
+    Object.keys(panelTriggers).forEach(function (group) {
+      var expanded = !$('d-records').hidden && recordsGroup() === group;
+      var trigger = $(panelTriggers[group]);
+      trigger.setAttribute('aria-expanded', String(expanded));
+      trigger.setAttribute('aria-pressed', String(expanded));
+    });
+  }
   function setRecordsTab(name) {
     recordsTab = name;
-    ['logs', 'inputs', 'sessions', 'events', 'tasks', 'commands'].forEach(function (tab) {
-      var selected = tab === name;
-      $('record-tab-' + tab).classList.toggle('on', selected);
-      $('record-tab-' + tab).setAttribute('aria-selected', selected ? 'true' : 'false');
-      $('record-panel-' + tab).hidden = !selected;
+    var history = recordsGroup() === 'history';
+    $('history-tabs').hidden = !history;
+    $('records-heading').hidden = history;
+    $('records-heading').textContent = toolPanels[name] || '';
+    $('task-refresh').hidden = name !== 'tasks';
+    historyTabs.forEach(function (tab) {
+      var selected = tab === name, button = $('record-tab-' + tab);
+      button.classList.toggle('on', selected);
+      button.setAttribute('aria-selected', String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
+    historyTabs.concat(Object.keys(toolPanels)).forEach(function (tab) {
+      $('record-panel-' + tab).hidden = tab !== name;
     });
     $('d-records').scrollTop = 0;
-    $('b-records').setAttribute('aria-pressed', name === 'logs' && !$('d-records').hidden ? 'true' : 'false');
-    $('b-tasks').setAttribute('aria-pressed', name === 'tasks' && !$('d-records').hidden ? 'true' : 'false');
-    $('b-command-nav').setAttribute('aria-pressed', name === 'inputs' && !$('d-records').hidden ? 'true' : 'false');
-    if (name === 'logs' && !$('d-records').hidden) loadLogs();
-    if (name === 'tasks' && !$('d-records').hidden) taskUI.refresh();
+    syncPanelTriggers();
+    if (name === 'logs') loadLogs();
+    if (name === 'sessions' || name === 'events') loadActivity();
+    if (name === 'tasks') taskUI.refresh();
     if (name === 'inputs' && terminalView.current) renderCommandNav(terminalView.current);
   }
   function setRecordsOpen(open) {
     $('d-records').hidden = !open;
     $('console-layout').classList.toggle('records-open', open);
-    $('b-records').setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) setRecordsTab(recordsTab);
-    else {
-      $('b-records').setAttribute('aria-pressed', 'false');
-      $('b-command-nav').setAttribute('aria-pressed', 'false');
-    }
+    else syncPanelTriggers();
     setTimeout(resizeTerm, 0);
   }
   function toggleRecordsTab(name) {
-    if (!$('d-records').hidden && recordsTab === name) setRecordsOpen(false);
-    else { recordsTab = name; setRecordsOpen(true); }
+    if (!$('d-records').hidden && (recordsTab === name || (name === 'logs' && recordsGroup() === 'history'))) {
+      setRecordsOpen(false);
+    } else {
+      recordsTab = name;
+      setRecordsOpen(true);
+    }
   }
-  var recordTabs = ['logs', 'inputs', 'sessions', 'events', 'tasks', 'commands'];
-  recordTabs.forEach(function (tab, index) {
+  historyTabs.forEach(function (tab, index) {
     var button = $('record-tab-' + tab);
     button.addEventListener('click', function () { setRecordsTab(tab); });
     button.addEventListener('keydown', function (event) {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      var next;
+      if (event.key === 'Home') next = historyTabs[0];
+      else if (event.key === 'End') next = historyTabs[historyTabs.length - 1];
+      else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        var offset = event.key === 'ArrowRight' ? 1 : -1;
+        next = historyTabs[(index + offset + historyTabs.length) % historyTabs.length];
+      } else return;
       event.preventDefault();
-      var offset = event.key === 'ArrowRight' ? 1 : -1;
-      var next = recordTabs[(index + offset + recordTabs.length) % recordTabs.length];
       setRecordsTab(next);
       $('record-tab-' + next).focus();
     });
   });
+  $('b-commands').addEventListener('click', function () { toggleRecordsTab('commands'); });
   $('b-command-nav').addEventListener('click', function () {
     toggleRecordsTab('inputs');
   });
@@ -731,7 +830,7 @@
     if (selected && flashing) flashing.open(selected);
   });
   $('b-flash-discover').addEventListener('click', function () {
-    if (flashing) flashing.discover();
+    if (flashing) flashing.open();
   });
   $('b-boot-compare').addEventListener('click', function () {
     if (!deviceDirectory.selected) return;
@@ -757,7 +856,11 @@
   });
   $('b-tasks').addEventListener('click', function () { toggleRecordsTab('tasks'); });
   $('b-records').addEventListener('click', function () { toggleRecordsTab('logs'); });
-  $('b-records-close').addEventListener('click', function () { setRecordsOpen(false); });
+  $('b-records-close').addEventListener('click', function () {
+    var group = recordsGroup();
+    setRecordsOpen(false);
+    $(group === 'inputs' || group === 'commands' ? 'terminal-tools-trigger' : panelTriggers[group]).focus();
+  });
   /* ---------- 动作 ---------- */
   $('b-send').addEventListener('click', function () {
     var v = $('d-in').value; if (!v || !deviceDirectory.selected) return;
@@ -1182,6 +1285,30 @@
       });
   }
   $('d-term').addEventListener('click', function () { if (terminalView.current) terminalView.current.term.focus(); });
+  var statusFilters = document.querySelectorAll('.overview button[data-filter]');
+  var deviceFilter = $('device-filter');
+  var deviceSearch = $('device-search');
+  function syncStatusFilters() {
+    $('device-clear-filters').hidden = !deviceSearch.value && deviceFilter.value === 'all';
+    statusFilters.forEach(function (button) {
+      button.setAttribute('aria-pressed', String(deviceFilter.value === button.dataset.filter));
+    });
+  }
+  statusFilters.forEach(function (button) {
+    button.addEventListener('click', function () {
+      deviceFilter.value = deviceFilter.value === button.dataset.filter ? 'all' : button.dataset.filter;
+      deviceFilter.dispatchEvent(new Event('change'));
+    });
+  });
+  $('device-clear-filters').addEventListener('click', function () {
+    deviceSearch.value = '';
+    deviceFilter.value = 'all';
+    deviceFilter.dispatchEvent(new Event('change'));
+    deviceSearch.focus();
+  });
+  deviceSearch.addEventListener('input', syncStatusFilters);
+  deviceFilter.addEventListener('change', syncStatusFilters);
+  syncStatusFilters();
   $('b-close').addEventListener('click', function () {
     if (boardControl) boardControl.close();
     if (desktop) desktop.close();
@@ -1194,8 +1321,12 @@
     $('b-expand').title = '放大终端';
     $('b-expand').setAttribute('aria-pressed', 'false');
     markSelected(); pollDevices();
+    $('device-search').focus();
   });
 
+  window.SerialdDevices.bindShortcuts($, function (direction, position) {
+    if (deviceDirectory.jump(direction, position) && terminalView.current) terminalView.current.term.focus();
+  });
   pollDevices();
   setInterval(pollDevices, 3000);
   archives.startRefresh();

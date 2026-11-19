@@ -157,7 +157,10 @@ class DesktopSetup:
                 except (OSError, ValueError):
                     return None
             with ThreadPoolExecutor(max_workers=8) as workers:
-                requests = [(endpoint[2], endpoint[1], endpoint[0])] if endpoint else [(provider, port, host) for host in hosts for provider, port in PORTS]
+                if endpoint and endpoint[2] == 'rdp' and endpoint[1] in (3389, 3390):
+                    requests = [('rdp', port, endpoint[0]) for port in (3389, 3390)]
+                else:
+                    requests = [(endpoint[2], endpoint[1], endpoint[0])] if endpoint else [(provider, port, host) for host in hosts for provider, port in PORTS]
                 found = list(workers.map(attempt, requests))
             if device.serial != serial or (tuple(hosts_for(device)), device.connection_id) != identity:
                 raise TaskError('设备身份或地址已改变，请重新检测', 409)

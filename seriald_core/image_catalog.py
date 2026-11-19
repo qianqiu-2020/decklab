@@ -9,7 +9,7 @@ import threading
 import time
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
-from .image_download import ImageConnection
+from .image_download import ImageConnection, download_keys, download_matches, preferred_download
 from .tasks import TaskError
 
 SOURCES = {
@@ -79,10 +79,9 @@ class _Index(HTMLParser):
 
 def _format(name):
     lower = name.lower()
-    if lower in ('flash-all.zip', 'flash_all.zip'):
+    if lower in ('flash-all.zip', 'flash_all.zip') or re.search(r'\.(?:img|raw)(?:\.|$)', lower):
         return ''
     if lower.endswith(('.tar.gz', '.tgz', '.tar', '.zip')): return 'package'
-    if lower.endswith(('.img.gz', '.img', '.raw.gz', '.raw')): return 'disk-image'
     if lower.endswith(('.itb', '.ext4', '.bin')): return 'partition-file'
     return ''
 
@@ -200,8 +199,27 @@ def library(manager, actor='web', serial=None):
             " AND direction='upload' AND state IN ('ready','claimed') ORDER BY updated DESC LIMIT 100", arguments)]
         active = [row[0] for row in manager.store.db.execute(
             "SELECT t.id FROM tasks t JOIN task_targets s ON s.task_id=t.id WHERE " + task_scope +
-            " AND t.kind='image-download' AND s.connection_id='image-downloads' "
+            " AND t.kind IN ('image-download','image-prepare') "
             "AND t.state IN ('queued','running') ORDER BY t.created DESC LIMIT 10", arguments)]
-    return {'artifacts': [{k: row[k] for k in ('id', 'name', 'size', 'sha256', 'updated', 'serial', 'state')}
-                          for row in (manager.artifacts.get(i, actor, serial) for i in ids)],
-            'tasks': [manager.tasks.store.get(i) for i in active]}
+    from .image_preparation import for_manager
+    preparations = for_manager(manager)
+    artifacts = []
+    for artifact_id in ids:
+        row = manager.artifacts.get(artifact_id, actor, None if actor == 'web' else serial)
+        item = {k: row[k] for k in ('id', 'name', 'size', 'sha256', 'updated', 'serial', 'state')}
+        from .image_workspaces import public_directory_info
+        item.update(public_directory_info(manager.artifacts._path(artifact_id, '.bin')))
+        task = preparations.latest(artifact_id, actor)
+        if task:
+            item['preparation_task'] = task
+        artifacts.append(item)
+    return {'artifacts': artifacts, 'tasks': [manager.tasks.store.get(i) for i in active]}
+
+
+def mark_downloads(manager, result):
+    files = [(item, download_keys(item['url'], item['name'])) for item in result['entries'] if item.get('url')]
+    matches = download_matches(manager, 'web', [key for _, keys in files for key in keys])
+    for item, keys in files:
+        match = preferred_download(matches, keys)
+        if match:
+            item['download_state'] = 'cached' if match['artifact_id'] else 'downloading'
