@@ -65,14 +65,19 @@ K3 只有一块系统盘时可自动核对，多盘必须明确选择目标盘�
 
 ## 原版 U-Boot 接入
 
-使用原版 SpacemiT U-Boot，不维护 DeckLab 固件补丁或私有 Fastboot 命令。原版已支持 RAM 下载运行、介质读写、EEPROM 配置、`UCmd` 及 `oem read` / `upload`。
+基于原版 SpacemiT U-Boot，不增加私有 Fastboot 命令。原版已支持 RAM 下载运行、介质读写、EEPROM 配置、`UCmd` 及 `oem read` / `upload`。K3 内置环境只为加速大块写盘带一个 U-Boot 补丁，再加一个 FSBL 补丁（见下文）。
 
-`tools/build_ram_loaders.py` 从固定源码提交构建，通过原生 Kconfig：
+`tools/build_ram_loaders.py` 从固定源码提交构建，应用 `packaging/flash-loaders/patches/0*.patch`，通过原生 Kconfig：
 
 - 关闭 `BOARD_LATE_INIT`，避开身份配置、DDR 参数持久化和自动刷卡等板级启动动作。
 - 仅保留 `ENV_IS_NOWHERE`，避免加载旧持久环境或保存临时环境；关闭可选 EC、retimer 初始化。
 - 通过原生 `USE_DEFAULT_ENV_FILE` 加载精简默认环境，`bootcmd` 循环运行 Fastboot、`bootdelay=-2`，避免板级 `.env` 覆盖构建配置；`LOCALVERSION=-seriald-ram` 用于识别匹配的临时构建。
 - 保留已有存储驱动和 UUU 命令，启用原生 NVMe、SCSI 命令。
+- 启用 `PCI_INIT_R`，PCIe 只在启动时枚举一次，否则每条 `nvme` 命令都要重新枚举（约 1.1 秒）。
+- 补丁增加两条命令。`unzstd` 用全部空闲核并行展开 zstd 帧容器。`bgblk` 在另一个核上写一段 NVMe，主核同时接收下一段，写前由主核清理块缓存。其他介质仍同步写。
+- 构建时把供应商 OpenSBI（`fw_dynamic`）放进 U-Boot FIT，U-Boot 以 S 模式运行，空闲核经 SBI HSM 启动。
+
+K3 FSBL 由 `tools/build_k3_fsbl.py` 从供应商 U-Boot SPL 源码构建，带 `fsbl-*.patch`：USB 下载模式下复用板子保存在启动介质上的 DDR 训练结果，按正常启动的规则校验，不写板子，省去约 5.6 秒训练。板上没有有效训练数据时照常训练。若板子停在 FSBL 阶段，执行器报 `loader-fsbl-timeout`；该 USB 口下一次改用每次都完整训练的原 FSBL。
 
 BootROM 下载模式下可在预览前选择 DeckLab 内置或镜像自带的临时 FSBL / U-Boot。两份材料作为一组按摘要绑定到预览，只装入 RAM。仍按镜像中的分区配置和预览范围写入。设备已经运行加载器时，须重新进入 BootROM 才能更换。
 
@@ -121,7 +126,7 @@ NOR 包不携带系统盘目标。切换回读校验重新解析时保留已经�
 
 指定分区默认不选任何项。完整包按包内映射提供候选载荷，也可在某一行选择独立文件；只有一个已选分区时，顶层单文件才自动绑定该行。允许全选，缺失载荷时拒绝预览。修改文件或选区立即使原预览失效。
 
-写入方式（普通刷写与极速刷写相同）：每条写盘命令最多 256 MiB，并受设备上报的 `max-download-size` 限制。整 1 MiB 的全零段不经 USB 传输：DeckLab 临时 U-Boot 写系统盘时，由设备内存中预先清零的区域直接写盘；经 Fastboot `flash` 写入时，编码为 sparse FILL 块。旧数据都会被覆盖，写入摘要和回读结论不变。K3 临时 U-Boot 写入的数据段先在主机 gzip 压缩，板上 `unzip` 并核对长度后再写盘；每段按实测 USB 与解压速率决定压缩还是原样发送。耗时公式与各参数实测值见 [刷写耗时模型](FLASH_PERFORMANCE.md)。
+写入方式（普通刷写与极速刷写相同）：数据段首段 16 MiB、之后逐段翻倍，最多 128 MiB，并受设备上报的 `max-download-size` 限制。整 1 MiB 的全零段不经 USB 传输：DeckLab 临时 U-Boot 写系统盘时，由设备内存中预先清零的区域直接写盘；经 Fastboot `flash` 写入时，编码为 sparse FILL 块。旧数据都会被覆盖，写入摘要和回读结论不变。K3 临时 U-Boot 写入的数据段在主机切成独立 zstd 帧，板上多核解压、核对长度后写盘，写盘与下一段下载重叠；旧加载器自动退回 gzip 与同步写盘。每段按实测 USB 与解压速率决定压缩还是原样发送。普通刷写边写边计算载荷摘要，与预览时的摘要不符即失败；稀疏文件的空洞不读盘。耗时公式与各参数实测值见 [刷写耗时模型](FLASH_PERFORMANCE.md)。
 
 确认前展示实际偏移、写入字节、补零、分区容量和擦除范围。`write_layout=false` 不添加分区表、其他介质或 EC 写入。原版 `flash:env` 有导入和保存环境的附加行为，NOR 分区路径使用原生 MTD 命令避免这些副作用。
 

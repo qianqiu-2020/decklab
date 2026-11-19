@@ -1,0 +1,461 @@
+diff --git a/cmd/Kconfig b/cmd/Kconfig
+index 99bf07f..3603339 100644
+--- a/cmd/Kconfig
++++ b/cmd/Kconfig
+@@ -902,6 +902,15 @@ config CMD_UNLZ4
+ 	help
+ 	  Support decompressing an LZ4 image from memory region.
+ 
++config CMD_UNZSTD
++	bool "unzstd"
++	select ZSTD
++	help
++	  Expand a zstd frame, or a DLZ1 container of independent zstd frames
++	  in parallel on idle harts started through the SBI HSM extension.
++	  Also adds bgblk, which writes a block range on an idle hart while
++	  the calling hart keeps serving commands.
++
+ config CMD_UNZIP
+ 	bool "unzip"
+ 	default y if CMD_BOOTI
+diff --git a/cmd/Makefile b/cmd/Makefile
+index 62cd9c9..f4e55b4 100644
+--- a/cmd/Makefile
++++ b/cmd/Makefile
+@@ -171,6 +171,7 @@ obj-$(CONFIG_CMD_UBI) += ubi.o
+ obj-$(CONFIG_CMD_UBIFS) += ubifs.o
+ obj-$(CONFIG_CMD_UNIVERSE) += universe.o
+ obj-$(CONFIG_CMD_UNLZ4) += unlz4.o
++obj-$(CONFIG_CMD_UNZSTD) += unzstd.o
+ obj-$(CONFIG_CMD_UNZIP) += unzip.o
+ obj-$(CONFIG_CMD_VIRTIO) += virtio.o
+ obj-$(CONFIG_CMD_WDT) += wdt.o
+diff --git a/cmd/unzstd.c b/cmd/unzstd.c
+new file mode 100644
+index 0000000..4097423
+--- /dev/null
++++ b/cmd/unzstd.c
+@@ -0,0 +1,423 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Parallel helpers for downloading large images in the RAM U-Boot.
++ *
++ * unzstd expands zstd data from one memory region into another. A plain zstd
++ * frame is expanded on the calling hart. A DLZ1 container holds independent
++ * frames; they are expanded in parallel on the calling hart and on a pool of
++ * the other harts listed in the device tree. Every frame must expand to
++ * exactly its listed size.
++ *
++ * bgblk writes one block range on a pool hart reserved for it while the
++ * calling hart keeps serving commands; `bgblk wait` collects the result. Only
++ * one background write is outstanding, and the caller must not use that
++ * device meanwhile. U-Boot's heap is not shared safely between harts, so the
++ * background hart must not allocate: the calling hart drops the device's
++ * block cache first, and only NVMe is written in the background, after one
++ * synchronous write of at least BG_PRIME bytes has sized the driver's PRP
++ * list for every later transfer. Other devices are written synchronously.
++ *
++ * Pool harts are started once through the SBI HSM extension and then stay
++ * in a polling loop, so no hart is stopped and restarted per command.
++ *
++ * DLZ1 layout (little endian): u32 magic "DLZ1", u32 frame count, u64 total
++ * expanded size, then per frame u64 offset (from the container start),
++ * u32 compressed size, u32 expanded size. Frames expand back to back.
++ */
++
++#include <common.h>
++#include <command.h>
++#include <env.h>
++#include <malloc.h>
++#include <time.h>
++#include <blk.h>
++#include <asm/global_data.h>
++#include <asm/sbi.h>
++#include <dm/ofnode.h>
++#include <linux/zstd.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++#define DLZ_MAGIC	0x315a4c44
++#define DLZ_MAX_FRAMES	4096
++#define DLZ_MAX_HARTS	16
++#define DLZ_STACK	(256 << 10)
++#define DLZ_TIMEOUT_MS	60000
++#define BG_PRIME	(4 << 20)
++
++struct dlz_frame {
++	u64 offset;
++	u32 size;
++	u32 raw;
++};
++
++struct dlz_job {
++	const u8 *src;
++	u8 *dst;
++	const struct dlz_frame *frames;
++	const u64 *dst_off;
++	u32 count;
++	u32 next;
++	u32 failed;
++};
++
++struct dlz_worker;
++typedef void (*dlz_fn)(struct dlz_worker *w, void *arg);
++
++/* The first three fields are read by dlz_entry. */
++struct dlz_worker {
++	ulong sp;
++	ulong gp;
++	ulong fn;
++	ulong hartid;
++	void *stack;
++	void *workspace;	/* zstd decompression context */
++	ZSTD_DCtx *ctx;
++	/* Mailbox: a new seq hands over fn(arg); ack = seq when it returned. */
++	ulong seq;
++	ulong ack;
++	dlz_fn work;
++	void *arg;
++};
++
++static struct dlz_worker *pool[DLZ_MAX_HARTS];
++static int pool_size = -1;	/* -1: not started yet */
++static bool pool_broken;
++static struct dlz_worker self;	/* the calling hart */
++
++void dlz_entry(void);
++asm(".pushsection .text.dlz_entry, \"ax\", @progbits\n"
++    ".align 2\n"
++    ".globl dlz_entry\n"
++    "dlz_entry:\n"
++    "	ld sp, 0(a1)\n"
++    "	ld gp, 8(a1)\n"
++    "	ld t0, 16(a1)\n"
++    "	mv a0, a1\n"
++    "	jalr t0\n"
++    "1:	wfi\n"
++    "	j 1b\n"
++    ".popsection\n");
++
++static void dlz_loop(struct dlz_worker *w)
++{
++	ulong last = 0;
++
++	for (;;) {
++		ulong seq = __atomic_load_n(&w->seq, __ATOMIC_ACQUIRE);
++
++		if (seq == last)
++			continue;
++		last = seq;
++		w->work(w, w->arg);
++		__atomic_store_n(&w->ack, seq, __ATOMIC_RELEASE);
++	}
++}
++
++static long hart_status(ulong hartid)
++{
++	struct sbiret r = sbi_ecall(SBI_EXT_HSM, SBI_EXT_HSM_HART_STATUS, hartid, 0, 0, 0, 0, 0);
++
++	return r.error ? -1 : r.value;
++}
++
++static struct dlz_worker *new_worker(void)
++{
++	struct dlz_worker *w = calloc(1, sizeof(*w));
++	size_t wsize = ZSTD_DCtxWorkspaceBound();
++
++	if (!w)
++		return NULL;
++	w->workspace = malloc(wsize);
++	w->ctx = w->workspace ? ZSTD_initDCtx(w->workspace, wsize) : NULL;
++	if (!w->ctx) {
++		free(w->workspace);
++		free(w);
++		return NULL;
++	}
++	return w;
++}
++
++/* Start the pool once; harts that fail to start are left out. */
++static int start_pool(void)
++{
++	ofnode cpus = ofnode_path("/cpus"), cpu;
++
++	if (pool_size >= 0)
++		return pool_size;
++	pool_size = 0;
++	if (!self.ctx) {
++		struct dlz_worker *w = new_worker();
++
++		if (!w)
++			return 0;
++		self = *w;
++		free(w);
++	}
++	if (!ofnode_valid(cpus) || sbi_probe_extension(SBI_EXT_HSM) <= 0)
++		return 0;
++	ofnode_for_each_subnode(cpu, cpus) {
++		const char *type = ofnode_read_string(cpu, "device_type");
++		u32 id = ofnode_read_u32_default(cpu, "reg", ~0U);
++		struct dlz_worker *w;
++		struct sbiret r;
++		ulong begin;
++
++		if (!type || strcmp(type, "cpu") || !ofnode_is_enabled(cpu) ||
++		    id == ~0U || id == gd->arch.boot_hart || pool_size >= DLZ_MAX_HARTS - 1 ||
++		    hart_status(id) != SBI_HSM_HART_STATUS_STOPPED)
++			continue;
++		w = new_worker();
++		if (!w)
++			break;
++		w->stack = malloc(DLZ_STACK);
++		if (!w->stack) {
++			free(w->workspace);
++			free(w);
++			break;
++		}
++		w->sp = ((ulong)w->stack + DLZ_STACK) & ~15UL;
++		w->gp = (ulong)gd;
++		w->fn = (ulong)dlz_loop;
++		w->hartid = id;
++		__atomic_thread_fence(__ATOMIC_SEQ_CST);
++		r = sbi_ecall(SBI_EXT_HSM, SBI_EXT_HSM_HART_START, id, (ulong)dlz_entry, (ulong)w, 0, 0, 0);
++		if (r.error) {
++			free(w->stack);
++			free(w->workspace);
++			free(w);
++			continue;
++		}
++		begin = get_timer(0);
++		while (hart_status(id) != SBI_HSM_HART_STATUS_STARTED && get_timer(begin) < 1000)
++			;
++		pool[pool_size++] = w;	/* kept even if slow to report: it may run */
++	}
++	return pool_size;
++}
++
++static void dispatch(struct dlz_worker *w, dlz_fn fn, void *arg)
++{
++	w->work = fn;
++	w->arg = arg;
++	__atomic_store_n(&w->seq, w->seq + 1, __ATOMIC_RELEASE);
++}
++
++static bool finished(struct dlz_worker *w)
++{
++	return __atomic_load_n(&w->ack, __ATOMIC_ACQUIRE) == w->seq;
++}
++
++static void expand_frames(struct dlz_worker *w, void *arg)
++{
++	struct dlz_job *job = arg;
++
++	for (;;) {
++		u32 i = __atomic_fetch_add(&job->next, 1, __ATOMIC_RELAXED);
++		const struct dlz_frame *f;
++		size_t n;
++
++		if (i >= job->count || __atomic_load_n(&job->failed, __ATOMIC_RELAXED))
++			break;
++		f = &job->frames[i];
++		n = ZSTD_decompressDCtx(w->ctx, job->dst + job->dst_off[i], f->raw,
++					job->src + f->offset, f->size);
++		if (ZSTD_isError(n) || n != f->raw)
++			__atomic_store_n(&job->failed, 1, __ATOMIC_RELAXED);
++	}
++}
++
++/* The last pool hart serves bgblk; the others expand frames. */
++static struct dlz_worker *writer_hart(void)
++{
++	return pool_size > 1 ? pool[pool_size - 1] : NULL;
++}
++
++static int expand_container(const u8 *src, ulong srclen, u8 *dst, ulong dstmax, u64 *expanded, int *used)
++{
++	const struct dlz_frame *frames;
++	struct dlz_job job = {};
++	bool dispatched[DLZ_MAX_HARTS] = {};
++	u64 *dst_off, total = 0;
++	int i, n, helpers = 0;
++	u32 count;
++	ulong begin;
++
++	count = *(const u32 *)(src + 4);
++	if (count == 0 || count > DLZ_MAX_FRAMES || 16 + (ulong)count * 16 > srclen)
++		return -EINVAL;
++	frames = (const struct dlz_frame *)(src + 16);
++	for (i = 0; i < count; i++) {
++		if (frames[i].offset < 16 + (u64)count * 16 || frames[i].offset > srclen ||
++		    frames[i].size > srclen - frames[i].offset || frames[i].raw == 0)
++			return -EINVAL;
++		total += frames[i].raw;
++	}
++	if (total != *(const u64 *)(src + 8) || total > dstmax)
++		return -EINVAL;
++	dst_off = malloc(count * sizeof(*dst_off));
++	if (!dst_off)
++		return -ENOMEM;
++	for (i = 0, total = 0; i < count; i++) {
++		dst_off[i] = total;
++		total += frames[i].raw;
++	}
++	job = (struct dlz_job){ .src = src, .dst = dst, .frames = frames, .dst_off = dst_off, .count = count };
++
++	n = pool_broken ? 0 : start_pool();
++	if (!self.ctx) {
++		free(dst_off);
++		return -ENOMEM;
++	}
++	for (i = 0; i < n; i++) {
++		if (pool[i] != writer_hart() && finished(pool[i])) {
++			dispatch(pool[i], expand_frames, &job);
++			dispatched[i] = true;
++			helpers++;
++		}
++	}
++	expand_frames(&self, &job);
++	begin = get_timer(0);
++	for (i = 0; i < n; i++) {
++		if (!dispatched[i])
++			continue;
++		while (!finished(pool[i])) {
++			if (get_timer(begin) > DLZ_TIMEOUT_MS) {
++				/* The job lives on this stack: no further use. */
++				pool_broken = true;
++				printf("unzstd: hart %lu did not finish\n", pool[i]->hartid);
++				return -ETIMEDOUT;
++			}
++		}
++	}
++	free(dst_off);
++	*expanded = total;
++	*used = helpers + 1;
++	return job.failed ? -EIO : 0;
++}
++
++struct bg_write {
++	struct blk_desc *desc;
++	const void *buf;
++	lbaint_t start, count;
++	ulong written;
++};
++
++static struct bg_write bg;
++static bool bg_busy;
++static struct blk_desc *bg_primed;
++
++static void bg_work(struct dlz_worker *w, void *arg)
++{
++	struct bg_write *b = arg;
++
++	b->written = blk_dwrite(b->desc, b->start, b->count, b->buf);
++}
++
++static int bg_wait(void)
++{
++	struct dlz_worker *w = writer_hart();
++	ulong begin = get_timer(0);
++
++	if (!bg_busy)
++		return CMD_RET_SUCCESS;
++	while (!finished(w)) {
++		if (get_timer(begin) > DLZ_TIMEOUT_MS) {
++			printf("bgblk: write did not finish\n");
++			return CMD_RET_FAILURE;	/* still busy: refuse new work */
++		}
++	}
++	bg_busy = false;
++	if (bg.written != bg.count) {
++		printf("bgblk: wrote %lu of " LBAFU " blocks\n", bg.written, bg.count);
++		return CMD_RET_FAILURE;
++	}
++	return CMD_RET_SUCCESS;
++}
++
++static int do_bgblk(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
++{
++	struct dlz_worker *w;
++
++	if (argc == 2 && !strcmp(argv[1], "wait"))
++		return bg_wait();
++	if (argc != 7 || strcmp(argv[1], "write"))
++		return CMD_RET_USAGE;
++	if (bg_busy) {
++		printf("bgblk: a write is outstanding\n");
++		return CMD_RET_FAILURE;
++	}
++	bg = (struct bg_write){};
++	bg.desc = blk_get_devnum_by_typename(argv[2], dectoul(argv[3], NULL));
++	bg.buf = (const void *)hextoul(argv[4], NULL);
++	bg.start = hextoul(argv[5], NULL);
++	bg.count = hextoul(argv[6], NULL);
++	if (!bg.desc || !bg.count)
++		return CMD_RET_FAILURE;
++	if (!pool_broken)
++		start_pool();
++	w = writer_hart();
++	if (!w || pool_broken || !finished(w) || bg.desc->if_type != IF_TYPE_NVME || bg_primed != bg.desc) {
++		/* Write here; the result is final already. */
++		if (blk_dwrite(bg.desc, bg.start, bg.count, bg.buf) != bg.count)
++			return CMD_RET_FAILURE;
++		if (bg.desc->if_type == IF_TYPE_NVME && (bg.count << bg.desc->log2blksz) >= BG_PRIME)
++			bg_primed = bg.desc;
++		return CMD_RET_SUCCESS;
++	}
++	blkcache_invalidate(bg.desc->if_type, bg.desc->devnum);
++	dispatch(w, bg_work, &bg);
++	bg_busy = true;
++	return CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(bgblk, 7, 0, do_bgblk, "write a block range on another hart",
++	   "write <interface> <dev> <addr> <blk#> <cnt> - start the write\n"
++	   "bgblk wait - wait for it and report whether every block was written");
++
++static int do_unzstd(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
++{
++	ulong srclen, dstmax;
++	u8 *src, *dst;
++	u64 expanded = 0;
++	int used = 1, ret;
++
++	if (argc == 2 && !strcmp(argv[1], "harts")) {
++		int i, n = pool_broken ? 0 : start_pool();
++
++		printf("boot hart %ld, pool %d%s:", gd->arch.boot_hart, n, pool_broken ? " (broken)" : "");
++		for (i = 0; i < n; i++)
++			printf(" %lu/%ld", pool[i]->hartid, hart_status(pool[i]->hartid));
++		printf("\n");
++		return CMD_RET_SUCCESS;
++	}
++	if (argc != 5)
++		return CMD_RET_USAGE;
++	src = (u8 *)hextoul(argv[1], NULL);
++	srclen = hextoul(argv[2], NULL);
++	dst = (u8 *)hextoul(argv[3], NULL);
++	dstmax = hextoul(argv[4], NULL);
++	if (srclen >= 16 && *(const u32 *)src == DLZ_MAGIC) {
++		ret = expand_container(src, srclen, dst, dstmax, &expanded, &used);
++	} else {
++		size_t wsize = ZSTD_DCtxWorkspaceBound(), n;
++		void *workspace = malloc(wsize);
++		ZSTD_DCtx *ctx = workspace ? ZSTD_initDCtx(workspace, wsize) : NULL;
++
++		n = ctx ? ZSTD_decompressDCtx(ctx, dst, dstmax, src, srclen) : 0;
++		ret = !ctx || ZSTD_isError(n) ? -EIO : 0;
++		expanded = n;
++		free(workspace);
++	}
++	if (ret) {
++		printf("unzstd: failed (%d)\n", ret);
++		return CMD_RET_FAILURE;
++	}
++	printf("unzstd: %llu bytes on %d hart(s)\n", expanded, used);
++	env_set_hex("filesize", expanded);
++	return CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(unzstd, 5, 0, do_unzstd, "expand zstd data or a DLZ1 frame container",
++	   "srcaddr srcsize dstaddr dstsize\n"
++	   "unzstd harts - start the hart pool and list it");

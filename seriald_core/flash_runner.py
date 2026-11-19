@@ -1177,6 +1177,11 @@ class LocalFlashExecutor:
                     if diagnostic_id:
                         logging.getLogger(__name__).error('flash diagnostic %s operation=%s code=%s reason=%r',
                             diagnostic_id, operation, event.get('code'), diagnostic[:8192])
+                    if event.get('code') == 'loader-fsbl-timeout':
+                        from .flash_loaders import record_fsbl_timeout
+                        record_fsbl_timeout(binding)
+                        message = ('临时 FSBL 未进入下载环境，板上保存的 DDR 训练数据可能已失效。'
+                                   '请让板子重新进入下载模式后重试，下次会重新训练 DDR（约多 6 秒）')
                     if event.get('code') == 'nor-baseline-changed':
                         message = '板上 NOR 内容在备份后发生变化，尚未写入；请重新读取备份并核对。'
                     if event.get('code') == 'nor-read-failed':

@@ -5,11 +5,15 @@
       "protocol": "spacemit-ram-v1",
       "fsbl": {
         "file": "k3/FSBL.bin",
+        "sha256": "d56b966e3389616e55c2f32113866f29fae716776e264350fe8208d4ce6a2d38"
+      },
+      "fsbl_fallback": {
+        "file": "k3/FSBL-full.bin",
         "sha256": "cfeeeee18728ef34a2d257311440a1bab8723cb554079de77dcf514d1b2bfdb0"
       },
       "uboot": {
         "file": "k3/u-boot.itb",
-        "sha256": "1bc52e418044b4c772662ea890333afdb0663e71b654a67c0ea98c62fc2f7718"
+        "sha256": "216dc03232d958e9356b298016a345db80f2e8989e3b0ede8408851694ba8938"
       }
     },
     "k1": {

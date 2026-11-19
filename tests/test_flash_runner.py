@@ -482,6 +482,17 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertNotIn('host-secret', str(error.exception))
         self.assertNotIn('/private', str(error.exception))
 
+    def test_fsbl_timeout_marks_port_for_full_training_and_explains_retry(self):
+        from seriald_core import flash_loaders
+        binding = self.binding("print(json.dumps({'event':'error','code':'loader-fsbl-timeout',"
+                               "'message':'RAM FSBL did not reach its download stage'}))")
+        with mock.patch.dict(flash_loaders._FULL_TRAINING, clear=True):
+            with self.assertRaises(FlashRunnerError) as error:
+                self.runner.inspect(binding)
+            self.assertEqual(error.exception.code, 'loader-fsbl-timeout')
+            self.assertIn('重新进入下载模式', str(error.exception))
+            self.assertTrue(flash_loaders._full_training(binding))
+
     def test_required_verification_failure_keeps_completed_write_evidence(self):
         binding = self.binding("print(json.dumps({'event':'result','result':{'write_result':'completed',"
                                "'verify_result':'unavailable','confirmed_bytes':8192}}))")

@@ -12,3 +12,6 @@ native/freerdp/** text eol=lf
 
 # Binary build inputs and their notices are authenticated byte for byte.
 packaging/flash-components/** -text
+# Loader source patches are recorded by SHA-256 in the RAM loader build info.
+packaging/flash-loaders/patches/** -text -whitespace
+packaging/flash-components/common/flash-loaders/patches/** -whitespace

@@ -3,18 +3,18 @@
   "platform": "linux-amd64",
   "executor": {
     "path": "decklab-flash",
-    "sha256": "b5d1f693ccd6561922acdea7afcf2980a504b1d94c94dc0f3d22f4c2ae0b4267"
+    "sha256": "7e9e087a30ac4123bf831dc4c4ee6fb7d3d1b3968b9286abfe0cfc46dbf14d97"
   },
   "loaders": {
     "path": "flash-loaders",
     "files": {
       "BUILD-INFO.txt": {
-        "sha256": "868dbba820ae117762e4ea353093ba0589b996342dbb764bc31a1cc5db567dca",
-        "size": 474
+        "sha256": "4781823826170993d3f2c2cab0cd5013da5db6ee9991d92441fd7305a7c1a434",
+        "size": 1876
       },
       "CONFIGURATION.txt": {
-        "sha256": "0954364df188ea875e313d05d5dc076b3902e39448fb448ae8d2f28861b6362b",
-        "size": 56170
+        "sha256": "1bd57f45c2a8959b017838e141e576742e37af6b91365bdcba006075c2bc56c1",
+        "size": 56184
       },
       "COPYING.txt": {
         "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
@@ -25,12 +25,12 @@
         "size": 110
       },
       "SAFETY-CHECK.txt": {
-        "sha256": "c074d6647c775c7c0c07851616e71c31a1f32b0d3debbe888659cd5b946a9f3b",
-        "size": 170
+        "sha256": "8f934f711423d0a0e8ed0c0ea1bae9bb200388c069360e8bd31356de58823085",
+        "size": 225
       },
       "SOURCE.txt": {
-        "sha256": "8b1d8a3c6c04786297fc3397d1e45728fad7650ff3f8df0faf558885534c7d1e",
-        "size": 582
+        "sha256": "6c9322bd431e494c33755a05ee17c1ad6b330995f0a2df4d5c71765518f88c54",
+        "size": 737
       },
       "k1/BUILD-INFO.txt": {
         "sha256": "18592e6c43631962fb47ca18588bd8a7b019cde6e7a80ed87b4a4aaa17522982",
@@ -48,17 +48,41 @@
         "sha256": "28e04e5cd73b5fc7e342b41cdcb2d3c5105aa2bf47558c460a65061c406e4522",
         "size": 1982070
       },
-      "k3/FSBL.bin": {
+      "k3/FSBL-CONFIGURATION.txt": {
+        "sha256": "e061073d50ee3afc9e1c276347dbbec08bd50e579627bd0f6212d2c7515f64d5",
+        "size": 56640
+      },
+      "k3/FSBL-full.bin": {
         "sha256": "cfeeeee18728ef34a2d257311440a1bab8723cb554079de77dcf514d1b2bfdb0",
         "size": 465504
       },
+      "k3/FSBL.bin": {
+        "sha256": "d56b966e3389616e55c2f32113866f29fae716776e264350fe8208d4ce6a2d38",
+        "size": 459712
+      },
+      "k3/OPENSBI-LICENSE.txt": {
+        "sha256": "82d13fb1bf6bb162629deeea9eb9c117e74548d3b707e478967691fe79a68e21",
+        "size": 1396
+      },
+      "k3/SOURCE-OFFER.txt": {
+        "sha256": "c89151894105acaaa9bb19642d14eaede59d4f794ff6978b4e0782be793f07a6",
+        "size": 1089
+      },
       "k3/u-boot.itb": {
-        "sha256": "1bc52e418044b4c772662ea890333afdb0663e71b654a67c0ea98c62fc2f7718",
-        "size": 781614
+        "sha256": "216dc03232d958e9356b298016a345db80f2e8989e3b0ede8408851694ba8938",
+        "size": 1100829
       },
       "manifest.json": {
-        "sha256": "b7781339eab5fba1f16876f95a3df80eb547bd6cf842707c399fe267b805ad74",
-        "size": 709
+        "sha256": "8cbf2a8ed9f3d8892ef79c4dd262ee533758eb70c60d27bf142af2a7bf5993f4",
+        "size": 864
+      },
+      "patches/0001-k3-ram-parallel-unzstd-and-background-block-write.patch": {
+        "sha256": "35857f92b8f227b8b8f9985663a07dd9e2129dc875da9cdb1b6cb0d2693bc57f",
+        "size": 13181
+      },
+      "patches/fsbl-0001-k3-spl-reuse-saved-ddr-training-in-usb-mode.patch": {
+        "sha256": "5a96bffdef11ed3cd6ed4bc2682f9d6f10d83f4b7bfae4cd8fbc0e4114bc89db",
+        "size": 716
       }
     }
   },
@@ -66,7 +90,7 @@
     "path": "notices",
     "files": {
       "BUILD-INFO.txt": {
-        "sha256": "c581bfc5b5978243fad193f779a0061745ee7aa5c1cdafa7826b1716529fd714",
+        "sha256": "76ac3a8683bfab32f6c2164566dad6667d69e30d9a1a47122cecaf7064c39ebe",
         "size": 408
       },
       "Go-LICENSE": {
@@ -101,9 +125,17 @@
         "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
         "size": 11357
       },
+      "x-sys-LICENSE": {
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+        "size": 1453
+      },
       "yaml-v3-LICENSE": {
         "sha256": "d18f6323b71b0b768bb5e9616e36da390fbd39369a81807cca352de4e4e6aa0b",
         "size": 2151
+      },
+      "zstd-xxhash-LICENSE": {
+        "sha256": "f566a9f97bacdaf00d9f21dd991e81dc11201c4e016c86b470799429a1c9a79c",
+        "size": 1068
       }
     }
   }

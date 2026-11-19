@@ -1,0 +1,18 @@
+DeckLab 1.17.39 — K3 FSBL source offer
+
+The K3 FSBL.bin in this distribution was built from SpacemiT U-Boot SPL revision
+88206a912b449de51bca97104ba48fd73a7102d2 with ../patches/fsbl-0001-k3-spl-reuse-saved-ddr-training-in-usb-mode.patch,
+k3_defconfig and LOCALVERSION "-decklab-ram" (k3/FSBL-CONFIGURATION.txt).
+
+Under section 3(b) of the GNU General Public License, version 2, the
+DeckLab distributor offers any third party a complete machine-readable
+copy of the corresponding source code for this FSBL binary, including the
+modifications and the scripts used to control compilation and installation,
+under the GPL. The copy is provided free of charge. This offer is valid for
+at least three years after distribution of each copy of this binary.
+
+To request the source, open an issue at
+https://github.com/qianqiu-2020/decklab/issues
+and identify DeckLab 1.17.39 and the K3 FSBL. The GPL license is included
+in ../COPYING.txt. The RAM U-Boot source is published as stated in ../SOURCE.txt;
+its DeckLab patch is ../patches/0001-k3-ram-parallel-unzstd-and-background-block-write.patch.
