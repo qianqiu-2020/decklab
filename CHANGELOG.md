@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.17.32
+## 1.17.33
 
 - Linux amd64 和 Windows x64 安装包均内置 goflash 及 K1、K3 临时加载器。K1 对应源码可通过 [DeckLab Issues](https://github.com/qianqiu-2020/decklab/issues) 免费索取，详见包内 `flash-loaders/k1/SOURCE-OFFER.txt`。
 - 镜像商店按系统、版本和变体浏览，可复用已下载的镜像。支持提前准备镜像、从控制机目录导入，以及组合选择 Firmware 和 OS。

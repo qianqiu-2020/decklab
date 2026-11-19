@@ -41,7 +41,7 @@
         "size": 198208
       },
       "k1/SOURCE-OFFER.txt": {
-        "sha256": "e7e5d48bf8dca2551d5fc0dfe8395af885b6aa88cee079822176ca3cbecfbeba",
+        "sha256": "befee93c048671d42351d08ca1ab94b86a58828fa46060ae696507f5a20d7365",
         "size": 997
       },
       "k1/u-boot.itb": {
@@ -66,7 +66,7 @@
     "path": "notices",
     "files": {
       "BUILD-INFO.txt": {
-        "sha256": "deadd1f4ea7b00b60401d3900c73a42ec879556f2284c7e1812133a574a6750d",
+        "sha256": "c899a3982fe92988bc239b723b26afdcc72565978818f13d5eb8f4199345bcd5",
         "size": 258
       },
       "Go-LICENSE": {

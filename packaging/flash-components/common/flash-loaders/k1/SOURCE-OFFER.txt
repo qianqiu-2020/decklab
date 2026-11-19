@@ -1,4 +1,4 @@
-DeckLab 1.17.32 — K1 RAM loader source offer
+DeckLab 1.17.33 — K1 RAM loader source offer
 
 The K1 FSBL.bin and u-boot.itb in this distribution were built from
 U-Boot revision 4a312b002711317ccf8c0ab9abea1e5ebe029413.
@@ -15,5 +15,5 @@ copy of these binaries.
 
 To request the source, open an issue at
 https://github.com/qianqiu-2020/decklab/issues
-and identify DeckLab 1.17.32 and the K1 RAM loaders. The GPL license is
+and identify DeckLab 1.17.33 and the K1 RAM loaders. The GPL license is
 included in ../COPYING.txt. This offer concerns the K1 U-Boot materials.

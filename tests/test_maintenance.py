@@ -31,6 +31,7 @@ class MaintenanceTests(unittest.TestCase):
         os.utime(path, (self.now - days * 86400, self.now - days * 86400))
         return path
 
+    @unittest.skipIf(os.name == 'nt', 'Linux sysfs and udev filenames contain colons')
     def test_usb_serial_warnings_follow_driver_and_per_device_udev_match(self):
         usb, udev = self.root / 'usb', self.root / 'udev'
         usb.mkdir()
@@ -52,8 +53,12 @@ class MaintenanceTests(unittest.TestCase):
                 event.write('DRIVER=ch341\n')
             (usb / '2-2' / 'dev').unlink()
             self.assertEqual(usb_serial_warnings(usb, udev), [])
+
+    def test_windows_skips_linux_usb_serial_diagnostics(self):
+        usb = mock.Mock(spec=Path)
         with mock.patch('seriald_core.maintenance.sys.platform', 'win32'):
-            self.assertEqual(usb_serial_warnings(usb, udev), [])
+            self.assertEqual(usb_serial_warnings(usb, self.root), [])
+        usb.glob.assert_not_called()
 
     def test_disabled_policy_never_enumerates_or_deletes(self):
         maintenance = LogMaintenance(MaintenancePolicy())
