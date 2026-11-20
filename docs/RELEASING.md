@@ -21,6 +21,24 @@ git tag -a v1.14.0 -m "DeckLab 1.14.0"
 git push github v1.14.0
 ```
 
+### 单一 main
+
+仓库只保留一个长期分支 `main`，开发与发版都在其上进行，GitHub `main` 必须能
+快进到本地 `main`，不得强制推送。
+
+- 不建 `release/*`、`decklab-x.y.z` 等按版本命名的分支；发版就是在 `main` 的
+  提交上打 annotated 标签 `v版本号`（`git tag -a`），不用轻量标签。
+- 需要隔离的发布验收目录时使用 detached worktree，发版完成后立即删除：
+
+  ```sh
+  git worktree add --detach build/publish-1.14.0 v1.14.0
+  # 验收、上传附件……
+  git worktree remove build/publish-1.14.0
+  ```
+
+- 短期任务分支合入 `main` 后即删除。其他镜像 remote 同步 `main` 后逐个推送
+  新标签，不使用 `git push --tags`，本地归档标签不推送到任何 remote。
+
 标签推送触发 `Tagged packages`：amd64 在原生 Ubuntu 22.04 runner
 构建 MCP 运行时和 deb，Windows 任务构建安装包和便携 ZIP。两平台任务
 都通过后才汇总附件，验证版本、运行时架构、逐文件摘要、第三方清单与校验和，

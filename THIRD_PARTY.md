@@ -132,3 +132,10 @@ are provided with the reviewed build components. Installed `flash-loaders/SOURCE
 identifies the source archive and its SHA-256; the U-Boot license is preserved as
 `COPYING.txt`. Neither the application license nor the U-Boot license relabels the
 FSBL or USB-driver components. Each retains its original license and attribution.
+
+
+The K1 FSBL and U-Boot are from the same K1 U-Boot build. Each installer
+includes its build receipt, GPL license and written source offer at
+`flash-loaders/k1/SOURCE-OFFER.txt`. Any third party may request complete
+corresponding source free of charge through DeckLab Issues for at least
+three years after distribution of their copy.

@@ -19,7 +19,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.install_components import load
 
 
-def extract(archive, destination, platform):
+# Keep the reviewed desktop SDK, drivers and K3 materials from these archives.
+# A custom complete archive supplies its own flashing components.
+BASE_ARCHIVES = {
+    'linux-amd64': '804be4bc200ddefbc99a614e676ba829670100556d6da405bb3597cfb667127c',
+    'windows-amd64': '41389f7c9b17a1a0054b154aad27fc183f0454cd7fd289b410d27e16cf5ad08d',
+}
+
+
+def extract(archive, destination, platform, archive_sha256=None):
     destination = Path(destination)
     if destination.exists():
         raise ValueError('component destination already exists')
@@ -46,6 +54,11 @@ def extract(archive, destination, platform):
                     with source.open(entry) as stream, target.open('xb') as output:
                         shutil.copyfileobj(stream, output, 1024 * 1024)
         load(root / 'manifest.json', platform)
+        if archive_sha256 and archive_sha256 == BASE_ARCHIVES.get(platform):
+            components = Path(__file__).resolve().parents[1] / 'packaging/flash-components'
+            shutil.copytree(components / 'common', root, dirs_exist_ok=True)
+            shutil.copytree(components / platform, root, dirs_exist_ok=True)
+            load(root / 'manifest.json', platform)
         root.rename(destination)
 
 
@@ -69,7 +82,7 @@ def main():
                 digest.update(data); archive.write(data)
         if digest.hexdigest() != expected: raise ValueError('component archive checksum mismatch')
         archive.seek(0)
-        extract(archive, args.output or Path('build/install-components')/args.platform, args.platform)
+        extract(archive, args.output or Path('build/install-components')/args.platform, args.platform, expected)
     print('Complete installation inputs verified for ' + args.platform)
 
 

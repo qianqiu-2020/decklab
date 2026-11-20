@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "platform": "windows-amd64",
+  "executor": {
+    "path": "decklab-flash.exe",
+    "sha256": "9d3c717eab3f52907b3d540c285b7629b022c80196574f4b7a7b6cb84d9260b5"
+  },
+  "loaders": {
+    "path": "flash-loaders",
+    "files": {
+      "BUILD-INFO.txt": {
+        "sha256": "4781823826170993d3f2c2cab0cd5013da5db6ee9991d92441fd7305a7c1a434",
+        "size": 1876
+      },
+      "CONFIGURATION.txt": {
+        "sha256": "1bd57f45c2a8959b017838e141e576742e37af6b91365bdcba006075c2bc56c1",
+        "size": 56184
+      },
+      "COPYING.txt": {
+        "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "size": 18092
+      },
+      "RAM-ENV.txt": {
+        "sha256": "90e5414d0885c9ef30388a0b6f766f065a0a2b20cc14d6eb07d9927fc28081f8",
+        "size": 110
+      },
+      "SAFETY-CHECK.txt": {
+        "sha256": "8f934f711423d0a0e8ed0c0ea1bae9bb200388c069360e8bd31356de58823085",
+        "size": 225
+      },
+      "SOURCE.txt": {
+        "sha256": "6c9322bd431e494c33755a05ee17c1ad6b330995f0a2df4d5c71765518f88c54",
+        "size": 737
+      },
+      "k1/BUILD-INFO.txt": {
+        "sha256": "18592e6c43631962fb47ca18588bd8a7b019cde6e7a80ed87b4a4aaa17522982",
+        "size": 1048
+      },
+      "k1/FSBL.bin": {
+        "sha256": "9c04391720bbe729c48ebb9cce6043fa14e4147e05baf653203e2e91b91dc26b",
+        "size": 198208
+      },
+      "k1/SOURCE-OFFER.txt": {
+        "sha256": "befee93c048671d42351d08ca1ab94b86a58828fa46060ae696507f5a20d7365",
+        "size": 997
+      },
+      "k1/u-boot.itb": {
+        "sha256": "28e04e5cd73b5fc7e342b41cdcb2d3c5105aa2bf47558c460a65061c406e4522",
+        "size": 1982070
+      },
+      "k3/FSBL-CONFIGURATION.txt": {
+        "sha256": "e061073d50ee3afc9e1c276347dbbec08bd50e579627bd0f6212d2c7515f64d5",
+        "size": 56640
+      },
+      "k3/FSBL-full.bin": {
+        "sha256": "cfeeeee18728ef34a2d257311440a1bab8723cb554079de77dcf514d1b2bfdb0",
+        "size": 465504
+      },
+      "k3/FSBL.bin": {
+        "sha256": "d56b966e3389616e55c2f32113866f29fae716776e264350fe8208d4ce6a2d38",
+        "size": 459712
+      },
+      "k3/OPENSBI-LICENSE.txt": {
+        "sha256": "82d13fb1bf6bb162629deeea9eb9c117e74548d3b707e478967691fe79a68e21",
+        "size": 1396
+      },
+      "k3/SOURCE-OFFER.txt": {
+        "sha256": "c89151894105acaaa9bb19642d14eaede59d4f794ff6978b4e0782be793f07a6",
+        "size": 1089
+      },
+      "k3/u-boot.itb": {
+        "sha256": "216dc03232d958e9356b298016a345db80f2e8989e3b0ede8408851694ba8938",
+        "size": 1100829
+      },
+      "manifest.json": {
+        "sha256": "8cbf2a8ed9f3d8892ef79c4dd262ee533758eb70c60d27bf142af2a7bf5993f4",
+        "size": 864
+      },
+      "patches/0001-k3-ram-parallel-unzstd-and-background-block-write.patch": {
+        "sha256": "35857f92b8f227b8b8f9985663a07dd9e2129dc875da9cdb1b6cb0d2693bc57f",
+        "size": 13181
+      },
+      "patches/fsbl-0001-k3-spl-reuse-saved-ddr-training-in-usb-mode.patch": {
+        "sha256": "5a96bffdef11ed3cd6ed4bc2682f9d6f10d83f4b7bfae4cd8fbc0e4114bc89db",
+        "size": 716
+      }
+    }
+  },
+  "notices": {
+    "path": "notices",
+    "files": {
+      "BUILD-INFO.txt": {
+        "sha256": "eb38eef08044b4c866eef6690e29a923e5044bdf0e8490d9ae9278e6ee443110",
+        "size": 421
+      },
+      "Go-LICENSE": {
+        "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+        "size": 1479
+      },
+      "Go-PATENTS": {
+        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc",
+        "size": 1303
+      },
+      "PRIVATE-COMPONENT.txt": {
+        "sha256": "e74bd6070800b5823ac7dda6ab7de8cc54e391f8b93e34d1c277797147f1e2b8",
+        "size": 266
+      },
+      "compress-LICENSE": {
+        "sha256": "0d9e582ee4bff57bf1189c9e514e6da7ce277f9cd3bc2d488b22fbb39a6d87cf",
+        "size": 16733
+      },
+      "libusb-COPYING.txt": {
+        "sha256": "5df07007198989c622f5d41de8d703e7bef3d0e79d62e24332ee739a452af62a",
+        "size": 26436
+      },
+      "libusb-SOURCE.txt": {
+        "sha256": "00d5e320245857c09eae9c2af70ae73c1d5083d6df9cebad9d4fb03cff10a07a",
+        "size": 231
+      },
+      "pgzip-LICENSE": {
+        "sha256": "7709cc030f078b17809884f92f33a2016944e1180312dc3f1371b02313d313ed",
+        "size": 1078
+      },
+      "purego-LICENSE": {
+        "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+        "size": 11357
+      },
+      "x-sys-LICENSE": {
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+        "size": 1453
+      },
+      "yaml-v3-LICENSE": {
+        "sha256": "d18f6323b71b0b768bb5e9616e36da390fbd39369a81807cca352de4e4e6aa0b",
+        "size": 2151
+      },
+      "zstd-xxhash-LICENSE": {
+        "sha256": "f566a9f97bacdaf00d9f21dd991e81dc11201c4e016c86b470799429a1c9a79c",
+        "size": 1068
+      }
+    }
+  },
+  "driver": {
+    "path": "usb-driver",
+    "files": {
+      "WinUSB/amd64/WdfCoInstaller01009.dll": {
+        "sha256": "aecf5115a3b310084cf1757d2f8468c78057921b626fed02a498999f48ec7357",
+        "size": 1739528
+      },
+      "WinUSB/amd64/winusbcoinstaller2.dll": {
+        "sha256": "ad600b1b936be4d52e195e6e42970f760e616117791fbc21e7c8e2fed492fc62",
+        "size": 1020672
+      },
+      "WinUSB/spacemit_amd64.cat": {
+        "sha256": "ffa122dd8d72115da17bde6f2d0f19c55e0916f1bbea88365582bb281a7be9cf",
+        "size": 10183
+      },
+      "driverinstall.exe": {
+        "sha256": "a0edab718aac6a87cd408241dfd340abdeac66bd6bdbc2805ef23e99392c143a",
+        "size": 7213120
+      },
+      "spacemit_usb.inf": {
+        "sha256": "4f39d0ea04b9a5372f3fce59f259d146471bd6dddd0de499044531a009a5d35e",
+        "size": 4965
+      }
+    }
+  }
+}

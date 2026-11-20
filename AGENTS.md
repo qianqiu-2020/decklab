@@ -31,6 +31,10 @@ Python tests use `unittest` and `unittest.mock`, with files named `tests/test_*.
 
 History uses concise, action-oriented Chinese subjects prefixed with `seriald:` or `FIXES:`. Follow those scopes where appropriate. PRs should describe the problem, resulting behavior, and validation commands/results; link relevant issues and include screenshots for visible UI changes.
 
+## Branches & Releases
+
+Keep a single long-lived branch, `main`; GitHub `main` must always fast-forward to it and is never force-pushed. Do not create `release/*` or version-named branches (such as `decklab-1.17.40`). A release is an annotated `v<version>` tag on a `main` commit, following [docs/RELEASING.md](docs/RELEASING.md). For isolated release acceptance use `git worktree add --detach` and remove the worktree once the release is published. Delete short-lived task branches after they merge. Push tags one by one, never with `--tags`; local archive tags stay local.
+
 ## Serial Safety & Configuration
 
 Keep exactly one reader per port; writes use separate write-only descriptors. Configure termios only when opening the collector, never from writers. Do not start another collector against active devices. `SERIALD_BASE` selects runtime storage; `SERIALD_STATIC` selects static assets. Recovery helpers must remain root-owned and non-writable by the service account.

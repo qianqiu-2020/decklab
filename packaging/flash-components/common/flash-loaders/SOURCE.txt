@@ -1,0 +1,7 @@
+U-Boot is distributed under GPL-2.0; COPYING.txt retains its license.
+Exact corresponding source archive: https://github.com/qianqiu-2020/decklab/releases/download/components-1.14.0/uboot-source-d9bce64dfcd2.tar.gz
+SHA-256: d1c3734ddc07ffc57d42c58f859a05f5fcf8840db44ef34da0692ecf66443c66
+Apply patches/0001-*.patch, then use the provided configuration and RAM-ENV.txt with the DeckLab RAM build tool.
+k3/FSBL-full.bin is a separately authorized vendor binary; it is not relabeled as U-Boot GPL source.
+k3/FSBL.bin source: see k3/SOURCE-OFFER.txt. OpenSBI inside u-boot.itb: BSD-2-Clause, see k3/OPENSBI-LICENSE.txt.
+Signing private keys and unrelated private-key fixtures are excluded; they are not required for the unsigned RAM build.

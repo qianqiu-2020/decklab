@@ -59,8 +59,9 @@
 - 从串口设备打开刷机面板时，优先选择已配对的 USB 口；多块板同时处于下载模式时无需再按插口号区分。
 - 从串口设备打开 USB 刷写任务时，按任务自身的 USB 目标解析镜像，不再报“flashing is not configured for this board”。包解析失败后不再每秒重试，刷机界面不再闪烁。
 
-## 1.17.32
+## 1.17.33
 
+- Linux amd64 和 Windows x64 安装包均内置 goflash 及 K1、K3 临时加载器。K1 对应源码可通过 [DeckLab Issues](https://github.com/qianqiu-2020/decklab/issues) 免费索取，详见包内 `flash-loaders/k1/SOURCE-OFFER.txt`。
 - 镜像商店按系统、版本和变体浏览，可复用已下载的镜像。支持提前准备镜像、从控制机目录导入，以及组合选择 Firmware 和 OS。
 - K1、K3 系统盘整包刷写按镜像重建 GPT。预览可对照包内布局、板上布局和预计写入范围，刷写时显示当前分区和速率。
 - 同一 USB 连接上确认整包范围后，执行阶段直接访问已选目标。K3 的后续分区复用刚读回的新 GPT。
