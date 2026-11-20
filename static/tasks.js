@@ -97,16 +97,20 @@
         detail.textContent = task.actor + ' · ' + options.age(task.created)
           + (task.cancel_requested ? ' · 已请求取消' : '');
         main.appendChild(title); main.appendChild(detail);
+        var reported = task.progress || {};
         if (active(task)) {
           var progress = document.createElement('progress'); progress.className = 'task-progress';
-          progress.max = Math.max(1, task.progress.total || 1); progress.value = task.progress.done || 0;
+          if (reported.total > 0) {
+            progress.max = reported.total;
+            progress.value = reported.done || 0;
+          }
           progress.setAttribute('aria-label', '任务进度'); main.appendChild(progress);
         }
         var output = document.createElement('code');
         output.textContent = task.error || task.result && (task.result.artifact ? task.result.artifact.name + ' · ' + task.result.artifact.size + ' B'
           : task.result.sid ? '会话 ' + task.result.sid
           : task.result.serial ? 'SN ' + task.result.serial
-          : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || task.progress.phase || '';
+          : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || reported.phase || '';
         main.appendChild(output); row.appendChild(main);
         if (['flash','flash-inspect','flash-preview'].includes(task.kind) && options.openFlash) {
           var inspect = document.createElement('button'); inspect.type = 'button'; inspect.textContent = '查看刷机';
@@ -114,7 +118,8 @@
           row.appendChild(inspect);
         }
         if (active(task)) {
-          var cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '取消';
+          var cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = task.cancel_requested ? '已请求取消' : '取消';
+          cancel.disabled = !!task.cancel_requested;
           cancel.addEventListener('click', function () {
             if (!sameSelection(selected)) return;
             cancel.disabled = true;
@@ -158,6 +163,7 @@
         box.appendChild(row);
       });
       if (!tasks.length) box.textContent = '尚无后台任务；任务结果在刷新或重新打开页面后仍可查看。';
+      $('task-pager').hidden = offset === 0 && !more;
       $('task-prev').disabled = offset === 0;
       $('task-next').disabled = !more;
       $('task-page').textContent = '第 ' + (offset / 10 + 1) + ' 页';
@@ -167,6 +173,7 @@
       var ctx = options.getView(), selected = scope(ctx);
       if (!ctx) return;
       if (selection !== selected) {
+        $('task-pager').hidden = true;
         selection = selected; offset = 0; $('d-tasks').textContent = '';
         $('task-status').textContent = '正在读取任务…';
         $('task-prev').disabled = true; $('task-next').disabled = true; $('task-page').textContent = '';

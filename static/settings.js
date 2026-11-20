@@ -209,6 +209,7 @@
       el('p', '服务端设置由管理员共享。设备标签、探测覆盖和已验证 SSH 密码仍在各设备页面管理。左侧排序与语言只影响当前浏览器。', dialog);
       el('p', '内嵌 JSON 文档优先于文件路径；修改不会执行硬件命令。数据目录切换不会搬迁已有档案。', dialog);
       var body = el('div', null, dialog); body.className = 'settings-body';
+      button(body, '设备快捷键', function () { UI.byId('b-shortcuts').click(); });
       groups.forEach(function (group) {
         var section = el('details', null, body); section.open = group === groups[0];
         el('summary', group[0], section);

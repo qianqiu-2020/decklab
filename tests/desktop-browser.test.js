@@ -160,6 +160,13 @@ let chrome, ws;
   assert.ok(inputs.some(e=>e.type==='pointer' && e.buttons===0));
   assert.deepEqual(inputs.filter(e=>e.type==='key').map(e=>[e.code,e.down]), [['ControlLeft',true],['KeyA',true],['KeyA',false],['ControlLeft',false]]);
   assert.ok(inputs.some(e=>e.type==='wheel' && e.steps===3));
+  for (const type of ['keyDown', 'keyUp']) {
+    await rpc('Input.dispatchKeyEvent', {type, key:'Meta', code:'MetaLeft', location:1, windowsVirtualKeyCode:91});
+  }
+  await evaluate('document.getElementById("desktop-super").click()');
+  await until('fixture.sent.filter(m=>m.event?.code==="MetaLeft").length===4','one Win key press/release from the keyboard and one from the toolbar');
+  assert.deepEqual(await evaluate('fixture.sent.filter(m=>m.event?.code==="MetaLeft").map(m=>[m.event.keysym,m.event.down])'),
+    [[0xffeb,true],[0xffeb,false],[0xffeb,true],[0xffeb,false]]);
   await evaluate('fixture.streams.at(-1).emit("background ssh\\r\\n"); window.dispatchEvent(new Event("resize"))');
   await rpc('Emulation.setDeviceMetricsOverride', {width: 1280, height: 900, deviceScaleFactor: 1, mobile: false});
   await delay(700);

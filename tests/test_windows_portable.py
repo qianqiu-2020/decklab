@@ -124,6 +124,66 @@ class WindowsPortableTests(unittest.TestCase):
             self.assertIsNone(device.fd)
             handle.close.assert_called_once()
 
+    def test_console_close_cancels_pending_read_and_releases_com_handle(self):
+        """Closing the window must free the COM port like a normal close (CancelIoEx + CloseHandle)."""
+        with tempfile.TemporaryDirectory() as root, \
+                mock.patch.object(device_module, 'LOG_ROOT', root), \
+                mock.patch.object(windows_manager.list_ports, 'comports', return_value=[]):
+            manager = windows_manager.WindowsManager()
+            device = device_module.Device('usb-1-4.2-UART', 'COM7', manager)
+            device.identity, device.present = (1, 2, 3), True
+            manager.devices[device.by_path] = device
+            pending, cancelled = threading.Event(), threading.Event()
+            handle = mock.Mock(in_waiting=0, is_open=True)
+            def read(_):
+                pending.set()
+                cancelled.wait(5)  # an overlapped ReadFile blocked until CancelIoEx
+                return b''
+            handle.read.side_effect = read
+            handle.cancel_read.side_effect = cancelled.set
+            with mock.patch.object(manager, '_matches', return_value=True), \
+                    mock.patch.object(windows_manager.serial, 'Serial', return_value=handle):
+                device.thread = threading.Thread(target=manager._capture, args=(device,), daemon=True)
+                device.thread.start()
+                self.assertTrue(pending.wait(2))
+                self.assertEqual(manager.release_ports(2), 1)
+            device.thread.join(2)
+            self.assertFalse(device.thread.is_alive())
+            handle.cancel_read.assert_called()
+            handle.close.assert_called_once()
+            self.assertIsNone(device.fd)
+            self.assertTrue(manager.stopping.is_set())
+
+    def test_stuck_reader_is_closed_directly_after_the_budget(self):
+        manager = windows_manager.WindowsManager()
+        device = device_module.Device('usb-1-4.2-UART', 'COM7', manager)
+        device.present, device.fd = True, mock.Mock()
+        device.thread = mock.Mock()
+        handle = device.fd
+        manager.devices[device.by_path] = device
+        with mock.patch.object(device, 'close_log'):
+            manager.release_ports(0)
+        handle.cancel_read.assert_called_once()
+        handle.close.assert_called_once()
+        self.assertIsNone(device.fd)
+
+    def test_console_events_release_ports_but_ctrl_c_keeps_python_shutdown(self):
+        from seriald_core import console_close_windows as close
+        calls = []
+        for event in (close.CTRL_CLOSE_EVENT, close.CTRL_BREAK_EVENT, close.CTRL_LOGOFF_EVENT, close.CTRL_SHUTDOWN_EVENT):
+            self.assertTrue(close.release_on(event, lambda budget: calls.append(budget)))
+        self.assertFalse(close.release_on(close.CTRL_C_EVENT, lambda budget: calls.append('ctrl-c')))
+        self.assertEqual(calls, [close.RELEASE_BUDGET] * 4)
+        stopped = threading.Event()
+        self.assertTrue(close.release_on(close.CTRL_CLOSE_EVENT, lambda budget: None, stopped.set))
+        self.assertTrue(stopped.wait(1))
+        kernel = mock.Mock()
+        kernel.SetConsoleCtrlHandler.return_value = 1
+        self.assertTrue(close.install(lambda budget: None, kernel32=kernel))
+        callback, add = kernel.SetConsoleCtrlHandler.call_args[0]
+        self.assertEqual(add, 1)
+        self.assertEqual(callback(close.CTRL_C_EVENT), 0)
+
     def test_quiet_com_port_removed_is_closed_for_rediscovery(self):
         manager = windows_manager.WindowsManager()
         device = device_module.Device('usb-1-4.2-UART', 'COM7', manager)

@@ -244,7 +244,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     public_agent_files = frozenset(('/serialctl.py', '/seriald_mcp.py', '/requirements-mcp.txt',
                                    '/pyproject.toml', '/skills/seriald-board/SKILL.md'))
     agent_denied_posts = frozenset(('/api/label', '/api/switch-mode', '/api/rescue',
-                                    '/api/ssh-enable', '/api/session-takeover', '/api/probe-settings', '/api/flash-recovery'))
+                                    '/api/ssh-enable', '/api/session-takeover', '/api/probe-settings', '/api/flash-recovery',
+                                    '/api/flash-stream', '/api/flash-calibrate'))
 
     def guess_type(self, path):
         route = urlparse(self.path).path
@@ -721,6 +722,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     devices_payload = json.loads(data)
                 except ValueError:
                     return self._json(502, {'error': 'collector returned invalid device list'})
+                devices_payload.pop('usb_serial_warnings', None)
                 devices_payload['devices'] = [item for item in devices_payload.get('devices', [])
                     if (item.get('serial') == grant['serial'] if grant['scope'] == 'device' else
                         item.get('connection_id') == grant['connection_id'] and item.get('alive') is True)]

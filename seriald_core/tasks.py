@@ -339,13 +339,20 @@ class TaskStore:
         if state is not None and state not in ('running', 'completed', 'failed', 'cancelled'):
             raise TaskError('invalid task state')
         if progress is not None:
-            if not isinstance(progress, dict) or set(progress) - {'done', 'total', 'phase'}:
+            if not isinstance(progress, dict):
                 raise TaskError('invalid task progress')
-            for name in ('done', 'total'):
+            counts, labels = {'done', 'total'}, {'phase'}
+            if progress.get('phase') == 'writing':
+                counts.update(('partition_done', 'partition_total', 'bytes_per_second'))
+                labels.update(('component', 'storage', 'partition'))
+            if set(progress) - counts - labels:
+                raise TaskError('invalid task progress')
+            for name in counts:
                 if name in progress and (type(progress[name]) is not int or progress[name] < 0):
                     raise TaskError('invalid task progress count')
-            if 'phase' in progress and (not isinstance(progress['phase'], str) or len(progress['phase']) > 160):
-                raise TaskError('invalid task phase')
+            for name in labels:
+                if name in progress and (not isinstance(progress[name], str) or len(progress[name]) > 160):
+                    raise TaskError('invalid task progress label')
         if outcome is not None and outcome not in OUTCOMES:
             raise TaskError('invalid physical outcome')
         if isinstance(result, dict) and _OUTCOME_FIELD in result:
@@ -455,9 +462,9 @@ class TaskContext:
     def retain_cleanup_failure(self, serial):
         self.store.retain_cleanup_failure(self.id, serial)
 
-    def progress(self, done, total, phase=''):
+    def progress(self, done, total, phase='', **details):
         self.check()
-        self.store.update(self.id, progress={'done': done, 'total': total, 'phase': phase})
+        self.store.update(self.id, progress=dict(details, done=done, total=total, phase=phase))
 
     def on_cancel(self, hook):
         with self._lock:

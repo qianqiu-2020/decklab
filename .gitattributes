@@ -9,3 +9,5 @@ vendor/novnc/** -text -whitespace
 vendor/python/** -text
 # The prepared desktop SDK records these source bytes on both build hosts.
 native/freerdp/** text eol=lf
+# Loader source patches are recorded by SHA-256 in the RAM loader build info.
+packaging/flash-loaders/patches/** -text -whitespace

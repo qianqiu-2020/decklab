@@ -84,6 +84,37 @@ class FlashLoaderTests(unittest.TestCase):
                 with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}), self.assertRaises(TaskError):
                     prepare_materials(SimpleNamespace(profile_data={'chip_family': family}), workspace, lambda: None)
 
+    def test_fsbl_timeout_switches_that_port_to_the_full_training_fallback(self):
+        from seriald_core import flash_loaders
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.bundle(root / 'bundle')
+            (manifest.parent / 'full.bin').write_bytes(b'full training FSBL')
+            document = json.loads(manifest.read_text())
+            document['families']['k3']['fsbl_fallback'] = {
+                'file': 'full.bin', 'sha256': hashlib.sha256(b'full training FSBL').hexdigest()}
+            manifest.write_text(json.dumps(document))
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            board = SimpleNamespace(profile_data={'chip_family': 'k3'}, device={'port_path': [1, 8, 2]})
+            other = SimpleNamespace(profile_data={'chip_family': 'k3'}, device={'port_path': [1, 8, 3]})
+            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}), \
+                    mock.patch.dict(flash_loaders._FULL_TRAINING, clear=True):
+                quick = prepare_materials(board, workspace, lambda: None)
+                self.assertEqual(Path(quick['fsbl']['path']).read_bytes(), b'RAM only fsbl')
+                self.assertNotIn('fsbl_variant', quick)
+                flash_loaders.record_fsbl_timeout(board)
+                full = prepare_materials(board, workspace, lambda: None)
+                self.assertEqual(full['fsbl_variant'], 'full-training')
+                self.assertEqual(Path(full['fsbl']['path']).read_bytes(), b'full training FSBL')
+                self.assertEqual(Path(full['uboot']['path']).read_bytes(), b'RAM only uboot')
+                # Another port keeps the quick FSBL; the quick cache stays valid.
+                self.assertEqual(Path(prepare_materials(other, workspace, lambda: None)['fsbl']['path']).read_bytes(),
+                                 b'RAM only fsbl')
+                with mock.patch.object(flash_loaders.time, 'monotonic',
+                                       return_value=flash_loaders.time.monotonic() + 2 * flash_loaders._FULL_TRAINING_SECONDS):
+                    self.assertNotIn('fsbl_variant', prepare_materials(board, workspace, lambda: None))
+
     def test_missing_materials_fail_explicitly_and_do_not_select_any_payload(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': directory + '/missing.json'}):
             with self.assertRaisesRegex(TaskError, '预备刷机环境'):

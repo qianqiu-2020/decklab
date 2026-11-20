@@ -11,7 +11,7 @@
 已经建立的 SoC 身份会优先匹配，避免固件随后修改上报编号而新建另一份档案。
 
 API 的 `serial` 是当前身份编号；`reported_serial` 保留固件原值，`serial_source` 表示
-`eeprom-onie`、`uboot-injected`、`device-tree`、`soc-sysfs` 或 `boot-marker`，`identity_status` 区分 `confirmed` 与
+`eeprom-onie`、`uboot-injected`、`usb-link`、`device-tree`、`soc-sysfs` 或 `boot-marker`，`identity_status` 区分 `confirmed` 与
 `provisional`。网页详情展示来源和状态。重复保护作用于所有身份来源。
 
 普通识别只读取内核属性和已有标记，不创建文件、不访问物理内存，也不调整时钟、复位、内核或 eFuse 内容。
@@ -22,6 +22,25 @@ ONIE `0x23` 是跨内核的规范板卡身份。upstream 内核优先从
 格式猜测。未知固件来源仍为候选身份。
 没有永久编号时按 USB by-path 摘要显示 `unprovisioned-…`，日志分连接暂存到
 `logs/_unprovisioned/<path-hash>/<connection-id>/`，避免同一插口先后接板时静默合并。
+
+## USB 刷机线配对串口
+
+板子进入下载模式后，检测 USB 设备时执行器先发一条只读查询
+`getvar:decklab-link-<16 位随机十六进制>`。SpacemiT K1/K3 的 BootROM 会在串口打印
+`fastboot_handle_command: <变量名>`，U-Boot 的 Fastboot 打印 `WARNING: unknown variable: <变量名>`，
+所以回显这个暗号的串口，就是接在同一块板上的那根线。全程不改固件和 U-Boot，不往串口写字节，也不靠时间先后推测。
+暗号只用一次，回显在单根串口上才算证据：
+
+| 串口身份 | USB 读到的编号 | 结果 |
+|---|---|---|
+| 已识别 A | 无（BootROM） | USB 口标为 A 的刷机线（`linked`），刷机身份仍按 USB 一侧规则 |
+| 未识别 | B（EEPROM / Fastboot） | 串口绑定到 B，来源记为 `usb-link`；已有档案沿用原标签和原来源 |
+| 未识别 | 无 | 只记配对（`paired`）；同一任务的临时 U-Boot 读到 EEPROM 编号后再绑定串口 |
+| 已识别 A | B（与 A 不同） | 只报告 `mismatch`，不改绑；换板仍需先点“准备换板” |
+| 多根串口回显 | 任意 | `ambiguous`，不绑定，提示检查接线 |
+
+USB 重新枚举后配对作废，再次检测时重发新暗号。任务自己完成并核实过的 BootROM → 临时 U-Boot
+切换会保留配对。配对状态由 `/api/flash-target` 与 `/api/flash-discover` 的 `console_link` 字段返回。
 
 ## /boot 软件标记兜底
 

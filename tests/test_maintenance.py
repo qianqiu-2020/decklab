@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 from seriald_core.device import Device
-from seriald_core.maintenance import MaintenancePolicy, LogMaintenance, disk_status, diagnostic_summary
+from seriald_core.maintenance import MaintenancePolicy, LogMaintenance, disk_status, diagnostic_summary, usb_serial_warnings
 
 
 class MaintenanceTests(unittest.TestCase):
@@ -30,6 +30,30 @@ class MaintenanceTests(unittest.TestCase):
         path.write_text('private board output\n')
         os.utime(path, (self.now - days * 86400, self.now - days * 86400))
         return path
+
+    def test_usb_serial_warnings_follow_driver_and_per_device_udev_match(self):
+        usb, udev = self.root / 'usb', self.root / 'udev'
+        usb.mkdir()
+        udev.mkdir()
+        (udev / 'c189:7').write_text('E:BRLTTY_BRAILLE_DRIVER=bm\n')
+        for port, dev, product, driver in [('2-1', '189:7', '1a86/7523/1', ''),
+                                           ('2-2', '189:8', '403/6001/1', 'DRIVER=usbfs'),
+                                           ('2-3', '189:9', '123/456/1', '')]:
+            (usb / port).mkdir()
+            (usb / port / 'dev').write_text(dev)
+            interface = usb / (port + ':1.0')
+            interface.mkdir()
+            (interface / 'uevent').write_text('PRODUCT=' + product + '\n' + driver)
+        with mock.patch('seriald_core.maintenance.sys.platform', 'linux'):
+            self.assertEqual(usb_serial_warnings(usb, udev), [
+                {'port': '2-1', 'chip': 'CH340', 'brltty_rule': True},
+                {'port': '2-2', 'chip': 'FTDI FT232', 'brltty_rule': False}])
+            with (usb / '2-1:1.0' / 'uevent').open('a') as event:
+                event.write('DRIVER=ch341\n')
+            (usb / '2-2' / 'dev').unlink()
+            self.assertEqual(usb_serial_warnings(usb, udev), [])
+        with mock.patch('seriald_core.maintenance.sys.platform', 'win32'):
+            self.assertEqual(usb_serial_warnings(usb, udev), [])
 
     def test_disabled_policy_never_enumerates_or_deletes(self):
         maintenance = LogMaintenance(MaintenancePolicy())

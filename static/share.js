@@ -137,7 +137,10 @@
       catch (_) { create.disabled = true; }
       if (!mcpEnabled) create.disabled = true;
     }
-    if (creating) create.disabled = true;
+    create.hidden = !!instructions;
+    copyButton.hidden = !instructions;
+    output.hidden = !output.value;
+    if (creating || instructions) create.disabled = true;
   }
   function baseUrl() {
     var url = new URL(address.value.trim());
@@ -262,6 +265,12 @@
                 headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: grant.id }) });
               var result = await response.json();
               if (!response.ok) throw new Error(result.error || '撤销失败');
+              if (instructions && instructions.grant.id === grant.id) {
+                instructions = null;
+                output.value = '';
+                copyButton.disabled = true;
+                updateHint();
+              }
               agentStatus.textContent = result.sessions_closed
                 ? '授权已撤销，相关 SSH 会话已关闭'
                 : '授权已撤销；若 collector 暂不可用，请稍后关闭遗留 SSH 会话';
@@ -297,6 +306,7 @@
   scope.addEventListener('change', function () {
     if (creating) scope.value = creatingScope;
     else {
+      agentStatus.textContent = '';
       instructions = null;
       output.value = '';
       copyButton.disabled = true;
@@ -351,6 +361,7 @@
       if (!response.ok || !result.token) throw new Error(result.error || '授权失败');
       instructions = { url: url, token: result.token, grant: result.grant, board: board };
       renderInstructions();
+      updateHint();
       if (output.value) {
         try {
           await copy(output.value, function () { return version === dialogVersion && dialog.open; });
@@ -381,6 +392,7 @@
   });
 
   async function sharePage(source) {
+    var board = source === deviceShare ? selectedDevice() : null;
     shareButtons.forEach(function (element) { element.disabled = true; });
     shareStatus('正在创建分享链接…');
     try {
@@ -393,10 +405,7 @@
         if (!response.ok || !result.path) throw new Error(result.error || '创建失败');
         url = new URL(result.path, lan);
       }
-      if (source === deviceShare) {
-        var board = selectedDevice();
-        if (board) url.hash = 'device=' + encodeURIComponent(board.serial || board.key);
-      }
+      if (board) url.hash = 'device=' + encodeURIComponent(board.serial || board.key);
       var copied = openAccess ? '局域网链接已复制' : '链接已复制，24 小时有效';
       try { await copy(url.href); shareStatus(copied); }
       catch (_) {

@@ -69,6 +69,47 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(member.read_text(),content)
             self.assertTrue((directory/'SHA256SUMS').read_text().startswith(hashlib.sha256(content.encode()).hexdigest()))
 
+    def test_choose_table_uses_sealed_geometry_and_keeps_original_directory(self):
+        from seriald_core.image_tables import describe
+        from seriald_core.image_preparation import for_manager
+        with integration.protected_flashing() as f, tempfile.TemporaryDirectory() as tmp:
+            root = self.directory(tmp)
+            (root / 'fastboot.yaml').write_text(json.dumps({'support':['k1x','k1pro']}))
+            default = 'partition_universal.json'
+            alternate = 'partition_alternate.json'
+            original = (root / default).read_bytes()
+            (root / alternate).write_bytes(original.replace(b'1M', b'2M'))
+            service = ImageWorkspaces(f.manager)
+            row = service.register(str(root))['artifact']
+            runner = LocalFlashExecutor(Path(f.manager.artifacts.root).parent / 'flashing')
+            runner.supports_image_preparation = False
+            f.manager.flash_executor = runner
+            info = {'root_path':str(root), 'files':[], 'catalogue':[]}
+            for file in root.iterdir():
+                data = file.read_bytes()
+                info['files'].append({'name':file.name, 'size':len(data), 'sha256':hashlib.sha256(data).hexdigest()})
+            for name in (default, alternate):
+                info['catalogue'].append({'name':name, 'format':'gpt', 'selected':name == default,
+                    'partitions':[{'name':'rootfs','payload':'rootfs.ext4','available':True}]})
+            describe(info)
+            self.assertEqual(info['chip_families'], ['k1'])
+            part = info['catalogue'][1]['partitions'][0]
+            self.assertEqual((part['offset'], part['remaining'], part['payload_size']), (2**21, True, (root / 'rootfs.ext4').stat().st_size))
+            body = {'action':'select-table','id':row['id'],'table_id':row['id'],'table':alternate,'path':default}
+            latest = {'state':'completed','result':{'preparation':info}}
+            with mock.patch.object(for_manager(f.manager), 'latest', return_value=latest):
+                self.assertEqual(service.request(dict(body,table='partition_flash.json')).status,400)
+                response = service.request(body)
+                self.assertEqual(response.status,202,response.payload)
+                final = integration.FlashHTTPIntegrationTests().terminal(f,response.payload['task']['id'])
+            self.assertEqual(final['state'],'completed',final)
+            updated = service.locate(final['result']['artifact']['id'])[2]
+            sidecar = origin_path(f.manager.artifacts._path(final['result']['artifact']['id'], '.bin'))
+            self.assertEqual(json.loads(sidecar.read_bytes())['table_choice'],
+                             {'name':alternate,'destination':default,'original_id':row['id']})
+            self.assertEqual((root / default).read_bytes(),original)
+            self.assertEqual((updated / default).read_bytes(),(root / alternate).read_bytes())
+
     def test_archive_cache_is_copied_before_web_edit_and_original_stays_unchanged(self):
         with integration.protected_flashing() as f,tempfile.TemporaryDirectory() as root:
             helper=integration.FlashHTTPIntegrationTests();row=helper.image(f)

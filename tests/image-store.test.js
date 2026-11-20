@@ -47,6 +47,14 @@ function setup(request, storage=new Map()){
   local.buttons().find(n=>n.textContent==='删除').fire();assert.equal(deleted,0);
   local.consent(true);local.buttons().find(n=>n.textContent==='删除').fire();await flush();assert.equal(deleted,1);
   local.buttons().find(n=>n.textContent==='使用').fire();assert.equal(selected,1);assert.equal(local.ids['image-store-dialog'].open,false);
+  const fwPicker=setup(()=>Promise.resolve({artifacts:[
+    {id:'primary',name:'os.tar.gz'},{id:'custom',name:'nightly.zip'},{id:'payload',name:'boot.bin'}],tasks:[]}));
+  let picked;
+  fwPicker.store.open(item=>{picked=item;},{firmwareOnly:true,excludeId:'primary'});await flush();
+  assert.equal(fwPicker.ids['is-source'].value,'local');
+  assert.ok(fwPicker.ids['is-list'].textContent.includes('nightly.zip'));
+  assert.doesNotMatch(fwPicker.ids['is-list'].textContent,/os\.tar|boot\.bin/);
+  fwPicker.buttons().find(n=>n.textContent==='使用').fire();assert.equal(picked.id,'custom');
   const pairedOS={name:'Debian-13-GNOME-K3-v1.0rc1-202611180100.tar.gz',kind:'package',url:'https://repo/os.tar.gz'};
   const pairedFW={name:'Debian-13-Firmware-K3-v1.0rc1-202611180055.tar.gz',kind:'package',url:'https://repo/fw.tar.gz'};
   let pairChoice;const pairCalls=[];

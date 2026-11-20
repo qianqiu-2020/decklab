@@ -2,6 +2,7 @@
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 import hashlib
 import os
 import re
@@ -32,6 +33,31 @@ class MaintenancePolicy:
                 raise ValueError('%s must be an integer between 0 and %d' % (name, maximum))
             values.append(int(raw))
         return cls(*values)
+
+
+def usb_serial_warnings(sys_usb=Path('/sys/bus/usb/devices'), udev_data=Path('/run/udev/data')):
+    """Report known UART interfaces without a serial driver. Never open a device."""
+    if not sys.platform.startswith('linux'):
+        return []
+    chips = {'1a86/7523': 'CH340', '403/6001': 'FTDI FT232'}
+    warnings = []
+    for interface in sorted(sys_usb.glob('*:*')):
+        try:
+            fields = dict(line.split('=', 1) for line in (interface / 'uevent').read_text().splitlines() if '=' in line)
+            chip = chips.get(fields.get('PRODUCT', '').rsplit('/', 1)[0])
+            if not chip or fields.get('DRIVER') not in (None, 'usbfs'):
+                continue
+            port = interface.name.split(':')[0]
+            dev = (sys_usb / port / 'dev').read_text().strip()
+        except (OSError, UnicodeError):
+            continue  # Hot-unplug during enumeration.
+        try:
+            properties = (udev_data / ('c' + dev)).read_text().splitlines()
+        except (OSError, UnicodeError):
+            properties = []
+        warnings.append({'port': port, 'chip': chip,
+                         'brltty_rule': any(line.startswith('E:BRLTTY_BRAILLE_DRIVER=') for line in properties)})
+    return warnings
 
 
 def disk_status(root, policy):

@@ -20,7 +20,9 @@ def publish(source, destination):
     for family, material in document['families'].items():
         if material.get('protocol') not in ('stock', 'spacemit-ram-v1'):
             raise ValueError('unsupported RAM loader protocol')
-        for name in ('fsbl', 'uboot'):
+        for name in ('fsbl', 'uboot', 'fsbl_fallback'):
+            if name == 'fsbl_fallback' and name not in material:
+                continue  # optional: full-training FSBL after a quick-boot failure
             entry = material[name]
             if (not isinstance(entry, dict) or set(entry) != {'file', 'sha256'}
                     or not isinstance(entry['file'], str) or not entry['file']

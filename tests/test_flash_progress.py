@@ -1,6 +1,8 @@
 import unittest
 
-from seriald_core.flash_progress import PHASES, PreviewProgress
+from unittest.mock import patch
+
+from seriald_core.flash_progress import PHASES, PreviewProgress, FlashWriteProgress
 from seriald_core.flash_store import FlashStore
 from seriald_core.storage import Store
 from seriald_core.tasks import TaskStore
@@ -52,3 +54,21 @@ class PreviewProgressTests(unittest.TestCase):
         self.assertEqual(saved['stages'][2]['state'], 'skipped')
         self.assertEqual(saved['stages'][4]['state'], 'failed')
         self.assertEqual(saved['stages'][5]['state'], 'pending')
+
+class FlashWriteProgressTests(unittest.TestCase):
+    def test_combined_progress_tracks_native_partition_offsets_and_speed(self):
+        def step(label, writes):
+            return {'label': label, 'result': {'plan': {'writes': [
+                dict(storage='active', partition=part, size=size) for part, size in writes]}}}
+        progress = FlashWriteProgress({'steps': [step('Firmware', [('boot', 10)]),
+                                                step('OS', [('ESP', 20), ('rootfs', 100)])]})
+        def measure(done, name, component, total):
+            return progress.measure(dict(component=component, storage='active', partition=name, done=done, total=total))
+        with patch('seriald_core.flash_progress.time.monotonic', side_effect=[0, 1, 2, 4]):
+            self.assertEqual(measure(5, 'boot', 'Firmware', 10)[:2], (5, 130))
+            self.assertEqual(progress.measure(dict(component='OS', storage='active', partition='ESP', total=120))[:2], (10, 130))
+            self.assertNotIn('bytes_per_second', measure(20, 'rootfs', 'OS', 120)[2])
+            done, total, part = measure(60, 'rootfs', 'OS', 120)
+        self.assertEqual((done, total, part['partition_done'], part['partition_total'], part['bytes_per_second']),
+                         (70, 130, 40, 100, 20))
+        self.assertEqual(measure(20, 'unknown', 'OS', 120), (20, 120, {}))

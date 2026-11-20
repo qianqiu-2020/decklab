@@ -41,13 +41,15 @@ def assemble(steps, artifact, base_profile=None):
         'requires_prepare':not ready and any(s['result'].get('requires_prepare') for s in steps)}
 
 
-def plan_bundle(executor, binding, artifact, firmware, mode, verify, check, **options):
-    if mode != 'full' or artifact['id'] == firmware['id']:
-        raise TaskError('固件＋系统镜像仅支持整包刷写，且必须选择两个不同镜像', 409)
+def plan_bundle(executor, binding, artifact, firmware, mode, verify, check, firmware_table=None, **options):
+    if mode != 'full' or (artifact['id'] == firmware['id']) != bool(firmware_table):
+        raise TaskError('请选择独立 Firmware 或 OS 包内的 NOR 分区表进行整包刷写', 409)
     steps = []
     # Both native plans are previewed before one task may execute either one.
     for label, source in [('Firmware',firmware), ('OS',artifact)]:
         arguments = dict(options)
+        if firmware_table:
+            arguments['package_scope'] = firmware_table if label == 'Firmware' else 'system'
         if label == 'Firmware':
             arguments.pop('target_storage', None)
         result = executor.plan(binding, source, 'full', [], verify, check, **arguments)

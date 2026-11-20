@@ -406,7 +406,9 @@ class TaskTests(unittest.TestCase):
     def test_progress_and_results_are_validated_without_persisting_bad_values(self):
         history = self.tasks.store
         task_id = history.create('identify', 'web', 'page', [TARGET])
-        for progress in ({'done': -1}, {'done': True}, {'phase': 'x' * 161}, {'password': 'secret'}):
+        for progress in ({'done': -1}, {'done': True}, {'phase': 'x' * 161}, {'password': 'secret'},
+                         {'phase': 'writing', 'bytes_per_second': -1}, {'partition': 'outside-writing'},
+                         {'phase': 'writing', 'partition': ['invalid']}, {'phase': 'writing', 'password': 'secret'}):
             with self.assertRaises(TaskError):
                 history.update(task_id, progress=progress)
         with self.assertRaises(ValueError):

@@ -257,7 +257,7 @@
       var box = $('is-list'), filter = $('is-search').value.toLowerCase(); box.textContent = '';
       rows.filter(function (item) { return (local || supported(item)) && item.name.toLowerCase().includes(filter)
         && (!picker.fileOnly || item.kind === 'directory' || !packageFile(item))
-        && (!picker.firmwareOnly || item.kind === 'directory' || (/firmware/i.test(item.name) || /\.directory$/i.test(item.name))); }).forEach(function (item) {
+        && (!picker.firmwareOnly || item.kind === 'directory' || (/\.(?:tar\.gz|tgz|tar|zip|directory)$/i.test(item.name) && (!picker.excludeId || item.id !== picker.excludeId))); }).forEach(function (item) {
         var row = text('div', '', box); row.className = 'is-row';
         var main = text('div', '', row); main.className = 'is-main';
         if (item.kind === 'directory') {
@@ -427,7 +427,7 @@
       var forced = ['local', 'public', 'internal'].includes(picker.source) ? picker.source : '';
       viewKey = picker.fileOnly ? 'partition' : picker.firmwareOnly ? 'firmware' : forced || 'store';
       var saved = views[viewKey] || {};
-      source = forced || (['local', 'public', 'internal'].includes(saved.source) ? saved.source : picker.fileOnly ? 'local' : 'public');
+      source = forced || (['local', 'public', 'internal'].includes(saved.source) ? saved.source : picker.fileOnly || picker.firmwareOnly ? 'local' : 'public');
       path = saved.path || ''; platform = saved.platform === 'k1' ? 'k1' : 'k3';
       operatingSystem = saved.os || ''; channel = saved.channel === 'daily' ? 'daily' : 'version';
       version = saved.version || ''; variant = saved.variant || '';

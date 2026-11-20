@@ -6,15 +6,17 @@ const root=path.resolve(__dirname,'..'),out=process.argv[2]||path.join(root,'dis
 fs.mkdirSync(out,{recursive:true});
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'decklab-device-drag-'));
 let devices=['A','B','C','D'].map(key=>({key,serial:key,label:'模拟设备 '+key,alive:true,state:'online',dev:'/dev/fixture-'+key,info:{},bytes:0}));
+const warningMarkup=fs.readFileSync(path.join(root,'index.html'),'utf8').match(/<details class="serial-warning"[\s\S]*?<\/details>/)[0];
+let warnings=[{port:'3-4',chip:'CH340',brltty_rule:true}];
 const errors=[];
 const server=http.createServer((req,res)=>{
   assert.equal(req.method,'GET','device sorting must never mutate the backend');
-  if(req.url==='/api/devices'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({devices}));return;}
+  if(req.url==='/api/devices'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({devices,usb_serial_warnings:warnings}));return;}
   if(req.url==='/'){
     res.setHeader('Content-Type','text/html');
     res.end(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/static/app.css">
-      <div hidden><span id="count-online"></span><span id="count-history"></span><span id="count-pending"></span><span id="conn-dot"></span><span id="conn-txt"></span><input id="device-search"><select id="device-filter"><option value="all">all</option></select></div>
-      <main id="fixture" style="margin:24px;width:320px;max-height:1140px;overflow:auto"><p>模拟设备 · 实际鼠标拖拽测试</p><div id="grid" class="grid" style="grid-template-columns:1fr"></div></main>
+      <div hidden><span id="count-online"></span><span id="count-history"></span><span id="count-pending"></span><span id="conn-dot"></span><span id="conn-txt"></span><input id="device-search"><select id="device-filter"><option value="all">all</option><option value="active">active</option></select><select id="device-sort"><option value="status">status</option><option value="manual">manual</option></select></div>
+      ${warningMarkup}<main id="fixture" style="margin:24px;width:320px;max-height:1140px;overflow:auto"><p>模拟设备 · 实际鼠标拖拽测试</p><div id="grid" class="grid" style="grid-template-columns:1fr"></div></main>
       <script src="/static/devices.js"></script><script>window.ui=SerialdDevices.create({byId:id=>document.getElementById(id),fetch:fetch,formatBytes:n=>n+' B',age:()=> 'now',open:()=>{window.unexpectedSelection=true},getView:()=>null,isCurrent:()=>false,loadSessions(){},loadActivity(){},renderInfo(){}});ui.poll();setInterval(()=>ui.poll(),100);</script>`);return;
   }
   if(!['/static/app.css','/static/devices.js'].includes(req.url)){res.statusCode=404;res.end();return;}
@@ -45,15 +47,20 @@ let chrome,ws;
     await rpc('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',buttons:1,clickCount:1});
     await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x+8,y:p.y-12,button:'left',buttons:1});
     for(let n=0;n<80&&!intercepted;n++)await delay(25);
-    assert.ok(intercepted,'actual mouse gesture must initiate native drag');return intercepted;
+    if (!intercepted) throw Error('Failed to start native drag '+key+' at '+JSON.stringify(p)+'; hit '+await evaluate('document.elementFromPoint('+p.x+','+p.y+')?.outerHTML?.slice(0,180)'));return intercepted;
   }
   async function hover(data,x,y){await rpc('Input.dispatchDragEvent',{type:'dragEnter',x,y,data});await rpc('Input.dispatchDragEvent',{type:'dragOver',x,y,data});await delay(180);}
   async function release(data,x,y,cancel=false){if(!cancel)await rpc('Input.dispatchDragEvent',{type:'dragOver',x,y,data});await rpc('Input.dispatchDragEvent',{type:cancel?'dragCancel':'drop',x,y,data});await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',buttons:0,clickCount:1});await delay(200);}
   await rpc('Runtime.enable');await rpc('Page.enable');await rpc('Emulation.setDeviceMetricsOverride',{width:1440,height:1200,deviceScaleFactor:1,mobile:false});
   await rpc('Input.setInterceptDrags',{enabled:true});await waitFor('document.querySelectorAll("#grid>.dev").length===4');
+  await waitFor('!document.querySelector("#serial-warning").hidden');
+  await evaluate('document.querySelector("#serial-warning summary").click()');
+  assert.ok(await evaluate('document.querySelector("#serial-warning-brltty code").getClientRects().length && document.querySelector("#serial-brltty-ports").textContent.includes("CH340")'));
+  warnings=[];await waitFor('document.querySelector("#serial-warning").hidden');
   const first=await position('A'), initial=await stored();
+  let data=await begin('C');
   await evaluate('window.originalA=document.querySelector("#grid>.dev");');
-  let data=await begin('C');await hover(data,first.x,first.top+12);
+  await hover(data,first.x,first.top+12);
   assert.deepEqual(await order(),['C','A','B','D'],'native dragover must preview the inserted card');
   assert.equal(await stored(),initial,'preview must not save order');
   assert.ok((await position('A')).top>first.top+100,'the original card must physically move down');
@@ -72,7 +79,36 @@ let chrome,ws;
   data=await begin('E');const d=await position('D');await hover(data,d.left+12,d.y);
   assert.deepEqual(await order(),['C','A','B','E','D'],'horizontal insertion must use the left/right landing side');
   landing=await position('E');await release(data,landing.x,landing.y);assert.deepEqual(await order(),['C','A','B','E','D']);
+  // Keep the pointer stationary while multiple screens of devices pass under it.
+  devices.push(...['F','G','H','I','J'].map(key=>({...devices[0],key,serial:key})));
+  await waitFor('document.querySelectorAll("#grid>.dev").length===10');
+  await evaluate(`const g=document.querySelector('#grid');g.style.cssText='grid-template-columns:1fr;height:280px;overflow:auto';g.scrollTop=g.scrollHeight`);
+  const bounds=await evaluate('(()=>{const r=g.getBoundingClientRect();return {x:r.left+80,top:r.top+4,bottom:r.bottom-4}})()');
+  data=await begin('J');await hover(data,bounds.x,bounds.top-8);
+  await waitFor('g.scrollTop===0 && g.firstElementChild.dataset.key==="J"');
+  await release(data,bounds.x,bounds.top-8);
+  assert.equal((await order())[0],'J');
+  data=await begin('J');await hover(data,bounds.x,bounds.bottom);
+  await waitFor('g.scrollTop+g.clientHeight>=g.scrollHeight-1 && g.lastElementChild.dataset.key==="J"');
+  await release(data,bounds.x,bounds.bottom);
+  assert.equal((await order()).at(-1),'J');
+  const afterBottom=await stored();
+  data=await begin('J');await hover(data,bounds.x,bounds.top);
+  await waitFor('g.scrollTop===0 && g.firstElementChild.dataset.key==="J"');
+  await release(data,bounds.x,bounds.top,true);
+  assert.equal(await stored(),afterBottom,'cancelling after edge scrolling must restore the saved order');
+  assert.equal((await order()).at(-1),'J','cancel must restore the visible order');
+  // The narrow layout scrolls its device strip sideways.
+  await evaluate(`g.style.cssText="display:flex;width:360px;overflow-x:auto";const style=document.createElement("style");style.textContent=".grid{scroll-snap-type:x proximity}#grid>.dev{flex:0 0 180px;scroll-snap-align:start}";document.head.append(style);g.scrollLeft=g.scrollWidth`);
+  const strip=await evaluate('(()=>{const r=g.getBoundingClientRect();return {left:r.left+3,right:r.right-3,y:r.top+r.height/2}})()');
+  data=await begin('J');await hover(data,strip.left,strip.y);
+  await waitFor('g.scrollLeft===0 && g.firstElementChild.dataset.key==="J"');
+  await release(data,strip.left,strip.y);
+  assert.equal((await order())[0],'J');
+  data=await begin('J');await hover(data,strip.right,strip.y);
+  await waitFor('g.scrollLeft+g.clientWidth>=g.scrollWidth-1 && g.lastElementChild.dataset.key==="J"');
+  await release(data,strip.right,strip.y);assert.equal((await order()).at(-1),'J');
   assert.equal(await evaluate('window.unexpectedSelection===true'),false);assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({native_mouse_drag:true,live_neighbor_movement:true,drop_persisted:true,cancel_rolled_back:true,poll_preserved_dom:true,horizontal_grid:true,fixtures_only:true},null,2)+'\n');
-  console.log('Native device drag passed: live insertion, neighbor movement, drop, cancellation, polling and horizontal grids.');
+  fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({native_mouse_drag:true,live_neighbor_movement:true,drop_persisted:true,cancel_rolled_back:true,poll_preserved_dom:true,edge_scroll_first_and_last:true,edge_scroll_cancel:true,horizontal_edge_scroll:true,horizontal_grid:true,fixtures_only:true},null,2)+'\n');
+  console.log('Native device drag passed: live insertion, neighbor movement, drop, cancellation, polling, vertical and horizontal edge scrolling.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();if(chrome)await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});

@@ -41,9 +41,27 @@
       send({type: 'key', keysym: keysym, code: code, down: !!down});
     }
     keyboard.onkeyevent = emitKey;
-    function grab() { if (!disposed && writable && !grabbed) { keyboard.grab(); grabbed = true; } }
+    var keyboardLock = null;
+    function keyHint(unavailable) {
+      if (options.onKeyLockUnavailable) options.onKeyLockUnavailable(unavailable);
+    }
+    function unlockSystemKeys() {
+      if (keyboardLock) { keyboardLock.api.unlock(); keyboardLock = null; }
+      keyHint(false);
+    }
+    function systemKeys() {
+      var api = global.navigator && global.navigator.keyboard, doc = global.document;
+      if (!grabbed || !doc || doc.activeElement !== canvas || !doc.fullscreenElement ||
+          !doc.fullscreenElement.contains(canvas)) { unlockSystemKeys(); return; }
+      if (!api || !api.lock) { keyHint(true); return; }
+      if (keyboardLock) return;
+      var request = {api: api}; keyboardLock = request;
+      // A denied request is retried only after the user refocuses the viewer.
+      api.lock(['MetaLeft', 'MetaRight', 'Tab']).catch(function () { if (keyboardLock === request) keyHint(true); });
+    }
+    function grab() { if (!disposed && writable && !grabbed) { keyboard.grab(); grabbed = true; systemKeys(); } }
     function release(reason) {
-      flushMove();
+      unlockSystemKeys(); flushMove();
       if (grabbed) { keyboard.ungrab(); grabbed = false; }
       keys.forEach(function (keysym, code) { send({type: 'key', keysym: keysym, code: code, down: false}); });
       keys.clear();
@@ -130,6 +148,7 @@
       },
       scale: function (value) { scale = value; layout(); },
       resize: layout,
+      systemKeys: systemKeys,
       flush: function () { return Promise.resolve(display.flush()).then(function () { return !disposed; }); },
       focus: function () { canvas.focus({preventScroll: true}); grab(); },
       release: release,
@@ -282,8 +301,14 @@
       var ctx = options.getView(); if (ctx && ctx.term && ctx.term.focus) ctx.term.focus();
       if (global.dispatchEvent && global.Event) global.dispatchEvent(new global.Event('resize'));
     }
+    function hideSettings() {
+      if ($('desktop-connection').hidden) return;
+      $('desktop-connection').hidden = true;
+      $('desktop-password').value = '';
+      $('desktop-command-status').textContent = '';
+    }
     function closePanel() {
-      hidePanel(); version++; detach();
+      hideSettings(); hidePanel(); version++; detach();
     }
     function refresh(ctx) {
       $('b-desktop').hidden = !ctx; $('b-desktop').disabled = !scope(ctx);
@@ -306,7 +331,7 @@
         if (version !== generation || selected !== serial) return;
         availability = data; setupValue = data.setup || null;
         $('desktop-settings').hidden = !setupValue;
-        if (setupValue) fillSetup();
+        if (setupValue && $('desktop-connection').hidden) fillSetup();
       }).catch(function () { if (version === generation) selected = ''; });
     }
     function bytes(encoded) {
@@ -418,6 +443,7 @@
         var old = $('desktop-image'), canvas = old.cloneNode(false);
         old.replaceWith(canvas);
         surface = createSurface({canvas: canvas, viewport: $('desktop-screen'), Display: lib.Display, Keyboard: lib.Keyboard,
+          onKeyLockUnavailable: function (value) { $('desktop-system-key-hint').hidden = !value; },
           send: enqueue, requestAnimationFrame: options.requestAnimationFrame, cancelAnimationFrame: options.cancelAnimationFrame});
         surface.scale($('desktop-scale').value || 'fit');
         var url = new global.URL(query(ctx, 'stream'), global.location.href);
@@ -469,7 +495,9 @@
     }
     function showSetup(automatic) {
       if (!setupValue) return;
-      showPanel(); $('desktop-connection').hidden = false; $('desktop-screen').hidden = true;
+      hidePanel();
+      if (options.prepareSetup) options.prepareSetup();
+      $('desktop-connection').hidden = false; $('desktop-screen').hidden = true;
       $('desktop-panel').scrollTop = 0; $('desktop-meta').textContent = scope(options.getView());
       $('desktop-input-tools').hidden = true; $('desktop-session-actions').hidden = true;
       $('desktop-clipboard').hidden = true; $('desktop-settings').hidden = false;
@@ -498,7 +526,8 @@
         if (!current(ctx, generation)) return;
         candidates = data.candidates || []; candidateId = '';
         var select = $('desktop-services'); select.textContent = '';
-        var manual = global.document.createElement('option'); manual.value = ''; manual.textContent = translate('手工填写'); select.appendChild(manual);
+        var manualOption = global.document.createElement('option'); manualOption.value = '';
+        manualOption.textContent = translate('手工填写'); select.appendChild(manualOption);
         candidates.forEach(function (item) {
           var option = global.document.createElement('option'); option.value = item.id;
           option.textContent = item.provider.toUpperCase() + ' · ' + item.host + ':' + item.port + (item.error ? ' · ' + item.error : '');
@@ -507,7 +536,7 @@
         $('desktop-services-field').hidden = !candidates.length;
         $('desktop-detect-status').textContent = translate(data.reason || '已发现可用服务');
         var available = candidates.filter(function (item) { return !item.error; });
-        if (available.length === 1 && (manual === true || !(setupValue.connection || {}).provider)) { select.value = available[0].id; chooseService(); }
+        if (!marker.edited && available.length === 1 && (manual === true || !(setupValue.connection || {}).provider)) { select.value = available[0].id; chooseService(); }
       }).catch(function (error) { if (current(ctx, generation)) $('desktop-detect-status').textContent = error.message; })
         .finally(function () { if (detecting === marker) { detecting = false; if (current(ctx, generation)) { $('desktop-detect').disabled = false; $('desktop-save-connect').disabled = !!savingSetup; } } });
     }
@@ -574,7 +603,19 @@
         }).catch(function () {});
       });
     }
-    $('b-desktop').addEventListener('click', function () { if (!visible && !sid) availability = null; open(); });
+    function dismissSetup() {
+      if ($('desktop-connection').hidden) return;
+      closePanel(); availability = null; detecting = false; savingSetup = false;
+      $('desktop-detect').disabled = false; $('desktop-save-connect').disabled = false;
+    }
+    $('desktop-setup-close').addEventListener('click', dismissSetup);
+    $('desktop-credentials-stage').addEventListener('click', function () {
+      if (options.stageSerialCommand) $('desktop-command-status').textContent = translate(options.stageSerialCommand($('desktop-credentials-command').textContent));
+    });
+    $('desktop-credentials-copy').addEventListener('click', function () {
+      if (options.copyText) $('desktop-command-status').textContent = translate(options.copyText($('desktop-credentials-command').textContent, true) ? '已复制' : '复制失败，请手动选择命令');
+    });
+    $('b-desktop').addEventListener('click', function () { if (!$('desktop-connection').hidden) { $('desktop-host').focus(); return; } if (!visible && !sid) availability = null; open(); });
     $('desktop-settings').addEventListener('click', function () {
       if (sid) { status('请先断开现有连接，再修改设置。'); return; }
       var ctx = options.getView(), generation = version;
@@ -589,6 +630,7 @@
     });
     $('desktop-services').addEventListener('change', chooseService);
     $('desktop-connection').addEventListener('submit', saveConnection);
+    $('desktop-connection').addEventListener('input', function () { if (detecting) detecting.edited = true; });
     ['desktop-host', 'desktop-port'].forEach(function (id) { $(id).addEventListener('input', function () {
       candidateId = ''; $('desktop-services').value = ''; $('desktop-certificate').value = ''; $('desktop-trust').checked = false; setupFields();
     }); });
@@ -598,7 +640,10 @@
       setupFields();
     }); });
     $('desktop-certificate').addEventListener('input', function () { candidateId = ''; $('desktop-trust').checked = true; setupFields(); });
-    $('d-tabs').addEventListener('click', function () { if (visible) hidePanel(); }, true);
+    $('d-tabs').addEventListener('click', function (event) {
+      if (visible) hidePanel();
+      if (event.target && event.target.dataset && event.target.dataset.kind && event.target.dataset.kind !== 'serial') dismissSetup();
+    }, true);
     $('desktop-close').addEventListener('click', hidePanel);
     $('desktop-refresh').addEventListener('click', function () {
       open(true);
@@ -628,18 +673,19 @@
         }).catch(function (error) { if (current(ctx, generation)) status(error.message); });
     });
     $('desktop-release').addEventListener('click', function () { if (surface) surface.release('manual'); });
+    $('desktop-super').addEventListener('click', function () { toolbarIntent({codes: ['MetaLeft']}); });
     $('desktop-key').addEventListener('click', function () { toolbarIntent({codes: $('desktop-keys').value.split(' ')}); });
     $('desktop-scale').addEventListener('change', function () { if (surface) surface.scale($('desktop-scale').value); });
     $('desktop-fullscreen').addEventListener('click', function () {
       var panel = $('desktop-panel'), document = global.document;
       if (!panel.requestFullscreen || !document) { status('当前浏览器不支持全屏'); return; }
       var change = document.fullscreenElement === panel ? document.exitFullscreen() : panel.requestFullscreen();
-      Promise.resolve(change).then(function () { if (surface) surface.resize(); }).catch(function () { status('浏览器未允许全屏，可继续在当前页面操作。'); });
+      Promise.resolve(change).then(function () { if (surface && document.fullscreenElement === panel) { surface.focus(); surface.systemKeys(); } }).catch(function () { status('浏览器未允许全屏，可继续在当前页面操作。'); });
     });
     if (global.document) {
       global.document.addEventListener('fullscreenchange', function () {
         fullscreenLabel();
-        if (surface) surface.resize();
+        if (surface) { surface.resize(); surface.systemKeys(); }
       });
       global.document.addEventListener('visibilitychange', function () {
         if (global.document.hidden && surface) surface.release('page-hidden');
@@ -697,7 +743,9 @@
       clipboard.writeText($('desktop-text').value).then(function () { if (current(ctx, generation)) status('文本已复制到本机剪贴板'); })
         .catch(function () { if (current(ctx, generation)) status('浏览器未允许写入剪贴板，请手动复制文本框中的内容。'); });
     });
-    return {refresh: refresh, close: closePanel};
+    return {refresh: refresh, close: closePanel, showTerminal: function () {
+      dismissSetup(); if (visible) hidePanel();
+    }};
   }
   global.SerialdDesktop = {create: create, createSurface: createSurface};
 })(window);

@@ -227,7 +227,8 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             fixture.executor.supports_skip_verification = True
             verifying = threading.Event()
             def execute(binding, plan, on_event, check, skip_verification, **identity):
-                on_event({'event': 'progress', 'phase': 'writing', 'done': 0, 'total': 32})
+                on_event({'event': 'progress', 'phase': 'writing', 'done': 16, 'total': plan['writes'][0]['size'],
+                          'storage': plan['writes'][0]['storage'], 'partition': plan['writes'][0]['partition']})
                 fixture.executor.started.set()
                 while not fixture.executor.release.wait(.02):
                     check()
@@ -245,6 +246,9 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             code, started = self.start(fixture, plan)
             self.assertEqual(code, 202, started)
             self.assertTrue(fixture.executor.started.wait(2))
+            code, live = self.request(fixture, '/api/task', query={'id': started['task']['id']})
+            self.assertEqual(code, 200)
+            self.assertEqual(live['task']['progress']['partition_done'], 16)
             payload = {'id': started['task']['id'], 'action': 'skip-verification', 'key': 'offline-board', 'serial': 'FLASH-A'}
             code, _ = self.request(fixture, '/api/flash-selection', payload)
             self.assertEqual(code, 409, 'writing cannot skip integrity checks')
@@ -333,6 +337,13 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(len(fixture.executor.executions), 1)
             self.assertEqual(maintenance_for(fixture.manager).holds('FLASH-A'), [])
             self.assertNotIn(str(fixture.manager.artifacts.root), json.dumps(task))
+
+    def test_prepare_for_review_cannot_start_an_already_writable_plan(self):
+        with protected_flashing() as fixture:
+            plan = self.plan(fixture, self.image(fixture))
+            code, _ = self.start(fixture, plan, prepare_for_review=True)
+            self.assertEqual(code, 409)
+            self.assertEqual(fixture.executor.executions, [])
 
     def test_partition_preview_selects_storage_and_does_not_implicitly_write_layout(self):
         with protected_flashing() as fixture:

@@ -4,6 +4,47 @@ import statistics
 import time
 
 
+class FlashWriteProgress:
+    """Map each executor's logical byte counter onto the sealed write sequence."""
+
+    def __init__(self, plan):
+        self.total = 0
+        self.components = {}
+        self.ranges = {}
+        self.sample = None
+        steps = [(step['label'], step['result']['plan']) for step in plan.get('steps', [])]
+        for component, native in steps or [('', plan)]:
+            start = self.total
+            for write in native.get('writes', []):
+                size = write.get('size')
+                if type(size) is not int or size <= 0:
+                    self.ranges.clear()
+                    return
+                key = (component, write.get('storage'), write.get('partition'))
+                self.ranges[key] = (self.total - start, size, write.get('target') if write.get('kind') == 'layout' else None)
+                self.total += size
+            self.components[component] = (start, self.total - start)
+
+    def measure(self, event):
+        done, total = event.get('done', 0), event['total']
+        component = event.get('component', '')
+        key = (component, event.get('storage'), event.get('partition'))
+        span = self.ranges.get(key)
+        base, expected = self.components.get(component, (0, 0))
+        if not span or total != expected or not span[0] <= done <= span[0] + span[1]:
+            return done, total, {}
+        count = done - span[0]
+        detail = dict(partition=span[2] or key[2], storage=key[1], component=component,
+                      partition_done=count, partition_total=span[1])
+        now = time.monotonic()
+        if not self.sample or self.sample[0] != key or count < self.sample[1]:
+            self.sample = (key, count, now)
+        elapsed = now - self.sample[2]
+        if elapsed >= 0.25 and count > self.sample[1]:
+            detail['bytes_per_second'] = round((count - self.sample[1]) / elapsed)
+        return base + done, self.total, detail
+
+
 PHASES = ('checking-upload', 'checking-image-sha256', 'expanding-image',
           'checking-payloads', 'checking-layout', 'reading-payload-metadata')
 

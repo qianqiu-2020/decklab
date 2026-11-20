@@ -97,7 +97,7 @@ class ImageWorkspaces:
     def __init__(self, manager):
         self.manager = manager
 
-    def register(self, directory, name=None):
+    def register(self, directory, name=None, table_choice=None):
         from .image_preparation import for_manager
         root, files = members(directory)
         if not any(Path(item['name']).name == 'fastboot.yaml' for item in files):
@@ -107,6 +107,8 @@ class ImageWorkspaces:
         # This small sealed descriptor identifies a directory revision. Only its
         # server-created sidecar enables prepare-directory; uploaded JSON cannot.
         document = {'version': 1, 'directory': str(root), 'files': files}
+        if table_choice:
+            document['table_choice'] = table_choice
         data = json.dumps(document, sort_keys=True, separators=(',', ':')).encode()
         if len(data) > 8 * 1024 ** 2:
             raise TaskError('目录清单过大', 413)
@@ -167,13 +169,13 @@ class ImageWorkspaces:
         try:
             if actor != 'web':
                 raise TaskError('只有网页所有者可以访问控制机镜像目录', 403)
-            if not isinstance(payload, dict) or set(payload) - {'action','id','directory','name','size','path','text','replacement_id','revision','actor','client_id','request_id'}:
+            if not isinstance(payload, dict) or set(payload) - {'action','id','directory','name','size','path','text','replacement_id','table_id','table','revision','actor','client_id','request_id'}:
                 raise TaskError('invalid image workspace request')
             action = payload.get('action', 'list')
             digest = None
             if not isinstance(payload.get('text', ''), str):
                 raise TaskError('无效的文本文件内容', 400)
-            if action in ('save','replace','fork') and payload.get('request_id'):
+            if action in ('save','replace','fork','select-table') and payload.get('request_id'):
                 digest = self.manager.tasks.store.request_digest({**{key:value for key,value in payload.items() if key!='text'},
                     'text_sha256':hashlib.sha256(payload.get('text','').encode()).hexdigest()})
                 previous = self.manager.tasks.store.find_request('web', payload['request_id'], digest)
@@ -208,9 +210,43 @@ class ImageWorkspaces:
                 with open_archive(path) as source:
                     content = source.read(1024 ** 2 + 1).decode('utf-8')
                 return response(200, {'ok':True, 'text':content})
-            if action not in ('save', 'replace', 'fork'):
+            if action not in ('save', 'replace', 'fork', 'select-table'):
                 raise TaskError('invalid image workspace action')
-            if action == 'save':
+            table_choice = None
+            if action == 'select-table':
+                from .image_preparation import for_manager
+                from .image_tables import table_bytes
+                source_id = payload.get('table_id')
+                candidate = payload.get('table')
+                if not isinstance(candidate, str) or not re.fullmatch(r'partition_[a-zA-Z0-9_-]+\.json', candidate) or candidate.lower() == 'partition_flash.json':
+                    raise TaskError('请选择 NOR 或系统盘的分区表', 400)
+                medium = {'partition_nor.json':'mtd', 'partition_universal.json':'gpt'}.get(payload.get('path'))
+                def prepared(artifact_id):
+                    job = for_manager(self.manager).latest(artifact_id)
+                    if not job or job['state'] != 'completed':
+                        raise TaskError('请先完成镜像准备', 409)
+                    return job['result']['preparation']
+                source_info, target_info = prepared(source_id), prepared(row['id'])
+                families = set(source_info.get('chip_families', []))
+                if families and target_info.get('chip_families') and not families.intersection(target_info['chip_families']):
+                    raise TaskError('分区表与目标镜像芯片不匹配', 409)
+                def table(info, name):
+                    return next((t for t in info.get('catalogue', []) if t['name'] == name and t['format'] == medium), {})
+                source_table = table(source_info, candidate)
+                default = table(target_info, path.name)
+                if not source_table.get('sha256') or not default.get('selected'):
+                    raise TaskError('所选分区表不适用于此刷机配置', 409)
+                _, _, source_root, _, _ = self.locate(source_id)
+                source_path = self.selected(source_root, candidate)
+                raw = table_bytes(source_root, dict(name=candidate, size=source_path.stat().st_size, sha256=source_table['sha256']))
+                content = raw.decode('utf-8')
+                table_choice = {'name':candidate, 'destination':path.name,
+                                'original_id':target_info.get('table_choice', {}).get('original_id', row['id'])}
+                # Check the target copy, whose payloads will actually be flashed.
+                for part in source_table['partitions']:
+                    if part.get('payload'):
+                        self.selected(root, part['payload'])
+            elif action == 'save':
                 content = payload.get('text')
                 if not isinstance(content, str) or len(content.encode()) > 1024 ** 2:
                     raise TaskError('无效的文本文件内容', 413)
@@ -236,7 +272,7 @@ class ImageWorkspaces:
                     with executor.image_guard(row, context.check):
                         if members(root)[1] != files:
                             raise TaskError('目录已变化，请刷新后重试', 409)
-                        if not editable or action == 'fork':
+                        if not editable or action in ('fork', 'select-table'):
                             base = executor._directory(executor.root / 'workdirs')
                             budget = executor._cache_size(root)
                             if (shutil.disk_usage(base).free < budget + 256 * 1024 ** 2
@@ -270,7 +306,7 @@ class ImageWorkspaces:
                         os.close(fd)
                         temporary = Path(temporary)
                         try:
-                            if action == 'save':
+                            if action in ('save', 'select-table'):
                                 temporary.write_bytes(content.encode('utf-8'))
                                 checksum = hashlib.sha256(content.encode()).hexdigest()
                             else:
@@ -296,7 +332,8 @@ class ImageWorkspaces:
                             lines = sums.read_text().splitlines()
                             lines = [checksum + line[64:] if len(line) >= 66 and line[64:].strip().lstrip('*').removeprefix('./') == relative else line for line in lines]
                             sums.write_text('\n'.join(lines) + '\n')
-                        result = self.register(str(target), root.name + '-edited')
+                        name = row['name'].removesuffix('.directory')[:155] + ' [' + candidate + ']' if action == 'select-table' else root.name + '-edited'
+                        result = self.register(str(target), name, table_choice)
                         created = False
                         return result
                 except BaseException:

@@ -401,6 +401,9 @@ class Device:
                     self.last_rx = time.time()
                     self.console_tail = (self.console_tail + text)[-4096:]
                     self.sniff(self.console_tail)
+                    links = getattr(self.manager, 'console_links', None)
+                    if links is not None:
+                        links.observe(self, self.console_tail)
                     self._maybe_auto_identify(self.console_tail)
                 end_off = self.base + len(self.buf)
                 replies = terminal.screen.feed(b, end_off)

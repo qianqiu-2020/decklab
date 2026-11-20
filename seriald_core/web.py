@@ -18,7 +18,7 @@ from .queries import ArchiveQueries, ArchiveDownload, SessionQueries, open_archi
 from . import __version__
 from .results import response as api_response
 from .transactions import transactions_for, TransactionError
-from .maintenance import disk_status, diagnostic_summary
+from .maintenance import disk_status, diagnostic_summary, usb_serial_warnings
 from .task_actions import TaskActions
 from .artifact_actions import ArtifactActions, body_limit
 from .tasks import TaskError
@@ -331,6 +331,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             devs.sort(key=lambda x: x['key'])
             return self._json(200, {'devices': devs, 'by_path': BY_PATH,
                                     'storage': disk_status(LOG_ROOT, self.manager.maintenance.policy),
+                                    'usb_serial_warnings': usb_serial_warnings(),
                                     'server_time': time.time()})
 
         if route in ('/api/desktop/sessions', '/api/desktop/frame'):
@@ -564,6 +565,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = flash.selection(payload, None, actor)
             elif route == '/api/flash-recovery':
                 result = flash.recovery(payload, None, actor)
+            elif route == '/api/flash-stream':
+                result = flash.stream(payload, None, actor)
+            elif route == '/api/flash-calibrate':
+                result = flash.calibrate(payload, None, actor)
             elif route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup'):
                 result = (flash.backup(payload, None, actor) if payload['kind'] == 'nor-backup'
                           else flash.start(payload, None, actor))

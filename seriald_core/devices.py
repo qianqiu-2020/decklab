@@ -18,8 +18,8 @@ from .archive import finish_staged, stage_logs
 from .config import BY_PATH, LOG_ROOT
 from .device import Device
 from .identity import eeprom_serial, hardware_serial, select_identity
-from .storage import (IdentityConfirmationRequired, IdentityError, archive_component,
-                      validate_conflict_reason)
+from .storage import (CONFIRMED_IDENTITY_SOURCES, IdentityConfirmationRequired, IdentityError,
+                      archive_component, validate_conflict_reason)
 from .transport import open_serial
 from .boot_marker import marker_serial
 from .profiles import ProfileBook
@@ -54,6 +54,8 @@ class Manager:
         self.handoff = {}
         self.armed_paths = {}
         self._flash_presence = {}
+        from .console_link import ConsoleLinks
+        self.console_links = ConsoleLinks()
         if store:
             for record in store.boards():
                 self.boards[record['serial']] = Board(record)
@@ -84,16 +86,20 @@ class Manager:
         if self.store is None:
             return
         with self.store.lock:
-            rows = self.store.db.execute('SELECT serial,document,seen,present FROM flash_targets t '
-                'WHERE serial IS NOT NULL AND NOT EXISTS '
-                '(SELECT 1 FROM identity_conflicts c WHERE c.serial=t.serial)').fetchall()
+            rows = self.store.db.execute('SELECT serial,document,seen,present FROM flash_targets').fetchall()
+            conflicts = {row['serial'] for row in self.store.db.execute('SELECT serial FROM identity_conflicts')}
         presence = {}
         now = time.time()
         for row in rows:
-            old = presence.get(row['serial'])
+            document = json.loads(row['document'])
+            # A console echo of this attachment's link nonce names the board too.
+            link = document.get('uart_link') or {}
+            serial = row['serial'] or (link.get('serial') if link.get('state') == 'linked' else None)
+            if not serial or serial in conflicts:
+                continue
+            old = presence.get(serial)
             if old is None or old['seen'] < row['seen']:
-                document = json.loads(row['document'])
-                presence[row['serial']] = {'connected': bool(row['present'] and now - row['seen'] <= 15),
+                presence[serial] = {'connected': bool(row['present'] and now - row['seen'] <= 15),
                     'mode': document.get('mode', 'unknown'), 'seen': row['seen']}
         with self.lock:
             self._flash_presence = presence
@@ -321,6 +327,38 @@ class Manager:
                         promoted_board.sessions.transfer_to(board.sessions)
                     finish_staged(staged, sources)
                 return board
+
+    def bind_linked_console(self, device, serial, connection_id):
+        """Bind an unidentified console that echoed this USB board's link nonce.
+
+        The serial itself comes from the USB side (EEPROM or Fastboot); the
+        echo only proves both cables reach the same board. An identified
+        console is never re-bound here: a different board needs "准备换板".
+        """
+        with self.lock:
+            if (device.serial or device.connection_id != connection_id or not device.present
+                    or device.stop.is_set() or self.devices.get(device.by_path) is not device):
+                raise IdentityError('串口连接已变化，请重新检测 USB 设备')
+            if self.store.has_conflict(serial):
+                raise IdentityError('该序列号存在身份冲突，未自动绑定串口')
+            previous_board = self.boards.get(serial)
+            previous = previous_board.connection if previous_board else None
+            if previous is not None and previous is not device and previous.present:
+                raise IdentityError('该板已有另一个在线串口，未自动绑定')
+            record = self.store.get(serial)
+            selected = dict(record['info']) if record else {}
+            selected['serial'] = serial
+            if not (record and record['info'].get('serial_source') in CONFIRMED_IDENTITY_SOURCES):
+                selected.update(serial_source='usb-link', identity_status='confirmed')
+            board = self._bind_identity_archive(device, selected, previous_board, None)
+            self.boards[serial] = board
+            self.armed_paths.pop(device.by_path, None)
+            device.auto_identify = False
+            device.identity_association = None
+            device.identity_candidate_serial = ''
+            device.identity_error = ''
+            self.store.event(serial, 'service', 'identified-usb-link', device.by_path)
+            return board
 
     def rename(self, device, label, connection_id=None, expected_serial=None):
         with self.lock:

@@ -100,6 +100,22 @@ class NORWorkflowTests(unittest.TestCase):
             self.assertEqual(executor.executions[0][0]['mode'], 'full')
             self.assertEqual(executor.executions[0][0]['verify'], 'none')
 
+    def test_full_package_opt_in_backs_up_once_and_failure_stops_before_write(self):
+        for fail in (False, True):
+            with self.subTest(fail=fail), protected_flashing() as fixture, tempfile.TemporaryDirectory() as workspace:
+                executor = self.attach_executor(fixture, workspace)
+                executor.snapshot_failure = fail
+                executor.execute = lambda *args, **kwargs: FakeFlashExecutor.execute(executor, *args, **kwargs)
+                plan = self.plan(fixture, self.image(fixture), mode='full', verify='none')
+                self.assertTrue(plan['can_backup_nor'])
+                code, result = self.start(fixture, plan, retain_backup=True)
+                self.assertEqual(code, 202, result)
+                task = self.terminal(fixture, result['task']['id'])
+                self.assertEqual(task['state'], 'failed' if fail else 'completed', task)
+                self.assertEqual(len(executor.snapshots), 1)
+                self.assertEqual(len(executor.executions), 0 if fail else 1)
+                self.assertEqual('nor_before' in task['flash'], not fail)
+
     def wait_selection(self, fixture, task_id):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:

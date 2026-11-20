@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from .board_maintenance import maintenance_for
 from .flash_runner import FlashBinding, BoardControl, SerialEndpoint
 from .models import Board
+from .storage import IdentityError
 from .tasks import TaskError
 
 
@@ -170,7 +171,18 @@ class FlashDiscovery:
                 'supported': bool(data.get('supported')), 'reason': data.get('reason', ''),
                 'diagnostic': data.get('diagnostic', ''),
                 'present': bool(row['present']), 'identity': data.get('identity', {}),
-                'chip': data.get('chip', '')}
+                'chip': data.get('chip', ''), 'console_link': self._public_link(row)}
+
+    def _public_link(self, row):
+        link = row['document'].get('uart_link')
+        if not link:
+            return None
+        result = {'state': link.get('state', ''), 'reason': link.get('reason', '')}
+        for key in ('serial', 'usb_serial'):
+            if link.get(key):
+                result[key] = link[key]
+                result[key.replace('serial', 'label')] = (self.store.get(link[key]) or {}).get('label', '')
+        return result
 
     def refresh(self):
         with self.lock:
@@ -270,60 +282,140 @@ class FlashDiscovery:
         data = row['document']
         resources = ['flash-usb:local:' + '.'.join(map(str, data['device']['port_path']))]
         maintenance = maintenance_for(self.manager)
-        with self.lock, maintenance.inspect_target_scope(target_id, generation, row.get('serial') or '', resources):
-            try:
-                result = self.executor.discover(self.argv, probe=True, device=data['device'])
-            except BaseException as error:
-                if getattr(error, 'cleanup_confirmed', True) is False:
-                    task = maintenance.retain_target_inspection_failure(target_id, generation,
-                        row.get('serial') or '', resources, attempt_id=secrets.token_hex(12),
-                        details={'target_id': target_id, 'target_generation': generation})
-                    error.recovery_task_id = task['id']
-                raise
-            devices = result.get('devices')
-            if not isinstance(devices, list) or len(devices) != 1:
-                raise TaskError('selected USB flash target is missing or ambiguous', 409)
-            candidate = devices[0]
-            if not isinstance(candidate, dict) or not isinstance(candidate.get('identity', {}), dict):
-                raise TaskError('flashing discovery returned invalid identity metadata', 502)
-            if _selector(candidate.get('device')) != data['device']:
-                raise TaskError('USB connection changed during capability detection', 409)
-            serial = _strong_serial(candidate)
-            if serial:
-                duplicate = any(other['id'] != row['id'] and other['present'] and other['serial'] == serial
-                                for other in self._rows())
-                if duplicate or self.store.has_conflict(serial):
-                    self.store.mark_conflict(serial)
-                    for other in self._rows():
-                        if other['serial'] == serial:
-                            other['document'] = json.loads(other['document'])
-                            other['document'].update(supported=False, reason='conflicting USB board identity')
-                            self._save(other)
-                    raise TaskError('conflicting USB board identity; resolve the duplicate before flashing', 409)
-                record = self.store.get(serial)
-                if record is None:
-                    info = {'serial': serial, 'serial_source': candidate.get('serial_source', 'fastboot'), 'identity_status': 'confirmed',
-                            'hostname': candidate.get('identity', {}).get('product', '')}
-                    record = self.store.bind(info, '', '')
-                with self.manager.lock:
-                    if serial not in self.manager.boards:
-                        self.manager.boards[serial] = Board(record)
-            profile = _profile(candidate['profile']) if candidate.get('profile') is not None else None
-            data.update(identity=candidate.get('identity') or {}, mode=candidate.get('mode', 'unknown'),
-                        chip=candidate.get('chip', ''), profile=profile,
-                        inspection=candidate.get('inspection'), modes=candidate.get('modes') or [],
-                        supported=candidate.get('supported') is True and profile is not None,
-                        reason=str(candidate.get('reason') or '')[:512],
-                        diagnostic=_diagnostic(candidate.get('diagnostic')))
-            data['preparable'] = bool(candidate.get('preparable') or candidate.get('can_prepare_from_image'))
-            if 'usb_address' not in data['device']:
-                data.update(supported=False, reason='USB connection generation is unavailable; reconnect and detect again')
-            data['label'] = ((self.store.get(serial) or {}).get('label') if serial else None) or (
-                str(data['identity'].get('product') or data.get('chip') or 'USB') + ' · ' + data['endpoint'])
-            row.update(serial=serial or None, document=data, seen=time.time())
-            self._save(row)
+        links = getattr(self.manager, 'console_links', None)
+        token = links.start() if links is not None else None
+        echoed, pending_bind = [], None
+        try:
+            with self.lock, maintenance.inspect_target_scope(target_id, generation, row.get('serial') or '', resources):
+                row, pending_bind = self._probe_locked(row, data, target_id, generation, resources,
+                                                       maintenance, links, token)
+        finally:
+            if token:
+                links.cancel(token)
+        if pending_bind is not None:
+            self._bind_console(row, *pending_bind)
         self.manager.refresh_flash_presence()
         return self.public(row)
+
+    def _probe_locked(self, row, data, target_id, generation, resources, maintenance, links, token):
+        pending_bind = None
+        try:
+            if token:
+                result = self.executor.discover(self.argv, probe=True, device=data['device'], link_token=token)
+            else:
+                result = self.executor.discover(self.argv, probe=True, device=data['device'])
+        except BaseException as error:
+            if getattr(error, 'cleanup_confirmed', True) is False:
+                task = maintenance.retain_target_inspection_failure(target_id, generation,
+                    row.get('serial') or '', resources, attempt_id=secrets.token_hex(12),
+                    details={'target_id': target_id, 'target_generation': generation})
+                error.recovery_task_id = task['id']
+            raise
+        devices = result.get('devices')
+        if not isinstance(devices, list) or len(devices) != 1:
+            raise TaskError('selected USB flash target is missing or ambiguous', 409)
+        candidate = devices[0]
+        if not isinstance(candidate, dict) or not isinstance(candidate.get('identity', {}), dict):
+            raise TaskError('flashing discovery returned invalid identity metadata', 502)
+        if _selector(candidate.get('device')) != data['device']:
+            raise TaskError('USB connection changed during capability detection', 409)
+        serial = _strong_serial(candidate)
+        if serial:
+            duplicate = any(other['id'] != row['id'] and other['present'] and other['serial'] == serial
+                            for other in self._rows())
+            if duplicate or self.store.has_conflict(serial):
+                self.store.mark_conflict(serial)
+                for other in self._rows():
+                    if other['serial'] == serial:
+                        other['document'] = json.loads(other['document'])
+                        other['document'].update(supported=False, reason='conflicting USB board identity')
+                        self._save(other)
+                raise TaskError('conflicting USB board identity; resolve the duplicate before flashing', 409)
+            record = self.store.get(serial)
+            if record is None:
+                info = {'serial': serial, 'serial_source': candidate.get('serial_source', 'fastboot'), 'identity_status': 'confirmed',
+                        'hostname': candidate.get('identity', {}).get('product', '')}
+                record = self.store.bind(info, '', '')
+            with self.manager.lock:
+                if serial not in self.manager.boards:
+                    self.manager.boards[serial] = Board(record)
+        profile = _profile(candidate['profile']) if candidate.get('profile') is not None else None
+        data.update(identity=candidate.get('identity') or {}, mode=candidate.get('mode', 'unknown'),
+                    chip=candidate.get('chip', ''), profile=profile,
+                    inspection=candidate.get('inspection'), modes=candidate.get('modes') or [],
+                    supported=candidate.get('supported') is True and profile is not None,
+                    reason=str(candidate.get('reason') or '')[:512],
+                    diagnostic=_diagnostic(candidate.get('diagnostic')))
+        data['preparable'] = bool(candidate.get('preparable') or candidate.get('can_prepare_from_image'))
+        if 'usb_address' not in data['device']:
+            data.update(supported=False, reason='USB connection generation is unavailable; reconnect and detect again')
+        echoed = links.finish(token) if token and candidate.get('link_sent') is True else []
+        link, console = self._link_document(echoed, serial)
+        if link is None:
+            data.pop('uart_link', None)
+        else:
+            data['uart_link'] = link
+            if link['state'] == 'pending-bind':
+                pending_bind = (console, serial, link['connection_id'])
+        named = serial or (link or {}).get('state') == 'linked' and link.get('serial')
+        data['label'] = ((self.store.get(named) or {}).get('label') if named else None) or (
+            str(data['identity'].get('product') or data.get('chip') or 'USB') + ' · ' + data['endpoint'])
+        row.update(serial=serial or None, document=data, seen=time.time())
+        self._save(row)
+        return row, pending_bind
+
+    @staticmethod
+    def _link_document(echoed, usb_serial):
+        """Classify one link nonce's console echoes; only a unique echo is evidence."""
+        if not echoed:
+            return None, None
+        if len(echoed) > 1:
+            return {'state': 'ambiguous', 'consoles': len(echoed), 'seen': time.time()}, None
+        console = echoed[0]
+        uart = console.serial or ''
+        link = {'connection_id': console.connection_id, 'by_path': console.by_path,
+                'serial': uart, 'seen': time.time()}
+        if usb_serial and uart and uart != usb_serial:
+            link.update(state='mismatch', usb_serial=usb_serial)
+        elif usb_serial and not uart:
+            link.update(state='pending-bind', serial=usb_serial)
+        else:
+            link['state'] = 'linked' if (uart or usb_serial) else 'paired'
+            link['serial'] = uart or usb_serial
+        return link, console
+
+    def _bind_console(self, row, console, serial, connection_id):
+        """Bind a linked, unidentified console after discovery locks are released."""
+        try:
+            self.manager.bind_linked_console(console, serial, connection_id)
+            state, reason = 'linked', ''
+        except (IdentityError, OSError) as error:
+            state, reason = 'bind-failed', str(error)[:256]
+        with self.lock:
+            try:
+                current = self.get(row['id'], row['generation'], require_present=False)
+            except TaskError:
+                return
+            link = current['document'].get('uart_link') or {}
+            if link.get('connection_id') != connection_id:
+                return
+            link.update(state=state, serial=serial)
+            if reason:
+                link['reason'] = reason
+            else:
+                link.pop('reason', None)
+                current['document']['label'] = (self.store.get(serial) or {}).get('label') or current['document'].get('label')
+            current['document']['uart_link'] = link
+            self._save(current)
+            row.update(document=current['document'])
+
+    def _linked_console(self, link):
+        connection_id = (link or {}).get('connection_id')
+        if not connection_id:
+            return None
+        with self.manager.lock:
+            return next((device for device in self.manager.devices.values()
+                         if device.connection_id == connection_id and device.present), None)
 
     def accept_prepared_target(self, target_id, initial_generation, final_device, task_id, attempt_id,
                                expected_serial=''):
@@ -352,9 +444,14 @@ class FlashDiscovery:
                     or len(holds) != len(needed) or any(value['task_id'] != task_id or value['state'] != 'active'
                                                      for value in holds)):
                 raise TaskError('USB transition does not belong to the active flashing attempt', 409)
+            # The engine-verified transition keeps the same board, so its console
+            # pairing survives the loader's USB re-enumeration.
+            link = self.get(target_id, require_present=False)['document'].get('uart_link')
             self.refresh()
             row = self.get(target_id, require_present=False)
             data = row['document']
+            if link:
+                data['uart_link'] = link
             if selector != data['device'] or not row['present']:
                 raise TaskError('prepared USB target changed before its transition was recorded', 409)
             row.update(generation=secrets.token_hex(12), serial=expected_serial or None,
@@ -412,6 +509,21 @@ class FlashDiscovery:
             row['serial'] = serial
             row['document']['identity'] = dict(identity)
             row['document']['label'] = record.get('label') or serial
+            link = row['document'].get('uart_link') or {}
+            console = None
+            if link.get('state') == 'paired':
+                console = self._linked_console(link)
+                if console is None:
+                    row['document'].pop('uart_link', None)
+                elif console.serial:
+                    link.update(state='linked' if console.serial == serial else 'mismatch',
+                                serial=console.serial, usb_serial=serial)
+                    console = None
+            elif link.get('state') == 'linked' and link.get('serial') != serial:
+                link.update(state='mismatch', usb_serial=serial)
             self._save(row)
+        if console is not None:
+            # The RAM loader supplied the identity this paired console lacked.
+            self._bind_console(row, console, serial, link['connection_id'])
         self.manager.refresh_flash_presence()
         return serial

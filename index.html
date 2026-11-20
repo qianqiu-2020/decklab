@@ -16,37 +16,54 @@
 <div class="wrap">
   <div class="top">
     <h1><img class="brand-logo" src="/static/decklab.svg" width="32" height="32" alt="">DeckLab</h1>
-    <span id="decklab-version" class="mono" style="color:var(--ink-3);font-size:12px" aria-label="DeckLab Web 版本">版本未知</span>
+    <span id="decklab-version" class="mono" aria-label="DeckLab Web 版本">版本未知</span>
     <button id="b-image-store" type="button">镜像商店</button>
     <button type="button" class="menu-trigger" popovertarget="platform-menu" aria-controls="platform-menu">全站分享</button>
     <div id="platform-menu" class="action-menu" popover aria-label="全站分享">
       <button id="b-share" type="button" hidden title="创建可访问全部设备的网页链接">网页链接（全部设备）</button>
       <button id="b-agent-share-all" type="button" disabled title="默认授权全部设备，可在授权范围中更改">AI 授权（全部设备）</button>
     </div>
+    <button id="b-shortcuts" type="button" aria-haspopup="dialog" aria-controls="device-shortcuts">快捷键</button>
     <button id="b-settings" type="button">系统配置</button>
     <select id="language-select" aria-label="Language / 语言" title="Language / 语言" data-language-select data-i18n-ignore><option value="zh-CN">中文</option><option value="en">English</option></select>
     <span id="share-status" role="status"></span>
     <span class="conn"><span class="dot" id="conn-dot"></span><span id="conn-txt">连接中…</span></span>
   </div>
-  <p class="sub">开发板工作台 · 按标签访问，以序列号保存设备档案、终端记录与 agent 操作历史。</p>
-  <div class="overview">
-    <div><strong id="count-online">0</strong><span>在线设备</span></div>
-    <div><strong id="count-history">0</strong><span>历史设备</span></div>
-    <div><strong id="count-pending">0</strong><span>待识别串口</span></div>
+  <div class="directory-heading">
+    <h2>设备工作台</h2>
+  <div class="overview" role="group" aria-label="按设备状态筛选">
+    <button type="button" data-filter="online" aria-pressed="false"><strong id="count-online">0</strong><span>在线设备</span></button>
+    <button type="button" data-filter="offline" aria-pressed="false"><strong id="count-history">0</strong><span>历史设备</span></button>
+    <button type="button" data-filter="pending" aria-pressed="false"><strong id="count-pending">0</strong><span>待识别串口</span></button>
+  </div>
   </div>
   <div class="workspace" id="workspace">
-  <div class="device-pane">
-  <div class="pane-head"><span class="pane-mark"><img src="/static/decklab.svg" width="34" height="34" alt=""></span><span class="pane-title">DeckLab<small>开发板工作台</small></span></div>
+  <div class="device-pane" id="device-pane">
+  <h2 class="pane-head">设备列表</h2>
   <div class="toolbar">
-    <input id="device-search" placeholder="搜索标签、序列号、主机名或串口位置" aria-label="搜索设备">
-    <select id="device-filter" aria-label="设备状态"><option value="all">全部设备</option><option value="online">在线</option><option value="offline">历史 / 离线</option><option value="pending">待识别</option></select>
-    <button id="b-flash-discover" type="button">发现刷机设备</button>
+    <input id="device-search" type="search" placeholder="搜索标签、序列号、主机名或串口位置" aria-label="搜索设备">
+    <select id="device-filter" aria-label="设备状态"><option value="all">全部设备</option><option value="active">待识别＋在线</option><option value="pending">待识别</option><option value="online">在线</option><option value="offline">历史 / 离线</option></select>
+    <select id="device-sort" aria-label="设备排序"><option value="status">状态优先</option><option value="manual">手动排序</option></select>
+    <button id="device-clear-filters" type="button" hidden>清除筛选</button>
+    <button id="b-flash-discover" type="button">刷机工作区</button>
   </div>
+  <details class="serial-warning" id="serial-warning" hidden>
+    <summary><strong>USB 串口未就绪</strong> <span id="serial-warning-ports" data-i18n-ignore></span></summary>
+    <p>控制机已识别转接器，但串口驱动未绑定。可在控制机查看内核日志：</p>
+    <code data-i18n-ignore>journalctl -k -b | grep -Ei 'ttyUSB|brltty|ch341|ftdi_sio' | tail -40</code>
+    <div id="serial-warning-brltty" hidden>
+      <p><span>以下转接器匹配了盲文设备规则：</span> <span id="serial-brltty-ports" data-i18n-ignore></span></p>
+      <p>若日志显示 brltty 接管了接口，且控制机不使用 USB 盲文显示器，可临时停用该服务，然后重新插拔转接器。重启后恢复自动识别盲文设备。</p>
+      <code data-i18n-ignore>sudo systemctl mask --runtime --now brltty-udev.service</code>
+    </div>
+  </details>
+  <div class="directory-columns" aria-hidden="true"><span>开发板</span><span>连接信息</span><span>最近输出</span><span>排序</span></div>
   <div class="grid" id="grid"><p class="empty">正在扫描串口…</p></div>
   </div>
   <div class="detail" id="detail" hidden>
     <div class="hd">
       <div class="board-heading">
+      <button id="b-device-pane" class="icon-button" type="button" aria-controls="device-pane" aria-expanded="true" aria-label="收起设备列表" title="收起设备列表"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-compare"/></svg></button>
       <button class="nm" id="d-name" type="button" title="点击修改设备名称">—</button>
       <span class="k" id="d-dev">—</span>
       <span class="k" id="d-key">—</span>
@@ -57,18 +74,15 @@
           <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-info"/></svg>设备信息</button>
           <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>识别设备</button>
           <button id="b-probe-settings" type="button">探测设置</button>
+          <button id="b-device-share" type="button" hidden title="链接默认打开此设备；网页授权仍可访问全部设备"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>此设备链接（全站权限）</button>
           <hr>
           <button id="b-rescue" type="button" title="执行 USB 软解绑与重新绑定，会暂时中断该设备连接"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>重新连接串口</button>
         </div>
         <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-switch"/></svg>换板</button>
         <button id="b-flash" type="button">刷机</button>
         <button id="b-board-control" type="button" hidden title="电源与启动" aria-label="电源与启动"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>电源与启动</button>
-        <button type="button" class="menu-trigger" popovertarget="device-share-menu" aria-controls="device-share-menu">设备分享</button>
-        <div id="device-share-menu" class="action-menu" popover aria-label="设备分享">
-          <button id="b-device-share" type="button" hidden title="链接默认打开此设备；网页授权仍可访问全部设备"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>此设备链接（全站权限）</button>
-          <button id="b-agent-share" type="button" disabled title="默认仅授权此设备，可在授权范围中更改"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>AI 授权（此设备）</button>
-        </div>
-        <button id="b-close" class="icon-button" type="button" aria-label="收起设备终端" title="收起设备终端"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button>
+        <button id="b-agent-share" type="button" disabled title="默认仅授权此设备，可在授权范围中更改"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>AI 接入</button>
+        <button id="b-close" class="icon-button" type="button" aria-label="返回设备列表" title="返回设备列表"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button>
       </div>
     </div>
     <div id="device-share-status" class="terminal-status" role="status"></div>
@@ -89,28 +103,6 @@
           <button id="desktop-close" type="button">返回终端</button>
         </div>
       </div>
-      <form id="desktop-connection" class="desktop-connection" hidden>
-        <div class="desktop-detection"><strong>连接远程桌面</strong><button id="desktop-detect" type="button">重新检测</button><span id="desktop-detect-status" role="status"></span></div>
-        <label id="desktop-services-field" hidden>发现的服务<select id="desktop-services"><option value="">手工填写</option></select></label>
-        <div class="desktop-connection-fields">
-          <label>协议<select id="desktop-protocol"><option value="rdp">RDP</option><option value="vnc">VNC</option></select></label>
-          <label>主机或 IP<input id="desktop-host" autocomplete="off" spellcheck="false" required></label>
-          <label>端口<input id="desktop-port" type="number" min="1" max="65535" value="3389" required></label>
-          <label id="desktop-user-field">用户名<input id="desktop-user" autocomplete="off" spellcheck="false"></label>
-          <label>密码<input id="desktop-password" type="password" autocomplete="new-password"></label>
-        </div>
-        <div id="desktop-certificate-field">
-          <label>服务器证书 SHA256<input id="desktop-certificate" autocomplete="off" spellcheck="false" placeholder="留空使用系统信任链"></label>
-          <label id="desktop-trust-field" class="desktop-check" hidden title="保存并连接后固定当前指纹；后续证书不匹配时拒绝连接"><input id="desktop-trust" type="checkbox" checked>信任并固定此证书指纹</label>
-        </div>
-        <div id="desktop-rdp-help" class="desktop-connection-help">
-          <p><strong>Debian GNOME 远程登录</strong><span>（GDM，通常 3389）：入口用户默认为 rdp；连接后再用 Linux 用户登录。</span></p>
-          <p><span>在开发板串口查看入口账号和密码：</span><code data-i18n-ignore>sudo grdctl --system status --show-credentials</code></p>
-          <p><strong>当前用户桌面共享</strong><span>：使用“设置 → 系统 → 远程桌面 → 桌面共享”中显示的独立账号和密码；3389 被占用时通常使用 3390，端口以设置页为准。</span></p>
-        </div>
-        <label class="desktop-check"><input id="desktop-agent" type="checkbox">允许持有该设备授权的 AI 使用桌面</label>
-        <div class="desktop-connection-footer"><button id="desktop-save-connect" class="pri" type="submit">保存并连接</button><span id="desktop-connection-status" role="status"></span></div>
-      </form>
       <details id="desktop-error" class="desktop-error" hidden>
         <summary>连接错误详情</summary>
         <pre id="desktop-error-details" data-i18n-ignore></pre>
@@ -123,7 +115,9 @@
       <div id="desktop-input-tools" class="desktop-input-tools">
         <span id="desktop-status" role="status" aria-live="polite">点击画面后控制桌面</span>
         <button id="desktop-release" type="button">释放按键</button>
-        <select id="desktop-keys" aria-label="远程组合键"><option value="ControlLeft AltLeft Delete">Ctrl+Alt+Del</option><option value="AltLeft Tab">Alt+Tab</option><option value="ControlLeft Escape">Ctrl+Esc</option><option value="MetaLeft">Super</option><option value="Escape">Esc</option></select>
+        <span id="desktop-system-key-hint" hidden>本机系统键未锁定，可点 Win / Super。</span>
+        <button id="desktop-super" type="button" title="向远端发送 Windows 或 Super 键">Win / Super</button>
+        <select id="desktop-keys" aria-label="远程组合键"><option value="ControlLeft AltLeft Delete">Ctrl+Alt+Del</option><option value="AltLeft Tab">Alt+Tab</option><option value="ControlLeft Escape">Ctrl+Esc</option><option value="Escape">Esc</option></select>
         <button id="desktop-key" type="button">发送组合键</button>
         <button id="desktop-clipboard-toggle" type="button" aria-expanded="false" aria-controls="desktop-clipboard">文本与剪贴板</button>
       </div>
@@ -143,15 +137,16 @@
       </div>
       <span id="terminal-search-status"></span>
       <div class="terminal-nav-tools" aria-label="侧栏导航">
-        <button id="b-records" type="button" aria-expanded="false" aria-pressed="false" title="打开串口日志归档"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-log"/></svg>历史日志</button>
+        <button id="b-records" type="button" aria-expanded="false" aria-pressed="false" aria-controls="d-records" title="查看串口日志、SSH 会话和操作记录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-log"/></svg>历史日志</button>
         <button id="b-boot-compare" type="button" title="比较同一块或不同开发板的两次启动日志"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-compare"/></svg>启动对比</button>
-        <button id="b-tasks" type="button" title="查看后台任务进度与结果"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>任务</button>
+        <button id="b-tasks" type="button" aria-controls="d-records" aria-expanded="false" title="查看后台任务进度与结果"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>任务</button>
       </div>
       <div class="terminal-extra-tools" aria-label="终端工具">
         <button id="b-file-transfer" type="button" title="通过串口上传、下载或在开发板之间复制文件"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-transfer"/></svg>文件传输</button>
-        <button type="button" class="menu-trigger" popovertarget="terminal-view-menu" aria-controls="terminal-view-menu">显示与导航</button>
-        <div id="terminal-view-menu" class="action-menu" popover aria-label="显示与导航">
-          <button id="b-command-nav" type="button" aria-pressed="false" title="在当前终端缓冲中按 shell 命令跳转"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>输入导航</button>
+        <button type="button" id="terminal-tools-trigger" class="menu-trigger" popovertarget="terminal-view-menu" aria-controls="terminal-view-menu">终端工具</button>
+        <div id="terminal-view-menu" class="action-menu" popover aria-label="终端工具">
+          <button id="b-command-nav" type="button" aria-controls="d-records" aria-expanded="false" aria-pressed="false" title="在当前终端缓冲中按 shell 命令跳转"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>输入导航</button>
+          <button id="b-commands" type="button" aria-controls="d-records" aria-expanded="false">常用命令</button>
           <hr>
           <button id="b-serial-size" type="button" title="在空闲 Linux shell 同步板端尺寸，启用宽屏串口">同步尺寸</button>
           <button id="b-redraw" type="button" title="从采集缓冲重绘全屏终端"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>重绘</button>
@@ -165,65 +160,112 @@
       <div class="termhost" id="d-term"></div>
       <div class="sendrow">
         <label class="chk"><input type="checkbox" id="d-kbd" checked> 键盘直通</label>
-        <input type="text" id="d-in" placeholder="或在此整行输入后回车" autocomplete="off" spellcheck="false">
+        <input type="text" id="d-in" aria-label="终端整行输入" placeholder="或在此整行输入后回车" autocomplete="off" spellcheck="false">
         <button class="pri" id="b-send" type="button">发送</button>
         <button id="b-cr" type="button" title="只发一个回车（唤醒板子 / 看是否还活着）">↵</button>
         <button id="b-ctrlc" type="button" title="发送 Ctrl-C">Ctrl-C</button>
         <button id="b-paste" type="button" title="粘贴剪贴板内容到会话">粘贴</button>
-        <button type="button" class="menu-trigger" popovertarget="input-options-menu" aria-controls="input-options-menu">输入选项</button>
+        <button id="b-input-owner" type="button" title="可选占用串口输入，其他人仍可查看输出"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg><span id="input-owner-label">占用输入</span></button>
+        <button type="button" id="input-options-trigger" class="menu-trigger" popovertarget="input-options-menu" aria-controls="input-options-menu">输入选项</button>
         <div id="input-options-menu" class="action-menu" popover aria-label="输入选项">
-          <button id="b-input-owner" type="button" title="可选占用串口输入，其他人仍可查看输出"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg><span id="input-owner-label">占用输入</span></button>
-          <hr>
           <label class="chk" id="slow-paste-option" title="GRUB/固件接管串口输入后若批量粘贴丢字，可逐字符发送"><input type="checkbox" id="d-slow-paste"> 固件慢速粘贴</label>
         </div>
         <button id="b-takeover" type="button" hidden title="获得此共享 SSH 会话的输入与尺寸控制权，并记录介入事件">介入此会话</button>
       </div>
       <div class="hint" id="d-hint" hidden></div>
     </div>
+    <dialog id="ssh-credentials-dialog" class="ssh-credentials-dialog" aria-labelledby="ssh-credentials-title" aria-describedby="ssh-credentials-intro">
+      <div class="agent-share-head"><strong id="ssh-credentials-title">SSH 连接设置</strong><button id="ssh-credentials-close" type="button" aria-label="关闭">关闭</button></div>
+      <p id="ssh-credentials-target" class="ssh-credentials-target" data-i18n-ignore></p>
+      <p id="ssh-credentials-intro">连接成功后，服务端按已识别设备保存账号和密码，后续连接自动使用；不修改板端账号。</p>
+      <p id="ssh-credentials-saved-status"></p>
+      <form id="ssh-credentials-form">
+        <div class="ssh-credentials-fields">
+          <label>SSH 用户<input id="ssh-credentials-user" type="text" autocomplete="username" maxlength="128" required spellcheck="false" data-i18n-ignore></label>
+          <label>SSH 密码<input id="ssh-credentials-password" type="password" autocomplete="off" maxlength="4096" data-i18n-ignore></label>
+        </div>
+        <p id="ssh-credentials-status" role="status"></p>
+        <div class="ft-actions"><button id="ssh-credentials-cancel" type="button">取消</button><button id="ssh-credentials-connect" class="pri" type="submit">使用此账号连接</button></div>
+      </form>
+      <details id="ssh-root-guide" class="ssh-root-guide">
+        <summary>需要 root 密码登录？</summary>
+        <p>已有普通用户可直接通过上方表单连接。以下步骤适用于 Ubuntu / Debian，需要板端 sudo 权限。</p>
+        <p>请分步执行，完成当前命令的密码输入并返回 shell 后，再执行下一步。不要将整份指引一次性粘贴到串口。</p>
+        <div class="ssh-root-step"><strong>1. 设置 root 密码</strong><button id="ssh-root-stage-passwd" type="button">填入串口</button><button id="ssh-root-copy-passwd" type="button">复制改密命令</button></div>
+        <p>sudo 提示时输入当前普通用户密码；随后按提示输入两次你选择的 root 新密码。</p>
+        <pre><code id="ssh-root-command-passwd">sudo passwd root</code></pre>
+        <div class="ssh-root-step"><strong>2. 编辑 SSH 服务配置</strong><button id="ssh-root-stage-edit" type="button">填入串口</button><button id="ssh-root-copy-edit" type="button">复制编辑命令</button></div>
+        <pre><code id="ssh-root-command-edit">sudoedit /etc/ssh/sshd_config</code></pre>
+        <p>将以下两项放在配置文件开头、Include 之前，然后保存退出。</p>
+        <div class="ssh-root-step"><span>配置片段</span><button id="ssh-root-copy-config" type="button">复制配置片段</button></div>
+        <pre><code id="ssh-root-command-config">PermitRootLogin yes
+PasswordAuthentication yes</code></pre>
+        <div class="ssh-root-step"><strong>3. 检查并重启 SSH</strong><button id="ssh-root-stage-restart" type="button">填入串口</button><button id="ssh-root-copy-restart" type="button">复制检查和重启命令</button></div>
+        <pre><code id="ssh-root-command-restart">sudo /usr/sbin/sshd -t &amp;&amp; sudo systemctl restart ssh</code></pre>
+        <div class="ssh-root-step"><strong>4. 确认生效配置</strong><button id="ssh-root-stage-check" type="button">填入串口</button><button id="ssh-root-copy-check" type="button">复制验证命令</button></div>
+        <pre><code id="ssh-root-command-check">sudo /usr/sbin/sshd -T | grep -E '^(permitrootlogin|passwordauthentication) '</code></pre>
+        <p>确认两项均为 yes 后，在上方填写 root 和刚设置的密码重试。</p>
+        <p id="ssh-root-copy-status" role="status"></p>
+      </details>
+    </dialog>
+      <form id="desktop-connection" class="desktop-connection" hidden>
+        <div class="desktop-detection"><strong>远程桌面设置</strong><button type="button" id="desktop-setup-close">关闭</button><button id="desktop-detect" type="button">重新检测</button><span id="desktop-detect-status" role="status"></span></div>
+        <label id="desktop-services-field" hidden>发现的服务<select id="desktop-services"><option value="">手工填写</option></select></label>
+        <div class="desktop-connection-fields">
+          <label>协议<select id="desktop-protocol"><option value="rdp">RDP</option><option value="vnc">VNC</option></select></label>
+          <label>主机或 IP<input id="desktop-host" autocomplete="off" spellcheck="false" required></label>
+          <label>端口<input id="desktop-port" type="number" min="1" max="65535" value="3389" required></label>
+          <label id="desktop-user-field">用户名<input id="desktop-user" autocomplete="off" spellcheck="false"></label>
+          <label>密码<input id="desktop-password" type="password" autocomplete="new-password"></label>
+        </div>
+        <div id="desktop-certificate-field">
+          <label>服务器证书 SHA256<input id="desktop-certificate" autocomplete="off" spellcheck="false" placeholder="留空使用系统信任链"></label>
+          <label id="desktop-trust-field" class="desktop-check" hidden title="保存并连接后固定当前指纹；后续证书不匹配时拒绝连接"><input id="desktop-trust" type="checkbox" checked>信任并固定此证书指纹</label>
+        </div>
+        <div id="desktop-rdp-help" class="desktop-connection-help">
+          <p><strong>Debian GNOME 远程登录</strong><span>（GDM，通常 3389）：入口用户默认为 rdp；连接后再用 Linux 用户登录。</span></p>
+          <p><span>在开发板串口查看入口账号和密码：</span><code id="desktop-credentials-command" data-i18n-ignore>sudo grdctl --system status --show-credentials</code><button type="button" id="desktop-credentials-stage">填入串口</button> <button type="button" id="desktop-credentials-copy">复制命令</button></p><span id="desktop-command-status" role="status"></span>
+          <p><strong>当前用户桌面共享</strong><span>：使用“设置 → 系统 → 远程桌面 → 桌面共享”中显示的独立账号和密码；3389 被占用时通常使用 3390，端口以设置页为准。</span></p>
+        </div>
+        <label class="desktop-check"><input id="desktop-agent" type="checkbox">允许持有该设备授权的 AI 使用桌面</label>
+        <div class="desktop-connection-footer"><button id="desktop-save-connect" class="pri" type="submit">保存并连接</button><span id="desktop-connection-status" role="status"></span></div>
+      </form>
     <section class="records" id="d-records" hidden>
-      <div class="records-title"><strong>记录与归档</strong><button id="b-records-close" class="icon-button" type="button" title="关闭侧栏" aria-label="关闭侧栏"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button></div>
-      <div class="records-tabs" role="tablist" aria-label="记录分类">
-        <button id="record-tab-logs" type="button" role="tab" aria-controls="record-panel-logs"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-log"/></svg>串口归档</button>
-        <button id="record-tab-inputs" type="button" role="tab" aria-controls="record-panel-inputs"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>输入导航</button>
-        <button id="record-tab-sessions" type="button" role="tab" aria-controls="record-panel-sessions"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-terminal"/></svg>SSH 会话</button>
-        <button id="record-tab-events" type="button" role="tab" aria-controls="record-panel-events"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-clock"/></svg>关键操作</button>
-        <button id="record-tab-tasks" type="button" role="tab" aria-controls="record-panel-tasks">后台任务</button>
-        <button id="record-tab-commands" type="button" role="tab" aria-controls="record-panel-commands"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>常用命令</button>
+      <div class="records-title">
+        <div class="records-tabs" id="history-tabs" role="tablist" aria-label="历史日志">
+          <button id="record-tab-logs" type="button" role="tab" aria-controls="record-panel-logs">串口日志</button>
+          <button id="record-tab-sessions" type="button" role="tab" aria-controls="record-panel-sessions">SSH 会话</button>
+          <button id="record-tab-events" type="button" role="tab" aria-controls="record-panel-events">操作记录</button>
+        </div>
+        <strong id="records-heading" hidden></strong>
+        <button id="task-refresh" type="button" hidden>刷新</button>
+        <button id="b-records-close" class="icon-button" type="button" title="关闭侧栏" aria-label="关闭侧栏"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button>
       </div>
-      <div class="records-panel" id="record-panel-logs" role="tabpanel">
-        <div class="section-head"><h2>串口日志归档</h2><span id="log-location"></span></div>
+      <div class="records-panel" id="record-panel-logs" role="tabpanel" aria-labelledby="record-tab-logs">
         <div id="archive-connections" class="archive-picker" hidden></div>
         <section id="boot-search-results" class="boot-search-results" hidden aria-label="全部启动日志搜索结果"><div id="boot-search-summary" role="status"></div><div id="boot-search-matches"></div><div class="pager"><button id="boot-search-prev" type="button">上一页</button><button id="boot-search-next" type="button">下一页</button><button id="boot-search-close" type="button">关闭搜索</button></div></section>
-        <div class="archive-tabs">
-          <button id="archive-mode-date" type="button">按日期</button>
-          <button id="archive-mode-boot" type="button">按启动</button>
-        </div>
-        <div id="archive-picker" class="archive-picker"></div>
         <div class="logs" id="d-logs"></div>
+        <div id="log-location" class="archive-location"></div>
       </div>
-      <div class="records-panel" id="record-panel-inputs" role="tabpanel" hidden>
-        <div class="section-head"><h2>终端输入导航</h2><span>当前终端缓冲中的 shell 命令，点击跳转到对应输入行</span></div>
+      <div class="records-panel" id="record-panel-inputs" role="region" aria-labelledby="records-heading" hidden>
         <div class="command-nav-controls"><button id="command-nav-prev" type="button">↑ 上一条</button><span id="command-nav-count">0 条</span><button id="command-nav-next" type="button">下一条 ↓</button></div>
         <div class="command-nav-list" id="d-command-nav"></div>
       </div>
-      <div class="records-panel" id="record-panel-sessions" role="tabpanel" hidden>
-        <div class="section-head"><h2>SSH 会话记录</h2><span>在线会话可实时查看，关闭后 transcript 仍保留</span></div>
+      <div class="records-panel" id="record-panel-sessions" role="tabpanel" aria-labelledby="record-tab-sessions" hidden>
         <div id="d-activity" class="activity"></div>
-        <div class="pager"><button id="activity-prev" type="button">较新</button><span id="activity-page"></span><button id="activity-next" type="button">更早</button></div>
+        <div id="activity-pager" class="pager" hidden><button id="activity-prev" type="button">较新</button><span id="activity-page"></span><button id="activity-next" type="button">更早</button></div>
       </div>
-      <div class="records-panel" id="record-panel-events" role="tabpanel" hidden>
-        <div class="section-head"><h2>关键操作记录</h2><span>逐按键写入保留在审计库中，此处不重复显示</span></div>
+      <div class="records-panel" id="record-panel-events" role="tabpanel" aria-labelledby="record-tab-events" hidden>
         <div id="d-events" class="activity"></div>
-        <div class="pager"><button id="event-prev" type="button">较新</button><span id="event-page"></span><button id="event-next" type="button">更早</button></div>
+        <div id="event-pager" class="pager" hidden><button id="event-prev" type="button">较新</button><span id="event-page"></span><button id="event-next" type="button">更早</button></div>
       </div>
-      <div class="records-panel" id="record-panel-tasks" role="tabpanel" hidden>
-        <div class="section-head"><h2>后台任务</h2><button id="task-refresh" type="button">刷新</button></div>
+      <div class="records-panel" id="record-panel-tasks" role="region" aria-labelledby="records-heading" hidden>
         <p id="task-status" class="log-note" role="status"></p>
         <div id="d-tasks" class="activity"></div>
-        <div class="pager"><button id="task-prev" type="button">较新</button><span id="task-page"></span><button id="task-next" type="button">更早</button></div>
+        <div id="task-pager" class="pager" hidden><button id="task-prev" type="button">较新</button><span id="task-page"></span><button id="task-next" type="button">更早</button></div>
       </div>
-      <div class="records-panel" id="record-panel-commands" role="tabpanel" hidden>
-        <div class="section-head"><h2>历史常用命令</h2><span>按使用次数排序；点击填入后再执行</span></div>
+      <div class="records-panel" id="record-panel-commands" role="region" aria-labelledby="records-heading" hidden>
+        <p class="log-note">点击命令填入输入框，按回车发送。</p>
         <div class="commands" id="d-commands"></div>
       </div>
     </section>
@@ -231,6 +273,17 @@
   </div>
   </div>
 </div>
+<dialog id="device-shortcuts" class="identity-association-dialog" aria-labelledby="shortcuts-title">
+  <div class="agent-share-head"><strong id="shortcuts-title">设备快捷键</strong><button id="shortcuts-close" type="button">关闭</button></div>
+  <p>按当前设备列表的顺序切换。点击组合键可重新录入，Delete 清除，Esc 取消。设置保存在当前浏览器。</p>
+  <div class="shortcut-fields">
+    <label for="shortcut-prev">上一台设备</label><button id="shortcut-prev" type="button"></button>
+    <label for="shortcut-next">下一台设备</label><button id="shortcut-next" type="button"></button>
+    <label for="shortcut-number">直达第 1–9 台设备</label>
+    <select id="shortcut-number"><option value="Alt+Shift">Alt + Shift + 1–9</option><option value="Alt">Alt + 1–9</option><option value="Ctrl+Alt">Ctrl + Alt + 1–9</option><option value="Ctrl+Shift">Ctrl + Shift + 1–9</option><option value="">关闭</option></select>
+  </div>
+  <div class="ft-actions"><span id="shortcuts-status" role="status"></span><button id="shortcuts-reset" type="button">恢复默认快捷键</button></div>
+</dialog>
 <dialog id="board-control-dialog" class="identity-association-dialog" aria-labelledby="board-control-title">
   <div class="agent-share-head"><strong id="board-control-title">板卡控制</strong><button id="board-control-close" type="button">关闭</button></div>
   <p id="board-control-target" data-i18n-ignore></p>
@@ -253,40 +306,6 @@
   <label class="ft-field">核实说明<input id="ia-reason" type="text" maxlength="600" placeholder="填写如何确认板卡与档案归属" autocomplete="off"></label>
   <p id="ia-status" role="status"></p>
   <div class="ft-actions"><button id="ia-cancel" type="button">取消</button><button id="ia-confirm" class="pri" type="button" disabled>确认关联并重新识别</button></div>
-</dialog>
-<dialog id="ssh-credentials-dialog" class="ssh-credentials-dialog" aria-labelledby="ssh-credentials-title" aria-describedby="ssh-credentials-intro">
-  <div class="agent-share-head"><strong id="ssh-credentials-title">填写 SSH 用户和密码</strong><button id="ssh-credentials-close" type="button" aria-label="关闭">关闭</button></div>
-  <p id="ssh-credentials-target" class="ssh-credentials-target" data-i18n-ignore></p>
-  <p id="ssh-credentials-intro">连接成功后，服务端按已识别设备保存账号和密码，后续连接自动使用；不修改板端账号。</p>
-  <p id="ssh-credentials-saved-status"></p>
-  <form id="ssh-credentials-form">
-    <div class="ssh-credentials-fields">
-      <label>SSH 用户<input id="ssh-credentials-user" type="text" autocomplete="username" maxlength="128" required spellcheck="false" data-i18n-ignore></label>
-      <label>SSH 密码<input id="ssh-credentials-password" type="password" autocomplete="off" maxlength="4096" data-i18n-ignore></label>
-    </div>
-    <p id="ssh-credentials-status" role="status"></p>
-    <div class="ft-actions"><button id="ssh-credentials-cancel" type="button">取消</button><button id="ssh-credentials-connect" class="pri" type="submit">使用此账号连接</button></div>
-  </form>
-  <details id="ssh-root-guide" class="ssh-root-guide">
-    <summary>需要 root 密码登录？</summary>
-    <p>已有普通用户可直接通过上方表单连接。以下步骤适用于 Ubuntu / Debian，需要板端 sudo 权限；命令仅复制到剪贴板，由你在串口中自行执行。</p>
-    <p>请分步执行，完成当前命令的密码输入并返回 shell 后，再执行下一步。不要将整份指引一次性粘贴到串口。</p>
-    <div class="ssh-root-step"><strong>1. 设置 root 密码</strong><button id="ssh-root-copy-passwd" type="button">复制改密命令</button></div>
-    <p>sudo 提示时输入当前普通用户密码；随后按提示输入两次你选择的 root 新密码。</p>
-    <pre><code id="ssh-root-command-passwd">sudo passwd root</code></pre>
-    <div class="ssh-root-step"><strong>2. 编辑 SSH 服务配置</strong><button id="ssh-root-copy-edit" type="button">复制编辑命令</button></div>
-    <pre><code id="ssh-root-command-edit">sudoedit /etc/ssh/sshd_config</code></pre>
-    <p>将以下两项放在配置文件开头、Include 之前，然后保存退出。</p>
-    <div class="ssh-root-step"><span>配置片段</span><button id="ssh-root-copy-config" type="button">复制配置片段</button></div>
-    <pre><code id="ssh-root-command-config">PermitRootLogin yes
-PasswordAuthentication yes</code></pre>
-    <div class="ssh-root-step"><strong>3. 检查并重启 SSH</strong><button id="ssh-root-copy-restart" type="button">复制检查和重启命令</button></div>
-    <pre><code id="ssh-root-command-restart">sudo /usr/sbin/sshd -t &amp;&amp; sudo systemctl restart ssh</code></pre>
-    <div class="ssh-root-step"><strong>4. 确认生效配置</strong><button id="ssh-root-copy-check" type="button">复制验证命令</button></div>
-    <pre><code id="ssh-root-command-check">sudo /usr/sbin/sshd -T | grep -E '^(permitrootlogin|passwordauthentication) '</code></pre>
-    <p>确认两项均为 yes 后，在上方填写 root 和刚设置的密码重试。</p>
-    <p id="ssh-root-copy-status" role="status"></p>
-  </details>
 </dialog>
 <dialog id="file-transfer-dialog" class="file-transfer-dialog" aria-labelledby="ft-title">
   <div class="ft-head" title="拖动标题可移动窗口"><div><strong id="ft-title">串口文件传输</strong><small id="ft-board"></small></div><button id="ft-close" type="button">关闭</button></div>
@@ -321,39 +340,16 @@ PasswordAuthentication yes</code></pre>
 </dialog>
 <dialog id="flash-dialog" class="flash-dialog" aria-labelledby="fl-title">
   <div class="fl-head"><div><strong id="fl-title">刷机工作区</strong><small id="fl-board" data-i18n-ignore></small></div><button id="fl-close" type="button">关闭</button></div>
-  <section class="fl-section" aria-labelledby="fl-connect-title">
-    <h3 id="fl-connect-title">下载设备</h3>
-    <div class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label><button id="fl-discover" type="button">重新检测</button></div>
-    <details id="fl-storage-details" class="fl-details"><summary>存储信息与备份</summary>
-      <div class="fl-read-action"><button id="fl-read-nor" type="button" disabled>读取设备存储</button></div>
-    </details>
-    <div id="fl-backups" class="fl-backups" hidden></div>
-    <div id="fl-nor-current" class="fl-system-parts" hidden></div>
-    <details class="fl-details"><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl></details>
+  <ol class="fl-stage-list" aria-label="刷机阶段"><li id="fl-step-setup" aria-current="step">准备镜像与设备</li><li id="fl-step-review">核对写入范围</li><li id="fl-step-run">执行与结果</li></ol>
+  <div id="fl-stage-body" tabindex="-1">
+  <div id="fl-setup">
+  <section id="fl-preview-overall" class="fl-section" hidden aria-label="正在预览写入范围">
+    <div class="fl-progress-heading"><strong id="fl-preview-phase" role="status"></strong><span id="fl-overall-text"></span></div>
+    <progress id="fl-overall-bar" max="100" aria-label="整体预览进度"></progress>
+    <details id="fl-stage-timing"><summary>查看各阶段耗时</summary><ol id="fl-preview-stages" class="fl-preview-stages"></ol></details>
   </section>
-  <div id="fl-expired" class="fl-alert" role="alert" hidden>
-    <p>确认已超时，本次未开始写入。镜像和备份已保留；重新检测后可再次预览刷写。</p>
-    <button id="fl-restart" type="button">重新检测设备</button>
-  </div>
-  <section id="fl-system" class="fl-section" hidden aria-labelledby="fl-system-title">
-    <h3 id="fl-system-title">系统盘</h3>
-    <p id="fl-eeprom-identity" class="log-note" hidden></p>
-    <div id="fl-boot-config" hidden>
-      <label class="ft-field">优先启动介质<select id="fl-boot-priority"><option value="">请选择</option><option value="UFS">UFS</option><option value="SSD">SSD / NVMe</option><option value="MMC">eMMC / SD</option><option value="USB">USB</option></select></label>
-      <button id="fl-boot-save" type="button">保存到 EEPROM</button>
-      <span id="fl-boot-status" class="log-note" role="status"></span>
-    </div>
-    <label class="ft-field">查看存储<select id="fl-system-storage"></select></label>
-    <p id="fl-system-origin" class="log-note" role="status"></p>
-    <div id="fl-system-parts" class="fl-system-parts"></div>
-  </section>
-  <section class="fl-section" aria-labelledby="fl-replace-title">
-    <h3 id="fl-replace-title">镜像与刷写范围</h3>
-    <div class="fl-inputs">
-    <label class="ft-field fl-mode-field">刷写方式<select id="fl-mode"><option value="full">整包刷写</option><option value="partitions">指定分区</option></select></label>
-    <label id="fl-loader-field" class="ft-field" hidden>临时刷机加载器<select id="fl-loader-source"><option value="builtin">DeckLab 内置</option><option value="image">镜像自带</option></select></label>
-      <label class="ft-field" id="fl-target-storage-field">目标系统盘<select id="fl-target-storage"></select><small>系统盘包按配置列出目标分区；多盘时须明确选择，不按枚举顺序选盘。</small></label>
-    </div>
+  <section class="fl-section" aria-labelledby="fl-image-title">
+    <h3 id="fl-image-title">待刷镜像</h3>
     <div id="fl-sources" class="fl-sources">
       <div class="fl-source-actions" role="group" aria-label="选择镜像来源">
         <button id="fl-local" type="button">选择本地文件</button><input id="fl-files" type="file" multiple hidden aria-label="选择本地文件">
@@ -365,14 +361,39 @@ PasswordAuthentication yes</code></pre>
         <details class="fl-details"><summary>校验 SHA-256（可选，请先填写）</summary><label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label></details>
         <button id="fl-download" type="button" hidden>重试下载</button>
       </div>
+      <details id="fl-fast" class="fl-details" hidden>
+        <summary>极速刷写系统盘（边下载边写入，不落盘）</summary>
+        <p class="fl-hint">直接从 URL 流式下载 K3 系统包，在内存中解压后写入系统盘，不经过预览。按包内分区表重建 GPT，系统盘原有数据全部覆盖；结束时按包内 SHA256SUMS 核对，未刷 NOR 固件。</p>
+        <label class="ft-field">系统包 URL（.tar.gz）<input id="fl-fast-url" type="url" spellcheck="false" placeholder="https://…/Debian-13-GNOME-K3-….tar.gz"></label>
+        <label class="ft-field">目标系统盘<input id="fl-fast-storage" type="text" value="auto" spellcheck="false" placeholder="auto 或 nvme:0 / scsi:0"></label>
+        <label class="ft-check"><input id="fl-fast-confirm" type="checkbox">我确认覆盖该板系统盘的全部内容</label>
+        <button id="fl-fast-start" type="button" disabled>开始极速刷写</button>
+      </details>
+      <details id="fl-tuning" class="fl-details" hidden>
+        <summary>刷写配置 <span id="fl-tuning-state"></span></summary>
+        <p class="fl-hint">在这块板上实测 USB、板上解压、写盘和控制机压缩速度，按耗时模型选出编码、压缩级别和写盘方式。之后经此 USB 口的普通刷写和极速刷写都使用这套配置。配置只影响速度，不改变写入内容。</p>
+        <dl id="fl-tuning-summary" class="fl-tuning-summary"></dl>
+        <label class="ft-check"><input id="fl-tuning-write" type="checkbox" checked>同时测写盘速度（读出 128 MiB 后原样写回，内容不变）</label>
+        <div class="fl-tuning-actions"><button id="fl-tuning-run" type="button" disabled>实测并生成配置</button><button id="fl-tuning-forget" type="button" hidden>清除此 USB 口的配置</button></div>
+      </details>
       <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
       <select id="fl-artifact" hidden aria-label="当前镜像来源"></select>
-      <label id="fl-firmware-field" class="ft-field">配套 Firmware（可选）<div class="fl-firmware-row"><select id="fl-firmware"><option value="">仅刷当前镜像</option></select><button id="fl-firmware-choose" type="button">选择配套固件</button></div><small id="fl-firmware-status" role="status"></small><button id="fl-firmware-retry" type="button" hidden>重试准备配套固件</button></label>
+      <div id="fl-firmware-field" class="ft-field" hidden>
+        <label for="fl-firmware">配套 Firmware（可选）</label>
+        <div class="fl-firmware-row">
+          <select id="fl-firmware"><option value="">仅刷当前镜像</option></select>
+          <button id="fl-firmware-local" type="button">选择本地文件</button>
+          <input id="fl-firmware-file" type="file" accept=".tar.gz,.tgz,.tar,.zip" hidden aria-label="选择配套固件">
+          <button id="fl-firmware-choose" type="button">从镜像库选择</button>
+        </div>
+        <small id="fl-firmware-status" role="status"></small><button id="fl-firmware-retry" type="button" hidden>重试准备配套固件</button>
+      </div>
+      <p id="fl-chip-warning" role="status" hidden></p>
       <section id="fl-image-preparation" hidden aria-live="polite">
-        <div class="fl-preparation-head"><div><strong id="fl-image-preparation-status"></strong><span id="fl-image-preparation-bytes"></span></div><button id="fl-image-preparation-cancel" type="button" hidden>取消准备</button><button id="fl-image-preparation-retry" type="button" hidden>重新准备镜像</button></div>
+        <div class="fl-preparation-head"><div><strong id="fl-image-preparation-status"></strong><span id="fl-image-preparation-bytes"></span><button type="button" id="fl-image-error-copy" hidden>复制错误详情</button></div><button id="fl-image-preparation-cancel" type="button" hidden>取消准备</button><button id="fl-image-preparation-retry" type="button" hidden>重新准备镜像</button></div>
         <progress id="fl-image-preparation-progress" max="100" aria-label="镜像准备进度"></progress>
         <div id="fl-image-overall" hidden><p id="fl-image-overall-text"></p><ol id="fl-image-stages"></ol></div>
-        <div id="fl-image-information"></div>
+        <details id="fl-image-information-details" open hidden><summary>镜像布局</summary><div id="fl-image-information"></div></details>
         <div id="fl-image-recovery" hidden>
           <label><input id="fl-image-stopped" type="checkbox">已检查并确认原镜像准备进程停止</label>
           <input id="fl-image-recovery-reason" type="text" placeholder="确认依据" aria-label="镜像准备恢复依据">
@@ -386,36 +407,72 @@ PasswordAuthentication yes</code></pre>
       <p>仅删除服务端保存的这份镜像，不影响开发板内容；任务占用中的镜像不能删除。</p>
       <button id="fl-delete-confirm" type="button">确认删除</button><button id="fl-delete-cancel" type="button">保留镜像</button>
     </fieldset>
+  </section>
+  <section class="fl-section" aria-labelledby="fl-connect-title">
+    <h3 id="fl-connect-title">目标开发板</h3>
+    <div class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label><button id="fl-discover" type="button">检测设备</button></div>
+    <details id="fl-storage-details" class="fl-details"><summary>板上已有内容与备份</summary>
+      <div class="fl-read-action"><button id="fl-read-nor" type="button" disabled>读取设备存储</button></div>
+      <span id="fl-read-status" role="status" hidden></span>
+      <div id="fl-live-gpt" hidden></div>
+      <div id="fl-nor-current" class="fl-system-parts" hidden></div>
+      <div id="fl-board-backup"><details id="fl-backup-files" hidden><summary>NOR 备份下载</summary><div id="fl-backups" class="fl-backups"></div></details></div>
+      <div id="fl-system" hidden>
+        <p id="fl-eeprom-identity" class="log-note" hidden></p>
+        <label class="ft-field">查看板上磁盘<select id="fl-system-storage"></select></label>
+        <p id="fl-system-origin" class="log-note" role="status"></p>
+        <div id="fl-system-parts" class="fl-system-parts"></div>
+        <details id="fl-boot-config" class="fl-details" hidden><summary>修改板上启动介质</summary>
+          <label class="ft-field">EEPROM 优先启动介质<select id="fl-boot-priority"><option value="">请选择</option><option value="UFS">UFS</option><option value="SSD">SSD / NVMe</option><option value="MMC">eMMC / SD</option><option value="USB">USB</option></select></label>
+          <button id="fl-boot-save" type="button">保存到 EEPROM</button>
+          <span id="fl-boot-status" class="log-note" role="status"></span>
+        </details>
+      </div>
+    </details>
+    <details class="fl-details"><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl></details>
+  </section>
+  <section class="fl-section" aria-labelledby="fl-replace-title">
+    <h3 id="fl-replace-title">写入目标与方式</h3>
+    <div class="fl-inputs">
+      <label class="ft-field fl-mode-field">刷写方式<select id="fl-mode"><option value="full">整包刷写</option><option value="partitions">指定分区</option></select></label>
+      <label id="fl-loader-field" class="ft-field" hidden>临时刷机加载器<select id="fl-loader-source"><option value="builtin">DeckLab 内置</option><option value="image">镜像自带</option></select></label>
+      <label class="ft-field" id="fl-target-storage-field">要写入的板上磁盘<select id="fl-target-storage"></select><small>有多块候选磁盘时，请选择要刷写的那一块。</small></label>
+    </div>
     <fieldset id="fl-partitions-field" hidden><legend class="visually-hidden">分区内容与替换文件</legend>
       <div id="fl-partition-tools" class="fl-partition-tools"><label><input id="fl-all-partitions" type="checkbox"><span id="fl-all-label">全选分区</span></label></div>
-      <div class="fl-partition-heading" aria-hidden="true"><span>分区</span><span id="fl-current-heading">板上现有内容</span><span>替换文件</span></div>
+      <div class="fl-partition-heading" aria-hidden="true"><span>分区</span><span id="fl-current-heading">板上现有内容</span><span>将写入的文件</span></div>
       <div id="fl-current-layout"></div>
       <div id="fl-partitions"></div>
     </fieldset>
-    <details id="fl-advanced" class="fl-details"><summary>校验与刷后复位</summary><div class="fl-inputs">
-      <label class="ft-field">回读校验<select id="fl-verify"><option value="if-supported">能力支持时校验</option><option value="required">必须回读校验</option><option value="none">不回读校验（更快）</option></select></label>
-      <label class="ft-check"><input type="checkbox" id="fl-reset-after"><span>刷完自动复位</span></label>
-    </div></details>
-    <div class="fl-section-foot"><button id="fl-plan" class="pri" type="button">预览写入范围</button></div>
   </section>
+  </div>
   <section id="fl-review" class="fl-section" aria-labelledby="fl-review-title" hidden>
-    <h3 id="fl-review-title">核对写入范围</h3>
+    <h3 id="fl-review-title">预计写入后布局</h3>
     <div id="fl-preview" class="fl-preview"></div>
+    <label id="fl-keep-field" class="ft-check" hidden><input id="fl-keep-backup" type="checkbox">保留写前 NOR 备份供下载</label>
+    <div id="fl-review-backup"></div>
   </section>
   <section id="fl-execution" class="fl-section fl-execution" aria-labelledby="fl-execution-title" hidden>
     <div class="fl-progress-heading"><h3 id="fl-execution-title">刷写与校验</h3><span id="fl-progress-text" role="status">尚未开始</span></div>
     <progress id="fl-progress" max="1" value="0" aria-label="当前阶段进度"></progress>
-    <div id="fl-preview-overall" hidden><p id="fl-overall-text" role="status"></p><progress id="fl-overall-bar" max="100" value="0" aria-label="整体预览进度"></progress></div>
-    <ol id="fl-preview-stages" class="fl-preview-stages"></ol>
+    <div id="fl-write-partition" hidden><div class="fl-progress-heading"><strong id="fl-write-target"></strong><span id="fl-write-count"></span></div>
+      <progress id="fl-partition-progress" max="1" value="0" aria-label="当前分区写入进度"></progress>
+    </div>
     <dl id="fl-results" class="fl-connections"></dl>
+    <div id="fl-result-backup"></div>
   </section>
+  <div id="fl-expired" class="fl-alert" role="alert" hidden>
+    <p>确认已超时，本次未开始写入。镜像可复用；重新检测后可再次预览刷写。</p>
+    <button id="fl-restart" type="button">重新检测设备</button>
+  </div>
   <fieldset id="fl-recovery-field" class="fl-alert" hidden><legend>恢复占用待处理</legend>
     <p>执行器退出尚未确认。仅在你已确认外部刷机进程停止后释放占用；释放不表示写入成功，也不改变原任务结果。</p>
     <label class="ft-field">确认依据<input id="fl-recovery-reason" type="text" maxlength="1000" placeholder="填写已确认进程停止的检查方式和结果"></label>
     <button id="fl-release" type="button" disabled>确认外部刷机进程已停止，释放占用</button>
   </fieldset>
   <details id="fl-task-details" class="fl-details" hidden><summary>执行详情</summary><p id="fl-task-id" class="log-note" data-i18n-ignore></p><dl id="fl-verification" class="fl-connections"></dl><p id="fl-event-status" role="status"></p><pre id="fl-events" data-i18n-ignore></pre></details>
-  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+  </div>
+  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-edit" type="button" hidden>返回修改</button><button id="fl-new" type="button" hidden>准备下一次刷写</button><div id="fl-confirm-options"><label>回读校验 <select id="fl-verify"><option value="none" selected>关闭</option><option value="if-supported">能力支持时校验</option><option value="required">必须通过</option></select></label><label><input type="checkbox" id="fl-reset-after">刷完自动复位</label></div><button id="fl-plan" class="pri" type="button">预览写入范围</button><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
 </dialog>
 <dialog id="image-workspace-dialog" class="ft-dialog">
   <header><h2>镜像工作目录</h2><button id="iw-close" type="button">关闭</button></header>
@@ -436,7 +493,7 @@ PasswordAuthentication yes</code></pre>
 </dialog>
 <dialog id="agent-share-dialog" class="agent-share-dialog" aria-labelledby="agent-share-title">
   <div class="agent-share-head"><div><strong id="agent-share-title">AI 授权</strong><small>生成独立令牌；默认不限期，可随时撤销</small></div><button id="agent-share-close" type="button">关闭</button></div>
-  <p>将 MCP 配置添加到 AI 客户端，可读取终端、发送输入和管理任务。也可选择 CLI 接入指引。</p>
+  <p id="agent-share-hint"></p>
   <div class="agent-share-fields">
     <label>授权范围<select id="agent-share-scope"><option value="device">当前设备</option><option value="all">全部设备</option></select></label>
     <label>连接位置<select id="agent-share-address-mode"><option value="local">本机</option><option value="lan">局域网</option></select></label>
@@ -460,10 +517,9 @@ echo "$HOME/.local/share/decklab-mcp/bin/seriald-mcp"</code></pre>
 Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\seriald-mcp.exe'</code></pre>
     </details>
   </div>
-  <p id="agent-share-hint"></p>
-  <div class="agent-share-actions"><button class="pri" id="agent-share-create" type="button">生成并复制</button><button id="agent-share-copy" type="button" disabled>再次复制</button><span id="agent-share-status" role="status"></span></div>
-  <textarea id="agent-share-text" readonly spellcheck="false" aria-label="Agent 接入配置" placeholder="生成后在此显示 MCP 配置或 CLI 指引" data-i18n-ignore></textarea>
-  <div class="agent-share-head agent-share-list-head"><strong>已有授权</strong><button id="agent-share-refresh" type="button">刷新</button></div>
+  <div class="agent-share-actions"><button class="pri" id="agent-share-create" type="button">生成并复制</button><button id="agent-share-copy" class="pri" type="button" hidden disabled>再次复制</button><span id="agent-share-status" role="status"></span></div>
+  <textarea id="agent-share-text" hidden readonly spellcheck="false" aria-label="Agent 接入配置" placeholder="生成后在此显示 MCP 配置或 CLI 指引" data-i18n-ignore></textarea>
+  <div class="agent-share-head agent-share-list-head"><strong>全站已有授权</strong><button id="agent-share-refresh" type="button">刷新</button></div>
   <div id="agent-share-grants" class="agent-share-grants"></div>
 </dialog>
 <dialog id="boot-compare-dialog" class="boot-compare-dialog" aria-labelledby="bc-title">

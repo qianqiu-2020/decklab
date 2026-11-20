@@ -393,8 +393,12 @@ not the flash target. Other connection-bound operations keep their existing guar
 | Method and route | Parameters / behavior |
 | --- | --- |
 | GET `/api/flash-discover` | Human-only USB download-device discovery; returns candidate target IDs and observed target generations, without resetting or writing storage |
+| POST `/api/flash-stream` | Human-only fast mode for a detected K3 target: `target_id`, `target_generation`, `url` (`.tar.gz`/`.tgz`/`.tar`), optional `sha256`, `system_storage` (`auto` or `nvme:N`/`scsi:N`), `reset_after`, `memory_budget`, `request_id`. Streams, decompresses and writes in executor memory; writes the package GPT first; returns a durable `flash` task with `operation: stream` |
+| POST `/api/flash-calibrate` | Human-only measurement for a detected K3 target: `target_id`, `target_generation`, optional `system_storage`, `measure_write` (default `true`: reads 128 MiB and writes the same bytes back), `request_id`. Returns a durable `flash` task with `operation: calibrate`; its `flash.configuration` holds the measured rates and the chosen configuration (`tuning`), which later flashes of this USB port use. `action: forget` instead removes this port's configuration and returns the one now in effect. `GET /api/flash-capabilities` reports `calibrate_supported` and `flash_configuration` |
 | POST `/api/flash-target` | Human-only target selection with `target_id` and expected `target_generation`; reads supported device identity/layout information and rejects a changed or ambiguous target |
 | GET `/api/flash-capabilities` | `key`, expected `serial`; configured execution location, supported modes and ready artifacts; no reset or storage write |
+| POST `/api/image-prepare` | Prepare a controller-cached image without a connected board. The returned `image-prepare` task reports extraction, payload checks and filesystem metadata. |
+| POST `/api/image-workspace` | Owner access to image directories on the controller. Browse files, import an extracted image or create a new revision after replacing a file. |
 | POST `/api/flash-plan` | `key`, `serial`, `artifact_id`, `mode` (`full` or `partitions`), `binding_revision`, `verify` (`none`, `if-supported` or `required`), optional boolean `reset_after` (default false), optional `selections` and optional full-disk `target_storage`; without `request_id` returns an immutable plan preview. A Web operator can supply a stable `request_id` to return HTTP 202 with a durable `flash-preview` task; poll the original `/api/task` for byte progress and the final plan, cancel through `/api/task-cancel`. Repeated identical input uses the original task; changed input with the same ID is rejected |
 | GET `/api/flash-events` | `key`, `serial`, task `id` and nonnegative `after` event cursor; bounded events and flash details |
 | POST `/api/flash-selection` | For the same task in `awaiting-selection`, `id`, `layout_digest` and `selections` with `preview=true` return a preview; optional boolean `reset_after` is sealed with this preview; a storage workspace can also choose `verify=none|if-supported|required`; submit its `plan_id` and unique `request_id` to continue |
@@ -620,6 +624,14 @@ string alongside their stable `reason` code, including `target-unavailable` or
 `probe-protocol-failed`. The string explains the opening/read-only probe error;
 it never changes `supported`, grants preparation/writes or triggers retries.
 Absent layout/readback information during a failed connection remains unknown.
+
+Automatic flash targets also return `console_link` (or `null`). A probe sends
+one read-only `getvar:decklab-link-<nonce>`; the console that echoes the nonce
+is paired with that USB attachment. `state` is `linked`, `paired`, `mismatch`,
+`ambiguous` or `bind-failed`, with `serial`/`serial_label` for the console's
+board and `usb_serial`/`usb_label` for a differing USB identity. Pairing never
+changes the target's flashing `serial`; see
+[hardware identity](HARDWARE_ID.md#usb-刷机线配对串口).
 
 ## Split Web/backend and image imports
 

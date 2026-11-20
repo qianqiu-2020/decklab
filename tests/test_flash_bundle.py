@@ -103,8 +103,9 @@ class BundleHTTPTests(unittest.TestCase):
         import dataclasses
         original = fixture.executor.plan
         def plan(binding, artifact, *args, **kwargs):
+            table = kwargs.pop('package_scope', None)
             result=original(binding,artifact,*args,**kwargs)
-            firmware='Firmware' in artifact['name']
+            firmware=(table != 'system' if table else 'Firmware' in artifact['name'])
             profile=copy.deepcopy(binding.profile_data)
             profile['storages']=[{'id':'active','layout_source':'spacemit-nor' if firmware else 'spacemit-gpt'}]
             result['execution_profile']=profile
@@ -135,3 +136,24 @@ class BundleHTTPTests(unittest.TestCase):
             self.assertEqual([item[0]['artifact']['id'] for item in f.executor.executions],[fw['id'],os['id']])
             for artifact in (os,fw):self.assertEqual(f.manager.artifacts.get(artifact['id'])['state'],'ready')
             self.assertEqual(final['result']['write_result'],'completed')
+
+    def test_embedded_nor_and_os_share_one_artifact_through_confirmation(self):
+        import test_flash_integration as integration
+        helper = integration.FlashHTTPIntegrationTests()
+        with integration.protected_flashing() as f:
+            self.setup(f)
+            image = helper.image(f)
+            scope = dict(key='offline-board', serial='FLASH-A', artifact_id=image['id'],
+                         mode='full', verify='none', firmware_table='partition_4M.json')
+            code, response = helper.request(f, '/api/flash-plan', scope)
+            self.assertEqual(code, 200, response)
+            plan = response['plan']
+            self.assertEqual(plan['firmware_table'], scope['firmware_table'])
+            self.assertEqual([(c['label'], c['id']) for c in plan['components']],
+                             [('Firmware', image['id']), ('OS', image['id'])])
+            code, started = helper.request(f, '/api/task-start', dict(kind='flash', key='offline-board',
+                serial='FLASH-A', plan_id=plan['id'], binding_revision=7, request_id='same-archive-bundle'))
+            self.assertEqual(code, 202, started)
+            self.assertEqual(helper.terminal(f, started['task']['id'])['state'], 'completed')
+            self.assertEqual([p['artifact']['id'] for p, _ in f.executor.executions], [image['id']]*2)
+            self.assertEqual(f.manager.artifacts.get(image['id'])['state'], 'ready')

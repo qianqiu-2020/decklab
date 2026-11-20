@@ -28,7 +28,7 @@ class WorkspaceExecutor(nor_fixture.SnapshotExecutor):
             mode='bootrom' if bootrom else 'fastboot', inspection=None if bootrom else self.inspect(None))
         self.discoveries, self.workspaces = [], []
 
-    def discover(self, argv, probe=False, device=None, check=lambda: None):
+    def discover(self, argv, probe=False, device=None, check=lambda: None, link_token=None):
         check()
         self.discoveries.append((probe, device))
         return {'devices': copy.deepcopy(self.candidates)}
@@ -130,6 +130,43 @@ class NORWorkspaceTests(unittest.TestCase):
             self.assertEqual({w['partition'] for w in executed[0]['writes']}, {'ESP', 'rootfs'})
             self.assertEqual(len(executor.snapshots), 1)
             self.assertEqual(executor.data, b'\xff' * (8 << 20))
+
+    def test_read_workspace_can_confirm_manual_firmware_and_os_in_same_task(self):
+        from test_flash_bundle import BundleHTTPTests
+        with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:
+            executor, target = self.setup_workspace(fixture, root)
+            task, _ = self.begin(fixture, target)
+            waiting = self.phase(fixture, task['id'], 'awaiting-selection')
+            os_id = self.upload(fixture, waiting, target, b'os', 'os.zip')
+            fw_id = self.upload(fixture, waiting, target, b'firmware', 'Firmware.zip')
+            fixture.executor = executor
+            BundleHTTPTests().setup(fixture)
+            calls = []
+
+            def execute(binding, plan, on_event, check, **options):
+                image_id = plan['artifact']['id']
+                self.assertEqual(bool(options.get('nor_baseline')), image_id == fw_id)
+                for claimed_id in (fw_id, os_id):
+                    self.assertEqual(fixture.manager.artifacts.get(claimed_id)['state'], 'claimed')
+                calls.append(image_id)
+                return {'ok': True, 'write_result': 'completed', 'verify_result': 'verified'}
+
+            executor.execute = execute
+            scope = dict(self.scope(target), id=task['id'], layout_digest=waiting['flash']['inspection']['layout_digest'])
+            params = dict(scope, preview=True, mode='full', artifact_id=os_id, firmware_artifact_id=fw_id)
+            code, preview = self.request(fixture, '/api/flash-selection', params)
+            self.assertEqual(code, 200, preview)
+            self.assertEqual([part['label'] for part in preview['plan']['components']], ['Firmware', 'OS'])
+            code, stale = self.request(fixture, '/api/flash-selection',
+                dict(params, firmware_artifact_id=None, plan_id=preview['plan']['id']))
+            self.assertEqual(code, 409, stale)
+            self.assertEqual(calls, [])
+            code, submitted = self.request(fixture, '/api/flash-selection',
+                dict(scope, plan_id=preview['plan']['id'], request_id='manual-companion-confirm-001'))
+            self.assertEqual(code, 200, submitted)
+            final = self.terminal(fixture, task['id'])
+            self.assertEqual(final['state'], 'completed', final)
+            self.assertEqual(calls, [fw_id, os_id])
 
     def test_unified_read_keeps_nor_backup_and_system_metadata_in_one_task(self):
         with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:
@@ -237,6 +274,47 @@ class NORWorkspaceTests(unittest.TestCase):
             self.request(fixture, '/api/task-cancel', {'id': task['id']})
             self.terminal(fixture, task['id'])
             self.assertEqual(maintenance_for(fixture.manager).holds(serial), [])
+
+    def test_bootrom_paired_console_is_bound_when_ram_loader_reads_eeprom(self):
+        from seriald_core import device as device_module, devices
+        from seriald_core.console_link import LINK_PREFIX
+        serial = 'BOARD-LINKED-01'
+        with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root, \
+                mock.patch.object(devices, 'LOG_ROOT', str(Path(root) / 'logs')), \
+                mock.patch.object(device_module, 'LOG_ROOT', str(Path(root) / 'logs')):
+            console = devices.Device('usb-COM9', 'COM9', fixture.manager)
+            console.present, console.fd = True, 98765
+            fixture.manager.devices[console.by_path] = console
+            self.addCleanup(console.close_log)
+            executor = WorkspaceExecutor(root, bootrom=True)
+            discover = executor.discover
+            def echoing(argv, probe=False, device=None, check=lambda: None, link_token=None):
+                result = discover(argv, probe, device, check)
+                if probe and link_token:
+                    console.append(('fastboot_handle_command: ' + LINK_PREFIX + link_token + '\r\n').encode())
+                    for candidate in result['devices']:
+                        candidate['link_sent'] = True
+                return result
+            executor.discover = echoing
+            fixture.manager.flash_executor = executor
+            result = self.probe(fixture, self.discover(fixture)[0])
+            target = result['target']
+            self.assertEqual(target['console_link']['state'], 'paired')
+            self.assertEqual(console.serial, '')
+            prepare = executor.prepare
+            def prepared(*args, **kwargs):
+                result = prepare(*args, **kwargs)
+                result['final_identity'] = {'serialno': serial, 'eeprom-serial': serial}
+                return result
+            executor.prepare = prepared
+            task, _ = self.begin(fixture, target)
+            self.phase(fixture, task['id'], 'awaiting-selection')
+            self.assertEqual(console.serial, serial)
+            self.assertEqual(fixture.store.get(serial)['last_path'], console.by_path)
+            link = fixture.manager.flash_discovery.get(target['id'])['document']['uart_link']
+            self.assertEqual((link['state'], link['serial']), ('linked', serial))
+            self.request(fixture, '/api/task-cancel', {'id': task['id']})
+            self.terminal(fixture, task['id'])
 
     def test_eeprom_conflict_after_prepare_stops_before_backup_or_flash(self):
         with usb_fixture.automatic_flashing(known=[('BOARD-SAMPLE-01', 'cloud-board')]) as fixture, tempfile.TemporaryDirectory() as root:
@@ -390,14 +468,14 @@ class NORWorkspaceTests(unittest.TestCase):
         self.assertTrue(result['capabilities']['nor_workspace_supported'])
         return executor, result['target']
 
-    def begin(self, fixture, target, request_id='read-nor-workspace-001'):
-        body = dict(self.scope(target), kind='nor-backup', binding_revision=1, request_id=request_id)
+    def begin(self, fixture, target, request_id='read-nor-workspace-001', **options):
+        body = dict(self.scope(target), kind='nor-backup', binding_revision=1, request_id=request_id, **options)
         code, result = self.request(fixture, '/api/task-start', body)
         self.assertEqual(code, 202, result)
         return result['task'], body
 
-    def upload(self, fixture, task, target, data=b'new opensbi fixture'):
-        body = dict(self.scope(target), task_id=task['id'], name='opensbi.itb', size=len(data))
+    def upload(self, fixture, task, target, data=b'new opensbi fixture', name='opensbi.itb'):
+        body = dict(self.scope(target), task_id=task['id'], name=name, size=len(data))
         code, result = self.request(fixture, '/api/artifact-create', body)
         self.assertEqual(code, 200, result)
         artifact_id = result['artifact']['id']
@@ -438,6 +516,38 @@ class NORWorkspaceTests(unittest.TestCase):
             self.assertEqual(len(executor.snapshots), 1)
             self.assertEqual(executor.executions, [])
             self.request(fixture, '/api/task-cancel', {'id': task['id']})
+
+    def test_inventory_snapshot_retention_reuses_file_and_honors_active_download(self):
+        for retain in (False, True):
+            with self.subTest(retain=retain), usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:
+                executor, target = self.setup_workspace(fixture, root)
+                task, _ = self.begin(fixture, target, temporary_snapshot=True)
+                ready = self.phase(fixture, task['id'], 'awaiting-selection')
+                artifacts = fixture.manager.artifacts
+                file_id = ready['flash']['nor_before']['artifact']['id']
+                artifacts.expire()
+                for _ in range(2):
+                    with artifacts.open(file_id) as stream:
+                        self.assertEqual(stream.read(8), executor.data[:8])
+                source = self.upload(fixture, task, target)
+                scope = dict(self.scope(target), id=task['id'], layout_digest='1' * 64)
+                code, result = self.request(fixture, '/api/flash-selection', dict(scope, preview=True,
+                    selections=[dict(storage='active', partition='opensbi', artifact_id=source)]))
+                self.assertEqual(code, 200, result)
+                confirmation = dict(scope, plan_id=result['plan']['id'], request_id='confirm-retention', retain_backup=retain)
+                with artifacts.open(file_id):
+                    code, result = self.request(fixture, '/api/flash-selection', confirmation)
+                    self.assertEqual(code, 200, result)
+                    final = self.terminal(fixture, task['id'])
+                    self.assertEqual(final['state'], 'completed', final)
+                    artifacts.expire()
+                    self.assertEqual(artifacts.get(file_id)['state'], 'available')
+                artifacts.expire()
+                self.assertEqual(artifacts.get(file_id)['state'], 'available' if retain else 'expired')
+                self.assertEqual(artifacts.get(final['flash']['nor_after']['artifact']['id'])['state'], 'available')
+                self.assertEqual(len(executor.snapshots), 1)
+                self.assertEqual(self.request(fixture, '/api/flash-selection', confirmation)[0], 200)
+                self.assertEqual(self.request(fixture, '/api/flash-selection', dict(confirmation, retain_backup=not retain))[0], 409)
 
     def test_read_without_image_then_upload_and_select_in_same_task(self):
         with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:

@@ -31,7 +31,7 @@ function backup(id, phase, bytes) {
       description:name==='esos'?'<img src=x onerror=window.norInjected=1>':undefined,
       built_at:!['env','bootinfo'].includes(name)?'2026-11-14T00:00:00+00:00':null}}))};
 }
-let previewTask = null, previewSubmissions = 0, verificationSkips = 0;
+let previewTask = null, previewSubmissions = 0, verificationSkips = 0, preparations = 0, fullWrites = 0;
 let current = null, upload = Buffer.alloc(0), artifact = null, preview = null, rejectPreview = true, urlDownloads = 0;
 const packageArtifact = {id:'9'.repeat(24),name:'firmware-fixture.tar.gz',size:2<<20,sha256:'a'.repeat(64),state:'ready'};
 const urlArtifact = {id:'8'.repeat(24),name:'url-fixture.itb',size:512,sha256:'b'.repeat(64),state:'ready'};
@@ -62,22 +62,43 @@ const server = http.createServer((req,res) => {
             flash:{preview_intent:{artifact_id:packageArtifact.id,mode:'full',verify:'none'},preview_source:packageArtifact,preview_progress:timing},
             progress:{phase:'expanding-image',done:1024,total:2048}};
           setTimeout(()=>{previewTask={...previewTask,state:'completed',flash:{...previewTask.flash,
-            preview_progress:{...timing,active:false,state:'completed',stages:timing.stages.map(step=>({...step,state:'completed',elapsed_seconds:step.estimated_seconds}))}},result:{plan:{id:'full-package-preview',ready:false,confirm_after_prepare:true,write_layout:true,
+            preview_progress:{...timing,active:false,state:'completed',stages:timing.stages.map(step=>({...step,state:'completed',elapsed_seconds:step.estimated_seconds}))}},result:{plan:{id:'full-package-preview',mode:'full',requires_prepare:true,ready:false,confirm_after_prepare:true,write_layout:true,
             writes:parts.map(([name,offset,size])=>({storage:'active',partition:name,offset,size,capacity:size})),
             erase_ranges:[{storage:'active',offset:0,size:before.length}],warnings:['模拟整包恢复会擦除 env']}}};},4000);
           res.statusCode=202;return json({task:previewTask});
         }
         if(url.pathname==='/api/image-download') {urlDownloads++;return json({task:{id:'url-fixture-download',state:'running'}});}
+        if(url.pathname==='/api/task-start' && payload.kind==='flash') {
+          assert.equal(payload.prepare_for_review,true);
+          assert.equal(payload.plan_id,'full-package-preview');
+          preparations++;
+          current={id:'full-task',kind:'flash',state:'running',progress:{phase:'prepare'},
+            flash:{request_id:payload.request_id,plan:previewTask.result.plan,write_result:'not-started'}};
+          setTimeout(()=>{
+            current.progress={phase:'awaiting-selection'};
+            Object.assign(current.flash,{confirmation_mode:'full',inspection,
+              prepared_plan:{...previewTask.result.plan,id:'checked-full-plan',requires_prepare:false,ready:true,verify:'none'}});
+          },1200);
+          return json({task:current});
+        }
         if(url.pathname==='/api/task-start') {
           assert.equal(payload.kind,'nor-backup');assert.equal('artifact_id' in payload,false);assert.equal('plan_id' in payload,false);
-          assert.equal(payload.read_system,true);
+          assert.equal(payload.read_system,true); assert.equal(payload.temporary_snapshot,true);
           submissions.push(payload);current={id:taskId,kind:'flash',state:'running',flash_targets:[{target_id:target.target_id,generation:target.target_generation}],
-            progress:{phase:'preparing-loader',done:2,total:4},flash:{operation:'nor-workspace',request_id:payload.request_id,write_result:'not-started',verify_result:'not-started'}};
+            progress:{phase:'preparing-loader',done:2,total:4},flash:{operation:'nor-workspace',temporary_snapshot:true,request_id:payload.request_id,write_result:'not-started',verify_result:'not-started'}};
           return json({task:current});
         }
         if(url.pathname==='/api/artifact-create') {assert.equal(payload.task_id,taskId);return json({artifact:{id:artifactId,size:payload.size}});}
         if(url.pathname==='/api/artifact-append') {assert.equal(payload.offset,upload.length);upload=Buffer.concat([upload,Buffer.from(payload.data_b64,'base64')]);return json({artifact:{id:artifactId,received:upload.length}});}
         if(url.pathname==='/api/artifact-seal') {artifact={id:artifactId,name:'opensbi-fixture.itb',size:upload.length,sha256:digest(upload),state:'ready'};return json({artifact});}
+        if(url.pathname==='/api/flash-selection' && payload.id==='full-task') {
+          assert.equal(payload.preview,undefined);
+          assert.equal(payload.plan_id,'checked-full-plan');
+          assert.equal(payload.layout_digest,inspection.layout_digest);
+          assert.ok(payload.request_id); fullWrites++;
+          current={...current,state:'completed',progress:{phase:'completed'},result:{write_result:'completed'}};
+          return json({task:current});
+        }
         if(url.pathname==='/api/flash-selection') {
           if(payload.action==='skip-verification') {
             assert.equal(payload.id,current.id);assert.equal(current.progress.phase,'verifying-nor');
@@ -172,12 +193,20 @@ let chrome,ws;
   await shot('image-preview-progress-fixture');
   await rpc('Page.reload');
   await wait('document.querySelector("#fl-task-id") && document.querySelector("#fl-task-id").textContent.includes("browser-preview")');
-  await wait('document.querySelector("#fl-start").disabled===false');
-  assert.equal(previewSubmissions,1,'reload resumes the original preview; no resubmission');
+  await wait('document.querySelector("#fl-preview-phase").textContent.includes("准备设备并核对")');
+  assert.equal(await evaluate('document.querySelector("#flash-dialog").dataset.stage'),'setup');
+  await wait('document.querySelector("#fl-select").checkVisibility() && document.querySelector("#fl-select").textContent.includes("并刷写")');
+  assert.equal(previewSubmissions,1);assert.equal(preparations,1);assert.equal(fullWrites,0);
+  assert.equal(await evaluate('document.querySelector("#flash-dialog").dataset.stage'),'review');
   assert.ok(await evaluate('document.querySelector("#fl-preview").textContent.includes("模拟整包恢复会擦除 env")'));
-  assert.equal(await evaluate('document.querySelectorAll("#fl-partitions input:checked").length'),0);
   await shot('full-package-preview-light-fixture');
-  assert.equal(submissions.length,0,'a package preview does not write or prepare the board');
+  await evaluate('document.querySelector("#fl-select").click()');
+  await wait('document.querySelector("#flash-dialog").dataset.stage==="run"');
+  assert.equal(fullWrites,1);
+  // Begin the independent backup scenario on an idle simulated controller.
+  current=null;previewTask=null;
+  await evaluate('sessionStorage.clear()');await rpc('Page.reload');
+  await wait('document.querySelector("#fl-read-nor")?.disabled===false');
   await evaluate('document.querySelector("#fl-url-toggle").click();(()=>{const d=new DataTransfer();d.setData("text","https://images.example/url-fixture.itb");document.querySelector("#fl-url").dispatchEvent(new ClipboardEvent("paste",{clipboardData:d,bubbles:true,cancelable:true}));})()');
   await wait('document.querySelector("#fl-source-summary").textContent.includes("url-fixture.itb")');
   await evaluate('document.querySelector("#fl-url").dispatchEvent(new Event("change"))');await delay(100);
@@ -196,6 +225,9 @@ let chrome,ws;
   await rpc('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
   await wait('document.querySelector("#fl-progress-text").textContent.includes("2 / 4")');
   assert.equal(submissions.length,1);
+  assert.equal(await evaluate('document.querySelector("#flash-dialog").dataset.stage'),'setup');
+  assert.ok(await evaluate('document.querySelector("#fl-storage-details").open && !document.querySelector("#fl-execution").checkVisibility()'));
+  assert.ok(await evaluate('document.querySelector("#fl-read-status").textContent.includes("2 / 4")'));
   current.progress={phase:'awaiting-selection'};current.flash.inspection=inspection;current.flash.nor_before=backup('1'.repeat(24),'before',before);current.flash.selection_deadline=Date.now()/1000+3600;
   current.flash.resolved_serial='BOARD-SAMPLE-01-FIXTURE';current.flash.request_serial='';
   current.flash.storage_inventory={boot_priority_editable:true,default_storage:'nvme:0',priority_source:'eeprom:SSD',full_backup:false,metadata_bytes_read:131072,
@@ -205,7 +237,15 @@ let chrome,ws;
   await wait('document.querySelectorAll(".fl-partition").length===6');
   assert.equal(await evaluate('document.querySelector("#fl-system-storage").value'),'nvme:0');
   assert.ok(await evaluate('document.querySelector("#fl-system-parts").textContent.includes("Debian 13")'));
+  assert.ok(await evaluate('document.querySelector("#fl-system").closest("section").contains(document.querySelector("#fl-device"))'));
+  if (!await evaluate('document.querySelector("#fl-storage-details").open')) await evaluate('document.querySelector("#fl-storage-details > summary").click()');
+  assert.ok(await evaluate('document.querySelector("#fl-system-parts .fl-map-heading").textContent.includes("板上已有布局")'));
+  const destination = await evaluate('document.querySelector("#fl-target-storage").value');
+  await evaluate('document.querySelector("#fl-system-storage").value="";document.querySelector("#fl-system-storage").dispatchEvent(new Event("change"))');
+  assert.equal(await evaluate('document.querySelector("#fl-target-storage").value'),destination);
+  await evaluate('document.querySelector("#fl-system-storage").value="nvme:0";document.querySelector("#fl-system-storage").dispatchEvent(new Event("change"))');
   await evaluate('document.querySelector("#fl-system").scrollIntoView({block:"start"})');
+  await evaluate('document.querySelector("#fl-boot-config > summary").click()');
   assert.equal(await evaluate('document.querySelector("#fl-boot-priority").value'),'SSD');
   await evaluate('document.querySelector("#fl-boot-priority").value="UFS";document.querySelector("#fl-boot-priority").dispatchEvent(new Event("change"));document.querySelector("#fl-boot-save").click()');
   await wait('document.querySelector("#fl-boot-status").textContent.includes("已回读校验")');
@@ -241,6 +281,14 @@ let chrome,ws;
   await evaluate('document.querySelector("#fl-select").click()');
   await wait('document.querySelector("#fl-select").textContent.includes("确认分区")');
   assert.equal(selections.length,2);assert.equal(submissions.length,1);
+  assert.ok(await evaluate('document.querySelector("#fl-confirm-options #fl-verify").checkVisibility()'));
+  await evaluate('(()=>{const v=document.querySelector("#fl-verify");v.value="if-supported";v.dispatchEvent(new Event("change"));})()');
+  await wait('document.querySelector("#fl-select").textContent.includes("确认分区") && !document.querySelector("#fl-select").disabled');
+  assert.equal(selections.length,3);assert.equal(selections[2].preview,true);assert.equal(selections[2].verify,'if-supported');
+
+  assert.ok(await evaluate('document.querySelector("#fl-keep-field").checkVisibility() && !document.querySelector("#fl-keep-backup").checked'));
+  assert.equal(await evaluate('document.querySelector("#fl-backup-files").parentNode.id'),'fl-review-backup');
+  await evaluate('document.querySelector("#fl-keep-backup").click()');
   assert.ok(await evaluate('document.querySelector("#fl-partitions").textContent.includes("OpenSBI v1.7")'));
   await rpc('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});
   assert.ok(await evaluate(contrast('#fl-select'))>=4.5,'dark primary button contrast');
@@ -253,7 +301,15 @@ let chrome,ws;
   assert.equal(await evaluate('getComputedStyle(document.querySelector(".fl-partition")).gridTemplateColumns.split(" ").length'),1);
   assert.ok(await evaluate('(()=>{const t=document.querySelector("#fl-preview table");return t.scrollWidth<=t.clientWidth+1})()'),'mobile selected write scope fits without horizontal scrolling');
   await evaluate('document.querySelector("#fl-select").click()');await wait('document.querySelector("#fl-progress-text").textContent.includes("检查备份")');
-  assert.equal(selections.length,3);assert.equal(submissions.length,1,'confirmation continues the same task');
+  assert.equal(selections[3].retain_backup,true); current.flash.selection_request={retain_backup:true};
+  assert.equal(selections.length,4);assert.equal(submissions.length,1,'confirmation continues the same task');
+  current.progress={phase:'writing',done:80,total:100,storage:'active',partition:'opensbi',partition_done:10,partition_total:20,bytes_per_second:123};
+  await wait('document.querySelector("#fl-write-partition").checkVisibility() && document.querySelector("#fl-write-count").textContent.includes("50%")');
+  assert.ok(await evaluate('document.querySelector("#fl-write-target").textContent.includes("opensbi") && document.querySelector("#fl-write-count").textContent.includes("123 B/s")'));
+  assert.equal(await evaluate('document.querySelector("#fl-progress").value'),80);
+  current.progress.done=85;current.progress.partition_done=15;
+  await wait('document.querySelector("#fl-partition-progress").value===15 && document.querySelector("#fl-write-count").textContent.includes("75%")');
+  await shot('live-partition-progress-fixture');
   current.progress={phase:'verifying-nor',done:4<<20,total:8<<20};current.flash.write_result='completed';
   await wait('document.querySelector("#fl-progress-text").textContent.includes("50%")');
   await evaluate('document.querySelector(".fl-execution").scrollIntoView({block:"center"})');await shot('nor-progress-mobile-fixture');
@@ -281,7 +337,8 @@ let chrome,ws;
   await evaluate('SerialdI18n.setLocale("zh-CN");ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
   await wait('document.querySelector("#fl-status").textContent.includes("identity changed")');
   const readsBeforeRedetect=targetReads.length,submissionsBeforeRedetect=submissions.length;
-  await evaluate('document.querySelector("#fl-discover").click()');
+  assert.equal(await evaluate('document.querySelector("#fl-new").getClientRects().length'),1);
+  await evaluate('document.querySelector("#fl-new").click()');
   await wait('!document.querySelector("#fl-files").disabled');
   assert.equal(targetReads.length,readsBeforeRedetect+1);
   assert.equal(targetReads.at(-1).target_generation,'new-bootrom-after-flash');
@@ -292,8 +349,20 @@ let chrome,ws;
   assert.equal(await evaluate('document.querySelector("#fl-start").disabled'),true);
   assert.equal(submissions.length,submissionsBeforeRedetect,'redetection cannot submit any read or write task');
   await evaluate('document.querySelector("#flash-dialog").scrollTop=0');await shot('redetect-after-completed-task-fixture');
+  // A previous readback count can be larger than the write receipt.
+  current={id:'older-readback',request_id:'old-write',kind:'flash',state:'completed',
+    progress:{phase:'verifying-system',done:12*2**30,total:12*2**30},
+    result:{write_result:'completed',verify_result:'verified',written_bytes:1883586158}};
+  await evaluate('ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
+  await wait('document.querySelector("#fl-progress-text").textContent.includes("本次写入")');
+  assert.equal(await evaluate('document.querySelector("#fl-progress").hidden'),true);
+  assert.equal(await evaluate('document.querySelector("#fl-progress-text").textContent.includes("12.0")'),false);
+  await evaluate('document.querySelector("#fl-close").click();sessionStorage.setItem("decklab-flash-task:'+target.target_id+'","old-write");ui.open('+JSON.stringify(target)+')');
+  await wait('document.querySelector("#flash-dialog").dataset.stage==="setup" && !document.querySelector("#fl-files").disabled');
+  assert.equal(await evaluate('document.querySelector("#fl-task-id").textContent'),'');
+  assert.equal(submissions.length,submissionsBeforeRedetect);
   assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,async_preview_progress:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,
+  fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,preparations,fullWrites,async_preview_progress:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,
     verification_skips:verificationSkips,redetect_after_completed_task:true,screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
   console.log('NOR browser workflow passed: full package preview, automatic URL/file imports, persistent errors, image-free read, six partition rows, same-task confirmation, byte progress, backups, desktop/mobile and light/dark (simulated data).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});

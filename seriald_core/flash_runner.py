@@ -150,6 +150,7 @@ class FlashBinding:
                 item['partitions'].append(entry)
             storages.append(item)
         return {'board_serial': self.serial, 'binding_revision': self.binding_revision,
+                'chip': self.profile_data.get('chip_family', ''),
                 'profile': self.profile, 'control': self.control.public(),
                 'console': self.console.public(),
                 'executor': {'provider': 'goflash', 'node': 'local', 'endpoint': self.endpoint},
@@ -313,12 +314,25 @@ def public_plan(value):
     return value
 
 
+def _with_configuration(result, configuration):
+    """Record which measured configuration, if any, a write used."""
+    if not isinstance(result, dict):
+        return result
+    summary = None
+    if configuration:
+        summary = {key: configuration.get(key) for key in ('measured_at', 'scope', 'port', 'board_serial')}
+        summary['tuning'] = configuration.get('tuning')
+    return dict(result, flash_configuration=summary)
+
+
 class LocalFlashExecutor:
     supports_nor_snapshot = True
     supports_reset_after = True
     supports_storage_metadata = True
     supports_skip_verification = True
     supports_image_preparation = True
+    supports_stream_flash = True
+    supports_calibrate = True
 
     def __init__(self, work_dir):
         # Canonicalize the administrator-selected root once. On Windows, TEMP
@@ -389,12 +403,42 @@ class LocalFlashExecutor:
             request.update(target_id=binding.target_id, target_generation=binding.target_generation)
         return request
 
-    def discover(self, argv, probe=False, device=None, check=lambda: None):
+    def discover(self, argv, probe=False, device=None, check=lambda: None, link_token=None):
         request = {'version': 1, 'probe': probe}
         if device is not None:
             request['device'] = device
+        if link_token:
+            request['link_token'] = link_token
         return self._run(SimpleNamespace(argv=tuple(argv), timeout=20 if probe else 10),
                          'discover', request, check=check)
+
+    def stream_flash(self, binding, request, on_event=None, check=lambda: None):
+        """Fast mode; the executor downloads, decompresses and writes in memory."""
+        configuration = self.tuning(binding)
+        if configuration:
+            request = dict(request, tuning=configuration['tuning'])
+        result = self._run(binding, 'stream-flash', request, on_event, check, timeout=4 * 3600)
+        return _with_configuration(result, configuration)
+
+    def calibrate(self, binding, request, on_event=None, check=lambda: None):
+        """Measure this board connection and keep the derived configuration."""
+        from . import flash_tuning
+        result = self._run(binding, 'calibrate', request, on_event, check, timeout=600)
+        return dict(result, configuration=flash_tuning.record(self.root, binding, result))
+
+    def tuning(self, binding):
+        """The measured configuration later K3 flashes of this connection use."""
+        from . import flash_tuning
+        if binding.profile_data.get('id') != 'auto-spacemit-gpt-v1' or binding.profile_data.get('chip_family') != 'k3':
+            return None
+        return flash_tuning.lookup(self.root, binding)
+
+    def forget_tuning(self, binding):
+        from . import flash_tuning
+        return flash_tuning.forget(self.root, binding)
+
+    def stream_loader_workspace(self):
+        return self.root / 'images' / 'stream'
 
     def inspect(self, binding, check=lambda: None):
         return self._run(binding, 'inspect', self._request(binding), check=check, timeout=min(binding.timeout, 60))
@@ -482,6 +526,9 @@ class LocalFlashExecutor:
                     'layout_source': 'spacemit-nor', 'size_getvar': 'mtd-size', 'sector_size': 512,
                     'partitions': None, 'package_tables': ['partition_nor.json'],
                     'layout_target': 'mtd', 'sparse': False}):
+            if candidate.get('nor_fill_tail') is True:
+                candidate.pop('nor_fill_tail')
+                baseline.pop('nor_fill_tail', None)
             # This template is produced by host image import, never by USB.
             # Keep original chip/BootROM checks and validate cached loaders below.
             candidate['storages'] = baseline['storages']
@@ -798,6 +845,10 @@ class LocalFlashExecutor:
                         os.replace(temporary, summary)
                     finally:
                         Path(temporary).unlink(missing_ok=True)
+                from .image_tables import describe
+                describe(result)
+                if operation == 'prepare-directory' and document.get('table_choice'):
+                    result['table_choice'] = document['table_choice']
                 result['payload_metadata'] = metadata
                 os.utime(workspace, None)
                 return result
@@ -816,13 +867,13 @@ class LocalFlashExecutor:
                     self._active_workspaces.discard(str(workspace))
 
     def plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
-             target_storage=None, inspection_scope=None, on_event=None, loader_source=None):
+             target_storage=None, inspection_scope=None, on_event=None, loader_source=None, package_scope=None):
         with self.image_guard(artifact, check):
             return self._plan(binding, artifact, input_mode, selections, verify, check,
-                              target_storage, inspection_scope, on_event, loader_source)
+                              target_storage, inspection_scope, on_event, loader_source, package_scope)
 
     def _plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
-              target_storage=None, inspection_scope=None, on_event=None, loader_source=None):
+              target_storage=None, inspection_scope=None, on_event=None, loader_source=None, package_scope=None):
         if input_mode not in ('full', 'partitions') or verify not in ('none', 'if-supported', 'optional', 'required'):
             raise TaskError('invalid flash mode or verification policy')
         if not isinstance(artifact, dict) or not re.fullmatch(r'[0-9a-f]{64}', str(artifact.get('sha256', ''))):
@@ -853,6 +904,15 @@ class LocalFlashExecutor:
                        selections=selections or [], verify='if-supported' if verify == 'optional' else verify,
                        workspace=str(workspace), max_cache_bytes=budget,
                        max_expanded_bytes=min(binding.max_expanded_bytes, budget))
+        if not package_scope and input_mode == 'full' and binding.profile_data.get('id') == 'auto-spacemit-gpt-v1':
+            tables = preparation.get('catalogue') or []
+            if (any(t.get('name') == 'partition_universal.json' and t.get('format') == 'gpt' and t.get('selected') for t in tables)
+                    and any(t.get('format') == 'mtd' and any(p.get('payload') == 'factory/bootinfo_spinor.bin'
+                            for p in t.get('partitions', [])) for t in tables)):
+                # NOR is opt-in. A mixed OS archive without a companion targets only its GPT.
+                package_scope = 'system'
+        if package_scope:
+            request['package_scope'] = package_scope
         if target_storage is not None:
             request['target_storage'] = target_storage
         stage = 'image-plan'
@@ -976,6 +1036,9 @@ class LocalFlashExecutor:
     def execute(self, binding, plan, on_event=None, check=lambda: None, task_id='', attempt_id='',
                 workspace=None, nor_baseline=None, reset_after=False, skip_verification=None):
         request = dict(self._request(binding), plan=plan, task_id=task_id, attempt_id=attempt_id)
+        configuration = self.tuning(binding)
+        if configuration:
+            request['tuning'] = configuration['tuning']
         if reset_after:
             request['reset_after'] = True
         if workspace is not None:
@@ -985,7 +1048,8 @@ class LocalFlashExecutor:
                 raise TaskError('invalid NOR baseline')
             self._owned_workspace(Path(nor_baseline['path']).parent)
             request['nor_baseline'] = {key: nor_baseline[key] for key in ('id', 'path', 'size', 'sha256')}
-        return self._run(binding, 'execute', request, on_event, check, skip_verification=skip_verification)
+        result = self._run(binding, 'execute', request, on_event, check, skip_verification=skip_verification)
+        return _with_configuration(result, configuration)
 
     def check_plan(self, binding, plan, payload_candidates=None, check=lambda: None, selections=None,
                    previous_device=None):
@@ -1137,9 +1201,24 @@ class LocalFlashExecutor:
                     # browser gets a correlation ID, never an arbitrary host path.
                     diagnostic = event.get('message')
                     diagnostic_id = secrets.token_hex(6) if isinstance(diagnostic, str) else ''
+                    if event.get('code') == 'capacity-mismatch':
+                        message = '目标容量与写入计划不符'
+                    if operation == 'execute' and isinstance(diagnostic, str):
+                        partition = re.fullmatch(r'new K1 GPT partition ([A-Za-z0-9_.-]{1,35}) (?:capacity|extent) did not match the plan', diagnostic)
+                        if partition:
+                            message = f'GPT 已写入，但新分区 {partition[1]} 的范围与计划不符，系统分区载荷尚未发送'
+                        elif diagnostic.startswith(('cannot read new K1 GPT after layout write:', 'cannot query new K1 GPT partition ')):
+                            message = 'GPT 已写入，未能核对新系统分区，系统分区载荷尚未发送'
+                    if operation == 'image-plan' and diagnostic == 'unsupported NOR descriptor partitions':
+                        message = 'NOR 分区表与目标芯片要求的分区列表不符，请核对 Firmware 镜像和板卡型号'
                     if diagnostic_id:
                         logging.getLogger(__name__).error('flash diagnostic %s operation=%s code=%s reason=%r',
                             diagnostic_id, operation, event.get('code'), diagnostic[:8192])
+                    if event.get('code') == 'loader-fsbl-timeout':
+                        from .flash_loaders import record_fsbl_timeout
+                        record_fsbl_timeout(binding)
+                        message = ('临时 FSBL 未进入下载环境，板上保存的 DDR 训练数据可能已失效。'
+                                   '请让板子重新进入下载模式后重试，下次会重新训练 DDR（约多 6 秒）')
                     if event.get('code') == 'nor-baseline-changed':
                         message = '板上 NOR 内容在备份后发生变化，尚未写入；请重新读取备份并核对。'
                     if event.get('code') == 'nor-read-failed':
