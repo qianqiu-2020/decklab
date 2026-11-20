@@ -835,9 +835,11 @@ class FlashActions:
                     if checksum:
                         request['archive_sha256'] = checksum
                     if binding.profile_data.get('bootrom_identity'):
-                        materials = prepare_materials(binding, executor.stream_loader_workspace(), context.check)
+                        materials = prepare_materials(binding, executor.stream_loader_workspace(), context.check, getattr(executor, 'root', None))
                         request['loader'] = {key: {name: materials[key][name] for name in ('id', 'name', 'path', 'size', 'sha256')}
                                              for key in ('fsbl', 'uboot')}
+                        if materials.get('trained_for'):
+                            request['loader']['trained_for'] = materials['trained_for']
                     started = {'writing': False}
                     def event(value):
                         store.append_event(context.id, value)
@@ -916,9 +918,11 @@ class FlashActions:
                     request = {'version': 1, 'device': binding.device, 'chip_family': 'k3',
                                'system_storage': storage, 'measure_write': measure_write}
                     if binding.profile_data.get('bootrom_identity'):
-                        materials = prepare_materials(binding, executor.stream_loader_workspace(), context.check)
+                        materials = prepare_materials(binding, executor.stream_loader_workspace(), context.check, getattr(executor, 'root', None))
                         request['loader'] = {key: {name: materials[key][name] for name in ('id', 'name', 'path', 'size', 'sha256')}
                                              for key in ('fsbl', 'uboot')}
+                        if materials.get('trained_for'):
+                            request['loader']['trained_for'] = materials['trained_for']
                     def event(value):
                         store.append_event(context.id, value)
                         done, total = value.get('done', 0), value.get('total', 0)

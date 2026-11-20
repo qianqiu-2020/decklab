@@ -422,6 +422,41 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(len(fixture.executor.plans), 1)
             self.assertEqual(fixture.store.boards(), [])
 
+    def test_loader_moved_to_the_usb3_address_keeps_the_target_and_holds_both_addresses(self):
+        class MovingExecutor(FakeBootROMExecutor):
+            def prepare(self, binding, on_event=None, check=lambda: None, **identity):
+                result = super().prepare(binding, on_event, check, **identity)
+                final = dict(result['final_device'], port_path=[2, 1], usb_serial='HW3MPK3321280183')
+                self.candidates[0].update(device=final)
+                return dict(result, final_device=final)
+        with automatic_flashing() as fixture:
+            fixture.manager.flash_executor = fixture.executor = MovingExecutor(
+                fixture.manager.artifacts.root.parent / 'flashing')
+            target = self.probe(fixture, self.discover(fixture)[0])['target']
+            original = '.'.join(map(str, target['usb']['port_path']))
+            image = self.image(fixture, target, bootrom_package(), 'k3-package.zip')
+            code, preview = self.request(fixture, '/api/flash-plan', dict(self.scope(target),
+                artifact_id=image['id'], mode='partitions', selections=[], verify='if-supported', binding_revision=1))
+            self.assertEqual(code, 200, preview)
+            code, started = self.request(fixture, '/api/task-start', dict(self.scope(target), kind='flash',
+                plan_id=preview['plan']['id'], binding_revision=1, request_id='moved-loader-request-001'))
+            self.assertEqual(code, 202, started)
+            task_id = started['task']['id']
+            self.phase(fixture, task_id, 'awaiting-selection')
+            current = fixture.manager.flash_discovery.get(target['target_id'])
+            self.assertEqual(current['document']['device']['port_path'], [2, 1])
+            self.assertTrue(current['present'])
+            targets = [t for t in fixture.manager.flash_discovery.refresh()['targets'] if t['present']]
+            self.assertEqual([t['target_id'] for t in targets], [target['target_id']])
+            holds = {h['resource'] for h in fixture.manager.store.db.execute(
+                'SELECT resource FROM flash_resource_holds WHERE task_id=?', (task_id,)).fetchall()}
+            self.assertIn('flash-usb:local:2.1', holds)
+            self.assertIn('flash-usb:local:' + original, holds)
+            code, cancelled = self.request(fixture, '/api/task-cancel', {'id': task_id})
+            self.terminal(fixture, task_id)
+            self.assertFalse(fixture.manager.store.db.execute(
+                'SELECT 1 FROM flash_resource_holds WHERE task_id=?', (task_id,)).fetchall())
+
     def test_nor_full_recovery_waits_for_new_preview_after_loader_and_never_replays(self):
         with automatic_flashing() as fixture:
             fixture.manager.flash_executor = fixture.executor = FakeNORExecutor(

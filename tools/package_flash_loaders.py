@@ -22,9 +22,16 @@ def publish(source, destination):
             raise ValueError('unsupported RAM loader protocol')
         for name in ('fsbl', 'uboot', 'fsbl_fallback'):
             if name == 'fsbl_fallback' and name not in material:
-                continue  # optional: full-training FSBL after a quick-boot failure
+                continue  # optional; DeckLab K3 FSBLs since 1.17.41 train DDR themselves
             entry = material[name]
-            if (not isinstance(entry, dict) or set(entry) != {'file', 'sha256'}
+            extra = {'training_slots'} if family == 'k3' and name == 'fsbl' else set()
+            if extra and 'training_slots' in entry:
+                slots = entry['training_slots']
+                if (not isinstance(slots, dict) or set(slots) != {'lpddr5', 'lpddr4x'}
+                        or any(not isinstance(v, dict) or set(v) != {'offset', 'size'} or type(v['offset']) is not int
+                               or v['offset'] < 0x1000 or v['size'] != 0x9800 for v in slots.values())):
+                    raise ValueError('invalid K3 FSBL training slots')
+            if (not isinstance(entry, dict) or not {'file', 'sha256'} <= set(entry) <= {'file', 'sha256'} | extra
                     or not isinstance(entry['file'], str) or not entry['file']
                     or entry['file'].startswith('/') or '\\' in entry['file'] or ':' in entry['file']
                     or '..' in entry['file'].split('/')):

@@ -664,6 +664,12 @@
       $('fl-all-label').textContent = nor ? '全选 NOR 分区' : '全选分区';
       var fast = !!(board && board.target_id && capabilities && capabilities.stream_flash_supported && !board.observingTask);
       $('fl-fast').hidden = !fast;
+      // Without a USB target (dialog opened from a serial board) or while a
+      // finished task is shown, the entry detects the board first.
+      var redetect = !!(board && !active && (!board.target_id || board.observingTask)
+        && !(capabilities && capabilities.chip === 'k1'));
+      $('fl-fast-toggle').hidden = !(fast || redetect);
+      $('fl-fast-toggle').disabled = busy || uploading || submissionUnknown;
       var tuning = !!(board && board.target_id && capabilities && capabilities.calibrate_supported && !board.observingTask);
       $('fl-tuning').hidden = !tuning;
       $('fl-tuning-run').disabled = !tuning || busy || uploading || submissionUnknown || !!active;
@@ -2663,6 +2669,18 @@
     $('fl-tuning-run').addEventListener('click', function () { calibrate('measure'); });
     $('fl-tuning-forget').addEventListener('click', function () { calibrate('forget'); });
     $('fl-fast-start').addEventListener('click', fastFlash);
+    $('fl-fast-toggle').addEventListener('click', async function () {
+      if ($('fl-fast').hidden) {
+        await discover(board && board.serialIdentity || board && board.serial || undefined);
+        if ($('fl-fast').hidden) {
+          if (!busy) status('未找到可极速刷写的 K3 下载设备：请让板子进入下载模式后重试，或按 USB 位置选择目标。', true);
+          return;
+        }
+      }
+      $('fl-fast').open = true;
+      $('fl-fast').scrollIntoView({block: 'nearest'});
+      $('fl-fast-url').focus();
+    });
     ['fl-fast-url', 'fl-fast-storage', 'fl-fast-confirm'].forEach(function (name) {
       $(name).addEventListener('input', updateControls); $(name).addEventListener('change', updateControls);
     });

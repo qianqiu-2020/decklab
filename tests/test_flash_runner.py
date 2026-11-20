@@ -176,7 +176,7 @@ class FlashRunnerTests(unittest.TestCase):
             " loader=request['boot_materials'][name]\n"
             " profile['prepare'].extend([{'kind':'stage','path':loader['path'],'sha256':loader['sha256']},{'kind':'continue'}])\n"
             "print(json.dumps({'event':'result','result':profile}))\n")
-        def materials(binding, workspace, check):
+        def materials(binding, workspace, check, root=None):
             result = {'protocol': 'spacemit-ram-v1', 'chip_family': 'k3'}
             for key, member in [('fsbl', 'factory/FSBL.bin'), ('uboot', 'u-boot.itb')]:
                 path = Path(workspace) / 'ram-loaders' / member
@@ -482,16 +482,34 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertNotIn('host-secret', str(error.exception))
         self.assertNotIn('/private', str(error.exception))
 
-    def test_fsbl_timeout_marks_port_for_full_training_and_explains_retry(self):
+    def test_loader_failure_discards_the_embedded_training_result_of_that_port(self):
         from seriald_core import flash_loaders
-        binding = self.binding("print(json.dumps({'event':'error','code':'loader-fsbl-timeout',"
-                               "'message':'RAM FSBL did not reach its download stage'}))")
-        with mock.patch.dict(flash_loaders._FULL_TRAINING, clear=True):
+        binding = self.binding("print(json.dumps({'event':'error','code':'device-ram-unstable',"
+                               "'message':'device RAM is unreliable: 2 of 6 on-board checks of 16 MiB random data failed'}))")
+        port = tuple(binding.device['port_path'])
+        with mock.patch.dict(flash_loaders._EMBEDDED, {port: True}, clear=True), \
+                mock.patch.object(flash_loaders, 'discard_training', wraps=flash_loaders.discard_training) as discard:
             with self.assertRaises(FlashRunnerError) as error:
                 self.runner.inspect(binding)
-            self.assertEqual(error.exception.code, 'loader-fsbl-timeout')
-            self.assertIn('重新进入下载模式', str(error.exception))
-            self.assertTrue(flash_loaders._full_training(binding))
+            self.assertEqual(error.exception.code, 'device-ram-unstable')
+            self.assertIn('已作废', str(error.exception))
+            self.assertIn('尚未写入', str(error.exception))
+            discard.assert_called_once()
+            # Trained this time already: the memory itself is unreliable.
+            with self.assertRaises(FlashRunnerError) as error:
+                self.runner.inspect(binding)
+            self.assertIn('内存不可靠', str(error.exception))
+
+    def test_training_result_events_are_kept_and_not_forwarded(self):
+        from seriald_core import flash_loaders
+        events = []
+        binding = self.binding("print(json.dumps({'event':'ddr-training','result':{'data':'AAAA'}}))\n"
+                               "print(json.dumps({'event':'result','result':{'ok':True}}))")
+        with mock.patch.object(flash_loaders, 'record_training') as record:
+            self.runner.inspect(binding, on_event=events.append) if 'on_event' in self.runner.inspect.__code__.co_varnames else self.runner.inspect(binding)
+        record.assert_called_once()
+        self.assertEqual(record.call_args.args[2], {'data': 'AAAA'})
+        self.assertFalse([e for e in events if e.get('event') == 'ddr-training'])
 
     def test_required_verification_failure_keeps_completed_write_evidence(self):
         binding = self.binding("print(json.dumps({'event':'result','result':{'write_result':'completed',"

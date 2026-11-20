@@ -273,7 +273,7 @@
     '等待': 'Waiting', '进行中': 'In progress', '完成': 'Complete', '无需执行': 'Not needed', '未完成': 'Incomplete',
     '搜索当前版本': 'Search current version', '内容目录': 'Contents', '当前目录': 'Current folder', '当前版本': 'Current version',
     '不支持此镜像格式': 'This image format is unsupported',
-    '刷写配置': 'Flash configuration', '实测刷写参数': 'Measuring flashing parameters', '实测并生成配置': 'Measure and create configuration',
+    '极速刷写': 'Fast flash', '刷写配置': 'Flash configuration', '实测刷写参数': 'Measuring flashing parameters', '实测并生成配置': 'Measure and create configuration',
     '清除此 USB 口的配置': 'Clear this USB port\'s configuration',
     '在这块板上实测 USB、板上解压、写盘和控制机压缩速度，按耗时模型选出编码、压缩级别和写盘方式。之后经此 USB 口的普通刷写和极速刷写都使用这套配置。配置只影响速度，不改变写入内容。': 'Measures USB, on-board decompression, disk write and host compression speed on this board, then picks the codec, compression level and write mode from the cost model. Later regular and fast flashes through this USB port use this configuration. It affects speed only, never what is written.',
     '同时测写盘速度（读出 128 MiB 后原样写回，内容不变）': 'Also measure disk writes (reads 128 MiB and writes the same bytes back; content unchanged)',

@@ -428,6 +428,15 @@ class FlashDiscovery:
         if 'usb_address' not in selector:
             raise TaskError('prepared USB connection generation is unavailable', 409)
         with self.lock:
+            original = self.get(target_id, require_present=False)['document']['device']
+            # A SuperSpeed link moves the RAM U-Boot to the USB 3 side of the
+            # same connector. The executor followed it only by the board serial
+            # the FSBL stage reported; the task also holds the new address.
+            relocated = selector['port_path'] != original['port_path']
+            if relocated and (not selector.get('usb_serial')
+                              or expected_serial and selector['usb_serial'] != expected_serial):
+                raise TaskError('prepared loader moved to another USB address without the board serial', 409)
+            moved_resource = 'flash-usb:local:' + '.'.join(map(str, selector['port_path']))
             with self.store.lock:
                 task = self.store.db.execute('SELECT state FROM tasks WHERE id=?', (task_id,)).fetchone()
                 snapshot = self.store.db.execute('SELECT generation FROM task_flash_targets '
@@ -435,9 +444,19 @@ class FlashDiscovery:
                 details = self.store.db.execute('SELECT document FROM flash_details WHERE task_id=?',
                                                 (task_id,)).fetchone()
                 needed = ['flash-target:' + target_id,
-                          'flash-usb:local:' + '.'.join(map(str, selector['port_path']))]
+                          'flash-usb:local:' + '.'.join(map(str, original['port_path']))]
                 holds = self.store.db.execute('SELECT resource,task_id,state FROM flash_resource_holds '
                     'WHERE resource IN (?,?)', needed).fetchall()
+                if (relocated and task is not None and task['state'] == 'running' and len(holds) == len(needed)
+                        and all(value['task_id'] == task_id and value['state'] == 'active' for value in holds)):
+                    with self.store.db:
+                        taken = self.store.db.execute('SELECT task_id FROM flash_resource_holds WHERE resource=?',
+                                                      (moved_resource,)).fetchone()
+                        if taken is not None and taken['task_id'] != task_id:
+                            raise TaskError('the USB address the loader moved to belongs to another task', 409)
+                        if taken is None:
+                            self.store.db.execute('INSERT INTO flash_resource_holds VALUES(?,?,?,?)',
+                                                  (moved_resource, task_id, 'active', time.time()))
             if (task is None or task['state'] != 'running' or snapshot is None
                     or snapshot['generation'] != initial_generation or details is None
                     or json.loads(details['document']).get('attempt_id') != attempt_id
@@ -447,6 +466,20 @@ class FlashDiscovery:
             # The engine-verified transition keeps the same board, so its console
             # pairing survives the loader's USB re-enumeration.
             link = self.get(target_id, require_present=False)['document'].get('uart_link')
+            if relocated:
+                # Keep this target: refresh matches rows by endpoint.
+                row = self.get(target_id, require_present=False)
+                endpoint = '.'.join(map(str, selector['port_path']))
+                with self.store.lock, self.store.db:
+                    used = {value['target_id'] for value in
+                            self.store.db.execute('SELECT target_id FROM task_flash_targets').fetchall()}
+                    for other in self._rows():
+                        if (other['id'] != target_id and other['id'] not in used
+                                and json.loads(other['document']).get('endpoint') == endpoint):
+                            self.store.db.execute('DELETE FROM flash_targets WHERE id=?', (other['id'],))
+                row['document'].update(endpoint=endpoint, device=selector,
+                                       fingerprint=hashlib.sha256(_encoded(selector).encode()).hexdigest())
+                self._save(row)
             self.refresh()
             row = self.get(target_id, require_present=False)
             data = row['document']

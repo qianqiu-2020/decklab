@@ -435,7 +435,9 @@ class LocalFlashExecutor:
 
     def forget_tuning(self, binding):
         from . import flash_tuning
-        return flash_tuning.forget(self.root, binding)
+        from .flash_loaders import discard_training
+        cleared = discard_training(binding, self.root)
+        return flash_tuning.forget(self.root, binding) or cleared
 
     def stream_loader_workspace(self):
         return self.root / 'images' / 'stream'
@@ -924,7 +926,7 @@ class LocalFlashExecutor:
                     raise TaskError('此镜像不含刷机加载器，请选择内置加载器', 409)
                 if loader_source == 'builtin' or loader_source is None and (
                         installed_for(binding.profile_data.get('chip_family')) or input_mode == 'partitions' and not package):
-                    request['boot_materials'] = prepare_materials(binding, workspace, check)
+                    request['boot_materials'] = prepare_materials(binding, workspace, check, self.root)
             image = self._run(binding, 'image-plan', request, on_event=on_event, check=check)
             if (not isinstance(image.get('plan'), dict)
                     or not isinstance(image.get('payload_candidates', []), list)):
@@ -981,7 +983,7 @@ class LocalFlashExecutor:
                            max_cache_bytes=budget)
             if binding.profile_data.get('bootrom_identity'):
                 from .flash_loaders import prepare_materials
-                request['boot_materials'] = prepare_materials(binding, workspace, check)
+                request['boot_materials'] = prepare_materials(binding, workspace, check, self.root)
                 if request['boot_materials'].get('protocol') != 'spacemit-ram-v1':
                     raise TaskError('NOR backup requires the RAM-only NOR loader', 409)
             profile = self._run(binding, 'nor-read-profile', request, check=check)
@@ -1175,8 +1177,16 @@ class LocalFlashExecutor:
                     event = _json(line.decode('utf-8'))
                 except (ValueError, UnicodeError):
                     raise FlashRunnerError('flashing executor returned invalid JSON') from None
-                if not isinstance(event, dict) or event.get('event') not in ('progress', 'phase', 'result', 'error'):
+                if not isinstance(event, dict) or event.get('event') not in ('progress', 'phase', 'result', 'error', 'ddr-training'):
                     raise FlashRunnerError('flashing executor returned an invalid event')
+                if event['event'] == 'ddr-training':
+                    # Kept per board; never forwarded to the task event log.
+                    from .flash_loaders import record_training
+                    try:
+                        record_training(binding, self.root, event.get('result'))
+                    except ValueError as error:
+                        logging.getLogger(__name__).warning('DDR training result ignored: %s', error)
+                    continue
                 if isinstance(event.get('result'), dict):
                     # Keep private, untrusted file receipts only on this process
                     # result/error. Publication independently validates the fixed
@@ -1214,11 +1224,20 @@ class LocalFlashExecutor:
                     if diagnostic_id:
                         logging.getLogger(__name__).error('flash diagnostic %s operation=%s code=%s reason=%r',
                             diagnostic_id, operation, event.get('code'), diagnostic[:8192])
-                    if event.get('code') == 'loader-fsbl-timeout':
-                        from .flash_loaders import record_fsbl_timeout
-                        record_fsbl_timeout(binding)
-                        message = ('临时 FSBL 未进入下载环境，板上保存的 DDR 训练数据可能已失效。'
-                                   '请让板子重新进入下载模式后重试，下次会重新训练 DDR（约多 6 秒）')
+                    if event.get('code') in ('loader-fsbl-timeout', 'device-ram-unstable', 'loader-training-mismatch'):
+                        from .flash_loaders import discard_training
+                        embedded = discard_training(binding, self.root)
+                        stopped = {'loader-fsbl-timeout': '临时刷机环境未启动（FSBL 或其解压的 U-Boot 停住）',
+                                   'loader-training-mismatch': '该 USB 口上换了板子，保存的 DDR 训练结果不属于这块板',
+                                   }.get(event['code'], '板上内存读出不稳定（同一组随机数据在板上多次核对 CRC 不一致）')
+                        if embedded:
+                            message = (stopped + '，尚未写入。这次复用了这块板之前保存的 DDR 训练结果，已作废；'
+                                       '请让板子重新进入下载模式后重试，下次会重新训练 DDR（约多 6 秒）')
+                        elif event['code'] == 'device-ram-unstable':
+                            message = (stopped + '，尚未写入。这次已重新训练 DDR，这块板的内存不可靠，'
+                                       '写入的数据可能出错，请先排查硬件')
+                        else:
+                            message = (stopped + '，尚未写入。请查看串口输出，断电后重新进入下载模式再试')
                     if event.get('code') == 'nor-baseline-changed':
                         message = '板上 NOR 内容在备份后发生变化，尚未写入；请重新读取备份并核对。'
                     if event.get('code') == 'nor-read-failed':

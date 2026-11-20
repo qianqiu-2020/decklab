@@ -84,36 +84,76 @@ class FlashLoaderTests(unittest.TestCase):
                 with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}), self.assertRaises(TaskError):
                     prepare_materials(SimpleNamespace(profile_data={'chip_family': family}), workspace, lambda: None)
 
-    def test_fsbl_timeout_switches_that_port_to_the_full_training_fallback(self):
+    @staticmethod
+    def training(chipid=0x1234, kind=1):
+        import base64, struct, zlib
+        data = bytearray(0x9800)
+        struct.pack_into('<IIQ', data, 0, 0x54524444, 0, chipid)
+        struct.pack_into('<II', data, 28, kind, 2)
+        data[200:204] = b'TRND'
+        struct.pack_into('<I', data, 4, zlib.crc32(bytes(data[8:])))
+        return base64.b64encode(bytes(data)).decode()
+
+    def test_training_result_is_kept_per_board_and_embedded_into_the_fsbl_for_that_port(self):
+        import struct, zlib
         from seriald_core import flash_loaders
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            manifest = self.bundle(root / 'bundle')
-            (manifest.parent / 'full.bin').write_bytes(b'full training FSBL')
-            document = json.loads(manifest.read_text())
-            document['families']['k3']['fsbl_fallback'] = {
-                'file': 'full.bin', 'sha256': hashlib.sha256(b'full training FSBL').hexdigest()}
-            manifest.write_text(json.dumps(document))
-            workspace = root / 'workspace'
+            bundle = root / 'bundle'
+            bundle.mkdir()
+            image = bytearray(0x20000)
+            struct.pack_into('<4sBBHQQII', image, 0xfe0, b'AIHD', 1, 0, 0, 0x1f000, 0, 0, 0)
+            struct.pack_into('<I', image, 0xffc, zlib.crc32(bytes(image[0x1000:0x20000])))
+            (bundle / 'fsbl.bin').write_bytes(bytes(image))
+            (bundle / 'uboot.bin').write_bytes(b'RAM only uboot')
+            fsbl_sha = hashlib.sha256(bytes(image)).hexdigest()
+            family = {'protocol': 'spacemit-ram-v1',
+                      'fsbl': {'file': 'fsbl.bin', 'sha256': fsbl_sha,
+                               'training_slots': {'lpddr5': {'offset': 0x2000, 'size': 0x9800},
+                                                  'lpddr4x': {'offset': 0xc000, 'size': 0x9800}}},
+                      'uboot': {'file': 'uboot.bin', 'sha256': hashlib.sha256(b'RAM only uboot').hexdigest()}}
+            manifest = bundle / 'manifest.json'
+            manifest.write_text(json.dumps({'version': 1, 'families': {'k3': family}}))
+            workspace, work = root / 'workspace', root / 'flashing'
             workspace.mkdir()
             board = SimpleNamespace(profile_data={'chip_family': 'k3'}, device={'port_path': [1, 8, 2]})
             other = SimpleNamespace(profile_data={'chip_family': 'k3'}, device={'port_path': [1, 8, 3]})
-            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}), \
-                    mock.patch.dict(flash_loaders._FULL_TRAINING, clear=True):
-                quick = prepare_materials(board, workspace, lambda: None)
-                self.assertEqual(Path(quick['fsbl']['path']).read_bytes(), b'RAM only fsbl')
-                self.assertNotIn('fsbl_variant', quick)
-                flash_loaders.record_fsbl_timeout(board)
-                full = prepare_materials(board, workspace, lambda: None)
-                self.assertEqual(full['fsbl_variant'], 'full-training')
-                self.assertEqual(Path(full['fsbl']['path']).read_bytes(), b'full training FSBL')
-                self.assertEqual(Path(full['uboot']['path']).read_bytes(), b'RAM only uboot')
-                # Another port keeps the quick FSBL; the quick cache stays valid.
-                self.assertEqual(Path(prepare_materials(other, workspace, lambda: None)['fsbl']['path']).read_bytes(),
-                                 b'RAM only fsbl')
-                with mock.patch.object(flash_loaders.time, 'monotonic',
-                                       return_value=flash_loaders.time.monotonic() + 2 * flash_loaders._FULL_TRAINING_SECONDS):
-                    self.assertNotIn('fsbl_variant', prepare_materials(board, workspace, lambda: None))
+            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}):
+                # No result yet: the plain FSBL trains DDR.
+                plain = prepare_materials(board, workspace, lambda: None, work)
+                self.assertNotIn('trained_for', plain)
+                self.assertEqual(Path(plain['fsbl']['path']).read_bytes(), bytes(image))
+                with self.assertRaises(ValueError):
+                    flash_loaders.record_training(board, work, {'data': self.training()})  # no board serial
+                with self.assertRaises(ValueError):
+                    import base64
+                    corrupt = bytearray(base64.b64decode(self.training()))
+                    corrupt[300] ^= 1
+                    flash_loaders.record_training(board, work, {'data': base64.b64encode(bytes(corrupt)).decode(),
+                                                                'identity': {'eeprom-serial': 'SN1'}})
+                flash_loaders.record_training(board, work, {'data': self.training(), 'identity': {'eeprom-serial': 'SN1'}})
+                trained = prepare_materials(board, workspace, lambda: None, work)
+                self.assertEqual(trained['trained_for'], 'SN1')
+                self.assertEqual(set(trained), {'chip_family', 'protocol', 'fsbl', 'uboot', 'trained_for'})
+                staged = Path(trained['fsbl']['path']).read_bytes()
+                self.assertEqual(Path(trained['fsbl']['path']).parent.parent, Path(trained['uboot']['path']).parent)
+                self.assertEqual(staged[0x2000 + 200:0x2000 + 204], b'TRND')
+                self.assertEqual(staged[:0x2000], bytes(image[:0x2000])[:0xffc] + staged[0xffc:0x1000] + bytes(image[0x1000:0x2000]))
+                self.assertEqual(struct.unpack_from('<I', staged, 0xffc)[0], zlib.crc32(staged[0x1000:0x20000]))
+                self.assertEqual(hashlib.sha256(staged).hexdigest(), trained['fsbl']['sha256'])
+                # Another port has no result; the plain cache stays valid.
+                self.assertNotIn('trained_for', prepare_materials(other, workspace, lambda: None, work))
+                self.assertEqual(Path(plain['fsbl']['path']).read_bytes(), bytes(image))
+                # A failed load with it discards it; the next load trains again.
+                self.assertTrue(flash_loaders.discard_training(board, work))
+                self.assertNotIn('trained_for', prepare_materials(board, workspace, lambda: None, work))
+                self.assertFalse(flash_loaders.discard_training(board, work))
+                # A result from another FSBL build is not embedded.
+                flash_loaders.record_training(board, work, {'data': self.training(), 'identity': {'serialno': 'SN1'}})
+                entries = json.loads((work / 'ddr-training.json').read_text())['entries']
+                entries[0]['fsbl_sha256'] = '0' * 64
+                (work / 'ddr-training.json').write_text(json.dumps({'version': 1, 'entries': entries}))
+                self.assertNotIn('trained_for', prepare_materials(board, workspace, lambda: None, work))
 
     def test_missing_materials_fail_explicitly_and_do_not_select_any_payload(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': directory + '/missing.json'}):
