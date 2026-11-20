@@ -93,7 +93,7 @@ Agent 令牌默认不限期，可在同一窗口撤销；授权记录保存在�
 无密码局域网模式下，令牌范围只约束使用该令牌的请求，其他客户端仍可直接访问服务。
 
 ```cmd
-set SERIALD_URL=http://192.168.1.20:8898
+set SERIALD_URL=http://192.0.2.20:8898
 set SERIALD_TOKEN=分享链接最后一段或窗口令牌
 py serialctl.py devices
 ```
