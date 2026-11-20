@@ -44,6 +44,10 @@ def reexecute(environment, role=None):
 
 def configure_collector(server, settings):
     server.settings_revision = settings.snapshot()['revision']
+    slots = getattr(server.manager, 'control_slots', None)
+    if slots is not None:
+        slots.settings = settings
+        slots.active_revision = server.settings_revision
     desktop = getattr(server.manager, 'desktop', None)
     if desktop is not None:
         desktop.setup.settings = settings
@@ -112,6 +116,16 @@ def configure_control(server, settings, collector_socket, connection_factory):
             return result
         finally:
             connection.close()
+
+    def wiring_is_active(revision):
+        try:
+            health = exchange(collector_socket, 'GET', '/api/settings-health')
+        except (OSError, http.client.HTTPException, ValueError):
+            return False
+        return (not health.get('restarting') and health.get('revision') == server.settings_revision
+                and health.get('wiring_revision') == revision)
+
+    server.wiring_is_active = wiring_is_active
 
     def activate(revision):
         if not lock.acquire(blocking=False):

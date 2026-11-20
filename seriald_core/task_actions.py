@@ -75,9 +75,12 @@ class TaskActions:
                 transactions.check_owner(actor)
             if kind.startswith('hardware-'):
                 if set(payload) - {'kind', 'key', 'serial', 'connection_id', 'actor', 'client_id', 'request_id',
-                                   'execution_lease'}:
+                                   'execution_lease', 'wiring_revision'}:
                     raise TaskError('hardware task accepts only a configured action and target')
                 operation = HardwareOperation(self.manager, device, kind[9:], actor, client)
+                if 'wiring_revision' in payload and payload['wiring_revision'] != (
+                        operation.book.wiring(source_serial) or {}).get('revision', ''):
+                    raise TaskError('接线已更新，请重新打开电源与启动并核对槽位', 409)
                 task = self.tasks.start(kind, actor, client,
                     [{'serial': source_serial, 'connection_id': connection}], operation.run, **submission)
                 return response(202, {'ok': True, 'task': task})

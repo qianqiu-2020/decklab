@@ -161,6 +161,7 @@ begun: a truncated download or dropped SSE connection requires client recovery.
 | GET `/api/serial` | Serial-only cursor read, same byte semantics |
 | GET `/api/session-events` | Same session selection; SSE, resumed by `Last-Event-ID` or `off` |
 | GET `/api/operation` | Active console lease and optional input owner |
+| POST `/api/control-slots` | Owner-only workstation wiring. `list` returns known boards and saved slots, `discover` reads Home Assistant registries over its upstream `/api/websocket`, `saved` opens offline bindings, and `save` applies the reviewed batch atomically with its revision and scan ID. |
 | GET `/api/hardware` | Configured actions and provider names allowed for the caller; never executes tools |
 | GET `/api/diagnostics` | Sanitized platform diagnostic summary; unavailable to single-board grants |
 

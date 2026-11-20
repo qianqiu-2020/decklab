@@ -195,6 +195,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if route == '/api/settings-health':
             return self._json(200, {'revision': getattr(self.server, 'settings_revision', None),
+                                    'wiring_revision': getattr(getattr(self.manager, 'control_slots', None), 'active_revision', None),
                                     'restarting': getattr(self.server, 'restart_requested', False)})
 
         if route == '/api/capabilities':
@@ -346,7 +347,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not device:
                 return self._json(404, {'error': 'no such device'})
             actor = self.headers.get('X-Seriald-Actor') or 'web'
-            return self._json(200, self.manager.hardware.available(device.serial or '', actor))
+            hardware = self.manager.hardware
+            result = hardware.available(device.serial or '', actor)
+            if actor == 'web':
+                result['wiring'] = hardware.wiring(device.serial)
+            if actor == 'web' and device.by_path:
+                result['slot_handoff'] = any(slot.get('suspended_on') == device.by_path
+                    for cfg in getattr(hardware, 'document', {}).get('home_assistant', {}).values()
+                    for slot in cfg['slots'].values())
+            return self._json(200, result)
 
         if route == '/api/flash-discover':
             result = FlashActions(self.manager).discover(self.headers.get('X-Seriald-Actor') or 'web')
@@ -506,6 +515,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(error.status, {'ok': False, 'error': str(error), 'code': error.code})
 
     def _post_payload(self, route, payload):
+        if route == '/api/control-slots':
+            if (self.headers.get('X-Seriald-Actor', 'web') != 'web'
+                    or payload.get('actor', 'web') != 'web'):
+                return self._json(403, {'error': '只有管理员可以修改工位接线'})
+            try:
+                return self._json(200, self.manager.control_slots.execute(payload))
+            except (TaskError, ValueError) as error:
+                return self._json(getattr(error, 'status', 400), {'error': str(error)})
         if route == '/api/image-workspace':
             from .image_workspaces import ImageWorkspaces
             result = ImageWorkspaces(self.manager).request(payload, payload.get('actor') or 'web')

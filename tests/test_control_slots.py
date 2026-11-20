@@ -1,0 +1,134 @@
+import json
+from pathlib import Path
+import tempfile
+import threading
+import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from seriald_core.control_slots import ControlSlots
+from seriald_core.ha_slots import SlotAction, inventory
+from seriald_core.hardware import HardwareBook
+from seriald_core.tasks import TaskError
+from seriald_core.web_settings import WebSettings
+
+
+URL = 'http://ha.example.test'
+TOKEN = 'fixture-token'
+ONE, TWO = 'controllerA/1', 'controllerB/1'
+
+
+def slot(prefix):
+    return {'device': prefix, 'number': 1, 'name': prefix, 'area': 'desk',
+            'entities': {'reset': 'switch.' + prefix.lower() + '_board_1_reset',
+                         'enter-download': 'button.' + prefix.lower() + '_board_1_fastboot_mode'}}
+
+
+class ControlSlotsTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.settings = WebSettings(Path(tmp.name)/'settings.json', {})
+        self.manager = SimpleNamespace(lock=threading.RLock(), hardware=HardwareBook(), _flash_presence={},
+            boards={sn: SimpleNamespace(serial=sn, label=sn) for sn in ['A','B']},
+            store=Mock(has_conflict=Mock(return_value=False)))
+        self.slots = ControlSlots(self.manager)
+        self.slots.settings = self.settings
+        fake = patch('seriald_core.ha_slots.inventory', return_value={ONE:slot('controllerA'), TWO:slot('controllerB')})
+        self.inventory = fake.start()
+        self.addCleanup(fake.stop)
+
+    def scan(self, token=TOKEN, action='discover'):
+        current = self.slots.execute({})
+        return self.slots.execute(dict(action=action, revision=current['revision'], origin=URL, token=token))
+
+    def save(self, scan, changes):
+        return self.slots.execute(dict(action='save', scan=scan['scan'], revision=scan['revision'],
+                                       changes={k:{'serial':sn, 'allow_agent':True} for k,sn in changes.items()}))
+
+    def test_bulk_assign_same_slot_numbers_swap_and_restart(self):
+        first = self.scan()
+        self.slots.active_revision = first['revision']
+        saved = self.save(first, {ONE:'A', TWO:'B'})
+        self.assertEqual(saved['revision'], self.slots.active_revision)
+        self.assertNotIn(TOKEN,json.dumps(self.settings.snapshot()))
+        self.assertNotIn(TOKEN,json.dumps(self.slots.execute({})))
+        with self.assertRaisesRegex(TaskError,'更新'):
+            self.save(first, {ONE:'B'})
+        with self.assertRaisesRegex(ValueError,'重复绑定'):
+            self.save(self.scan(), {ONE:'B'})
+        self.assertEqual(self.manager.hardware.command('A','reset','web').key,ONE)
+        self.save(self.scan(), {ONE:'B',TWO:'A'})
+        restored = HardwareBook(self.settings.effective()['documents']['hardware'])
+        self.assertEqual(restored.command('A','reset','agent').key,TWO)
+
+    def test_suspended_and_moved_board_cannot_use_old_command(self):
+        self.save(self.scan(), {ONE:'A'})
+        cmd = self.manager.hardware.command('A','reset','web')
+        with self.slots.using('A','reset',cmd):
+            with self.assertRaisesRegex(TaskError,'占用'):
+                self.save(self.scan(), {ONE:'B'})
+            with self.assertRaisesRegex(TaskError,'执行'):
+                self.slots.suspend('A','port')
+        self.slots.suspend('A','port')
+        self.manager.boards['B'].connection = SimpleNamespace(by_path='port', dev='COM2', present=True)
+        self.manager._flash_presence['B'] = {'connected':True,'endpoint':'3.7'}
+        handoff = self.slots.execute({'action':'list', 'serial':'B'})
+        self.assertEqual(handoff['handoff'], {'origin':URL, 'key':ONE})
+        self.assertEqual(handoff['boards'][0]['uart'], 'COM2')
+        self.assertEqual(handoff['boards'][0]['flash_usb'], '3.7')
+        self.assertEqual(self.manager.hardware.available('A','web')['actions'],[])
+        with self.assertRaisesRegex(TaskError,'变化'):
+            with self.slots.using('A','reset',cmd):
+                self.fail('stale command entered')
+        self.save(self.scan(), {ONE:'B'})
+        self.assertEqual(self.manager.hardware.command('B','reset','web').key,ONE)
+        self.assertFalse(self.manager.hardware.available('A','web')['actions'])
+
+    def test_offline_unbind_and_never_reuse_token_for_another_origin(self):
+        self.save(self.scan(), {ONE:'A'})
+        self.inventory.reset_mock()
+        review = self.scan('', 'saved')
+        self.assertFalse(review['slots'][0]['present'])
+        self.save(review, {ONE:''})
+        self.inventory.assert_not_called()
+        with self.assertRaisesRegex(ValueError,'令牌'):
+            self.slots.execute(dict(action='discover', revision=self.slots.execute({})['revision'],
+                                    origin='http://another.example.test'))
+
+    def test_adopt_only_matching_legacy_commands(self):
+        item = slot('controllerA')
+        old = {a:{'argv':['/usr/bin/python3','-I','/opt/home_assistant_control.py',URL,'/private/token',e],
+                  'allow_agent':True} for a,e in item['entities'].items()}
+        old['power-off'] = {'argv':['/bin/false']}
+        doc = {'boards':{'A':old}}
+        self.manager.hardware = HardwareBook(doc)
+        self.settings.save({'version':1,'documents':{'hardware':doc}}, self.settings.snapshot()['revision'])
+        scan = self.scan()
+        self.assertTrue(scan['slots'][0]['legacy'])
+        self.save(scan,{ONE:'B'})
+        self.assertEqual(set(self.manager.hardware.boards['A']), {'power-off'})
+        self.assertEqual(set(self.manager.hardware.boards['B']), {'reset','enter-download'})
+
+    def test_slot_service_ack_and_unknown_never_replay(self):
+        self.save(self.scan(),{ONE:'A'})
+        action = self.manager.hardware.command('A','enter-download','web')
+        state = {'entity_id':action.entity, 'state':'unknown'}
+        for reply in ([], TaskError('timed out',502)):
+            with patch('seriald_core.ha_slots.request', side_effect=[state,reply]) as api:
+                outcome=Mock()
+                if isinstance(reply, list):
+                    self.assertEqual(action.run(lambda:None,outcome=outcome)['control_result'],'acknowledged')
+                else:
+                    with self.assertRaisesRegex(TaskError,'结果未知'):
+                        action.run(lambda:None,outcome=outcome)
+                self.assertEqual(api.call_count,2)
+                self.assertEqual(api.call_args.args[2:],('/api/services/button/press',{'entity_id':action.entity}))
+
+    def test_discovery_groups_by_registry_id_and_ignores_disabled_entities(self):
+        rows=[{'device_id':'abc','entity_id':e,'platform':'esphome'} for e in slot('a')['entities'].values()]
+        rows += [dict(rows[0],device_id='def',entity_id='switch.b_board_1_reset'),
+                 dict(rows[0],entity_id='switch.a_board_4_reset',disabled_by='user')]
+        with patch('seriald_core.ha_slots.registries', return_value=([],
+                [{'id':'abc','name':'Desk'},{'id':'def','name':'Desk'}],rows)):
+            self.assertEqual(set(inventory(URL,TOKEN)),{'abc/1','def/1'})

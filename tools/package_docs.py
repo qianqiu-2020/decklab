@@ -34,7 +34,7 @@ def document_map(platform):
     # Keep platform examples usable without adding an SDK dependency. This is
     # the same standard-library client served by the application, not a fork.
     pairs['serialctl.py'] = 'examples/serialctl.py'
-    for path in ('examples/profiles.json', 'examples/hardware.json', 'examples/hardware-bmc.json', 'examples/flash.json',
+    for path in ('examples/profiles.json', 'examples/hardware.json', 'examples/hardware-bmc.json', 'examples/home_assistant_control.py', 'examples/flash.json',
                  'examples/platform_executor.py', 'examples/platform-device.json', 'examples/edge_task_lookup.go', 'skills/seriald-board/SKILL.md',
                  'skills/seriald-board/SKILL.zh-CN.md'):
         pairs[path] = path

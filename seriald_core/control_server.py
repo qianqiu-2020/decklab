@@ -231,7 +231,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     share_seconds = SHARE_SECONDS
     default_language = ''
     settings = None
-    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/desktop.js',
+    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/control-slots.js', '/static/board-control.js', '/static/desktop.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
     try:
@@ -422,6 +422,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 else:
                     result = self.settings.snapshot()
                 result['active_revision'] = getattr(self.server, 'settings_revision', None)
+                check_wiring = getattr(self.server, 'wiring_is_active', None)
+                if check_wiring and result['active_revision'] != result['revision'] and check_wiring(result['revision']):
+                    result['active_revision'] = result['revision']
                 result['restart_available'] = callable(getattr(self.server, 'activate_settings', None))
                 result['activation'] = getattr(self.server, 'settings_activation', {'state': 'idle'})
                 return self._json(200, result)
@@ -607,6 +610,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 return self._json(403, {'error': '镜像操作需要设备或全部设备范围的授权'})
             if grant and grant['scope'] != 'all' and route == '/api/flash-discover':
                 return self._json(403, {'error': '发现 USB 设备需要全部设备范围的授权'})
+            if agent_actor and route == '/api/control-slots':
+                return self._json(403, {'error': '只有管理员可以管理工位接线'})
             if agent_actor and route == '/api/desktop/configure':
                 return self._json(403, {'error': '只有网页操作者可以配置桌面连接'})
             if agent_actor and route == '/api/probe-settings':
@@ -789,9 +794,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return proxy(self)
         if route == '/api/settings':
             return self._settings_request()
-        if route == '/api/device-preferences':
+        if route in ('/api/device-preferences', '/api/control-slots'):
             if not self._owner_authorized():
-                return self._json(403, {'error': '只有主访问凭证可以管理设备偏好'})
+                return self._json(403, {'error': '只有主访问凭证可以管理此配置'})
             return self._proxy()
         if route == '/api/settings-health':
             return self._json(404, {'error': 'not found'})
@@ -831,9 +836,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         route = urlparse(self.path).path
         if route == '/api/settings':
             return self._settings_request(write=True)
-        if route == '/api/device-preferences':
+        if route in ('/api/device-preferences', '/api/control-slots'):
             if not self._owner_authorized():
-                return self._json(403, {'error': '只有主访问凭证可以管理设备偏好'})
+                return self._json(403, {'error': '只有主访问凭证可以管理此配置'})
             if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
                 return self._json(400, {'error': '需要 application/json 请求'})
             return self._proxy()
@@ -902,7 +907,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         if urlparse(self.path).path.startswith('/vendor/novnc/'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
-                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-control.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
+                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/control-slots.js', '/static/board-control.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()
 

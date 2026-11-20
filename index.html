@@ -287,7 +287,8 @@ PasswordAuthentication yes</code></pre>
 <dialog id="board-control-dialog" class="identity-association-dialog" aria-labelledby="board-control-title">
   <div class="agent-share-head"><strong id="board-control-title">板卡控制</strong><button id="board-control-close" type="button">关闭</button></div>
   <p id="board-control-target" data-i18n-ignore></p>
-  <label class="ft-field">操作<select id="board-control-action"></select></label>
+  <button type="button" id="board-slot-bind" hidden>绑定控制槽位</button>
+  <label class="ft-field" id="board-control-action-field">操作<select id="board-control-action"></select></label>
   <p>操作会改变板卡电源或启动状态。</p>
   <p id="board-control-status" role="status"></p>
   <div class="ft-actions"><button id="board-control-cancel" type="button">取消</button><button id="board-control-submit" class="pri" type="button">确认执行</button></div>
@@ -549,6 +550,7 @@ Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\seriald-mcp.exe'</code></pre>
 <script src="/static/devices.js"></script>
 <script src="/static/tasks.js"></script>
 <script src="/static/image-store.js"></script>
+<script src="/static/control-slots.js"></script>
 <script src="/static/board-control.js"></script>
 <script src="/static/desktop.js"></script>
 <script src="/static/file-transfer.js"></script>

@@ -251,6 +251,7 @@
       file.addEventListener('change', run(function () { return importFile(file.files[0]); }));
       button(actions, '导入配置…', function () { file.value = ''; file.click(); });
       preview = button(actions, '预览修改', doPreview);
+      button(actions, '工位接线', function () { global.SerialdControlSlots.open(); });
       save = button(actions, '保存配置', doSave);
       activate = button(actions, '重启并应用', async function () {
         var view = dialog;

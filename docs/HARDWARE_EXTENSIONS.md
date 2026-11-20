@@ -126,6 +126,27 @@ BMC 成功回执记为 `control_result=acknowledged`，表示控制请求获得�
 Windows 硬件验收继续只覆盖串口和刷机，BMC 复位在 Linux 控制机验收。
 BMC 回执只表示控制请求被接受，启动结果须以新的串口输出确认；复位后落入 initramfs 不算正常启动。
 
+### Home Assistant 工位控制器
+
+管理员在「系统配置 → 工位接线」输入 Home Assistant 根地址和访问令牌，点击「检测槽位」。选择工位区域及控制器，为 1–4 号槽位分配板卡序列号，可一次保存多个控制器上的接线。板卡可按标签、序列号、当前串口或已识别的刷机 USB 位置搜索。令牌由控制机保存。以后从设备的「电源与启动 → 绑定控制槽位」可单独移交或解除绑定。下线的控制器可通过「查看已存接线」解除绑定。
+
+槽位以 Home Assistant 注册表中的控制器设备 ID 和槽号标识，区域和名称仅用于显示。缺少刷机按钮时只提供复位。每张板只绑定一个槽位，保存时校验整批修改并立即生效。允许 AI 按每个槽位单独设置，实际操作仍经过设备授权、输入占用和任务去重。普通重插沿用原序列号。显式「换板」会先停用该板已登记的槽位，新板识别后从「电源与启动」确认接线。串口及刷机 USB 保持各自原有识别和核对流程。
+
+已有固定命令接线在检测时会显示原板号。核对后点「接管旧接线」并保存即可转入槽位管理。需要继续使用旧版部署时，可在控制机上保存 [Home Assistant 控制脚本](../examples/home_assistant_control.py) 和仅服务账户及管理员可读的令牌文件。按实际接线，在 `hardware.boards` 中为板卡序列号配置固定动作。实体 ID 请从该工位的 Home Assistant 区域复制；不同工位可能有相同槽位号。
+
+```json
+{
+  "boards": {
+    "YOUR-BOARD-SERIAL": {
+      "reset": {"argv": ["/usr/bin/python3", "-I", "/opt/decklab/home_assistant_control.py", "https://ha.example.com", "/etc/seriald/ha.token", "switch.controller_board_2_reset"], "timeout": 20, "allow_agent": true},
+      "enter-download": {"argv": ["/usr/bin/python3", "-I", "/opt/decklab/home_assistant_control.py", "https://ha.example.com", "/etc/seriald/ha.token", "button.controller_board_2_fastboot_mode"], "timeout": 20, "allow_agent": true}
+    }
+  }
+}
+```
+
+调试时在脚本名后加 `--check` 只读查询实体。复位通过 `switch/turn_on` 触发硬件脉冲，进入下载模式通过 `button/press` 触发控制器上的按键时序。网页「电源与启动」和 MCP 共用这两个任务。服务回执只确认 Home Assistant 已处理请求，启动结果看串口，下载模式看刷机工作区的 USB 检测。实际写入仍需选择镜像并确认范围。
+
 ## 平台接入与执行合同
 
 BMC、Studio 和自动化测试系统的职责与适配落点见

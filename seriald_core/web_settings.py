@@ -43,7 +43,7 @@ DEFAULTS = {
 }
 DOCUMENTS = {'profiles': 'PROFILES', 'hardware': 'HARDWARE', 'flash': 'FLASH', 'desktop': 'DESKTOP',
              'agent_tokens': 'AGENT_TOKENS_FILE'}
-DOCUMENT_LIMITS = {'profiles': 65536, 'hardware': 65536, 'desktop': 65536,
+DOCUMENT_LIMITS = {'profiles': 65536, 'hardware': 512 * 1024, 'desktop': 65536,
                    'flash': 1024 ** 2, 'agent_tokens': 65536}
 CHOICES = {'PARITY': ['N', 'E', 'O'], 'DATA_BITS': ['5', '6', '7', '8'],
            'STOP_BITS': ['1', '2'], 'FLOW_CONTROL': ['none', 'rtscts', 'xonxoff'],

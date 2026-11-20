@@ -35,6 +35,8 @@ class Manager:
 
     def __init__(self, store=None, handoff=None, profiles=None, artifact_dir=None, hardware=None):
         self.hardware = hardware if hardware is not None else HardwareBook.from_env()
+        from .control_slots import ControlSlots
+        self.control_slots = ControlSlots(self)
         self.profiles = profiles if profiles is not None else ProfileBook.from_env()
         self.maintenance = LogMaintenance(MaintenancePolicy.from_env())
         self.store = store
@@ -100,7 +102,8 @@ class Manager:
             old = presence.get(serial)
             if old is None or old['seen'] < row['seen']:
                 presence[serial] = {'connected': bool(row['present'] and now - row['seen'] <= 15),
-                    'mode': document.get('mode', 'unknown'), 'seen': row['seen']}
+                    'mode': document.get('mode', 'unknown'), 'endpoint': document.get('endpoint', ''),
+                    'seen': row['seen']}
         with self.lock:
             self._flash_presence = presence
 
@@ -385,6 +388,10 @@ class Manager:
                 if not device.serial or not device.present:
                     raise IdentityError('只有已识别且在线的设备可以进入换板识别模式')
                 old_serial, old_record = device.serial, device.record
+                try:
+                    self.control_slots.suspend(old_serial, device.by_path)
+                except ValueError as error:
+                    raise IdentityError(str(error)) from None
                 for sid in list(device.ssh_sessions):
                     device.close_session(sid)
                 with device.log_lock:

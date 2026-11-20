@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 
+from .ha_slots import add_slots
 from .profiles import _unique_object
 from .tasks import TaskError, TaskCancelled
 from .transactions import transactions_for, TransactionError
@@ -152,8 +153,9 @@ class BoundCommand:
 class HardwareBook:
     def __init__(self, document=None):
         document = {} if document is None else document
-        if not isinstance(document, dict) or set(document) - {'boards'} or not isinstance(document.get('boards', {}), dict):
+        if not isinstance(document, dict) or set(document) - {'boards', 'home_assistant'} or not isinstance(document.get('boards', {}), dict):
             raise ValueError('hardware configuration requires a boards object')
+        self.document = document
         self.boards: dict[str, dict[str, ControlAction]] = {}
         for serial, actions in document.get('boards', {}).items():
             if not isinstance(serial, str) or not serial or len(serial.encode()) > 100:
@@ -175,15 +177,17 @@ class HardwareBook:
                                                             values.get('allow_agent', False),
                                                             values.get('exclusive_serial', False))
 
+        add_slots(self.boards, document.get('home_assistant', {}))
+
     @classmethod
     def from_env(cls):
         path = os.environ.get('SERIALD_HARDWARE')
         if not path:
             return cls()
         with open(path, 'rb') as source:
-            raw = source.read(65537)
-        if len(raw) > 65536:
-            raise ValueError('hardware configuration exceeds 64 KiB')
+            raw = source.read(512 * 1024 + 1)
+        if len(raw) > 512 * 1024:
+            raise ValueError('hardware configuration exceeds 512 KiB')
         return cls(json.loads(raw.decode('utf-8-sig'), object_pairs_hook=_unique_object))
 
     def command(self, serial, action, actor):
@@ -195,6 +199,16 @@ class HardwareBook:
         if os.name not in ('posix', 'nt'):
             raise TaskError('unsupported helper process platform', 503)
         return command
+
+    def wiring(self, serial):
+        for url, cfg in self.document.get('home_assistant', {}).items():
+            for key, row in cfg['slots'].items():
+                if row['serial'] == serial:
+                    from hashlib import sha256
+                    binding = json.dumps([url, key, row], sort_keys=True).encode()
+                    return {'name': row['name'], 'number': int(key.split('/')[1]),
+                            'revision': sha256(binding).hexdigest()}
+        return None
 
     def available(self, serial, actor):
         return {'actions': [action for action, command in self.boards.get(serial, {}).items()
@@ -240,7 +254,8 @@ class HardwareOperation:
         self.actor, self.client_id = actor, client_id
         self.serial, self.connection, self.stop = device.serial or '', device.connection_id, device.stop
         self.was_stopped = self.stop.is_set()
-        self.command = manager.hardware.command(self.serial, action, actor)
+        self.book = manager.hardware
+        self.command = self.book.command(self.serial, action, actor)
         self.bound = self.command.bind(device)
 
     def run(self, context):
@@ -265,7 +280,9 @@ class HardwareOperation:
                 context.issued()
             else:
                 context.mark_outcome(value)
-        with transactions.actor_scope(self.actor, self.client_id), \
+        slots = getattr(self.manager, 'control_slots', None)
+        guard = slots.using(self.serial, self.action, self.command) if slots else nullcontext()
+        with guard, transactions.actor_scope(self.actor, self.client_id), \
                 transactions.task_scope(context.cancelled, self.connection, self.stop), \
                 transactions.begin('hardware-' + self.action, self.command.timeout + 1, require_open=False) as lease:
             check()

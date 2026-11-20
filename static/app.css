@@ -921,3 +921,13 @@ dialog :is(button,input,textarea,select){max-width:100%}
     grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
   .console-layout>.ssh-credentials-dialog,.console-layout>.desktop-connection{border-left:0;border-top:1px solid var(--line)}
 }
+
+.wiring-dialog { width: min(52rem, 95vw); padding: 1rem; max-height: 88vh; }
+.wiring-body { padding: 1rem 0; overflow: auto; max-height: 65vh; }
+.wiring-source { border: 0; padding: 0; margin: 0 0 1rem; display: flex; align-items: end; flex-wrap: wrap; gap: .6rem; }
+.wiring-source label { flex: 1 1 12rem; }
+.wiring-row { display: grid; grid-template-columns: minmax(6rem,1fr) minmax(9rem,3fr) auto auto; align-items: center; gap: .6rem; padding: .75rem 0; border-bottom: 1px solid var(--line); }
+.wiring-row small { display: block; }
+.wiring-row select { min-width: 0; }
+.wiring-footer span { margin-right: auto; }
+@media (max-width: 600px) { .wiring-row { grid-template-columns: 1fr 2fr; } }

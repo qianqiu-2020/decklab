@@ -100,6 +100,13 @@ class HardwareTaskTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertTrue(marker.exists())
 
+    def test_stale_web_wiring_confirmation_cannot_start_a_task(self):
+        self.configure('pass')
+        result = self.start(wiring_revision='previous-slot')
+        self.assertEqual(result.status, 409)
+        self.assertIn('接线已更新', result.payload['error'])
+        self.assertFalse(self.manager.tasks._active)
+
     def test_exclusive_command_uses_handoff_inside_task_lease(self):
         from contextlib import contextmanager
         self.configure('pass')

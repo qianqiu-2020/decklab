@@ -10,6 +10,7 @@
       $('decklab-version').dataset.i18nIgnore = '';
     }
     boardRecoveryAuthorized = access.board_recovery_authorized === true;
+    if (boardControl && terminalView) boardControl.refresh(terminalView.current);
     if (terminalView && isCurrent(terminalView.current)) setInputMode(terminalView.current);
   }).catch(function () { /* Missing authorization never enables recovery. */ });
   var curSid = 'serial';              // serial、sshN 或本地只读 log:* 标签
@@ -107,8 +108,10 @@
     openImageStore: function (choose, picker) { if (imageStore) imageStore.open(choose, picker); },
     openImageWorkspace: function (artifact, choose) { if (imageWorkspaces) imageWorkspaces.open(artifact, choose); }
   });
+  window.addEventListener('decklab-wiring-saved', function () { if (boardControl) boardControl.invalidate(); });
   var boardControl = window.SerialdBoardControl && window.SerialdBoardControl.create({
     byId: $, fetch: fetch, getView: function () { return terminalView.current; },
+    canBind: function () { return boardRecoveryAuthorized; },
     onTask: function () { taskUI.refresh(); }
   });
   var desktop = window.SerialdDesktop && window.SerialdDesktop.create({byId:$,fetch:fetch,
