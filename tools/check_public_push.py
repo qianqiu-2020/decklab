@@ -8,6 +8,7 @@ binary files, path names, commit and tag messages, and author/committer identiti
 
 Usage:
   check_public_push.py REV...                 scan commits selected by git log REV...
+  check_public_push.py --tree REV             scan every file currently in the tree of REV
   check_public_push.py --pre-push REMOTE URL  pre-push hook mode; refs arrive on stdin
 
 Reviewed, already public values live in tools/public_push_allowlist.txt. Internal
@@ -15,6 +16,7 @@ domain patterns must not be committed: they are read from
 $GIT_COMMON_DIR/info/public-push-deny and DECKLAB_PUBLIC_DENY (one regex per line).
 """
 import argparse
+import base64
 import fnmatch
 import hashlib
 import ipaddress
@@ -41,11 +43,21 @@ CREDENTIALS = (
     ('google-api-key', re.compile(r'\bAIza[0-9A-Za-z_-]{35}\b')),
     ('private-key', re.compile(r'-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----')),
     ('jwt', re.compile(r'\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}')),
+    ('anthropic-key', re.compile(r'\bsk-ant-(?:api|admin|oat|sid)\d{2}-[A-Za-z0-9_-]{32,}')),
+    ('openai-key', re.compile(r'\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{32,}')),
+    ('openai-key', re.compile(r'\bsk-[A-Za-z0-9]{32,}(?![\w-])')),
+    ('npm-token', re.compile(r'\bnpm_[A-Za-z0-9]{36}(?![A-Za-z0-9])')),
+    ('pypi-token', re.compile(r'\bpypi-AgEI[A-Za-z0-9_-]{50,}')),
+    ('huggingface-token', re.compile(r'\bhf_[A-Za-z]{34}(?![A-Za-z0-9])')),
+    ('stripe-key', re.compile(r'\b(?:sk|rk)_live_[A-Za-z0-9]{24,}')),
     ('url-credentials', re.compile(r'\b[a-z][a-z0-9+.-]*://[^/\s:@\'"]+:([^/\s@\'"]{6,})@[\w.-]+', re.I)),
 )
 ASSIGNMENT = re.compile(
     r'(?i)\b[\w.-]*(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|credential)s?\b'
     r'["\']?\s*(?:[:=]|=>)\s*["\']?([A-Za-z0-9+/_.~-]{20,}={0,2})')
+# Authorization headers: a literal Bearer/token credential, or Basic user:password.
+AUTH_HEADER = re.compile(r'(?i)\bauthorization\b["\']?\s*[:=,]\s*["\']?(bearer|token|basic)\s+'
+                         r'([A-Za-z0-9._~+/-]{8,}=*)')
 STRINGS = re.compile(rb'[\x20-\x7e]{6,}')
 
 
@@ -146,15 +158,34 @@ def scan_text(text, allow, deny, binary=False):
     for rule, pattern in CREDENTIALS:
         for match in pattern.finditer(text):
             hits.append((rule, match.group(match.lastindex or 0)))
+    for match in AUTH_HEADER.finditer(text):
+        scheme, value = match.group(1).lower(), match.group(2)
+        if scheme == 'basic' and basic_credentials(value):
+            hits.append(('authorization-header', value))
+        elif scheme != 'basic' and looks_random(value, 16):
+            hits.append(('authorization-header', value))
     if not binary:
         for match in ASSIGNMENT.finditer(text):
             value = match.group(1)
-            if (entropy(value) >= 3.5 and re.search(r'\d', value) and re.search(r'[A-Za-z]', value)
-                    and not re.fullmatch(r'[0-9a-f]{40,64}', value)):
+            if looks_random(value, 20) and not re.fullmatch(r'[0-9a-f]{40,64}', value):
                 hits.append(('secret-assignment', value))
     # A private-key header is identical for every key, so it is only allowed by path.
     return [(rule, value) for rule, value in hits
             if rule == 'private-key' or fingerprint(value) not in allow.fingerprints]
+
+
+def looks_random(value, length):
+    return (len(value) >= length and entropy(value) >= 3.5 and re.search(r'\d', value)
+            and re.search(r'[A-Za-z]', value) is not None)
+
+
+def basic_credentials(value):
+    try:
+        decoded = base64.b64decode(value + '=' * (-len(value) % 4), validate=True).decode('utf-8')
+    except (ValueError, UnicodeDecodeError):
+        return False
+    user, sep, password = decoded.partition(':')
+    return bool(sep and user and password and decoded.isprintable())
 
 
 def fingerprint(value):
@@ -247,6 +278,42 @@ def scan_binaries(revs, allow, deny, cwd):
     return findings
 
 
+def scan_tree(rev, allow, deny, cwd=None):
+    """Scan every file of one tree, e.g. to clean what a checkout still publishes."""
+    entries = git('ls-tree', '-r', '-z', '--full-tree', rev, cwd=cwd).split(b'\0')
+    blobs = []
+    for entry in entries:
+        if not entry:
+            continue
+        meta, _, path = entry.partition(b'\t')
+        mode, kind, blob = meta.split()
+        if kind == b'blob' and mode != b'120000':
+            blobs.append((blob.decode(), path.decode('utf-8', 'replace')))
+    findings = []
+    process = subprocess.Popen(('git', 'cat-file', '--batch'), cwd=cwd, stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE)
+    try:
+        for blob, path in blobs:
+            process.stdin.write(blob.encode() + b'\n')
+            process.stdin.flush()
+            size = int(process.stdout.readline().split()[2])
+            data = process.stdout.read(size)
+            process.stdout.read(1)
+            findings += [Finding(rev, 'path ' + path, r, v, path) for r, v in scan_text(path, allow, deny)]
+            if b'\0' in data[:8192]:
+                for match in STRINGS.finditer(data):
+                    text = match.group(0).decode('ascii')
+                    findings += [Finding(rev, f'{path} (binary)', r, v, path)
+                                 for r, v in scan_text(text, allow, deny, binary=True)]
+                continue
+            for number, line in enumerate(data.decode('utf-8', 'replace').splitlines(), 1):
+                findings += [Finding(rev, f'{path}:{number}', r, v, path) for r, v in scan_text(line, allow, deny)]
+    finally:
+        process.stdin.close()
+        process.wait()
+    return [f for f in findings if not allow.path(f.rule, f.path)]
+
+
 def scan_tag(ref, sha, allow, deny, cwd=None):
     if git('cat-file', '-t', sha, cwd=cwd).strip() != b'tag':
         return []
@@ -319,6 +386,8 @@ def main(argv=None, stdin=sys.stdin):
     parser.add_argument('--deny-file')
     parser.add_argument('--redact', action='store_true',
                         help='print locations and fingerprints only; use where the log is public (CI)')
+    parser.add_argument('--tree', metavar='REV',
+                        help='scan every file in the tree of REV instead of commit ranges')
     parser.add_argument('revs', nargs='*')
     args = parser.parse_args(argv)
     allow = Allowlist.load(args.allowlist)
@@ -331,6 +400,8 @@ def main(argv=None, stdin=sys.stdin):
             if ref.startswith('refs/tags/'):
                 findings += scan_tag(ref, sha, allow, deny)
             findings += scan_commits(revs, allow, deny)
+    elif args.tree:
+        findings = scan_tree(args.tree, allow, deny)
     elif args.revs:
         findings = scan_commits(args.revs, allow, deny)
     else:

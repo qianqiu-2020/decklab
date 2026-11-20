@@ -32,6 +32,7 @@ git push github v1.14.0
 - 推送前必须通过 `tools/check_public_push.py` 扫描。每个克隆执行一次
   `sh tools/install_hooks.sh`，它为所有 remote 安装 pre-push 闸门；不得用 `--no-verify` 绕过。
   手工复核待推送范围可运行 `python3 tools/check_public_push.py github/main..HEAD`。
+  检查当前文件树里仍在发布的内容可运行 `python3 tools/check_public_push.py --tree HEAD`。
 - 扫描命中时删除相应内容并改写尚未推送的提交。`tools/public_push_allowlist.txt` 只收录
   经复核的占位值或早已公开的值；内部域名模式只放在本地不入库的 `.git/info/public-push-deny`，
   规则本身也不能写进仓库。

@@ -21,6 +21,20 @@ NET_B = '.'.join(('172', '20', '1', '5'))
 NET_C = '.'.join(('192', '168', '4', '9'))
 SECRET = 'q8Vn2LxR' + '7tKp4Wz9Hc3Jm6Fd'
 URL_PASSWORD = 'Zx81' + 'kQp2Lm'
+
+
+def body(length, alphabet='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'):
+    """A random-looking token body, built at run time so no full sample is stored here."""
+    out, value = [], 7
+    for _ in range(length):
+        value = (value * 1103515245 + 12345) % 2 ** 31
+        out.append(alphabet[value % len(alphabet)])
+    return ''.join(out)
+
+
+def b64(text):
+    import base64
+    return base64.b64encode(text.encode()).decode()
 ALLOW = f'email {EMAIL}\nip {TEST_IP}\nhost *.example.lan\n'
 
 
@@ -48,6 +62,49 @@ class ScanTextTests(unittest.TestCase):
         self.assertEqual(hits('url = "https://deploy:' + URL_PASSWORD + '@example.test/repo"'),
                          [('url-credentials', URL_PASSWORD)])
         self.assertEqual(hits(f'API_TOKEN = "{SECRET}"'), [('secret-assignment', SECRET)])
+
+    def test_vendor_key_prefixes_hit(self):
+        letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+        cases = (
+            ('anthropic-key', 'sk-' + 'ant-' + 'api03-' + body(95)),
+            ('anthropic-key', 'sk-' + 'ant-' + 'admin01-' + body(40)),
+            ('openai-key', 'sk-' + 'proj-' + body(64)),
+            ('openai-key', 'sk-' + 'svcacct-' + body(48)),
+            ('openai-key', 'sk-' + body(48)),
+            ('npm-token', 'npm' + '_' + body(36)),
+            ('pypi-token', 'pypi-' + 'AgEI' + body(70)),
+            ('huggingface-token', 'hf' + '_' + body(34, letters)),
+            ('stripe-key', 'sk' + '_live_' + body(24)),
+            ('stripe-key', 'rk' + '_live_' + body(30)),
+        )
+        for rule, token in cases:
+            with self.subTest(rule=rule, prefix=token[:8]):
+                self.assertEqual(hits(f'value: "{token}"'), [(rule, token)])
+
+    def test_vendor_prefixes_without_a_key_do_not_hit(self):
+        for text in ('task-runner', 'sk-ant-api03-short', 'disk-' + body(40), 'ask-' + body(40),
+                     'sk-' + body(20), 'sk-' + body(48) + '-suffix', 'npm_' + body(20), 'npm_config_cache',
+                     'pypi-' + body(60), 'hf_' + body(34) + '9', 'hf_hub_download', 'sk_test_' + body(24),
+                     'sk_live_short', 'pip install pypi-simple'):
+            with self.subTest(text=text[:16]):
+                self.assertEqual(hits(text), [])
+
+    def test_authorization_headers_with_literal_credentials_hit(self):
+        token = body(40)
+        basic = b64('deploy:' + body(12))
+        self.assertEqual(hits(f'Authorization: Bearer {token}'), [('authorization-header', token)])
+        self.assertEqual(hits(f'curl -H "authorization: token {token}"'), [('authorization-header', token)])
+        self.assertEqual(hits(f"headers = {{'Authorization': 'Bearer {token}'}}"), [('authorization-header', token)])
+        self.assertEqual(hits(f'Authorization: Basic {basic}'), [('authorization-header', basic)])
+
+    def test_authorization_header_templates_do_not_hit(self):
+        for text in ('Authorization: Bearer ${TOKEN}', 'Authorization: Bearer $SERIALD_TOKEN',
+                     "'Authorization': 'Bearer ' + token", 'Authorization: Bearer <token>',
+                     'f"Authorization: Bearer {token}"', 'Authorization: Bearer YOUR_TOKEN_HERE_PLEASE',
+                     'Authorization: Basic ' + b64('no-colon-here'), 'Authorization: Basic notbase64!!',
+                     'Authorization header is required'):
+            with self.subTest(text=text):
+                self.assertEqual(hits(text), [])
 
     def test_low_entropy_or_digest_assignments_do_not_hit(self):
         for text in ('token = "aaaaaaaaaaaaaaaaaaaaaaaa"', 'password = placeholder_password_value',
@@ -133,6 +190,17 @@ class GitScanTests(GitRepoCase):
         [finding] = self.scan(self.base + '..HEAD')
         self.assertEqual((finding.commit, finding.where, finding.rule, finding.value),
                          (sha, 'app.py:2', 'private-ip', PRIVATE_IP))
+
+    def test_tree_mode_scans_every_current_file_but_not_removed_content(self):
+        self.commit('docs/old.md', f'see {PRIVATE_IP}\n', 'docs: leak')
+        self.commit('docs/old.md', 'see example.test\n', 'docs: clean')
+        self.assertEqual(scanner.scan_tree('HEAD', self.allow, [], cwd=self.repo), [])
+        self.commit('cfg/app.ini', f'one\nhost={PRIVATE_IP}\n', 'cfg: add')
+        self.commit('fw.bin', b'\x00ip=' + PRIVATE_IP.encode() + b'\x00', 'fw: add', binary=True)
+        found = sorted((f.where, f.rule) for f in scanner.scan_tree('HEAD', self.allow, [], cwd=self.repo))
+        self.assertEqual(found, [('cfg/app.ini:2', 'private-ip'), ('fw.bin (binary)', 'private-ip')])
+        allow = scanner.Allowlist(ALLOW + 'path private-ip fw.bin\n')
+        self.assertEqual(len(scanner.scan_tree('HEAD', allow, [], cwd=self.repo)), 1)
 
     def test_removed_lines_and_already_public_commits_are_not_rescanned(self):
         self.commit('app.py', f'HOST = "{PRIVATE_IP}"\n', 'app: leak')
