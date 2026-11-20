@@ -1,0 +1,52 @@
+# Reviewed values that tools/check_public_push.py accepts in public commits.
+# This file is public: list only addresses, hosts and identities that are
+# placeholders, documentation examples or already-public identities. Never add
+# a real internal address or host here; remove it from the commit instead.
+#
+#   ip CIDR|ADDRESS          private IPv4 used by tests, docs or RFC range checks
+#   host GLOB                placeholder host under an internal-looking suffix
+#   email GLOB               author, committer and tagger addresses allowed to publish
+#   fingerprint HEX16        reviewed false positive; the scanner prints the value
+#   path RULE|* GLOB         allow one rule (or all) in matching paths
+#
+# Run `python3 tools/check_public_push.py origin/main..HEAD` before adding entries.
+
+# Publishing identities already present in public history.
+email weizhi.li@spacemit.com
+email 73449132+qianqiu-2020@users.noreply.github.com
+
+# Private-range checks: the networks themselves and probe targets in control_server.py.
+ip 10.0.0.0
+ip 172.16.0.0
+ip 192.168.0.0
+ip 10.0.0.1
+ip 172.16.0.1
+ip 192.168.0.1
+# Docker's default bridge address in board interface fixtures.
+ip 172.17.0.1
+# Board LAN addresses in desktop, share and access test fixtures.
+ip 10.0.0.2
+ip 10.0.0.3
+ip 10.0.0.4
+ip 10.0.0.5
+ip 10.0.0.8
+ip 10.0.0.9
+ip 10.0.0.88
+ip 10.0.0.89
+ip 10.0.1.1
+# Resolver fixture in tests/test_image_download.py.
+ip 10.23.45.10
+
+# Placeholder backend in docs/DISTRIBUTED.md.
+host *.example.lan
+
+# Throwaway TLS key generated for backend-link tests.
+path private-key tests/fixtures/backend-tls/*.pem
+
+# Dummy credentials in test URLs and log fixtures.
+fingerprint 030b4239fd0172c3
+fingerprint dca6861589d640c0
+fingerprint 5e884898da280471
+fingerprint 832cb5e7d57e92b9
+fingerprint 2bb80d537b1da3e3
+fingerprint 64e39251026f50f2

@@ -21,6 +21,23 @@ git tag -a v1.14.0 -m "DeckLab 1.14.0"
 git push github v1.14.0
 ```
 
+### main 即公开分支
+
+`main` 就是公开分支：其中每个提交、文件、提交信息和作者身份都会对外发布，每次提交并推送
+（无论推到 GitHub 还是内部镜像）都等于一次对外发布。
+
+- 内网地址、内部域名与主机名、凭据和令牌、内部仓库或基础设施结构说明，一律不得进入仓库，
+  包括测试、文档、提交信息和二进制材料。测试和示例使用占位值（`example.test`、文档地址段、
+  运行时生成的假凭据）。
+- 推送前必须通过 `tools/check_public_push.py` 扫描。每个克隆执行一次
+  `sh tools/install_hooks.sh`，它为所有 remote 安装 pre-push 闸门；不得用 `--no-verify` 绕过。
+  手工复核待推送范围可运行 `python3 tools/check_public_push.py github/main..HEAD`。
+- 扫描命中时删除相应内容并改写尚未推送的提交。`tools/public_push_allowlist.txt` 只收录
+  经复核的占位值或早已公开的值；内部域名模式只放在本地不入库的 `.git/info/public-push-deny`，
+  规则本身也不能写进仓库。
+- 一旦推上 GitHub，只能删除整个仓库才能撤回；force push 或改写历史无效，fork、缓存和按提交号
+  访问仍能取到原内容。CI 中的 `public_scan` 作业只是事后检查，真正的闸门是 pre-push。
+
 ### 单一 main
 
 仓库只保留一个长期分支 `main`，开发与发版都在其上进行，GitHub `main` 必须能

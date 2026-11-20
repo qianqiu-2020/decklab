@@ -1,0 +1,12 @@
+#!/bin/sh
+# Public push gate: main is public, so every pushed commit is published for good.
+# Installed by tools/install_hooks.sh; never bypass it with --no-verify.
+top=$(git rev-parse --show-toplevel) || exit 1
+scanner="$top/tools/check_public_push.py"
+if [ ! -f "$scanner" ]; then
+  echo "pre-push: $scanner is missing in this checkout; refusing to push unscanned commits" >&2
+  exit 1
+fi
+python=python3
+command -v python3 >/dev/null 2>&1 || python=python
+exec "$python" "$scanner" --pre-push "$@"
