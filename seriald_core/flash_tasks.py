@@ -846,7 +846,7 @@ class FlashActions:
                         request['archive_sha256'] = checksum
                     if binding.profile_data.get('bootrom_identity'):
                         materials = prepare_materials(binding, executor.stream_loader_workspace(), context.check,
-                                                      getattr(executor, 'root', None), url_stream=family == 'k3')
+                                                      getattr(executor, 'root', None))
                         request['loader'] = {key: {name: materials[key][name] for name in ('id', 'name', 'path', 'size', 'sha256')}
                                              for key in ('fsbl', 'uboot')}
                         if materials.get('trained_for'):

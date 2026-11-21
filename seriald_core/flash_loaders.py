@@ -249,7 +249,7 @@ def _staged(target, check):
     return target.stat().st_size, digest.hexdigest()
 
 
-def prepare_materials(binding, workspace, check, root=None, *, url_stream=False, k1_ram_boot=False):
+def prepare_materials(binding, workspace, check, root=None, *, k1_ram_boot=False):
     """Stage the RAM loaders; `root` is the flashing work directory that keeps
     per-board DDR training results."""
     family = binding.profile_data.get('chip_family')
@@ -266,11 +266,6 @@ def prepare_materials(binding, workspace, check, root=None, *, url_stream=False,
     destination = Path(workspace) / 'ram-loaders'
     if Path(workspace).parent.name == 'images':
         destination = destination / hashlib.sha256(raw).hexdigest() / family
-    uboot_key = 'stream_uboot' if url_stream else 'uboot'
-    if url_stream and uboot_key not in material:
-        raise TaskError('URL 刷写缺少 K3 原版 U-Boot，请更新控制机刷机组件', 409)
-    if url_stream:
-        destination = destination / 'url'
     fsbl_entry = _loader_entry(material.get('fsbl'), frozenset({'training_slots'}))
     training = None
     if family == 'k3' and 'training_slots' in fsbl_entry:
@@ -299,7 +294,7 @@ def prepare_materials(binding, workspace, check, root=None, *, url_stream=False,
         output['usb_speed'] = usb_speed(binding, root)
     destination.mkdir(mode=0o700, parents=True, exist_ok=True)
     for key in ('fsbl', 'uboot'):
-        entry = fsbl_entry if key == 'fsbl' else _loader_entry(material.get(uboot_key))
+        entry = fsbl_entry if key == 'fsbl' else _loader_entry(material.get('uboot'))
         expected = hashlib.sha256(embedded).hexdigest() if key == 'fsbl' and embedded is not None else entry['sha256']
         source = (bundle / entry['file']).resolve()
         if source == bundle or bundle not in source.parents or not source.is_file():

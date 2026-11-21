@@ -16,14 +16,12 @@ def publish(source, destination):
     document = json.loads(raw)
     if document.get('version') != 1 or set(document.get('families', {})) - {'k1', 'k3'} or not document.get('families'):
         raise ValueError('invalid RAM loader families')
+    removed_stream = False
     files = {'manifest.json'}
     def validate(family, material, protocols):
         if not isinstance(material, dict) or material.get('protocol') not in protocols:
             raise ValueError('unsupported RAM loader protocol')
-        names = ['fsbl', 'uboot', 'fsbl_fallback']
-        if family == 'k3' and 'stream_uboot' in material:
-            names.append('stream_uboot')
-        for name in names:
+        for name in ('fsbl', 'uboot', 'fsbl_fallback'):
             if name == 'fsbl_fallback' and name not in material:
                 continue  # optional; DeckLab K3 FSBLs since 1.17.41 train DDR themselves
             entry = material[name]
@@ -46,6 +44,9 @@ def publish(source, destination):
                 raise ValueError('RAM loader checksum, type, path or size mismatch')
             files.add(entry['file'])
     for family, material in document['families'].items():
+        if family == 'k3' and isinstance(material, dict) and 'stream_uboot' in material:
+            del material['stream_uboot']
+            removed_stream = True
         validate(family, material, ('stock', 'spacemit-ram-v1'))
         if 'ram_boot' in material:
             alternate = material['ram_boot']
@@ -64,7 +65,10 @@ def publish(source, destination):
     for name in sorted(files):
         target = destination / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source / name, target)
+        if name == 'manifest.json' and removed_stream:
+            target.write_text(json.dumps(document, indent=2) + '\n')
+        else:
+            shutil.copyfile(source / name, target)
         target.chmod(0o644)
     return document
 

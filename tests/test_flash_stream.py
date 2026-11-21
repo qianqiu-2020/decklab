@@ -71,7 +71,7 @@ class FlashStreamTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
             self.assertEqual((code, again['task']['id']), (202, task['id']))
             self.assertEqual(len(fixture.executor.streams), 1)
 
-    def test_url_from_bootrom_stages_the_packaged_vendor_uboot(self):
+    def test_url_from_bootrom_stages_the_shared_k3_uboot(self):
         from pathlib import Path
         from unittest.mock import patch
         import os
@@ -88,7 +88,7 @@ class FlashStreamTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
             task = self.terminal(fixture, result['task']['id'])
             self.assertEqual(task['state'], 'completed', task)
             loader = executor.streams[0]['loader']
-            self.assertEqual(Path(loader['uboot']['path']).read_bytes(), (manifest.parent / 'k3/url/u-boot.itb').read_bytes())
+            self.assertEqual(Path(loader['uboot']['path']).read_bytes(), (manifest.parent / 'k3/u-boot.itb').read_bytes())
             self.assertEqual(Path(loader['fsbl']['path']).read_bytes(), (manifest.parent / 'k3/FSBL.bin').read_bytes())
 
     def test_first_flash_request_after_start_is_answered_not_crashed(self):

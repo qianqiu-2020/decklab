@@ -67,28 +67,25 @@ class FlashLoaderTests(unittest.TestCase):
             publish(manifest.parent, root / 'installed')
             self.assertEqual((root / 'installed/uboot.bin').read_bytes(), b'RAM only uboot')
 
-    def test_url_stream_stages_vendor_uboot_separately_and_reuses_fsbl(self):
+    def test_old_url_loader_is_ignored_and_omitted_from_new_packages(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             manifest = self.bundle(root / 'bundle')
+            legacy = b'old URL U-Boot'
+            (manifest.parent / 'url.itb').write_bytes(legacy)
+            document = json.loads(manifest.read_text())
+            document['families']['k3']['stream_uboot'] = {
+                'file': 'url.itb', 'sha256': hashlib.sha256(legacy).hexdigest()}
+            manifest.write_text(json.dumps(document))
             board = SimpleNamespace(profile_data={'chip_family': 'k3'})
             with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}):
-                with self.assertRaisesRegex(TaskError, '原版 U-Boot'):
-                    prepare_materials(board, root / 'workspace', lambda: None, url_stream=True)
-                payload = b'vendor U-Boot'
-                (manifest.parent / 'url.itb').write_bytes(payload)
-                document = json.loads(manifest.read_text())
-                document['families']['k3']['stream_uboot'] = {
-                    'file': 'url.itb', 'sha256': hashlib.sha256(payload).hexdigest()}
-                manifest.write_text(json.dumps(document))
-                regular = prepare_materials(board, root / 'workspace', lambda: None)
-                stream = prepare_materials(board, root / 'workspace', lambda: None, url_stream=True)
-                self.assertEqual(stream['fsbl']['sha256'], regular['fsbl']['sha256'])
-                self.assertEqual(Path(stream['uboot']['path']).read_bytes(), payload)
-                self.assertEqual(Path(regular['uboot']['path']).read_bytes(), b'RAM only uboot')
-                self.assertEqual(stream['uboot']['name'], 'u-boot.itb')
-                publish(manifest.parent, root / 'installed')
-                self.assertEqual((root / 'installed/url.itb').read_bytes(), payload)
+                materials = prepare_materials(board, root / 'workspace', lambda: None)
+            self.assertEqual(Path(materials['uboot']['path']).read_bytes(), b'RAM only uboot')
+            publish(manifest.parent, root / 'installed')
+            installed = json.loads((root / 'installed/manifest.json').read_text())
+            self.assertNotIn('stream_uboot', installed['families']['k3'])
+            self.assertFalse((root / 'installed/url.itb').exists())
+            self.assertEqual((root / 'installed/uboot.bin').read_bytes(), b'RAM only uboot')
 
     def test_changed_loader_wrong_family_and_escaping_paths_are_rejected(self):
         for failure in ('checksum', 'family', 'path'):
