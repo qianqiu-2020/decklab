@@ -2,6 +2,7 @@ import gzip
 import io
 from pathlib import Path
 import struct
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from seriald_core.ramboot_prepare import (
 
 
 class PrepareRambootTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'private LZ4 tooling is Linux-only')
     def test_private_lz4_path_requires_both_initramfs_cli_names(self):
         with tempfile.TemporaryDirectory() as tmp:
             code = Path(tmp) / 'seriald_core' / 'ramboot_prepare.py'
