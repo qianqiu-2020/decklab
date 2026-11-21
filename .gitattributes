@@ -15,3 +15,6 @@ packaging/flash-components/** -text
 # Loader source patches are recorded by SHA-256 in the RAM loader build info.
 packaging/flash-loaders/patches/** -text -whitespace
 packaging/flash-components/common/flash-loaders/patches/** -whitespace
+# Hook scripts run under sh on every platform, including Git for Windows.
+.githooks/** text eol=lf
+tools/install_hooks.sh text eol=lf

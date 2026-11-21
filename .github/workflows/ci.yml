@@ -7,6 +7,36 @@ on:
 permissions:
   contents: read
 jobs:
+  public_scan:
+    # After-the-fact backstop only: by the time this runs the commits are already
+    # public. The real gate is the pre-push hook (tools/install_hooks.sh).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Scan pushed commits for private addresses, internal hosts and credentials
+        env:
+          # Optional repository secret with one internal-domain regex per line.
+          DECKLAB_PUBLIC_DENY: ${{ secrets.PUBLIC_PUSH_DENY }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$BASE..$HEAD_SHA"
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -qE '^0+$' \
+              && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..$HEAD_SHA"
+          else
+            echo "No previous public commit for this event; scanning $HEAD_SHA only."
+            range="$HEAD_SHA^!"
+          fi
+          python tools/check_public_push.py --redact "$range"
   package_install:
     runs-on: ${{ matrix.runner }}
     strategy:

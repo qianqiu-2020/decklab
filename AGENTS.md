@@ -31,6 +31,10 @@ Python tests use `unittest` and `unittest.mock`, with files named `tests/test_*.
 
 History uses concise, action-oriented Chinese subjects prefixed with `seriald:` or `FIXES:`. Follow those scopes where appropriate. PRs should describe the problem, resulting behavior, and validation commands/results; link relevant issues and include screenshots for visible UI changes.
 
+## Public Branch
+
+`main` is the public branch: every commit, file, commit message and author identity on it is published, and every push to any remote that carries `main` or its tags is a public release of that content. Private network addresses, internal domains and hostnames, credentials and tokens, and descriptions of internal repository or infrastructure layout must never enter the repository, including tests, docs, commit messages and binaries. Use placeholders (`example.test`, documentation address ranges, generated dummy credentials) instead. Once something reaches GitHub it can only be withdrawn by deleting the whole repository; force-pushing or rewriting history does not remove it from forks, caches or direct commit links. Every push must pass `tools/check_public_push.py`: run `sh tools/install_hooks.sh` once per clone, which installs a pre-push hook for all remotes, and never bypass it with `--no-verify`. If the scanner reports a hit, remove the content and rewrite the unpushed commits; add a `tools/public_push_allowlist.txt` entry only for reviewed placeholder or already-public values, and keep internal domain patterns in the local, uncommitted `.git/info/public-push-deny`.
+
 ## Branches & Releases
 
 Keep a single long-lived branch, `main`; GitHub `main` must always fast-forward to it and is never force-pushed. Do not create `release/*` or version-named branches (such as `decklab-1.17.40`). A release is an annotated `v<version>` tag on a `main` commit, following [docs/RELEASING.md](docs/RELEASING.md). For isolated release acceptance use `git worktree add --detach` and remove the worktree once the release is published. Delete short-lived task branches after they merge. Push tags one by one, never with `--tags`; local archive tags stay local.
