@@ -489,8 +489,11 @@ class FlashDiscovery:
                 data['uart_link'] = link
             if selector != data['device'] or not row['present']:
                 raise TaskError('prepared USB target changed before its transition was recorded', 409)
-            row.update(generation=secrets.token_hex(12), serial=expected_serial or None,
-                       present=True, seen=time.time())
+            # A fresh USB-only board has no registry row yet. Its verified
+            # identity is registered by accept_eeprom_identity, once that
+            # method has checked conflicts and the board lease.
+            known_serial = expected_serial if expected_serial and self.store.get(expected_serial) else None
+            row.update(generation=secrets.token_hex(12), serial=known_serial, present=True, seen=time.time())
             data.update(device=selector, fingerprint=hashlib.sha256(_encoded(selector).encode()).hexdigest(),
                         mode='loader', supported=False, preparable=False,
                         reason='task prepared this loader; detect again after the task finishes')

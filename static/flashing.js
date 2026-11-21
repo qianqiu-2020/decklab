@@ -744,6 +744,11 @@
       $('fl-url').disabled = busy || uploading || submissionUnknown || !!active && !selecting;
       $('fl-url-sha256').disabled = busy || uploading || submissionUnknown || !!active && !selecting;
       $('fl-download-cancel').hidden = !downloadTask || !['queued', 'running'].includes(downloadTask.state);
+      var ramBoot = $('fl-ram-boot');
+      ramBoot.hidden = !capabilities || !(capabilities.ram_boot_supported || capabilities.ram_boot_reason);
+      ramBoot.disabled = busy || uploading || !!active || submissionUnknown
+        || !capabilities || !capabilities.ram_boot_supported || !$('fl-artifact').value;
+      ramBoot.title = capabilities && capabilities.ram_boot_reason || '';
       $('fl-plan').disabled = busy || uploading || !!active || !!(board && board.observingTask)
         || !(available || preparable) || !$('fl-artifact').value || !imageReady() || !!mismatched.length;
       if (nor && $('fl-mode').value === 'partitions' && !active) $('fl-plan').disabled = true;
@@ -753,7 +758,7 @@
         ? (systemPlan(plan) ? '准备环境并核对写入范围' : '准备环境并核对固件范围')
         : prepareOnly(plan) ? '准备刷机环境并读取布局' : '开始刷写';
       $('fl-cancel').disabled = previewTask ? !['queued','running'].includes(previewTask.state) || previewTask.cancel_requested : !active || task.cancel_requested;
-      $('fl-cancel').textContent = previewTask ? '取消预览' : nor && selecting ? '结束准备' : active && (task.flash || {}).operation === 'nor-workspace' && task.flash.write_result === 'not-started' ? '取消读取' : '取消刷机';
+      $('fl-cancel').textContent = previewTask ? '取消预览' : active && task.kind === 'ram-boot' ? '取消内存启动' : nor && selecting ? '结束准备' : active && (task.flash || {}).operation === 'nor-workspace' && task.flash.write_result === 'not-started' ? '取消读取' : '取消刷机';
       var verifying = active && task.flash && task.flash.can_skip_verification === true
         && ['verifying','verifying-nor','verifying-system'].includes((task.progress || {}).phase);
       $('fl-skip-verify').hidden = !verifying;
@@ -1043,6 +1048,8 @@
         'preparing-loader': '加载临时刷机器', 'prepare': '准备临时刷机器', 'calibrating': '实测刷写参数',
         'awaiting-selection': '等候核对写入范围', 'image-download': '后端下载镜像',
         'image-ready': '镜像已准备', 'uploading-image': '上传替换文件',
+        'ramboot-identify': '核对板型与内存', 'ramboot-prepare': '准备临时内存镜像',
+        'ramboot-transfer': '传送并核验内存载荷', 'ramboot-handoff': '交接给临时系统',
         'reading-system-layout': '读取系统盘分区表', 'reading-system-metadata': '读取系统盘版本信息'};
       var label = names[phase] || phase || '尚未开始', bar = $('fl-progress');
       bar.hidden = phase === 'awaiting-selection';
@@ -1906,6 +1913,16 @@
         setProgress(p.phase, p.done, p.total, ['queued', 'running'].includes(current.state), p);
       $('fl-task-id').textContent = current.id + ' · ' + current.state + (p.phase ? ' · ' + p.phase : '');
       var box = $('fl-results'); box.textContent = '';
+      if (current.kind === 'ram-boot' && result.handoff === 'acknowledged') {
+        text('dt', '内存启动', box);
+        text('dd', '临时加载器已确认启动命令，请在串口确认系统和根文件系统。', box);
+      }
+      var ramReceipt = result.ram_boot || details.ram_boot || {};
+      if (current.kind === 'ram-boot' && Array.isArray(ramReceipt.limitations)
+          && ramReceipt.limitations.includes('k1-bianbu-rcpu-disabled')) {
+        text('dt', '本次内存启动限制', box);
+        text('dd', '此 Bianbu 镜像在内存启动期间停用 RCPU（远程处理器）及依赖它的功能。', box);
+      }
       [['写入结果', result.write_result || details.write_result], ['校验结果', result.verify_result || details.verify_result],
        ['启动结果', result.boot_result || details.boot_result]].forEach(function (item) {
         var state = typeof item[1] === 'string' ? item[1] : item[1] && item[1].status;
@@ -2022,6 +2039,30 @@
         if (!error.result || error.status >= 500) {
           submissionUnknown = true; status('提交结果未确认；请查询原任务，勿重新刷写。');
         } else status(error.message);
+      } finally { if (same(selected, seq)) { busy = false; updateControls(); } }
+    }
+    async function startRamBoot() {
+      if (!board || $('fl-ram-boot').disabled) return;
+      var selected = board, seq = sequence, artifactId = $('fl-artifact').value;
+      invalidatePlan(); requestId = id(); busy = true; updateControls();
+      status('正在提交内存启动任务…');
+      try {
+        operationReference(selected, 'write/' + requestId);
+        var result = await client.request('/api/task-start', Object.assign(scope(selected), {
+          kind: 'ram-boot', artifact_id: artifactId, request_id: requestId,
+          client_id: options.clientId || '', binding_revision: capabilities.binding_revision }));
+        if (!same(selected, seq)) return;
+        if (!result.task || !result.task.id) throw new Error('缺少内存启动任务回执');
+        observe(result.task, selected, seq);
+      } catch (error) {
+        if (!same(selected, seq)) return;
+        if (!error.result || error.status >= 500) {
+          submissionUnknown = true;
+          status('提交结果未确认；请查询原任务。');
+        } else {
+          operationReference(selected, null);
+          status(error.message);
+        }
       } finally { if (same(selected, seq)) { busy = false; updateControls(); } }
     }
     async function start() {
@@ -2697,6 +2738,7 @@
       try { await client.request('/api/task-cancel', { id: downloadTask.id }); }
       catch (error) { status(error.message); }
     });
+    $('fl-ram-boot').addEventListener('click', startRamBoot);
     $('fl-start').addEventListener('click', start); $('fl-recover').addEventListener('click', recover);
     $('fl-select').addEventListener('click', submitSelection);
     $('fl-recovery-reason').addEventListener('input', updateControls);

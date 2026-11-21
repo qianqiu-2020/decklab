@@ -647,7 +647,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                         return self._json(403, {'error': '此令牌需要指定设备 key 或已核实的 USB 目标'})
                     payload['serial'] = grant['serial']
                 if grant and grant['scope'] == 'connection':
-                    if route in ('/api/flash-plan', '/api/flash-selection', '/api/flash-stream') or (route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup')):
+                    if (route in ('/api/flash-plan', '/api/flash-selection', '/api/flash-stream')
+                            or route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup', 'ram-boot')):
                         return self._json(403, {'error': '刷机需要已登记板卡范围的授权'})
                     if not payload.get('key') and route not in ('/api/task-cancel',
                             '/api/artifact-append', '/api/artifact-seal', '/api/artifact-delete'):

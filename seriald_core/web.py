@@ -586,6 +586,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = flash.stream(payload, None, actor)
             elif route == '/api/flash-calibrate':
                 result = flash.calibrate(payload, None, actor)
+            elif route == '/api/task-start' and payload.get('kind') == 'ram-boot':
+                from .ramboot_tasks import start
+                result = start(flash, payload, actor)
             elif route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup'):
                 result = (flash.backup(payload, None, actor) if payload['kind'] == 'nor-backup'
                           else flash.start(payload, None, actor))

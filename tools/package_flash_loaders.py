@@ -17,8 +17,8 @@ def publish(source, destination):
     if document.get('version') != 1 or set(document.get('families', {})) - {'k1', 'k3'} or not document.get('families'):
         raise ValueError('invalid RAM loader families')
     files = {'manifest.json'}
-    for family, material in document['families'].items():
-        if material.get('protocol') not in ('stock', 'spacemit-ram-v1'):
+    def validate(family, material, protocols):
+        if not isinstance(material, dict) or material.get('protocol') not in protocols:
             raise ValueError('unsupported RAM loader protocol')
         names = ['fsbl', 'uboot', 'fsbl_fallback']
         if family == 'k3' and 'stream_uboot' in material:
@@ -45,6 +45,13 @@ def publish(source, destination):
                     or hashlib.sha256(path.read_bytes()).hexdigest() != entry['sha256']):
                 raise ValueError('RAM loader checksum, type, path or size mismatch')
             files.add(entry['file'])
+    for family, material in document['families'].items():
+        validate(family, material, ('stock', 'spacemit-ram-v1'))
+        if 'ram_boot' in material:
+            alternate = material['ram_boot']
+            if family != 'k1' or not isinstance(alternate, dict) or set(alternate) != {'protocol', 'fsbl', 'uboot'}:
+                raise ValueError('invalid K1 RAM boot loader manifest')
+            validate(family, alternate, ('spacemit-k1-ramboot-v1',))
     for path in source.rglob('*'):
         if path.is_symlink():
             raise ValueError('RAM loader bundle must not contain symbolic links')
@@ -113,6 +120,11 @@ if __name__ == '__main__':
     manifest = publish(args.source, args.destination)
     if k1:
         material, files, receipt = k1
+        ram_boot = manifest['families'].get('k1', {}).get('ram_boot')
+        if ram_boot:
+            if {entry['file'] for entry in (ram_boot['fsbl'], ram_boot['uboot'])} & set(files):
+                raise ValueError('K1 RAM boot loader files must not be replaced by firmware loaders')
+            material['ram_boot'] = ram_boot
         for name, data in files.items():
             target = args.destination / name
             target.parent.mkdir(exist_ok=True)

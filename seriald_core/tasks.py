@@ -178,7 +178,7 @@ class TaskStore:
         """Atomically bind one execution, idempotency key and durable resource holds."""
         from .flash_store import encode_document, validate_request
         validate_request(request_id, input_digest)
-        if kind not in ('flash', 'flash-inspect') or not isinstance(actor, str) or not actor or len(actor) > 80:
+        if kind not in ('flash', 'flash-inspect', 'ram-boot') or not isinstance(actor, str) or not actor or len(actor) > 80:
             raise TaskError('invalid board task kind or actor')
         if not isinstance(client_id, str) or len(client_id) > 80:
             raise TaskError('invalid board task client')

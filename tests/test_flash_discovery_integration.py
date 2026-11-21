@@ -252,6 +252,33 @@ def automatic_flashing(known=None):
 
 
 class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
+    def test_first_usb_only_board_can_be_registered_after_a_verified_loader_transition(self):
+        from seriald_core.flash_tasks import _discovery
+        with automatic_flashing() as fixture:
+            discovery = _discovery(fixture.manager)
+            target = discovery.refresh()['targets'][0]
+            target = discovery.probe(target['target_id'], target['target_generation'])
+            binding = discovery.binding(target['target_id'], target['target_generation'])
+            final = dict(binding.device, usb_address=binding.device['usb_address'] + 1)
+
+            def run(context):
+                fixture.executor.candidates[0]['device'] = final
+                generation = discovery.accept_prepared_target(binding.target_id, binding.target_generation,
+                                                              final, context.id, 'attempt', 'BOARD123456')
+                self.assertIsNone(fixture.store.get('BOARD123456'))
+                serial = discovery.accept_eeprom_identity(binding.target_id, generation,
+                    {'serialno': 'BOARD123456', 'eeprom-serial': 'BOARD123456'}, context.id, 'attempt')
+                return {'resolved_serial': serial}
+
+            task = fixture.manager.tasks.start_board('ram-boot', 'web', 'client', '', run,
+                request_id='first-ram-boot', input_digest='1' * 64, details={'attempt_id': 'attempt'},
+                resources=binding.resources, maintenance=maintenance_for(fixture.manager),
+                target_id=binding.target_id, target_generation=binding.target_generation)
+            completed = self.terminal(fixture, task['id'])
+            self.assertEqual(completed['state'], 'completed', completed)
+            self.assertEqual(completed['result']['resolved_serial'], 'BOARD123456')
+            self.assertEqual(fixture.store.get('BOARD123456')['serial'], 'BOARD123456')
+
     def test_debian_image_pair_with_another_chip_is_rejected_before_native_preview(self):
         with automatic_flashing() as fixture:
             candidate = fixture.executor.candidates[0]

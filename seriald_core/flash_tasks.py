@@ -322,6 +322,11 @@ class FlashActions:
                     storage.get('verify') is True for storage in result['storages'])
                 result['verification'] = {'required': result['readback_supported']}
                 profile = data.get('profile') or {}
+                from .ramboot_tasks import availability
+                ramboot_reason = availability(profile, actor, discovery.argv)
+                result['ram_boot_supported'] = ramboot_reason == ''
+                if ramboot_reason:
+                    result['ram_boot_reason'] = ramboot_reason
                 if result['preparable']:
                     from .flash_loaders import installed_for
                     result['loader_sources'] = (['builtin'] if installed_for(profile.get('chip_family')) else []) + ['image']
@@ -1026,7 +1031,7 @@ class FlashActions:
     def events(self, task_id, after=0, actor='web', serial=None, connection_id=None, target_id=None):
         try:
             task = self.manager.tasks.store.get(task_id)
-            if (task['kind'] not in ('flash', 'flash-inspect') or actor != 'web' and task['actor'] != actor
+            if (task['kind'] not in ('flash', 'flash-inspect', 'ram-boot') or actor != 'web' and task['actor'] != actor
                     or serial is not None and not self.manager.tasks.store.visible_serial(task, serial)
                     or target_id is not None and not any(value['target_id'] == target_id
                                                         for value in task.get('flash_targets', []))

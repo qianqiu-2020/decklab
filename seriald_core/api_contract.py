@@ -17,7 +17,7 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
     """Return fresh JSON-compatible data; never inspect an active device."""
     submitted = list(BASE_TASK_KINDS) + ['hardware-' + action for action in hardware_actions]
     produced = [kind for kind in submitted if kind != 'nor-backup'] + [
-        'flash-inspect', 'desktop-input', 'image-download']
+        'flash-inspect', 'desktop-input', 'image-download', 'ram-boot']
     return {
         'api_version': API_VERSION, 'version': version,
         'contract': {

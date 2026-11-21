@@ -63,6 +63,12 @@ K3 只有一块系统盘时可自动核对，多盘必须明确选择目标盘�
 例如 `Debian-13-GNOME-K3-v1.0rc1-202611150400.tar.gz` 的配置只引用 `partition_universal.json`，目标为 ESP 与 rootfs。
 其附带 `partition_nor.json`、EDK2 等文件不表示本次 OS 刷机包含 NOR；选择“整包”也不把这些材料补入目标。
 
+## 从原始镜像内存启动
+
+板卡进入下载模式后，检测 USB 设备，从「已下载」选原始系统包，点击「从镜像内存启动」。控制机按板型和内存预算选择内核、设备树和根文件系统，临时加载器只向内存传输并核对载荷。任务完成表示已交接启动命令，是否进入系统请看串口。复位会退出内存系统并沿原启动链启动。
+
+K1 入口要求 Linux 控制端安装 `spacemit-k1-ramboot-v1` 组件及支持它的执行器。只接纳 EEPROM 型号、序列号和实测 DRAM 布局与 16 GiB MUSE-Pi-Pro 路径相符的设备。原始 Debian 13 Minimal ZIP 可直接使用。同一路径支持已验证的 Bianbu 2.3.5 原始 Minimal ZIP，页面会显示该次内存启动停用 RCPU（远程处理器）及其依赖功能。停用只应用于该镜像的临时设备树。撤下专用组件即可关闭 K1 内存启动入口，正常刷机仍使用原固件随附组件。
+
 ## 原版 U-Boot 接入
 
 基于原版 SpacemiT U-Boot，不增加私有 Fastboot 命令。原版已支持 RAM 下载运行、介质读写、EEPROM 配置、`UCmd` 及 `oem read` / `upload`。K3 内置环境只为加速大块写盘带一个 U-Boot 补丁，再加一个 FSBL 补丁（见下文）。

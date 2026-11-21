@@ -27,6 +27,7 @@ _TRAINING_TYPES = {0: 'lpddr4x', 1: 'lpddr5'}
 _TRAINING_ENTRIES = 64
 # Ports whose last load used an embedded result, so a failure there discards it.
 _EMBEDDED = {}
+K1_RAM_BOOT_PROTOCOL = 'spacemit-k1-ramboot-v1'
 
 
 def _port(binding):
@@ -222,6 +223,14 @@ def record_usb_speed(binding, root, speed):
         os.replace(temporary, path)
 
 
+def k1_ram_boot_installed():
+    try:
+        material = _manifest()[2].get('k1', {}).get('ram_boot', {})
+        return material.get('protocol') == K1_RAM_BOOT_PROTOCOL
+    except (OSError, ValueError, AttributeError, TaskError):
+        return False
+
+
 def _loader_entry(entry, allowed=frozenset()):
     if (not isinstance(entry, dict) or not {'file', 'sha256'} <= set(entry) <= {'file', 'sha256'} | allowed
             or not isinstance(entry['file'], str) or not re.fullmatch('[0-9a-f]{64}', str(entry['sha256']))):
@@ -240,13 +249,17 @@ def _staged(target, check):
     return target.stat().st_size, digest.hexdigest()
 
 
-def prepare_materials(binding, workspace, check, root=None, *, url_stream=False):
+def prepare_materials(binding, workspace, check, root=None, *, url_stream=False, k1_ram_boot=False):
     """Stage the RAM loaders; `root` is the flashing work directory that keeps
     per-board DDR training results."""
     family = binding.profile_data.get('chip_family')
     path, raw, families = _manifest()
     material = families.get(family)
-    if not isinstance(material, dict) or material.get('protocol') not in ('stock', 'spacemit-ram-v1'):
+    protocols = ('stock', 'spacemit-ram-v1')
+    if k1_ram_boot:
+        material = material.get('ram_boot') if family == 'k1' and isinstance(material, dict) else None
+        protocols = (K1_RAM_BOOT_PROTOCOL,)
+    if not isinstance(material, dict) or material.get('protocol') not in protocols:
         raise TaskError('预备刷机环境不支持当前芯片', 409)
     bundle = path.parent.resolve()
     output = dict(chip_family=family, protocol=material['protocol'])

@@ -128,7 +128,10 @@ class PackageTests(unittest.TestCase):
             binary = extracted / 'usr/libexec/seriald/decklab-flash'
             self.assertEqual(binary.read_bytes(), executor.read_bytes())
             self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
-            self.assertIn(', libusb-1.0-0, udev, libstdc++6, libgcc-s1\n', (control / 'control').read_text())
+            dependencies = (control / 'control').read_text()
+            for name in ('libusb-1.0-0', 'udev', 'libstdc++6', 'libgcc-s1', 'e2fsprogs',
+                         'device-tree-compiler', 'initramfs-tools-core', 'lz4', 'zstd'):
+                self.assertIn(', ' + name, dependencies)
             rule = (extracted / 'lib/udev/rules.d/70-seriald-fastboot.rules').read_text()
             self.assertIn('ATTR{idVendor}=="361c"', rule)
             self.assertIn('ENV{ID_USB_INTERFACES}=="*:ff4203:*"', rule)

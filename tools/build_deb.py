@@ -201,7 +201,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
         for name in ('postinst', 'prerm', 'postrm'):
             put('packaging/' + name, 'DEBIAN/' + name, 0o755)
         write('DEBIAN/conffiles', '/etc/seriald/seriald.env\n/etc/sudoers.d/seriald-rescue\n')
-        flash_dependency = ', libusb-1.0-0, udev' if executor_metadata is not None else ''
+        flash_dependency = ', libusb-1.0-0, udev, e2fsprogs, device-tree-compiler, initramfs-tools-core, lz4, zstd' if executor_metadata is not None else ''
         desktop_dependency = ', libstdc++6, libgcc-s1' if desktop_runtime.is_dir() else ''
         write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s%s\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)

@@ -445,6 +445,20 @@ class LocalFlashExecutor:
     def inspect(self, binding, check=lambda: None):
         return self._run(binding, 'inspect', self._request(binding), check=check, timeout=min(binding.timeout, 60))
 
+    def ram_boot(self, binding, serial, workspace=None, files=None, on_event=None, check=lambda: None,
+                 *, image_sha256=None):
+        profile = dict(binding.profile_data)
+        profile.pop('download_device', None)
+        request = dict(self._request(binding), profile=profile, ram_boot={'serial': serial})
+        if workspace is not None:
+            request['workspace'] = str(workspace)
+            request['ram_boot']['files'] = {
+                name: dict(item, path=str(workspace / name)) for name, item in files.items()
+            }
+            if binding.profile_data.get('chip_family') == 'k1':
+                request['ram_boot']['image_sha256'] = image_sha256
+        return self._run(binding, 'ram-boot', request, on_event, check, timeout=1800 if files else 60)
+
     def prepare(self, binding, on_event=None, check=lambda: None, task_id='', attempt_id=''):
         request = dict(self._request(binding), task_id=task_id, attempt_id=attempt_id)
         return self._run(binding, 'prepare', request, on_event, check)
@@ -474,7 +488,11 @@ class LocalFlashExecutor:
             raise FlashRunnerError('prepared system storage changed')
         baseline_protocol = baseline.pop('ram_loader_protocol', None)
         protocol = candidate.pop('ram_loader_protocol', None)
-        if protocol is not None and protocol not in ('stock', 'spacemit-ram-v1'):
+        from .flash_loaders import K1_RAM_BOOT_PROTOCOL
+        protocols = ('stock', 'spacemit-ram-v1')
+        if baseline['chip_family'] == 'k1' and baseline.get('bootrom_identity'):
+            protocols += (K1_RAM_BOOT_PROTOCOL,)
+        if protocol is not None and protocol not in protocols:
             raise FlashRunnerError('unsupported RAM loader protocol')
         if baseline_protocol and baseline_protocol != protocol:
             raise FlashRunnerError('prepared execution profile changed RAM loader protocol')
@@ -963,18 +981,30 @@ class LocalFlashExecutor:
             with self._cache_lock:
                 self._active_workspaces.discard(str(workspace))
 
-    def nor_workspace(self, binding, check=lambda: None):
+    def nor_workspace(self, binding, check=lambda: None, *, ram_boot=False):
         """Prepare a RAM-only read profile without importing a dummy image."""
         if (not binding.target_id or binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
                 or binding.profile_data.get('chip_family') != 'k3'):
             raise TaskError('NOR reading requires a detected K3 USB target', 409)
+        return self._loader_workspace(binding, 'nor-read-profile', check, ram_boot=ram_boot)
+
+    def ram_boot_workspace(self, binding, check=lambda: None):
+        if binding.profile_data.get('chip_family') == 'k3':
+            return self.nor_workspace(binding, check, ram_boot=True)
+        if (not binding.target_id or binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
+                or binding.profile_data.get('chip_family') != 'k1' or not binding.profile_data.get('bootrom_identity')):
+            raise TaskError('K1 RAM boot requires a detected BootROM target', 409)
+        return self._loader_workspace(binding, 'ram-boot-profile', check, k1_ram_boot=True)
+
+    def _loader_workspace(self, binding, operation, check, *, k1_ram_boot=False, ram_boot=False):
         cache = self._directory(self.root / 'cache')
         with self._cache_lock:
             free = max(0, shutil.disk_usage(cache).free - 256 * 1024 ** 2 - self._cache_reserved)
             budget = min(free, max(0, binding.max_cache_bytes - self._cache_size(cache) - self._cache_reserved),
                          800 * 1024 ** 2)
             if budget < 32 * 1024 ** 2:
-                raise TaskError('insufficient free space or cache quota for NOR backup', 503)
+                raise TaskError('insufficient free space or cache quota for ' +
+                                ('the K1 RAM loader' if k1_ram_boot else 'NOR backup'), 503)
             workspace = Path(tempfile.mkdtemp(prefix='plan-', dir=cache))
             self._cache_reserved += budget
             self._active_workspaces.add(str(workspace))
@@ -982,11 +1012,16 @@ class LocalFlashExecutor:
             request = dict(self._request(binding), mode='partitions', workspace=str(workspace),
                            max_cache_bytes=budget)
             if binding.profile_data.get('bootrom_identity'):
-                from .flash_loaders import prepare_materials
-                request['boot_materials'] = prepare_materials(binding, workspace, check, self.root)
-                if request['boot_materials'].get('protocol') != 'spacemit-ram-v1':
-                    raise TaskError('NOR backup requires the RAM-only NOR loader', 409)
-            profile = self._run(binding, 'nor-read-profile', request, check=check)
+                from .flash_loaders import K1_RAM_BOOT_PROTOCOL, prepare_materials
+                options = {'k1_ram_boot': True} if k1_ram_boot else {}
+                request['boot_materials'] = prepare_materials(binding, workspace, check, self.root, **options)
+                if ram_boot:
+                    request['boot_materials']['usb_speed'] = 'high'
+                protocol = K1_RAM_BOOT_PROTOCOL if k1_ram_boot else 'spacemit-ram-v1'
+                if request['boot_materials'].get('protocol') != protocol:
+                    raise TaskError('K1 RAM boot requires its managed loader' if k1_ram_boot else
+                                    'NOR backup requires the RAM-only NOR loader', 409)
+            profile = self._run(binding, operation, request, check=check)
             execution = self.execution_binding(binding, profile, workspace, check)
             return {'workspace': str(workspace), 'execution_profile': execution.profile_data}
         except BaseException as error:

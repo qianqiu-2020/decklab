@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core.flash_loaders import prepare_materials
+from seriald_core.flash_loaders import K1_RAM_BOOT_PROTOCOL, k1_ram_boot_installed, prepare_materials
 from seriald_core.flash_runner import FlashRunnerError, LocalFlashExecutor
 from seriald_core.tasks import TaskError
 from tools.package_flash_loaders import publish
@@ -107,6 +107,30 @@ class FlashLoaderTests(unittest.TestCase):
                 workspace.mkdir()
                 with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}), self.assertRaises(TaskError):
                     prepare_materials(SimpleNamespace(profile_data={'chip_family': family}), workspace, lambda: None)
+
+    def test_k1_ram_boot_material_is_separate_from_the_firmware_loader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.bundle(root / 'bundle')
+            document = json.loads(manifest.read_text())
+            stock = dict(document['families']['k3'], protocol='stock')
+            ram_fit = b'verified temporary FIT fixture'
+            (manifest.parent / 'ram.itb').write_bytes(ram_fit)
+            stock['ram_boot'] = {'protocol': K1_RAM_BOOT_PROTOCOL, 'fsbl': stock['fsbl'],
+                                 'uboot': {'file': 'ram.itb', 'sha256': hashlib.sha256(ram_fit).hexdigest()}}
+            document['families']['k1'] = stock
+            manifest.write_text(json.dumps(document))
+            installed = root / 'installed'
+            publish(manifest.parent, installed)
+            binding = SimpleNamespace(profile_data={'chip_family': 'k1'})
+            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(installed / 'manifest.json')}):
+                self.assertTrue(k1_ram_boot_installed())
+                normal = prepare_materials(binding, root / 'stock', lambda: None)
+                ram = prepare_materials(binding, root / 'ram', lambda: None, k1_ram_boot=True)
+            self.assertEqual(normal['protocol'], 'stock')
+            self.assertEqual(Path(normal['uboot']['path']).read_bytes(), b'RAM only uboot')
+            self.assertEqual(ram['protocol'], K1_RAM_BOOT_PROTOCOL)
+            self.assertEqual(Path(ram['uboot']['path']).read_bytes(), ram_fit)
 
     @staticmethod
     def training(chipid=0x1234, kind=1):

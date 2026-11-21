@@ -68,7 +68,7 @@
     var names = { 'desktop-input': '桌面输入', identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH', 'file-copy': '板间复制',
                   'file-upload': '上传文件', 'file-download': '下载文件', 'image-download': '下载刷机镜像', 'image-prepare': '准备刷机镜像',
                   'hardware-power-on': '硬件上电', 'hardware-power-off': '硬件断电',
-                  'hardware-reset': '硬件复位', 'hardware-enter-download': '进入下载模式', 'hardware-flash': '外部刷机', flash: '刷机', 'flash-inspect': '刷机预检', 'flash-preview': '预览刷写范围' };
+                  'hardware-reset': '硬件复位', 'hardware-enter-download': '进入下载模式', 'hardware-flash': '外部刷机', flash: '刷机', 'flash-inspect': '刷机预检', 'flash-preview': '预览刷写范围', 'ram-boot': '内存启动' };
     function scope(ctx) { return ctx ? ctx.serial ? 'serial:' + ctx.serial
       : 'connection:' + (ctx.connectionId || ctx.key) : ''; }
     function sameSelection(selected) { return !!selected && scope(options.getView()) === selected; }
@@ -112,7 +112,7 @@
           : task.result.serial ? 'SN ' + task.result.serial
           : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || reported.phase || '';
         main.appendChild(output); row.appendChild(main);
-        if (['flash','flash-inspect','flash-preview'].includes(task.kind) && options.openFlash) {
+        if (['flash','flash-inspect','flash-preview','ram-boot'].includes(task.kind) && options.openFlash) {
           var inspect = document.createElement('button'); inspect.type = 'button'; inspect.textContent = '查看刷机';
           inspect.addEventListener('click', function () { if (sameSelection(selected)) options.openFlash(task); });
           row.appendChild(inspect);
