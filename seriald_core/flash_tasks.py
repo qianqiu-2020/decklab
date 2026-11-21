@@ -851,8 +851,6 @@ class FlashActions:
                                              for key in ('fsbl', 'uboot')}
                         if materials.get('trained_for'):
                             request['loader']['trained_for'] = materials['trained_for']
-                        if materials.get('usb_speed'):
-                            request['loader']['usb_speed'] = materials['usb_speed']
                     started = {'writing': False}
                     def event(value):
                         store.append_event(context.id, value)
@@ -936,8 +934,6 @@ class FlashActions:
                                              for key in ('fsbl', 'uboot')}
                         if materials.get('trained_for'):
                             request['loader']['trained_for'] = materials['trained_for']
-                        if materials.get('usb_speed'):
-                            request['loader']['usb_speed'] = materials['usb_speed']
                     def event(value):
                         store.append_event(context.id, value)
                         done, total = value.get('done', 0), value.get('total', 0)

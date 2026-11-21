@@ -71,7 +71,7 @@ K1 入口要求 Linux 控制端安装 `spacemit-k1-ramboot-v1` 组件及支持�
 
 ## 原版 U-Boot 接入
 
-沿用 SpacemiT U-Boot 的 Fastboot、`UCmd`、`oem read` 和 `upload`。K3 普通刷写、直接 URL 极速刷写和内存启动复用同一临时 U-Boot。新的临时配置继承 FSBL 记录的 USB 速度申请，延续现有 USB 2.0 和 USB 3.0 选择。
+沿用 SpacemiT U-Boot 的 Fastboot、`UCmd`、`oem read` 和 `upload`。K3 普通刷写、直接 URL 极速刷写和内存启动复用同一临时 U-Boot。USB 连接使用原版加载器的协商。遇到重新枚举时，控制机仍核对同一块板的身份。
 
 `tools/build_ram_loaders.py` 从固定的 U-Boot 提交读取该仓库维护的 `decklab-k3-download.config` 和默认环境。配置保持以下行为。
 

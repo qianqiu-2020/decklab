@@ -62,8 +62,7 @@ class FlashLoaderTests(unittest.TestCase):
             self.assertEqual(materials['chip_family'], 'k3')
             self.assertEqual(Path(materials['fsbl']['path']), workspace / 'ram-loaders/factory/FSBL.bin')
             self.assertEqual(Path(materials['uboot']['path']).read_bytes(), b'RAM only uboot')
-            self.assertEqual(set(materials), {'chip_family', 'protocol', 'fsbl', 'uboot', 'usb_speed'})
-            self.assertEqual(materials['usb_speed'], 'high')  # no USB port known
+            self.assertEqual(set(materials), {'chip_family', 'protocol', 'fsbl', 'uboot'})
             publish(manifest.parent, root / 'installed')
             self.assertEqual((root / 'installed/uboot.bin').read_bytes(), b'RAM only uboot')
 
@@ -179,11 +178,7 @@ class FlashLoaderTests(unittest.TestCase):
                 flash_loaders.record_training(board, work, {'data': self.training(), 'identity': {'eeprom-serial': 'SN1'}})
                 trained = prepare_materials(board, workspace, lambda: None, work)
                 self.assertEqual(trained['trained_for'], 'SN1')
-                self.assertEqual(set(trained), {'chip_family', 'protocol', 'fsbl', 'uboot', 'trained_for', 'usb_speed'})
-                self.assertEqual(trained['usb_speed'], 'super')
-                flash_loaders.record_usb_speed(board, work, 'high')
-                self.assertEqual(prepare_materials(board, workspace, lambda: None, work)['usb_speed'], 'high')
-                self.assertEqual(prepare_materials(other, workspace, lambda: None, work)['usb_speed'], 'super')
+                self.assertEqual(set(trained), {'chip_family', 'protocol', 'fsbl', 'uboot', 'trained_for'})
                 staged = Path(trained['fsbl']['path']).read_bytes()
                 self.assertEqual(Path(trained['fsbl']['path']).parent.parent, Path(trained['uboot']['path']).parent)
                 self.assertEqual(staged[0x2000 + 200:0x2000 + 204], b'TRND')

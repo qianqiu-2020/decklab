@@ -182,47 +182,6 @@ def installed_for(family):
         return False
 
 
-# USB speed of the RAM U-Boot, per USB port: unknown ports try SuperSpeed
-# (K3 USB-C direct links reach about 330 MB/s instead of about 42). Some USB 3
-# hubs never establish that link and the gadget does not fall back; such a
-# port is kept at high speed after the first failure.
-_SPEED_FILE = 'usb-speed.json'
-_SPEED_LOCK = threading.Lock()
-
-
-def _speeds(root):
-    try:
-        document = json.loads((Path(root) / _SPEED_FILE).read_text())
-    except (OSError, ValueError, TypeError):
-        return {}
-    ports = document.get('ports') if isinstance(document, dict) else None
-    return {k: v for k, v in ports.items() if isinstance(k, str) and v in ('super', 'high')} if isinstance(ports, dict) else {}
-
-
-def usb_speed(binding, root):
-    port = _port(binding)
-    if root is None or port is None:
-        return 'high'
-    with _SPEED_LOCK:
-        return _speeds(root).get(_port_key(port), 'super')
-
-
-def record_usb_speed(binding, root, speed):
-    port = _port(binding)
-    if root is None or port is None or speed not in ('super', 'high'):
-        return
-    with _SPEED_LOCK:
-        ports = _speeds(root)
-        if ports.get(_port_key(port)) == speed:
-            return
-        ports[_port_key(port)] = speed
-        path = Path(root) / _SPEED_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix('.tmp')
-        temporary.write_text(json.dumps({'version': 1, 'ports': dict(sorted(ports.items())[-64:])}, sort_keys=True))
-        os.replace(temporary, path)
-
-
 def k1_ram_boot_installed():
     try:
         material = _manifest()[2].get('k1', {}).get('ram_boot', {})
@@ -290,8 +249,6 @@ def prepare_materials(binding, workspace, check, root=None, *, k1_ram_boot=False
         destination = destination / ('trained-' + hashlib.sha256(embedded).hexdigest()[:16])
         # The executor requires the loader to report this board.
         output['trained_for'] = record['board_serial']
-    if family == 'k3':
-        output['usb_speed'] = usb_speed(binding, root)
     destination.mkdir(mode=0o700, parents=True, exist_ok=True)
     for key in ('fsbl', 'uboot'):
         entry = fsbl_entry if key == 'fsbl' else _loader_entry(material.get('uboot'))

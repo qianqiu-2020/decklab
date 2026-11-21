@@ -987,22 +987,22 @@ class LocalFlashExecutor:
             with self._cache_lock:
                 self._active_workspaces.discard(str(workspace))
 
-    def nor_workspace(self, binding, check=lambda: None, *, ram_boot=False):
+    def nor_workspace(self, binding, check=lambda: None):
         """Prepare a RAM-only read profile without importing a dummy image."""
         if (not binding.target_id or binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
                 or binding.profile_data.get('chip_family') != 'k3'):
             raise TaskError('NOR reading requires a detected K3 USB target', 409)
-        return self._loader_workspace(binding, 'nor-read-profile', check, ram_boot=ram_boot)
+        return self._loader_workspace(binding, 'nor-read-profile', check)
 
     def ram_boot_workspace(self, binding, check=lambda: None):
         if binding.profile_data.get('chip_family') == 'k3':
-            return self.nor_workspace(binding, check, ram_boot=True)
+            return self.nor_workspace(binding, check)
         if (not binding.target_id or binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
                 or binding.profile_data.get('chip_family') != 'k1' or not binding.profile_data.get('bootrom_identity')):
             raise TaskError('K1 RAM boot requires a detected BootROM target', 409)
         return self._loader_workspace(binding, 'ram-boot-profile', check, k1_ram_boot=True)
 
-    def _loader_workspace(self, binding, operation, check, *, k1_ram_boot=False, ram_boot=False):
+    def _loader_workspace(self, binding, operation, check, *, k1_ram_boot=False):
         cache = self._directory(self.root / 'cache')
         with self._cache_lock:
             free = max(0, shutil.disk_usage(cache).free - 256 * 1024 ** 2 - self._cache_reserved)
@@ -1021,8 +1021,6 @@ class LocalFlashExecutor:
                 from .flash_loaders import K1_RAM_BOOT_PROTOCOL, prepare_materials
                 options = {'k1_ram_boot': True} if k1_ram_boot else {}
                 request['boot_materials'] = prepare_materials(binding, workspace, check, self.root, **options)
-                if ram_boot:
-                    request['boot_materials']['usb_speed'] = 'high'
                 protocol = K1_RAM_BOOT_PROTOCOL if k1_ram_boot else 'spacemit-ram-v1'
                 if request['boot_materials'].get('protocol') != protocol:
                     raise TaskError('K1 RAM boot requires its managed loader' if k1_ram_boot else
@@ -1278,11 +1276,6 @@ class LocalFlashExecutor:
                             message = stopped + '，尚未写入。请分别检查 USB 传输和板上内存读写'
                         else:
                             message = (stopped + '，尚未写入。请查看串口输出，断电后重新进入下载模式再试')
-                    if event.get('code') == 'loader-superspeed-failed':
-                        from .flash_loaders import record_usb_speed
-                        record_usb_speed(binding, self.root, 'high')
-                        message = ('请求 USB 3 后，控制机等待 RAM U-Boot 的 USB 设备上线超时，尚未写入。'
-                                   '此端口下次使用 USB 2.0，请让板子重新进入下载模式后重试')
                     if event.get('code') == 'device-data-corrupt':
                         message = ('板上解压命令失败，已停止刷写。此前的分段可能已写入。'
                                    '请按诊断编号查看执行器日志，并核对串口输出')

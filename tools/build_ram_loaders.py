@@ -76,13 +76,13 @@ def main():
                                  'CONFIG_ENV_IS_NOWHERE=y', 'CONFIG_USE_DEFAULT_ENV_FILE=y',
                                  'CONFIG_FASTBOOT_UUU_SUPPORT=y',
                                  'CONFIG_BOOTDELAY=-2', 'CONFIG_PCI_INIT_R=y',
-                                 'CONFIG_CMD_UNZIP=y', 'CONFIG_GZIP=y', 'CONFIG_CMD_BOOTI=y',
-                                 'CONFIG_FASTBOOT_FOLLOW_SPL_USB_SPEED=y'):
+                                 'CONFIG_CMD_UNZIP=y', 'CONFIG_GZIP=y', 'CONFIG_CMD_BOOTI=y'):
                     if expected not in configuration:
                         raise RuntimeError('required stock RAM configuration missing: ' + expected)
-                for forbidden in ('CONFIG_CMD_UNZSTD=y', 'CONFIG_CMD_BGBLK=y'):
+                for forbidden in ('CONFIG_CMD_UNZSTD=y', 'CONFIG_CMD_BGBLK=y',
+                                  'CONFIG_FASTBOOT_FOLLOW_SPL_USB_SPEED=y'):
                     if forbidden in configuration:
-                        raise RuntimeError('obsolete flash transport command enabled: ' + forbidden)
+                        raise RuntimeError('obsolete flash transport configuration enabled: ' + forbidden)
                 subprocess.run(command + ['-j%d' % args.jobs, 'u-boot.bin'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
                 elf = (build / 'u-boot').read_bytes()
                 if b'bootcmd=while true; do fastboot 0; done\x00' not in elf or b'bootcmd=run autoboot' in elf:

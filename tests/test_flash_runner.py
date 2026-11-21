@@ -500,17 +500,13 @@ class FlashRunnerTests(unittest.TestCase):
                 self.runner.inspect(binding)
             self.assertIn('下载样本计算的 CRC 与控制机不一致', str(error.exception))
 
-    def test_superspeed_failure_keeps_that_port_at_high_speed(self):
-        from seriald_core import flash_loaders
+    def test_legacy_executor_usb_timeout_does_not_cache_speed(self):
         binding = self.binding("print(json.dumps({'event':'error','code':'loader-superspeed-failed',"
                                "'message':'RAM U-Boot did not enumerate after requesting SuperSpeed'}))")
-        self.assertEqual(flash_loaders.usb_speed(binding, self.runner.root), 'super')
         with self.assertRaises(FlashRunnerError) as error:
             self.runner.inspect(binding)
         self.assertEqual(error.exception.code, 'loader-superspeed-failed')
-        self.assertIn('USB 设备上线超时', str(error.exception))
-        self.assertIn('USB 2.0', str(error.exception))
-        self.assertEqual(flash_loaders.usb_speed(binding, self.runner.root), 'high')
+        self.assertFalse((self.runner.root / 'usb-speed.json').exists())
 
     def test_corrupt_on_board_expansion_stops_with_an_explicit_reason(self):
         binding = self.binding("print(json.dumps({'event':'error','code':'device-data-corrupt',"
