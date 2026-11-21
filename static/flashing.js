@@ -666,8 +666,7 @@
       $('fl-fast').hidden = !fast;
       // Without a USB target (dialog opened from a serial board) or while a
       // finished task is shown, the entry detects the board first.
-      var redetect = !!(board && !active && (!board.target_id || board.observingTask)
-        && !(capabilities && capabilities.chip === 'k1'));
+      var redetect = !!(board && !active && (!board.target_id || board.observingTask));
       $('fl-fast-toggle').hidden = !(fast || redetect);
       $('fl-fast-toggle').disabled = busy || uploading || submissionUnknown;
       var tuning = !!(board && board.target_id && capabilities && capabilities.calibrate_supported && !board.observingTask);

@@ -409,6 +409,10 @@ class Adapter:
         return self.flash_api(target, '/api/task-start', dict(kind='flash', plan_id=plan_id,
             binding_revision=binding_revision, request_id=request_id), post=True, token=token)
 
+    def stream_flash(self, target, url, system_storage, request_id, sha256='', reset_after=True, token=None):
+        return self.flash_api(target, '/api/flash-stream', dict(url=url, system_storage=system_storage,
+            request_id=request_id, sha256=sha256, reset_after=reset_after), post=True, token=token)
+
     def select_flash(self, target, task_id, layout_digest, selections=None,
                      plan_id='', request_id='', preview=True, token=None,
                      artifact_id='', target_storage='', source_plan_id='', verify='if-supported', reset_after=False):
@@ -748,6 +752,14 @@ def create_server(settings, adapter=None):
         """Start the exact reviewed preview plan asynchronously. Writes board storage; user must authorize its concrete scope. Reuse request_id for uncertain submissions; poll get_task and check verification, not just task creation. An awaiting-selection task still needs preview/confirm_flash_selection."""
         return call(ctx, adapter.start_flash, target=target, plan_id=plan_id,
                     binding_revision=binding_revision, request_id=request_id, execution_lease=execution_lease)
+
+    @server.tool(annotations=write, structured_output=True)
+    def stream_flash(target: FlashTarget, url: str, system_storage: str, request_id: str, ctx: Context,
+                     sha256: str = '', reset_after: bool = True,
+                     execution_lease: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Stream a trusted OS .tar.gz or .tar URL directly to the selected system disk. Requires explicit authorization to replace its GPT and OS partitions. Check flash_capabilities first. Unlike staged flashing, package digests are checked after writing. Reuse request_id after a lost response and poll get_task."""
+        return call(ctx, adapter.stream_flash, target=target, url=url, system_storage=system_storage,
+                    request_id=request_id, sha256=sha256, reset_after=reset_after, execution_lease=execution_lease)
 
     @server.tool(annotations=staging, structured_output=True)
     def preview_flash_selection(target: FlashTarget, task_id: str, layout_digest: str,

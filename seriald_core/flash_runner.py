@@ -1227,17 +1227,24 @@ class LocalFlashExecutor:
                     if event.get('code') in ('loader-fsbl-timeout', 'device-ram-unstable', 'loader-training-mismatch'):
                         from .flash_loaders import discard_training
                         embedded = discard_training(binding, self.root)
-                        stopped = {'loader-fsbl-timeout': '临时刷机环境未启动（FSBL 或其解压的 U-Boot 停住）',
+                        stopped = {'loader-fsbl-timeout': '控制机等待下一阶段的 USB 下载设备上线超时',
                                    'loader-training-mismatch': '该 USB 口上换了板子，保存的 DDR 训练结果不属于这块板',
-                                   }.get(event['code'], '板上内存读出不稳定（同一组随机数据在板上多次核对 CRC 不一致）')
+                                   }.get(event['code'], '板上对下载样本计算的 CRC 与控制机不一致')
                         if embedded:
                             message = (stopped + '，尚未写入。这次复用了这块板之前保存的 DDR 训练结果，已作废；'
                                        '请让板子重新进入下载模式后重试，下次会重新训练 DDR（约多 6 秒）')
                         elif event['code'] == 'device-ram-unstable':
-                            message = (stopped + '，尚未写入。这次已重新训练 DDR，这块板的内存不可靠，'
-                                       '写入的数据可能出错，请先排查硬件')
+                            message = stopped + '，尚未写入。请分别检查 USB 传输和板上内存读写'
                         else:
                             message = (stopped + '，尚未写入。请查看串口输出，断电后重新进入下载模式再试')
+                    if event.get('code') == 'loader-superspeed-failed':
+                        from .flash_loaders import record_usb_speed
+                        record_usb_speed(binding, self.root, 'high')
+                        message = ('请求 USB 3 后，控制机等待 RAM U-Boot 的 USB 设备上线超时，尚未写入。'
+                                   '此端口下次使用 USB 2.0，请让板子重新进入下载模式后重试')
+                    if event.get('code') == 'device-data-corrupt':
+                        message = ('板上解压命令失败，已停止刷写。此前的分段可能已写入。'
+                                   '请按诊断编号查看执行器日志，并核对串口输出')
                     if event.get('code') == 'nor-baseline-changed':
                         message = '板上 NOR 内容在备份后发生变化，尚未写入；请重新读取备份并核对。'
                     if event.get('code') == 'nor-read-failed':

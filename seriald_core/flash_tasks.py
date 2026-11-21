@@ -330,9 +330,9 @@ class FlashActions:
                     and profile.get('id') == 'auto-spacemit-gpt-v1' and profile.get('chip_family') == 'k3'
                     and (profile.get('ram_loader_protocol') == 'spacemit-ram-v1' or result['preparable']))
                 result['stream_flash_supported'] = bool(profile.get('id') == 'auto-spacemit-gpt-v1'
-                    and profile.get('chip_family') == 'k3'
+                    and profile.get('chip_family') in ('k1', 'k3')
                     and getattr(_services(self.manager)[1], 'supports_stream_flash', False))
-                result['calibrate_supported'] = bool(result['stream_flash_supported']
+                result['calibrate_supported'] = bool(result['stream_flash_supported'] and profile.get('chip_family') == 'k3'
                     and getattr(_services(self.manager)[1], 'supports_calibrate', False))
                 if result['calibrate_supported']:
                     try:
@@ -781,15 +781,13 @@ class FlashActions:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
 
     def stream(self, payload, device, actor='web'):
-        """Fast mode: stream an HTTP(S) K3 system package straight to the disk.
+        """Fast mode: stream an HTTP(S) K1/K3 system package straight to the disk.
 
         Download, decompression and writing overlap in the executor's memory;
         nothing is staged on the host disk. The executor writes the package
         GPT first and checks member digests against SHA256SUMS at the end.
         """
         try:
-            if actor != 'web':
-                raise TaskError('fast flashing is limited to the human web operator', 403)
             if not isinstance(payload, dict) or set(payload) - {
                     'actor', 'client_id', 'request_id', 'target_id', 'target_generation', 'serial',
                     'url', 'sha256', 'system_storage', 'reset_after', 'memory_budget'}:
@@ -802,7 +800,7 @@ class FlashActions:
             if checksum and not re.fullmatch('[a-f0-9]{64}', checksum):
                 raise TaskError('invalid expected image SHA-256')
             storage = payload.get('system_storage') or 'auto'
-            if storage != 'auto' and not re.fullmatch(r'(nvme|scsi|mmc|usb):[0-3]', storage):
+            if storage not in ('auto', 'active') and not re.fullmatch(r'(nvme|scsi|mmc|usb):[0-3]', storage):
                 raise TaskError('invalid system disk')
             reset_after = payload.get('reset_after', True)
             budget = payload.get('memory_budget', 1 << 30)
@@ -823,23 +821,33 @@ class FlashActions:
                     raise TaskError('fast flashing requires a detected USB target')
                 device = self._device(device, payload, actor)
                 binding, executor = self._target(device, actor, payload)
+                family = binding.profile_data.get('chip_family')
                 if (binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
-                        or binding.profile_data.get('chip_family') != 'k3'
+                        or family not in ('k1', 'k3')
                         or not getattr(executor, 'supports_stream_flash', False)):
-                    raise TaskError('fast flashing requires a detected K3 USB target and updated executor', 409)
+                    raise TaskError('fast flashing requires a detected K1/K3 USB target and updated executor', 409)
+                if family == 'k1' and storage not in ('active', 'auto'):
+                    raise TaskError('K1 使用 Fastboot 当前系统盘')
+                if family == 'k3' and storage == 'active':
+                    raise TaskError('K3 需要选择实际系统盘或自动检测')
                 url, store = payload['url'], self.store
                 def run(context):
                     from .flash_loaders import prepare_materials
-                    request = {'version': 1, 'device': binding.device, 'chip_family': 'k3', 'source_url': url,
+                    request = {'version': 1, 'device': binding.device, 'chip_family': family, 'source_url': url,
                                'system_storage': storage, 'reset_after': reset_after, 'memory_budget': budget}
+                    if actor != 'web':
+                        request['restrict_source'] = True
                     if checksum:
                         request['archive_sha256'] = checksum
                     if binding.profile_data.get('bootrom_identity'):
-                        materials = prepare_materials(binding, executor.stream_loader_workspace(), context.check, getattr(executor, 'root', None))
+                        materials = prepare_materials(binding, executor.stream_loader_workspace(), context.check,
+                                                      getattr(executor, 'root', None), url_stream=family == 'k3')
                         request['loader'] = {key: {name: materials[key][name] for name in ('id', 'name', 'path', 'size', 'sha256')}
                                              for key in ('fsbl', 'uboot')}
                         if materials.get('trained_for'):
                             request['loader']['trained_for'] = materials['trained_for']
+                        if materials.get('usb_speed'):
+                            request['loader']['usb_speed'] = materials['usb_speed']
                     started = {'writing': False}
                     def event(value):
                         store.append_event(context.id, value)
@@ -923,6 +931,8 @@ class FlashActions:
                                              for key in ('fsbl', 'uboot')}
                         if materials.get('trained_for'):
                             request['loader']['trained_for'] = materials['trained_for']
+                        if materials.get('usb_speed'):
+                            request['loader']['usb_speed'] = materials['usb_speed']
                     def event(value):
                         store.append_event(context.id, value)
                         done, total = value.get('done', 0), value.get('total', 0)
@@ -1521,7 +1531,8 @@ class FlashOperation:
                     previous_device = dict(self.binding.device)
                     self.final_generation = _discovery(self.manager).accept_prepared_target(
                         self.binding.target_id, self.binding.target_generation, final_device,
-                        context.id, self.attempt_id, record['serial'])
+                        context.id, self.attempt_id, record['serial'],
+                        (prepared.get('final_identity') or {}).get('eeprom-serial') or '')
                     self.binding = replace(self.binding, device=final_device)
                     identity = prepared.get('final_identity') or {}
                     self.resolved_serial = _discovery(self.manager).accept_eeprom_identity(

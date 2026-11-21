@@ -418,7 +418,7 @@ class FlashDiscovery:
                          if device.connection_id == connection_id and device.present), None)
 
     def accept_prepared_target(self, target_id, initial_generation, final_device, task_id, attempt_id,
-                               expected_serial=''):
+                               expected_serial='', board_serial=''):
         """Record one engine-verified mode transition owned by the active task.
 
         Ordinary discovery still changes generations on attachment changes;
@@ -433,8 +433,10 @@ class FlashDiscovery:
             # same connector. The executor followed it only by the board serial
             # the FSBL stage reported; the task also holds the new address.
             relocated = selector['port_path'] != original['port_path']
-            if relocated and (not selector.get('usb_serial')
-                              or expected_serial and selector['usb_serial'] != expected_serial):
+            # SuperSpeed RAM U-Boot has no USB serial; the executor matched its
+            # EEPROM serial with the one the FSBL stage reported.
+            if relocated and (not board_serial or expected_serial and board_serial != expected_serial
+                              or selector.get('usb_serial') and selector['usb_serial'] != board_serial):
                 raise TaskError('prepared loader moved to another USB address without the board serial', 409)
             moved_resource = 'flash-usb:local:' + '.'.join(map(str, selector['port_path']))
             with self.store.lock:
