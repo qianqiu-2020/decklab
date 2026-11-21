@@ -136,6 +136,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             destination.chmod(mode)
         if lz4 is not None:
             put(lz4 / 'lz4', 'usr/lib/seriald/ramboot-tools/lz4', 0o755)
+            (stage / 'usr/lib/seriald/ramboot-tools/lz4cat').symlink_to('lz4')
             for name in ('copyright', 'source.json'):
                 put(lz4 / name, 'usr/share/doc/seriald/ramboot-lz4/' + name)
         build_id = collector_build_id()

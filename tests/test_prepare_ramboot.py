@@ -10,11 +10,25 @@ from unittest.mock import call, patch
 from seriald_core.ramboot_prepare import (
     IMAGE_MAGIC, K1_BIANBU_JUNE_SHA256, K1_BIANBU_RCPU, K1_BIANBU_SHA256,
     K3_PICO_MODEL, PrepareError, choose_dtb, clear_k1_boot_properties,
-    kernel_image, newc_entry, prepare_k1_bianbu_rcpu, select_partitions,
+    kernel_image, newc_entry, prepare_k1_bianbu_rcpu, ramboot_tool_path, select_partitions,
 )
 
 
 class PrepareRambootTests(unittest.TestCase):
+    def test_private_lz4_path_requires_both_initramfs_cli_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code = Path(tmp) / 'seriald_core' / 'ramboot_prepare.py'
+            tools = Path(tmp) / 'ramboot-tools'
+            tools.mkdir()
+            cli = tools / 'lz4'
+            cli.write_text('#!/bin/sh\n')
+            cli.chmod(0o755)
+            with patch('seriald_core.ramboot_prepare.__file__', str(code)), patch.dict(
+                    'os.environ', {'PATH': '/host-tools'}):
+                self.assertEqual(ramboot_tool_path(), '/host-tools')
+                (tools / 'lz4cat').symlink_to('lz4')
+                self.assertEqual(ramboot_tool_path(), str(tools) + ':/host-tools')
+
     def test_june_bianbu_keeps_original_rcpu_enabled(self):
         with patch('seriald_core.ramboot_prepare.run',
                    side_effect=[b'spacemit,k1-x-rproc\n', b'okay\n']) as fdt:

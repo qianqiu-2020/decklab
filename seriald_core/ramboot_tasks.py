@@ -21,7 +21,7 @@ from .tasks import TaskError
 from .transactions import TransactionError
 
 
-TOOLS = ('debugfs', 'fdtget', 'fdtput', 'gzip', 'lsinitramfs', 'lz4', 'zstd')
+TOOLS = ('debugfs', 'fdtget', 'fdtput', 'gzip', 'lsinitramfs', 'lz4', 'lz4cat', 'zstd')
 
 
 @lru_cache(maxsize=8)

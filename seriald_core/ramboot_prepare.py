@@ -50,7 +50,7 @@ class PrepareError(ValueError):
 def ramboot_tool_path():
     path = os.environ.get('PATH', os.defpath)
     directory = Path(__file__).resolve().parent.parent / 'ramboot-tools'
-    if shutil.which('lz4', path=str(directory)):
+    if all(shutil.which(tool, path=str(directory)) for tool in ('lz4', 'lz4cat')):
         return str(directory) + os.pathsep + path
     return path
 
