@@ -78,7 +78,9 @@ def load(path, platform):
         raise ValueError('installation component manifest exceeds size limit')
     value = json.loads(raw)
     expected = {'version', 'platform', 'executor', 'loaders', 'notices'} | ({'driver'} if platform.startswith('windows-') else set())
-    if not isinstance(value, dict) or set(value) != expected or type(value.get('version')) is not int or value.get('version') != 1 or value.get('platform') != platform:
+    optional = {'lz4'} if platform.startswith('linux-') else set()
+    if (not isinstance(value, dict) or not expected <= set(value) <= expected | optional
+            or type(value.get('version')) is not int or value.get('version') != 1 or value.get('platform') != platform):
         raise ValueError('invalid complete-install component manifest')
     def member(name, directory=False):
         entry = value[name]
@@ -98,6 +100,12 @@ def load(path, platform):
         return source
     result = {'executor': member('executor'), 'loaders': member('loaders', True), 'notices': member('notices', True)}
     executor_metadata(result['executor'], platform)
+    if 'lz4' in value:
+        lz4 = member('lz4', True)
+        if set(value['lz4']['files']) != {'lz4', 'copyright', 'source.json'}:
+            raise ValueError('invalid private LZ4 CLI component inventory')
+        executor_metadata(lz4 / 'lz4', platform)
+        result['lz4'] = lz4
     if platform.startswith('windows-'):
         result['driver'] = member('driver', True)
         if not all((result['driver'] / name).is_file() for name in ('spacemit_usb.inf', 'WinUSB/spacemit_amd64.cat', 'driverinstall.exe')):

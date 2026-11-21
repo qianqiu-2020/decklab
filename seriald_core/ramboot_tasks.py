@@ -15,7 +15,7 @@ from .board_maintenance import CACHE_POOL_RESOURCE, maintenance_for
 from .flash_discovery import _selector
 from .flash_runner import stream_process
 from .flash_tasks import _digest, _discovery, _resources, _services
-from .ramboot_prepare import K1_MUSE_PI_PRO_MODEL, K3_PICO_MODEL
+from .ramboot_prepare import K1_MUSE_PI_PRO_MODEL, K3_PICO_MODEL, ramboot_tool_path
 from .results import response
 from .tasks import TaskError
 from .transactions import TransactionError
@@ -54,7 +54,8 @@ def availability(profile, actor, argv):
         return '控制机缺少 K1 MUSE-Pi-Pro 内存启动组件'
     if family == 'k3' and profile.get('bootrom_identity') and not installed_for('k3'):
         return '控制机缺少 K3 临时加载器'
-    missing = [tool for tool in TOOLS if shutil.which(tool) is None]
+    path = ramboot_tool_path()
+    missing = [tool for tool in TOOLS if shutil.which(tool, path=path) is None]
     if missing:
         return '控制机缺少内存启动工具 ' + ', '.join(missing)
     return ''

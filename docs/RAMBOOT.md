@@ -63,3 +63,5 @@ losetup --list --output NAME,BACK-FILE,RO
 lsblk -o NAME,TYPE,MOUNTPOINTS
 cat /proc/mtd
 ```
+
+Linux 完整安装可以在锁定的组件清单中提供随包 LZ4 CLI。该工具只加入内存启动准备进程的辅助命令路径，来源和许可随包保存在 `ramboot-lz4` 文档目录。未提供组件时沿用发行版的 `lz4` 依赖。

@@ -102,6 +102,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
         if not desktop_runtime.is_dir():
             raise ValueError('Complete x64 installation requires the prepared desktop SDK in the frozen runtime')
         validate(desktop_runtime, 'linux-amd64')
+    lz4 = None
     if complete:
         from tools.install_components import load, default_manifest
         explicit = any(value is not None for value in (flash_executor, flash_notices, flash_loaders))
@@ -112,6 +113,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
         if components_manifest is not None or flash_executor is None:
             components = load(components_manifest or default_manifest('linux-' + architecture), 'linux-' + architecture)
             flash_executor, flash_notices, flash_loaders = (components[name] for name in ('executor', 'notices', 'loaders'))
+            lz4 = components.get('lz4')
         if not all(value is not None for value in (flash_executor, flash_notices, flash_loaders)):
             raise ValueError('complete standalone installation requires executor, notices and RAM materials')
     executor_metadata = flash_executor_metadata(flash_executor, architecture) if flash_executor is not None else None
@@ -132,6 +134,10 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(text)
             destination.chmod(mode)
+        if lz4 is not None:
+            put(lz4 / 'lz4', 'usr/lib/seriald/ramboot-tools/lz4', 0o755)
+            for name in ('copyright', 'source.json'):
+                put(lz4 / name, 'usr/share/doc/seriald/ramboot-lz4/' + name)
         build_id = collector_build_id()
         for name in ('seriald.py', 'seriald_demo.py', 'serialctl.py', 'seriald_mcp.py',
                      'requirements-mcp.txt', 'pyproject.toml', 'index.html'):
@@ -201,7 +207,11 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
         for name in ('postinst', 'prerm', 'postrm'):
             put('packaging/' + name, 'DEBIAN/' + name, 0o755)
         write('DEBIAN/conffiles', '/etc/seriald/seriald.env\n/etc/sudoers.d/seriald-rescue\n')
-        flash_dependency = ', libusb-1.0-0, udev, e2fsprogs, device-tree-compiler, initramfs-tools-core, lz4, zstd' if executor_metadata is not None else ''
+        flash_dependency = ''
+        if executor_metadata is not None:
+            flash_dependency = ', libusb-1.0-0, udev, e2fsprogs, device-tree-compiler, initramfs-tools-core, zstd'
+            if lz4 is None:
+                flash_dependency += ', lz4'
         desktop_dependency = ', libstdc++6, libgcc-s1' if desktop_runtime.is_dir() else ''
         write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s%s\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)

@@ -47,8 +47,16 @@ class PrepareError(ValueError):
     pass
 
 
-def run(*args):
-    return subprocess.run(args, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
+def ramboot_tool_path():
+    path = os.environ.get('PATH', os.defpath)
+    directory = Path(__file__).resolve().parent.parent / 'ramboot-tools'
+    if shutil.which('lz4', path=str(directory)):
+        return str(directory) + os.pathsep + path
+    return path
+
+
+def run(*args, env=None):
+    return subprocess.run(args, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env).stdout
 
 
 def prepare_k1_bianbu_rcpu(dtb, image_digest):
@@ -360,7 +368,8 @@ def prepare(image, board, ram_bytes, output, expected_sha256=None):
             raise PrepareError('root filesystem does not identify Debian or Bianbu')
         version = boot_files(root, boot, workspace)
         original = workspace / 'initrd.original'
-        initramfs_files = run('lsinitramfs', str(original)).decode(errors='replace').splitlines()
+        tool_env = dict(os.environ, PATH=ramboot_tool_path())
+        initramfs_files = run('lsinitramfs', str(original), env=tool_env).decode(errors='replace').splitlines()
         if ('init' not in initramfs_files or 'scripts/local' not in initramfs_files
                 or 'scripts/ramroot' in initramfs_files):
             raise PrepareError('expected an unmodified initramfs-tools image')
