@@ -75,7 +75,8 @@ class FlashStreamTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
         from pathlib import Path
         from unittest.mock import patch
         import os
-        manifest = Path(__file__).resolve().parents[1] / 'packaging/flash-components/common/flash-loaders/manifest.json'
+        manifest = (Path(os.environ['SERIALD_FLASH_LOADERS']) if os.environ.get('SERIALD_FLASH_LOADERS') else
+                    Path(__file__).resolve().parents[1] / 'packaging/flash-components/common/flash-loaders/manifest.json')
         with usb_fixture.automatic_flashing() as fixture, patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}):
             executor = StreamExecutor(self.tmp.name)
             executor.candidates = usb_fixture.FakeBootROMExecutor(self.tmp.name).candidates
