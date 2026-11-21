@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build the K3 FSBL staged by DeckLab in USB download mode, without a board.
 
-The FSBL is the vendor U-Boot SPL from an archived source revision plus the
-patches in packaging/flash-loaders/patches/fsbl-*.patch, if any (in name
-order; none since 1.17.41). In USB download mode the vendor SPL never uses
+The FSBL is built from an archived vendor U-Boot SPL revision. The build
+sets a local version label and builds the original source. In USB download
+mode the vendor SPL never uses
 training data saved on the board's boot storage: it trains DDR (~5.6 s) and
 leaves the result in SRAM, unless the image itself carries a result in the
 space of the training firmware of the other DDR generation (the vendor's
@@ -23,8 +23,6 @@ import subprocess
 import tarfile
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
-PATCHES = sorted((ROOT / 'packaging/flash-loaders/patches').glob('fsbl-*.patch'))
 BOOTROM_LIMIT = 475136
 
 
@@ -73,9 +71,6 @@ def main():
             subprocess.run(['git', '-C', str(args.source), 'archive', commit], stdout=output, check=True)
         with tarfile.open(Path(directory) / 'source.tar') as archive:
             archive.extractall(source)
-        for patch in PATCHES:
-            subprocess.run(['patch', '-p1', '--forward', '--batch', '-i', str(patch)], cwd=source, check=True,
-                           stdout=subprocess.DEVNULL)
         make = ['make', 'CROSS_COMPILE=' + args.cross_compile]
         with (args.output / 'build.log.txt').open('w') as log:
             subprocess.run(make + ['k3_defconfig'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
@@ -93,9 +88,8 @@ def main():
         (args.output / 'k3').mkdir()
         shutil.copyfile(fsbl, args.output / 'k3/FSBL.bin')
         shutil.copyfile(source / '.config', args.output / 'FSBL-CONFIGURATION.txt')
-    patches = [{'file': p.name, 'sha256': digest(p)} for p in PATCHES]
     (args.output / 'BUILD-INPUT.json').write_text(json.dumps({
-        'uboot_commit': commit, 'source_patches': patches, 'cross_compile': args.cross_compile,
+        'uboot_commit': commit, 'source_patches': [], 'cross_compile': args.cross_compile,
         'configuration': 'k3_defconfig', 'localversion': '-decklab-ram', 'training_slots': slots,
         'fsbl_sha256': digest(args.output / 'k3/FSBL.bin')}, indent=2) + '\n')
     print(args.output / 'k3/FSBL.bin')
