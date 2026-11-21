@@ -426,9 +426,11 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
         class MovingExecutor(FakeBootROMExecutor):
             def prepare(self, binding, on_event=None, check=lambda: None, **identity):
                 result = super().prepare(binding, on_event, check, **identity)
-                final = dict(result['final_device'], port_path=[2, 1], usb_serial='HW3MPK3321280183')
+                final = dict(result['final_device'], port_path=[2, 1])
+                final.pop('usb_serial', None)  # SuperSpeed RAM U-Boot has none
                 self.candidates[0].update(device=final)
-                return dict(result, final_device=final)
+                return dict(result, final_device=final,
+                            final_identity={'eeprom-serial': 'TEST-K3-0001', 'serialno': 'TEST-K3-0001'})
         with automatic_flashing() as fixture:
             fixture.manager.flash_executor = fixture.executor = MovingExecutor(
                 fixture.manager.artifacts.root.parent / 'flashing')

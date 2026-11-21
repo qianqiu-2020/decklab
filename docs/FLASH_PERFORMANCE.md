@@ -2,6 +2,18 @@
 
 本文给出 DeckLab 系统盘刷写（普通刷写的写盘阶段与极速刷写）的耗时公式、实测参数和选型规则。条件变化（USB 速率、介质、芯片、主机）时，代入实测值即可算出合理配置。
 
+## MCP 从 URL 写系统盘
+
+用 `probe_flash_target` 核对目标芯片和板号，用 `flash_capabilities` 查看 `stream_flash_supported`。调用 `stream_flash` 时传入本次 USB 目标及其 generation、OS 包 URL、系统盘和唯一的 request_id。K1 使用 `active`（板上 Fastboot 选定的系统盘），K3 可指定 `nvme:0` 等目标盘。用 `get_task` 跟踪原任务；返回包摘要校验结果，刷后启动需另外观察串口。普通刷机沿用 `preview_flash`、`start_flash` 和准备后的确认步骤。
+
+K1 通过原版 U-Boot 的 Fastboot 分区命令接收带绝对偏移的 sparse 分块。控制机边下载边解压，零块使用 FILL 覆写。系统包的分区表必须先于大载荷到达。两种芯片都只向选定的系统盘写入 OS 包。
+
+## K3 从 URL 刷系统盘
+
+在刷机工作区选择「极速刷写」，填入 OS 包 URL 并确认目标盘。控制机在内存中下载和解包，同一份数据直接送往板子。BootROM 启动时沿用当前 FSBL 和 DDR 训练策略，加载固件自带的原版 U-Boot（`a687790502`）。已经处于受支持的 U-Boot 时复用当前连接。USB 3 切换导致路径变化时，执行器使用上一阶段的 USB 序列号与板上 EEPROM 核对身份。
+
+原版使用已有的下载、解压和块写入命令。原版路径不调用 `unzstd` 或 `bgblk`；已加载带这些扩展的 DeckLab U-Boot 时仍可使用原有加速。写盘前会核对所选物理盘容量，按包内布局写 GPT，再读回核对分区范围。包内文件摘要在流结束时核对，断网或摘要不符可能留下部分写入。
+
 ## 写入方式
 
 板子先进入 DeckLab 临时 RAM 环境：BootROM → FSBL → OpenSBI → U-Boot（S 模式），不写板上固件。之后执行器按 1 MiB 扫描镜像：

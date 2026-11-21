@@ -58,7 +58,7 @@ class MCPFlashTests(unittest.TestCase):
                     tools = (await client.list_tools()).tools
                     names = {tool.name for tool in tools}
                     self.assertTrue({'list_flash_targets', 'probe_flash_target', 'read_device_storage',
-                        'preview_flash', 'start_flash', 'preview_flash_selection', 'confirm_flash_selection',
+                        'preview_flash', 'start_flash', 'stream_flash', 'preview_flash_selection', 'confirm_flash_selection',
                         'set_boot_priority', 'get_flash_events', 'create_flash_artifact', 'append_artifact',
                         'seal_artifact', 'get_artifact', 'delete_artifact', 'list_images',
                         'list_downloaded_images', 'download_image'}.issubset(names))

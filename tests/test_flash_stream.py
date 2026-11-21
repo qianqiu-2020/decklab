@@ -71,6 +71,25 @@ class FlashStreamTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
             self.assertEqual((code, again['task']['id']), (202, task['id']))
             self.assertEqual(len(fixture.executor.streams), 1)
 
+    def test_url_from_bootrom_stages_the_packaged_vendor_uboot(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        import os
+        manifest = Path(__file__).resolve().parents[1] / 'packaging/flash-components/common/flash-loaders/manifest.json'
+        with usb_fixture.automatic_flashing() as fixture, patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}):
+            executor = StreamExecutor(self.tmp.name)
+            executor.candidates = usb_fixture.FakeBootROMExecutor(self.tmp.name).candidates
+            fixture.manager.flash_executor = fixture.executor = executor
+            target = self.probe(fixture, self.discover(fixture)[0])['target']
+            code, result = self.request(fixture, '/api/flash-stream', dict(self.scope(target), url=self.URL,
+                system_storage='nvme:0', request_id='url-stock-bootrom'))
+            self.assertEqual(code, 202, result)
+            task = self.terminal(fixture, result['task']['id'])
+            self.assertEqual(task['state'], 'completed', task)
+            loader = executor.streams[0]['loader']
+            self.assertEqual(Path(loader['uboot']['path']).read_bytes(), (manifest.parent / 'k3/url/u-boot.itb').read_bytes())
+            self.assertEqual(Path(loader['fsbl']['path']).read_bytes(), (manifest.parent / 'k3/FSBL.bin').read_bytes())
+
     def test_first_flash_request_after_start_is_answered_not_crashed(self):
         with usb_fixture.automatic_flashing() as fixture:
             for name in ('_flash_waiters', '_flash_waiters_lock', '_flash_plans_lock', '_flash_recovery_pins'):
@@ -92,7 +111,7 @@ class FlashStreamTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
             self.assertEqual(task['state'], 'failed', task)
             self.assertEqual(task['flash']['write_result'], 'partial-or-unknown')
 
-    def test_invalid_inputs_and_agents_are_refused_before_any_write(self):
+    def test_invalid_inputs_are_refused_and_agent_uses_restricted_source(self):
         with usb_fixture.automatic_flashing() as fixture:
             target = self.target(fixture)
             for change in ({'url': 'file:///tmp/a.tar.gz'}, {'url': 'https://u:p@images.example/a.tar.gz'},
@@ -103,11 +122,13 @@ class FlashStreamTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
                     body.update(change)
                     code, result = self.request(fixture, '/api/flash-stream', body)
                     self.assertIn(code, (400, 403, 409), result)
+            self.assertEqual(fixture.executor.streams, [])
             token, _ = fixture.grants.issue('all')
             code, result = self.request(fixture, '/api/flash-stream', dict(self.scope(target), url=self.URL,
                 request_id='fast-agent'), token=token)
-            self.assertEqual(code, 403, result)
-            self.assertEqual(fixture.executor.streams, [])
+            self.assertEqual(code, 202, result)
+            self.assertEqual(self.terminal(fixture, result['task']['id'])['state'], 'completed')
+            self.assertTrue(fixture.executor.streams[0]['restrict_source'])
 
     def test_finished_fast_flash_releases_the_board_and_unconfirmed_stop_keeps_recovery(self):
         from seriald_core.board_maintenance import maintenance_for

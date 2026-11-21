@@ -495,10 +495,31 @@ class FlashRunnerTests(unittest.TestCase):
             self.assertIn('已作废', str(error.exception))
             self.assertIn('尚未写入', str(error.exception))
             discard.assert_called_once()
-            # Trained this time already: the memory itself is unreliable.
+            # The failed comparison does not identify which part of the data path failed.
             with self.assertRaises(FlashRunnerError) as error:
                 self.runner.inspect(binding)
-            self.assertIn('内存不可靠', str(error.exception))
+            self.assertIn('下载样本计算的 CRC 与控制机不一致', str(error.exception))
+
+    def test_superspeed_failure_keeps_that_port_at_high_speed(self):
+        from seriald_core import flash_loaders
+        binding = self.binding("print(json.dumps({'event':'error','code':'loader-superspeed-failed',"
+                               "'message':'RAM U-Boot did not enumerate after requesting SuperSpeed'}))")
+        self.assertEqual(flash_loaders.usb_speed(binding, self.runner.root), 'super')
+        with self.assertRaises(FlashRunnerError) as error:
+            self.runner.inspect(binding)
+        self.assertEqual(error.exception.code, 'loader-superspeed-failed')
+        self.assertIn('USB 设备上线超时', str(error.exception))
+        self.assertIn('USB 2.0', str(error.exception))
+        self.assertEqual(flash_loaders.usb_speed(binding, self.runner.root), 'high')
+
+    def test_corrupt_on_board_expansion_stops_with_an_explicit_reason(self):
+        binding = self.binding("print(json.dumps({'event':'error','code':'device-data-corrupt',"
+                               "'message':'on-board decompression of a 33554432-byte run failed'}))")
+        with self.assertRaises(FlashRunnerError) as error:
+            self.runner.inspect(binding)
+        self.assertEqual(error.exception.code, 'device-data-corrupt')
+        self.assertIn('板上解压命令失败', str(error.exception))
+        self.assertIn('此前的分段可能已写入', str(error.exception))
 
     def test_training_result_events_are_kept_and_not_forwarded(self):
         from seriald_core import flash_loaders

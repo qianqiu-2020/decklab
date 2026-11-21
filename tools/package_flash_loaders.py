@@ -20,7 +20,10 @@ def publish(source, destination):
     for family, material in document['families'].items():
         if material.get('protocol') not in ('stock', 'spacemit-ram-v1'):
             raise ValueError('unsupported RAM loader protocol')
-        for name in ('fsbl', 'uboot', 'fsbl_fallback'):
+        names = ['fsbl', 'uboot', 'fsbl_fallback']
+        if family == 'k3' and 'stream_uboot' in material:
+            names.append('stream_uboot')
+        for name in names:
             if name == 'fsbl_fallback' and name not in material:
                 continue  # optional; DeckLab K3 FSBLs since 1.17.41 train DDR themselves
             entry = material[name]

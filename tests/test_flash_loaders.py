@@ -62,9 +62,33 @@ class FlashLoaderTests(unittest.TestCase):
             self.assertEqual(materials['chip_family'], 'k3')
             self.assertEqual(Path(materials['fsbl']['path']), workspace / 'ram-loaders/factory/FSBL.bin')
             self.assertEqual(Path(materials['uboot']['path']).read_bytes(), b'RAM only uboot')
-            self.assertEqual(set(materials), {'chip_family', 'protocol', 'fsbl', 'uboot'})
+            self.assertEqual(set(materials), {'chip_family', 'protocol', 'fsbl', 'uboot', 'usb_speed'})
+            self.assertEqual(materials['usb_speed'], 'high')  # no USB port known
             publish(manifest.parent, root / 'installed')
             self.assertEqual((root / 'installed/uboot.bin').read_bytes(), b'RAM only uboot')
+
+    def test_url_stream_stages_vendor_uboot_separately_and_reuses_fsbl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.bundle(root / 'bundle')
+            board = SimpleNamespace(profile_data={'chip_family': 'k3'})
+            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}):
+                with self.assertRaisesRegex(TaskError, '原版 U-Boot'):
+                    prepare_materials(board, root / 'workspace', lambda: None, url_stream=True)
+                payload = b'vendor U-Boot'
+                (manifest.parent / 'url.itb').write_bytes(payload)
+                document = json.loads(manifest.read_text())
+                document['families']['k3']['stream_uboot'] = {
+                    'file': 'url.itb', 'sha256': hashlib.sha256(payload).hexdigest()}
+                manifest.write_text(json.dumps(document))
+                regular = prepare_materials(board, root / 'workspace', lambda: None)
+                stream = prepare_materials(board, root / 'workspace', lambda: None, url_stream=True)
+                self.assertEqual(stream['fsbl']['sha256'], regular['fsbl']['sha256'])
+                self.assertEqual(Path(stream['uboot']['path']).read_bytes(), payload)
+                self.assertEqual(Path(regular['uboot']['path']).read_bytes(), b'RAM only uboot')
+                self.assertEqual(stream['uboot']['name'], 'u-boot.itb')
+                publish(manifest.parent, root / 'installed')
+                self.assertEqual((root / 'installed/url.itb').read_bytes(), payload)
 
     def test_changed_loader_wrong_family_and_escaping_paths_are_rejected(self):
         for failure in ('checksum', 'family', 'path'):
@@ -134,7 +158,11 @@ class FlashLoaderTests(unittest.TestCase):
                 flash_loaders.record_training(board, work, {'data': self.training(), 'identity': {'eeprom-serial': 'SN1'}})
                 trained = prepare_materials(board, workspace, lambda: None, work)
                 self.assertEqual(trained['trained_for'], 'SN1')
-                self.assertEqual(set(trained), {'chip_family', 'protocol', 'fsbl', 'uboot', 'trained_for'})
+                self.assertEqual(set(trained), {'chip_family', 'protocol', 'fsbl', 'uboot', 'trained_for', 'usb_speed'})
+                self.assertEqual(trained['usb_speed'], 'super')
+                flash_loaders.record_usb_speed(board, work, 'high')
+                self.assertEqual(prepare_materials(board, workspace, lambda: None, work)['usb_speed'], 'high')
+                self.assertEqual(prepare_materials(other, workspace, lambda: None, work)['usb_speed'], 'super')
                 staged = Path(trained['fsbl']['path']).read_bytes()
                 self.assertEqual(Path(trained['fsbl']['path']).parent.parent, Path(trained['uboot']['path']).parent)
                 self.assertEqual(staged[0x2000 + 200:0x2000 + 204], b'TRND')
