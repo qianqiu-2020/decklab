@@ -71,17 +71,17 @@ K1 入口要求 Linux 控制端安装 `spacemit-k1-ramboot-v1` 组件及支持�
 
 ## 原版 U-Boot 接入
 
-基于原版 SpacemiT U-Boot，不增加私有 Fastboot 命令。原版已支持 RAM 下载运行、介质读写、EEPROM 配置、`UCmd` 及 `oem read` / `upload`。K3 内置环境只为加速大块写盘带一个 U-Boot 补丁，再加一个 FSBL 补丁（见下文）。
+沿用 SpacemiT U-Boot 的 Fastboot、`UCmd`、`oem read` 和 `upload`。K3 普通刷写、直接 URL 极速刷写和内存启动复用同一临时 U-Boot。新的临时配置继承 FSBL 记录的 USB 速度申请，延续现有 USB 2.0 和 USB 3.0 选择。
 
-`tools/build_ram_loaders.py` 从固定源码提交构建，应用 `packaging/flash-loaders/patches/0*.patch`，通过原生 Kconfig：
+`tools/build_ram_loaders.py` 从固定的 U-Boot 提交读取该仓库维护的 `decklab-k3-download.config` 和默认环境。配置保持以下行为。
 
 - 关闭 `BOARD_LATE_INIT`，避开身份配置、DDR 参数持久化和自动刷卡等板级启动动作。
 - 仅保留 `ENV_IS_NOWHERE`，避免加载旧持久环境或保存临时环境；关闭可选 EC、retimer 初始化。
-- 通过原生 `USE_DEFAULT_ENV_FILE` 加载精简默认环境，`bootcmd` 循环运行 Fastboot、`bootdelay=-2`，避免板级 `.env` 覆盖构建配置；`LOCALVERSION=-seriald-ram` 用于识别匹配的临时构建。
+- 通过原生 `USE_DEFAULT_ENV_FILE` 加载精简默认环境，`bootcmd` 循环运行 Fastboot、`bootdelay=-2`，避免板级 `.env` 覆盖构建配置。`LOCALVERSION=-seriald-ram` 用于识别匹配的临时构建。
 - 保留已有存储驱动和 UUU 命令，启用原生 NVMe、SCSI 命令。
 - 启用 `PCI_INIT_R`，PCIe 只在启动时枚举一次，否则每条 `nvme` 命令都要重新枚举（约 1.1 秒）。
 - 刷写前检查加载器是否支持原生 `unzip`。支持时，仅在传输加解压的估算耗时更短时发送 gzip。其他数据原样发送，各段使用同步写盘。
-- 构建时把供应商 OpenSBI（`fw_dynamic`）放进 U-Boot FIT，U-Boot 以 S 模式运行，空闲核经 SBI HSM 启动。
+- 已核对的 K1/K3 USB 下载入口由 FSBL 解析 FIT，按配置装载供应商 OpenSBI、U-Boot 及其设备树。随后 Linux 内核、系统设备树和 initramfs 由 U-Boot 分别接收并经 `booti` 启动。
 
 K3 FSBL 由 `tools/build_k3_fsbl.py` 从供应商 U-Boot SPL 源码原样构建（不改源码），并记录两块训练固件在镜像中的偏移。USB 下载模式下它不读板上保存的训练结果：第一次加载完整训练，执行器从 SRAM 取回结果（`ddr-training` 事件），后端按板子序列号存入刷机工作目录的 `ddr-training.json`；之后同一 USB 口的加载把结果写入 FSBL 镜像，省去约 5.6 秒，临时环境须报出同一块板的序列号（否则 `loader-training-mismatch`）。临时环境未启动（`loader-fsbl-timeout`）、内存自检失败（`device-ram-unstable`）或板子不符时作废该结果，下次重新训练。不写板子。
 
