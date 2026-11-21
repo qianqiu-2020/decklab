@@ -73,8 +73,8 @@ const server = http.createServer((req, res) => {
           modes:preparable&&!target.nor?['partitions']:['full','partitions'],
           stream_flash_supported:true,calibrate_supported:true,flash_configuration:{scope:'port',port:'1-8-2',
             board_serial:'FIXTURE-SN',measured_at:1795125430,
-            measured:{usb_bps:43357871,dlz_bps:982910182,gzip_bps:167339624,write_bps:587894365,command_s:0.000244},
-            tuning:{codec:'dlz',zstd_level:2,run_bytes:134217728,background:true,usb_bps:43357871},
+            measured:{usb_bps:43357871,gzip_bps:167339624,write_bps:587894365,command_s:0.000244},
+            tuning:{codec:'gzip',gzip_level:6,run_bytes:134217728,usb_bps:43357871},
             predicted:{data_s_per_gb:11.025,zero_s_per_gb:1.701}}}});
       }); return;
     }

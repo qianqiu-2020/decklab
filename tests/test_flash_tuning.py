@@ -12,8 +12,9 @@ from seriald_core.flash_runner import LocalFlashExecutor
 import test_flash_discovery_integration as usb_fixture
 from test_flash_stream import StreamExecutor
 
-TUNING = {'codec': 'dlz', 'zstd_level': 2, 'run_bytes': 128 << 20, 'background': True,
-          'usb_bps': 43e6, 'gzip_bps': 250e6, 'dlz_bps': 1.2e9, 'write_bps': 570e6}
+TUNING = {'codec': 'gzip', 'gzip_level': 6, 'run_bytes': 128 << 20,
+          'usb_bps': 43e6, 'gzip_bps': 250e6, 'write_bps': 570e6}
+LEGACY_TUNING = dict(TUNING, codec='dlz', zstd_level=2, background=True, dlz_bps=1.2e9)
 
 
 def binding(port=(1, 8, 2), chip='k3'):
@@ -32,16 +33,33 @@ class FlashTuningStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             self.assertIsNone(flash_tuning.lookup(root, binding()))
             with mock.patch.object(flash_tuning.time, 'time', return_value=100):
-                flash_tuning.record(root, binding((1, 8, 2)), result('A', dict(TUNING, zstd_level=1)))
+                flash_tuning.record(root, binding((1, 8, 2)), result('A', dict(TUNING, gzip_level=1)))
             with mock.patch.object(flash_tuning.time, 'time', return_value=200):
                 flash_tuning.record(root, binding((1, 8, 3)), result('B'))
             own = flash_tuning.lookup(root, binding((1, 8, 2)))
-            self.assertEqual((own['scope'], own['board_serial'], own['tuning']['zstd_level']), ('port', 'A', 1))
+            self.assertEqual((own['scope'], own['board_serial'], own['tuning']['gzip_level']), ('port', 'A', 1))
             other = flash_tuning.lookup(root, binding((3, 3)))
             self.assertEqual((other['scope'], other['board_serial']), ('chip', 'B'))
             self.assertIsNone(flash_tuning.lookup(root, binding((3, 3), chip='k1')))
             self.assertTrue(flash_tuning.forget(root, binding((1, 8, 2))))
             self.assertEqual(flash_tuning.lookup(root, binding((1, 8, 2)))['scope'], 'chip')
+
+    def test_saved_legacy_configuration_is_normalized_without_rewriting_history(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'tuning.json'
+            entry = dict(key=flash_tuning.key(binding()), chip_family='k3', measured_at=100,
+                         tuning=LEGACY_TUNING, measured={'dlz_bps': 1.2e9, 'gzip_bps': 250e6, 'background': True},
+                         predicted={'data_s_per_gb': 9.2}, codecs=[{'name': 'dlz'}, {'name': 'gzip'}])
+            original = json.dumps({'version': 1, 'entries': [entry]})
+            path.write_text(original)
+            for target, scope in ((binding(), 'port'), (binding((8, 3)), 'chip')):
+                got = flash_tuning.lookup(root, target)
+                self.assertEqual(got['scope'], scope)
+                self.assertEqual(got['tuning'], TUNING)
+                self.assertEqual(got['measured'], {'gzip_bps': 250e6})
+                self.assertEqual(got['predicted'], {})
+                self.assertEqual(got['codecs'], [])
+            self.assertEqual(path.read_text(), original)
 
     def test_invalid_executor_results_are_not_stored(self):
         with tempfile.TemporaryDirectory() as root:
@@ -62,13 +80,15 @@ class FlashTuningStoreTests(unittest.TestCase):
                 executor.execute(target, {'id': 'plan'})
                 self.assertNotIn('tuning', seen[0][1])
                 self.assertNotIn('tuning', seen[1][1])
-                flash_tuning.record(executor.root, target, result())
+                executor.stream_flash(target, {'version': 1, 'tuning': dict(LEGACY_TUNING, codec='DLZ1')})
+                flash_tuning.record(executor.root, target, result(tuning=LEGACY_TUNING))
                 executor.stream_flash(target, {'version': 1})
                 executor.execute(target, {'id': 'plan'})
                 executor.execute(binding(chip='k1'), {'id': 'plan'})
             self.assertEqual(seen[2][1]['tuning'], TUNING)
             self.assertEqual(seen[3][1]['tuning'], TUNING)
-            self.assertNotIn('tuning', seen[4][1])
+            self.assertEqual(seen[4][1]['tuning'], TUNING)
+            self.assertNotIn('tuning', seen[5][1])
 
 
 class CalibrateExecutor(StreamExecutor):

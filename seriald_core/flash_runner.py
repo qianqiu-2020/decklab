@@ -417,6 +417,12 @@ class LocalFlashExecutor:
         configuration = self.tuning(binding)
         if configuration:
             request = dict(request, tuning=configuration['tuning'])
+        elif request.get('tuning') is not None:
+            from . import flash_tuning
+            tuning = flash_tuning.normalize_tuning(request['tuning'])
+            if tuning is None:
+                raise TaskError('invalid flash configuration')
+            request = dict(request, tuning=tuning)
         result = self._run(binding, 'stream-flash', request, on_event, check, timeout=4 * 3600)
         return _with_configuration(result, configuration)
 

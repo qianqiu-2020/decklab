@@ -80,7 +80,7 @@ K1 入口要求 Linux 控制端安装 `spacemit-k1-ramboot-v1` 组件及支持�
 - 通过原生 `USE_DEFAULT_ENV_FILE` 加载精简默认环境，`bootcmd` 循环运行 Fastboot、`bootdelay=-2`，避免板级 `.env` 覆盖构建配置；`LOCALVERSION=-seriald-ram` 用于识别匹配的临时构建。
 - 保留已有存储驱动和 UUU 命令，启用原生 NVMe、SCSI 命令。
 - 启用 `PCI_INIT_R`，PCIe 只在启动时枚举一次，否则每条 `nvme` 命令都要重新枚举（约 1.1 秒）。
-- 补丁增加两条命令。`unzstd` 用全部空闲核并行展开 zstd 帧容器。`bgblk` 在另一个核上写一段 NVMe，主核同时接收下一段，写前由主核清理块缓存。其他介质仍同步写。
+- 刷写前检查加载器是否支持原生 `unzip`。支持时，仅在传输加解压的估算耗时更短时发送 gzip。其他数据原样发送，各段使用同步写盘。
 - 构建时把供应商 OpenSBI（`fw_dynamic`）放进 U-Boot FIT，U-Boot 以 S 模式运行，空闲核经 SBI HSM 启动。
 
 K3 FSBL 由 `tools/build_k3_fsbl.py` 从供应商 U-Boot SPL 源码原样构建（不改源码），并记录两块训练固件在镜像中的偏移。USB 下载模式下它不读板上保存的训练结果：第一次加载完整训练，执行器从 SRAM 取回结果（`ddr-training` 事件），后端按板子序列号存入刷机工作目录的 `ddr-training.json`；之后同一 USB 口的加载把结果写入 FSBL 镜像，省去约 5.6 秒，临时环境须报出同一块板的序列号（否则 `loader-training-mismatch`）。临时环境未启动（`loader-fsbl-timeout`）、内存自检失败（`device-ram-unstable`）或板子不符时作废该结果，下次重新训练。不写板子。

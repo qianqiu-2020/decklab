@@ -2671,15 +2671,15 @@
       var m = configuration.measured || {}, t = configuration.tuning || {}, predicted = configuration.predicted || {};
       var when = new Date((configuration.measured_at || 0) * 1000).toLocaleString();
       state.textContent = configuration.scope === 'port' ? translate('（此 USB 口已实测）') : translate('（沿用同型号其他 USB 口的实测）');
-      var codec = {dlz: translate('zstd 帧，板上多核解压'), gzip: translate('gzip，板上单核解压'), raw: translate('不压缩')}[t.codec] || t.codec;
+      var codec = {gzip: translate('gzip，板上单核解压'), raw: translate('不压缩')}[t.codec] || '—';
       [['实测时间', when + (configuration.board_serial ? ' · SN ' + configuration.board_serial : '') + ' · USB ' + (configuration.port || '')],
        ['USB 下载', rate(m.usb_bps)],
-       ['板上解压', 'zstd ' + rate(m.dlz_bps) + ' · gzip ' + rate(m.gzip_bps)],
+       ['板上解压', rate(m.gzip_bps)],
        ['写盘', m.write_bps ? rate(m.write_bps) : translate('未测（按 550 MB/s 估算）')],
        ['命令开销', m.command_s !== undefined ? (m.command_s * 1000).toFixed(1) + ' ms' : '—'],
-       ['选用配置', codec + (t.zstd_level ? ' · ' + translate('级别') + ' ' + t.zstd_level : '') + (t.gzip_level ? ' · ' + translate('级别') + ' ' + t.gzip_level : '')
-         + ' · ' + translate('每段') + ' ' + Math.round((t.run_bytes || 0) / 1048576) + ' MiB · ' + (t.background ? translate('写盘与下载重叠') : translate('同步写盘'))],
-       ['预计耗时', translate('每 GB 非零数据') + ' ' + (predicted.data_s_per_gb || 0).toFixed(1) + ' s · ' + translate('每 GB 全零') + ' ' + (predicted.zero_s_per_gb || 0).toFixed(1) + ' s']
+       ['选用配置', codec + (t.gzip_level ? ' · ' + translate('级别') + ' ' + t.gzip_level : '')
+         + ' · ' + translate('每段') + ' ' + Math.round((t.run_bytes || 0) / 1048576) + ' MiB'],
+       ['预计耗时', predicted.data_s_per_gb ? translate('每 GB 非零数据') + ' ' + predicted.data_s_per_gb.toFixed(1) + ' s · ' + translate('每 GB 全零') + ' ' + (predicted.zero_s_per_gb || 0).toFixed(1) + ' s' : '—']
       ].forEach(function (row) { text('dt', translate(row[0]), box); text('dd', row[1], box); });
     }
     var tuningRequest = null;
