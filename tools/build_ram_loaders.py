@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 
@@ -100,21 +101,13 @@ def main():
 
                 (fit / 'configs').mkdir(parents=True)
                 (fit / 'dtb').mkdir()
-                its = (source / 'board/spacemit/k3/configs/uboot_fdt.its').read_text()
-                # In USB download mode SPL otherwise jumps to U-Boot in
-                # M-mode, without SBI. As in normal boot, start OpenSBI
-                # first; U-Boot then runs in S-mode with HSM and SRST.
+                # The vendor OpenSBI starts U-Boot in S-mode.
                 shutil.copyfile(args.opensbi, fit / 'fw_dynamic.bin')
-                node = ('\t\topensbi {\n\t\t\tdescription = "OpenSBI fw_dynamic Firmware";\n'
-                        '\t\t\ttype = "firmware";\n\t\t\tos = "opensbi";\n\t\t\tarch = "riscv";\n'
-                        '\t\t\tcompression = "none";\n\t\t\tload = <0x1 0x00000000>;\n'
-                        '\t\t\tentry = <0x1 0x00000000>;\n\t\t\tdata = /incbin/("../fw_dynamic.bin");\n'
-                        '\t\t\thash-1 {\n\t\t\t\talgo = "crc32";\n\t\t\t};\n\t\t};\n\n')
-                its, count = re.subn(r'(\timages \{\n)', lambda m: m.group(1) + node, its, count=1)
-                its, confs = re.subn(r'(\t\t\tloadables = "uboot";)', '\t\t\tfirmware = "opensbi";\n\\1', its)
-                if count != 1 or confs == 0 or 'entry' not in node:
-                    raise RuntimeError('cannot add OpenSBI to the U-Boot FIT')
-                (fit / 'configs/uboot_fdt.its').write_text(its)
+                description = fit / 'configs/uboot_fdt.its'
+                subprocess.run([sys.executable, str(source / 'tools/spacemit_k3_download_fit.py'),
+                                str(source / 'board/spacemit/k3/configs/uboot_fdt.its'),
+                                str(description)], check=True)
+                its = description.read_text()
                 def lzo(incoming, outgoing):
                     with outgoing.open('wb') as output:
                         subprocess.run(['lzop', '-9', '-c', str(incoming)], stdout=output, stderr=log, check=True)
