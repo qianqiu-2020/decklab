@@ -356,15 +356,33 @@ let chrome, ws;
     row.querySelectorAll('.bc-content').forEach(cell=>cell.appendChild(document.createTextNode('x'.repeat(2000))));
     for(let n=0;n<100;n++)diff.appendChild(row.cloneNode(true));
   })()`);
+  async function compareWheelPoint(selector) {
+    const point = await evaluate(`new Promise(resolve => {
+      const results = document.querySelector('#bc-results');
+      results.scrollTop = 0;
+      // Let the browser paint the new scroll bounds before dispatching input.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const target = document.querySelector(${JSON.stringify(selector)});
+        const bounds = target.getBoundingClientRect();
+        const x = bounds.left + Math.min(10, bounds.width / 2);
+        const y = bounds.top + bounds.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        resolve({x, y, targetHit: target.contains(hit), scrollRange: results.scrollHeight - results.clientHeight});
+      }));
+    })`);
+    assert.ok(point.scrollRange > 0, 'comparison results must overflow before sending wheel input');
+    assert.ok(point.targetHit, 'wheel coordinates must hit ' + selector);
+    const {x, y} = point;
+    await rpc('Input.dispatchMouseEvent', {type:'mouseMoved', x, y});
+    return {x, y};
+  }
   for (const selector of ['.bc-content', '.bc-inline-add', '.bc-line-no', '.bc-clue-text']) {
-    await evaluate('document.querySelector("#bc-results").scrollTop=0');
-    const point=await evaluate(`(() => {const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.left+Math.min(10,r.width/2),y:r.top+r.height/2};})()`);
+    const point = await compareWheelPoint(selector);
     await rpc('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:180});
     for(let n=0;n<20 && !await evaluate('document.querySelector("#bc-results").scrollTop>0');n++)await delay(50);
     assert.ok(await evaluate('document.querySelector("#bc-results").scrollTop>0'),'vertical wheel over '+selector);
   }
-  await evaluate('document.querySelector("#bc-results").scrollTop=0');
-  const horizontalPoint=await evaluate(`(() => {const r=document.querySelector('.bc-content').getBoundingClientRect();return {x:r.left+10,y:r.top+r.height/2};})()`);
+  const horizontalPoint = await compareWheelPoint('.bc-content');
   await rpc('Input.dispatchMouseEvent',{type:'mouseWheel',...horizontalPoint,deltaX:200,deltaY:0});
   for(let n=0;n<20 && !await evaluate('document.querySelector(".bc-content").scrollLeft>0');n++)await delay(50);
   assert.ok(await evaluate('document.querySelector(".bc-content").scrollLeft>0'),'horizontal scrolling remains available');
