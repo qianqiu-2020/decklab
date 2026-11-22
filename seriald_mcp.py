@@ -409,6 +409,12 @@ class Adapter:
         return self.flash_api(target, '/api/task-start', dict(kind='flash', plan_id=plan_id,
             binding_revision=binding_revision, request_id=request_id), post=True, token=token)
 
+    def boot_ram(self, target, artifact_id, binding_revision, request_id, token=None):
+        if not target.target_id:
+            raise ClientError('RAM boot requires a detected USB target and generation')
+        return self.flash_api(target, '/api/task-start', dict(kind='ram-boot', artifact_id=artifact_id,
+            binding_revision=binding_revision, request_id=request_id), post=True, token=token)
+
     def stream_flash(self, target, url, system_storage, request_id, sha256='', reset_after=True, token=None):
         return self.flash_api(target, '/api/flash-stream', dict(url=url, system_storage=system_storage,
             request_id=request_id, sha256=sha256, reset_after=reset_after), post=True, token=token)
@@ -751,6 +757,13 @@ def create_server(settings, adapter=None):
                     ctx: Context, execution_lease: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start the exact reviewed preview plan asynchronously. Writes board storage; user must authorize its concrete scope. Reuse request_id for uncertain submissions; poll get_task and check verification, not just task creation. An awaiting-selection task still needs preview/confirm_flash_selection."""
         return call(ctx, adapter.start_flash, target=target, plan_id=plan_id,
+                    binding_revision=binding_revision, request_id=request_id, execution_lease=execution_lease)
+
+    @server.tool(annotations=write, structured_output=True)
+    def boot_ram(target: FlashTarget, artifact_id: str, binding_revision: int, request_id: str,
+                 ctx: Context, execution_lease: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Boot a prepared K1/K3 Linux image from memory on an identified USB target. Use a fresh request_id for a new boot, query the original task on timeout, and confirm Linux startup in the serial console."""
+        return call(ctx, adapter.boot_ram, target=target, artifact_id=artifact_id,
                     binding_revision=binding_revision, request_id=request_id, execution_lease=execution_lease)
 
     @server.tool(annotations=write, structured_output=True)

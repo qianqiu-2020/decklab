@@ -1,10 +1,11 @@
-"""Directory owner operations use ordinary files and isolated task registries."""
+"""Controller image imports and edits use isolated task registries."""
 import hashlib
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+import zipfile
 
 import test_flash_integration as integration
 from seriald_core.image_workspaces import ImageWorkspaces, origin_path
@@ -46,6 +47,46 @@ class WorkspaceTests(unittest.TestCase):
             token,_=f.grants.issue('all')
             code,denied=helper.request(f,'/api/image-workspace',{'action':'directories','directory':root,'actor':'web'},token=token)
             self.assertEqual(code,403,denied)
+
+    def test_browses_and_imports_controller_archive_without_changing_source(self):
+        with integration.protected_flashing() as f, tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            directory = self.directory(root)
+            archive = root / 'system.ZIP'
+            with zipfile.ZipFile(archive, 'w') as package:
+                for path in directory.iterdir():
+                    package.write(path, arcname=path.name)
+            content = archive.read_bytes()
+            (root / 'raw.img').write_bytes(b'raw')
+            helper = integration.FlashHTTPIntegrationTests()
+            code, listed = helper.request(f, '/api/image-workspace', {'action':'directories', 'directory':str(root)})
+            self.assertEqual(code, 200, listed)
+            self.assertEqual(listed['archives'], [{'name':archive.name, 'path':str(archive)}])
+            self.assertEqual(listed['directories'], [{'name':directory.name, 'path':str(directory)}])
+
+            body = {'action':'import', 'path':str(archive), 'request_id':'controller-import-test-001'}
+            token, _ = f.grants.issue('all')
+            code, denied = helper.request(f, '/api/image-workspace', dict(body, actor='web'), token=token)
+            self.assertEqual(code, 403, denied)
+            service = ImageWorkspaces(f.manager)
+            self.assertEqual(service.request(dict(body, action='import-archive', path=str(directory))).status, 400)
+            self.assertEqual(service.request(dict(body, path=str(root / 'raw.img'))).status, 400)
+            code, started = helper.request(f, '/api/image-workspace', body)
+            self.assertEqual(code, 202, started)
+            final = helper.terminal(f, started['task']['id'])
+            self.assertEqual(final['state'], 'completed', final)
+            artifact = final['result']['artifact']
+            self.assertEqual(artifact['sha256'], hashlib.sha256(content).hexdigest())
+            self.assertEqual(artifact['name'], archive.name)
+            with f.manager.artifacts.open(artifact['id']) as source:
+                self.assertEqual(source.read(), content)
+            self.assertEqual(archive.read_bytes(), content)
+
+            archive.unlink()
+            code, replay = helper.request(f, '/api/image-workspace', body)
+            self.assertEqual(code, 202, replay)
+            self.assertEqual(replay['task']['id'], final['id'])
+            self.assertEqual(service.request(dict(body, path=str(root / 'other.zip'))).status, 409)
 
     def test_save_creates_new_sealed_revision_and_updates_checksum_manifest(self):
         with integration.protected_flashing() as f,tempfile.TemporaryDirectory() as root:

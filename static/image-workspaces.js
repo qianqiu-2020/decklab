@@ -2,7 +2,8 @@
 (function(global){
   'use strict';
   function create(options){
-    var $=options.byId,client=global.SerialdTasks.createClient(options.fetch),artifact=null,choose=null,member='',revision='',generation=0,busy=false,activeTask=null,pendingEdit=null;
+    var $=options.byId,client=global.SerialdTasks.createClient(options.fetch),artifact=null,choose=null,member='',revision='',generation=0,busy=false,activeTask=null,pendingEdit=null,pendingImport=null,archiveOnly=false;
+    var phases={'copying-image-directory':'创建可编辑副本','importing-image':'正在导入镜像包'};
     function status(value){$('iw-status').textContent=value;}
     function controls(){['iw-import','iw-refresh','iw-save','iw-replace','iw-fork','iw-browse'].forEach(function(id){$(id).disabled=busy;});$('iw-directory').disabled=busy;['iw-files','iw-directories'].forEach(function(id){Array.from($(id).children).forEach(function(node){node.disabled=busy;});});}
     function payload(action){return {action:action,id:artifact&&artifact.id,path:member,revision:revision};}
@@ -11,8 +12,12 @@
       try{
         var result=await client.request('/api/image-workspace',{action:'directories',directory:value});
         if(seq!==generation||!$('image-workspace-dialog').open||$('iw-directory').value.trim()!==value)return;
-        $('iw-directory').value=result.directory;$('iw-directories').textContent='';
+        $('iw-directory').value=result.directory;$('iw-directories').textContent='';status('');
         [{name:'..',path:result.parent}].concat(result.directories||[]).forEach(function(item){var button=document.createElement('button');button.type='button';button.textContent=item.name+'/';button.dataset.i18nIgnore='';button.addEventListener('click',function(){$('iw-directory').value=item.path;browse();});$('iw-directories').appendChild(button);});
+        if(!artifact)(result.archives||[]).forEach(function(item){
+          var button=document.createElement('button');button.type='button';button.textContent=item.name;button.dataset.i18nIgnore='';
+          button.addEventListener('click',function(){$('iw-directory').value=item.path;status('');});$('iw-directories').appendChild(button);
+        });
       }catch(error){if(seq===generation)status(error.message);}
     }
     async function load(){
@@ -36,9 +41,9 @@
       try{var result=await client.request('/api/image-workspace',payload('read'));if(seq===generation&&selected===member)$('iw-text').value=result.text;}
       catch(error){status(error.message);}
     }
-    async function use(result,keepOpen){
-      if(result.task){status('正在准备修改后的目录…');activeTask=result.task;$('iw-cancel').hidden=false;try{result=await client.watch(result.task,{key:''},function(task){activeTask=task;var p=task.progress||{};status((p.phase==='copying-image-directory'?'创建可编辑副本':p.phase||'正在准备镜像目录…')+(p.total?' · '+options.formatBytes(p.done||0)+' / '+options.formatBytes(p.total):''));});}finally{activeTask=null;$('iw-cancel').hidden=true;}}
-      if(!result.artifact)throw new Error('镜像目录尚未生成');
+    async function use(result,keepOpen,waiting){
+      if(result.task){status(waiting||'正在准备镜像目录…');activeTask=result.task;$('iw-cancel').hidden=false;try{result=await client.watch(result.task,{key:''},function(task){activeTask=task;var p=task.progress||{};status((phases[p.phase]||p.phase||waiting||'正在准备镜像目录…')+(p.total?' · '+options.formatBytes(p.done||0)+' / '+options.formatBytes(p.total):''));});}finally{activeTask=null;$('iw-cancel').hidden=true;}}
+      if(!result.artifact)throw new Error('镜像尚未准备好');
       artifact=Object.assign({},result.artifact,{preparation_task:result.preparation_task});
       if(choose)choose(artifact);if(keepOpen)await load();else $('image-workspace-dialog').close();
     }
@@ -56,7 +61,17 @@
     $('iw-browse').addEventListener('click',browse);
     $('iw-copy').addEventListener('click',function(){options.copyText($('iw-directory').value);});
     $('iw-refresh').addEventListener('click',load);
-    $('iw-import').addEventListener('click',async function(){if(busy)return;busy=true;controls();try{await use(await client.request('/api/image-workspace',{action:'import',directory:$('iw-directory').value.trim()}));}catch(error){status(error.message);}finally{busy=false;controls();}});
+    $('iw-import').addEventListener('click',async function(){
+      if(busy)return;
+      var data={action:archiveOnly?'import-archive':'import',path:$('iw-directory').value.trim()};
+      var signature=JSON.stringify(data);
+      if(!pendingImport||pendingImport.signature!==signature)pendingImport={signature:signature,id:'image-import-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)};
+      data.request_id=pendingImport.id;
+      busy=true;controls();status('正在导入镜像…');
+      try{await use(await client.request('/api/image-workspace',data),false,'正在导入镜像…');pendingImport=null;}
+      catch(error){if(error.permanent||error.result)pendingImport=null;status(error.message);}
+      finally{busy=false;controls();}
+    });
     $('iw-fork').addEventListener('click',async function(){if(busy||!artifact)return;busy=true;controls();try{await use(await client.request('/api/image-workspace',{action:'fork',id:artifact.id}),true);}catch(error){status(error.message);}finally{busy=false;controls();}});
     $('image-workspace-dialog').addEventListener('cancel',function(event){if(busy)event.preventDefault();else ++generation;});
     $('iw-save').addEventListener('click',function(){save('save');});
@@ -71,7 +86,16 @@
         await client.request('/api/artifact-seal',{id:staged.id});busy=false;await save('replace',staged.id);
       }catch(error){status(error.message);}finally{busy=false;$('iw-upload').value='';controls();}
     });
-    return {open:function(selected,onChoose){if(busy)return;artifact=selected;choose=onChoose;++generation;member='';$('iw-files').textContent='';$('iw-directories').textContent='';$('iw-editor').hidden=true;$('iw-directory').value='';status('');$('image-workspace-dialog').showModal();if(artifact)load();}};
+    return {open:function(selected,onChoose,settings){
+      if(busy)return;
+      artifact=selected;choose=onChoose;archiveOnly=!!(settings&&settings.archiveOnly);++generation;member='';
+      $('iw-title').textContent=artifact?'镜像工作目录':'从控制机导入镜像';
+      $('iw-directory').placeholder=archiveOnly?'镜像包的绝对路径':'镜像包或解压目录的绝对路径';
+      $('iw-refresh').hidden=$('iw-fork').hidden=!artifact;
+      $('iw-files').textContent='';$('iw-directories').textContent='';$('iw-editor').hidden=true;
+      $('iw-directory').value='';status('');$('image-workspace-dialog').showModal();
+      if(artifact)load();
+    }};
   }
   global.SerialdImageWorkspaces={create:create};
 })(window);

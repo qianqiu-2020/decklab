@@ -148,6 +148,17 @@ class FlashCalibrateHTTPTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
                 self.assertEqual(code, 400, extra)
             self.assertEqual(fixture.executor.calibrations, [])
 
+    def test_measurement_defaults_to_usb_and_ram(self):
+        with usb_fixture.automatic_flashing() as fixture:
+            fixture.manager.flash_executor = fixture.executor = CalibrateExecutor(self.tmp.name)
+            target = self.probe(fixture, self.discover(fixture)[0])['target']
+            body = dict(self.scope(target), request_id='calibrate-usb-only')
+            code, started = self.request(fixture, '/api/flash-calibrate', body)
+            self.assertEqual(code, 202, started)
+            self.assertEqual(self.terminal(fixture, started['task']['id'])['state'], 'completed')
+            request, = fixture.executor.calibrations
+            self.assertEqual((request['system_storage'], request['measure_write']), ('auto', False))
+
 
 # The base class's own tests are not repeated here.
 for name in list(vars(usb_fixture.FlashDiscoveryHTTPIntegrationTests)):

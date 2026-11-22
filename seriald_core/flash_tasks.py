@@ -884,8 +884,8 @@ class FlashActions:
     def calibrate(self, payload, device, actor='web'):
         """Measure a K3 board connection and keep its flashing configuration.
 
-        Only RAM and an unchanged rewrite of one disk range are touched; the
-        board's storage content is the same afterwards.
+        Measure USB and RAM first. A write test requires an explicit opt-in
+        and rewrites a range with the bytes read from that same range.
         """
         try:
             if set(payload) - {'key', 'serial', 'actor', 'client_id', 'request_id', 'target_id', 'target_generation',
@@ -897,7 +897,7 @@ class FlashActions:
             storage = payload.get('system_storage') or 'auto'
             if storage != 'auto' and not re.fullmatch(r'(nvme|scsi|mmc|usb):[0-3]', storage):
                 raise TaskError('invalid system disk')
-            measure_write = payload.get('measure_write', True)
+            measure_write = payload.get('measure_write', False)
             if type(measure_write) is not bool:
                 raise TaskError('measure_write must be boolean')
             client = payload.get('client_id', '')

@@ -32,7 +32,7 @@ class DesktopBook:
         for serial, config in self.boards.items():
             if not isinstance(serial, str) or not serial or len(serial) > 100 or not isinstance(config, dict):
                 raise ValueError('invalid desktop board')
-            if set(config) - {'provider', 'argv', 'allow_agent', 'display', 'display_kind', 'scale', 'reservation', 'secret_url', 'width', 'height', 'text_input', 'engine', 'certificate_sha256'}:
+            if set(config) - {'provider', 'argv', 'allow_agent', 'display', 'display_kind', 'scale', 'reservation', 'secret_url', 'width', 'height', 'text_input', 'engine', 'certificate_sha256', 'certificate_policy'}:
                 raise ValueError('unknown desktop setting')
             if config.get('provider') not in ('helper', 'vnc', 'rdp'):
                 raise ValueError('unsupported desktop provider')
@@ -42,6 +42,9 @@ class DesktopBook:
                     or not isinstance(config['certificate_sha256'], str)
                     or not re.fullmatch(r'[0-9a-fA-F]{64}', config['certificate_sha256'])):
                 raise ValueError('FreeRDP certificate_sha256 requires a complete DER SHA256 fingerprint')
+            if 'certificate_policy' in config and (config.get('engine') != 'freerdp'
+                    or config['certificate_policy'] != 'accept' or 'certificate_sha256' in config):
+                raise ValueError('accepting new certificates requires FreeRDP and no fixed fingerprint')
             if 'text_input' in config and (config['provider'] != 'rdp' or config['text_input'] not in ('unicode', 'clipboard')):
                 raise ValueError('RDP text_input must be unicode or clipboard')
             if config.get('display_kind') not in ('physical', 'virtual', 'unknown'):

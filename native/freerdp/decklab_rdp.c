@@ -71,6 +71,7 @@ struct dl_rdp {
     uint64_t generation;
     char* hostname;
     char* pin;
+    BOOL accept_certificate;
     uint32_t port;
     dl_rdp_frame_cb frame;
     dl_rdp_closed_cb closed;
@@ -290,7 +291,9 @@ static int dl_verify(freerdp* instance, const BYTE* data, size_t length,
     if (!certificate) goto done;
     /* FreeRDP checks its authenticated RedirectionAcceptedCert before invoking
      * this callback. A redirect flag alone never grants certificate trust. */
-    if (session->pin && *session->pin) {
+    if (session->accept_certificate) {
+        if (!_stricmp(hostname, session->hostname) && port == session->port) accepted = 2;
+    } else if (session->pin && *session->pin) {
         if (_stricmp(hostname, session->hostname) || port != session->port) goto done;
         fingerprint = freerdp_certificate_get_fingerprint_by_hash_ex(certificate, "sha256", FALSE);
         if (fingerprint && !_stricmp(fingerprint, session->pin)) accepted = 2;
@@ -300,7 +303,8 @@ static int dl_verify(freerdp* instance, const BYTE* data, size_t length,
 done:
     if (!accepted) {
         EnterCriticalSection(&session->lock);
-        session->certificate_error = !certificate ? 3 : session->pin && *session->pin ? 2 : 1;
+        session->certificate_error = !certificate ? 3 : session->accept_certificate ? 4 :
+            session->pin && *session->pin ? 2 : 1;
         LeaveCriticalSection(&session->lock);
     }
     free(fingerprint);
@@ -803,7 +807,9 @@ dl_rdp* dl_rdp_new(const dl_rdp_options* options, dl_rdp_frame_cb frame,
         !options->port || options->port > 65535 || !options->width || !options->height ||
         options->width > 8192 || options->height > 8192 ||
         (uint64_t)options->width * options->height > DL_MAX_PIXELS) return NULL;
-    if (options->certificate_sha256 && *options->certificate_sha256) {
+    BOOL accept_certificate = options->certificate_sha256 &&
+        !strcmp(options->certificate_sha256, "accept-current");
+    if (!accept_certificate && options->certificate_sha256 && *options->certificate_sha256) {
         if (strlen(options->certificate_sha256) != 64) return NULL;
         for (const char* p = options->certificate_sha256; *p; p++)
             if (!isxdigit((unsigned char)*p)) return NULL;
@@ -815,7 +821,8 @@ dl_rdp* dl_rdp_new(const dl_rdp_options* options, dl_rdp_frame_cb frame,
     session->ready = CreateEvent(NULL, TRUE, FALSE, NULL);
     session->queued = CreateEvent(NULL, TRUE, FALSE, NULL);
     session->hostname = _strdup(options->hostname);
-    session->pin = _strdup(options->certificate_sha256 ? options->certificate_sha256 : "");
+    session->accept_certificate = accept_certificate;
+    session->pin = _strdup(!accept_certificate && options->certificate_sha256 ? options->certificate_sha256 : "");
     session->port = options->port;
     session->frame = frame; session->closed = closed; session->user = user;
     if (!session->stop || !session->ready || !session->queued || !session->hostname || !session->pin) goto fail;
@@ -889,6 +896,7 @@ uint32_t dl_rdp_error(dl_rdp* session, char* reason, uint32_t capacity)
     const char* name = freerdp_get_last_error_name(code);
     const char* description = freerdp_get_last_error_string(code);
     (void)snprintf(reason, capacity, "%s%s: %s",
+        certificate == 4 ? "certificate: endpoint mismatch; " :
         certificate == 3 ? "certificate: server certificate could not be parsed; " :
         certificate == 2 ? "certificate: pinned SHA-256 or endpoint mismatch; " :
         certificate == 1 ? "certificate: system trust or hostname verification rejected; " : "",

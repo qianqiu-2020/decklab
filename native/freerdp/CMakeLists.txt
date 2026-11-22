@@ -74,5 +74,6 @@ if(DECKLAB_RDP_BUILD_TESTS)
   enable_testing()
   add_test(NAME decklab-freerdp-colors COMMAND decklab-freerdp-color-test
     "${CMAKE_CURRENT_BINARY_DIR}/gdi-colors.raw")
-  add_test(NAME decklab-freerdp-runtime COMMAND decklab-freerdp-runtime-test)
+  add_test(NAME decklab-freerdp-runtime COMMAND decklab-freerdp-runtime-test
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/backend-tls/certificate.pem")
 endif()

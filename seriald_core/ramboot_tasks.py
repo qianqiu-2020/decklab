@@ -30,14 +30,14 @@ def executor_support(argv, identity):
         result = subprocess.run([*argv, '--capabilities'], stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3, check=True)
         capabilities = json.loads(result.stdout)
-        return frozenset(key for key in ('ram_boot', 'ram_boot_k1') if capabilities.get(key) is True)
+        return frozenset(key for key in ('ram_boot', 'ram_boot_k1', 'ram_boot_k3_stock') if capabilities.get(key) is True)
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
         return frozenset()
 
 
 def availability(profile, actor, argv):
     family = profile.get('chip_family')
-    if actor != 'web' or not sys.platform.startswith('linux') or family not in ('k1', 'k3'):
+    if not sys.platform.startswith('linux') or family not in ('k1', 'k3'):
         return None
     if not profile.get('bootrom_identity') and (family == 'k1' or profile.get('ram_loader_protocol') != 'spacemit-ram-v1'):
         return None
@@ -46,10 +46,12 @@ def availability(profile, actor, argv):
         identity = (binary.st_dev, binary.st_ino, binary.st_size, binary.st_mtime_ns)
     except (IndexError, OSError):
         return '控制机缺少内存启动执行器'
+    from .flash_loaders import installed_for, k1_ram_boot_installed, ram_boot_installed
     capability = 'ram_boot_k1' if family == 'k1' else 'ram_boot'
+    if family == 'k3' and profile.get('bootrom_identity') and ram_boot_installed('k3'):
+        capability = 'ram_boot_k3_stock'
     if capability not in executor_support(tuple(argv), identity):
         return '控制机需要支持内存启动的刷机执行器'
-    from .flash_loaders import installed_for, k1_ram_boot_installed
     if family == 'k1' and not k1_ram_boot_installed():
         return '控制机缺少 K1 MUSE-Pi-Pro 内存启动组件'
     if family == 'k3' and profile.get('bootrom_identity') and not installed_for('k3'):
@@ -93,8 +95,6 @@ def _prepare(args, context):
 def start(actions, payload, actor):
     manager = actions.manager
     try:
-        if actor != 'web':
-            raise TaskError('只有网页所有者可以启动内存镜像', 403)
         if set(payload) - {'kind', 'target_id', 'target_generation', 'binding_revision', 'serial',
                            'artifact_id', 'client_id', 'request_id', 'actor'}:
             raise TaskError('invalid RAM boot request')
@@ -111,6 +111,8 @@ def start(actions, payload, actor):
                 raise TaskError('内存启动需要检测到的 USB 下载目标', 409)
             device = actions._device(None, payload, actor)
             binding, executor = actions._target(device, actor, payload)
+            if actor != 'web' and not device.serial and not binding.profile_data.get('bootrom_identity'):
+                raise TaskError('MCP 内存启动需要已核对身份的设备', 403)
             reason = availability(binding.profile_data, actor, binding.argv)
             if reason is None:
                 raise TaskError('此平台或加载器不支持内存启动', 409)
@@ -121,7 +123,7 @@ def start(actions, payload, actor):
             client = payload.get('client_id', '')
             if not isinstance(client, str) or client and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client):
                 raise TaskError('invalid flash client')
-            row = manager.artifacts.get(payload.get('artifact_id'), actor)
+            row = manager.artifacts.get(payload.get('artifact_id'), actor, None if actor == 'web' else device.serial)
             preparing = (row['state'] == 'claimed' and row['task_id']
                          and manager.tasks.store.get(row['task_id'])['kind'] == 'image-prepare')
             if row['direction'] != 'upload' or not (row['state'] == 'ready' or preparing):
@@ -130,7 +132,7 @@ def start(actions, payload, actor):
             maintenance = maintenance_for(manager)
 
             def run(context):
-                return _run(actions, executor, binding, device.serial, row, context, attempt_id, maintenance)
+                return _run(actions, executor, binding, device.serial, row, context, attempt_id, maintenance, actor)
 
             task = manager.tasks.start_board('ram-boot', actor, client, device.serial, run,
                 request_id=request_id, input_digest=input_digest, maintenance=maintenance,
@@ -144,7 +146,7 @@ def start(actions, payload, actor):
         return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
 
 
-def _run(actions, executor, binding, serial, row, context, attempt_id, maintenance):
+def _run(actions, executor, binding, serial, row, context, attempt_id, maintenance, actor='web'):
     manager = actions.manager
     discovery = _discovery(manager)
     k1 = binding.profile_data.get('chip_family') == 'k1'
@@ -157,7 +159,7 @@ def _run(actions, executor, binding, serial, row, context, attempt_id, maintenan
         context.check()
         if serial:
             from .board_ownership import ownership_for
-            ownership_for(manager).check(serial, 'web')
+            ownership_for(manager).check(serial, actor)
             if manager.store.has_conflict(serial):
                 raise TaskError('RAM boot board identity is in conflict', 409)
 
@@ -173,12 +175,13 @@ def _run(actions, executor, binding, serial, row, context, attempt_id, maintenan
             actions.store.append_event(context.id, value)
             context.progress(value.get('done', 0), value.get('total', 0), phase)
 
+    artifact_serial = None if actor == 'web' else serial
     try:
         check_loader()
         with executor.image_guard(row, check_loader):
-            manager.artifacts.claim(row['id'], context.id, 'web')
+            manager.artifacts.claim(row['id'], context.id, actor, artifact_serial)
             claimed = True
-        with manager.artifacts.open(row['id'], 'web', task_id=context.id):
+        with manager.artifacts.open(row['id'], actor, artifact_serial, task_id=context.id):
             check_loader()
             if binding.profile_data.get('bootrom_identity'):
                 context.progress(0, 0, 'preparing-loader')

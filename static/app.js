@@ -106,7 +106,7 @@
   var flashing = window.SerialdFlashing && window.SerialdFlashing.create({
     byId: $, fetch: fetch, formatBytes: fmt, copyText: copyText,
     openImageStore: function (choose, picker) { if (imageStore) imageStore.open(choose, picker); },
-    openImageWorkspace: function (artifact, choose) { if (imageWorkspaces) imageWorkspaces.open(artifact, choose); }
+    openImageWorkspace: function (artifact, choose, settings) { if (imageWorkspaces) imageWorkspaces.open(artifact, choose, settings); }
   });
   window.addEventListener('decklab-wiring-saved', function () { if (boardControl) boardControl.invalidate(); });
   var boardControl = window.SerialdBoardControl && window.SerialdBoardControl.create({
@@ -828,12 +828,18 @@
     var selected = deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0];
     if (selected) SerialdFileTransfer.open(selected, deviceDirectory.items);
   });
-  $('b-flash').addEventListener('click', function () {
-    var selected = deviceDirectory.find(deviceDirectory.selected);
-    if (selected && flashing) flashing.open(selected);
-  });
-  $('b-flash-discover').addEventListener('click', function () {
-    if (flashing) flashing.open();
+  [
+    ['b-flash', 'b-flash-discover', 'normal'],
+    ['b-device-fast-flash', 'b-fast-flash', 'fast'],
+    ['b-device-ram-boot', 'b-ram-boot', 'ram']
+  ].forEach(function ([deviceButton, homeButton, operation]) {
+    $(deviceButton).addEventListener('click', function () {
+      var selected = deviceDirectory.find(deviceDirectory.selected);
+      if (selected && flashing) flashing.open(selected, null, false, operation);
+    });
+    $(homeButton).addEventListener('click', function () {
+      if (flashing) flashing.open(null, null, true, operation);
+    });
   });
   $('b-boot-compare').addEventListener('click', function () {
     if (!deviceDirectory.selected) return;

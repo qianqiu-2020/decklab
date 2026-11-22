@@ -1,4 +1,4 @@
-"""Human-owned directory inputs and editable copies; reuse sealed artifacts/tasks."""
+"""Controller-side image inputs and editable copies for the web owner."""
 import hashlib
 import json
 import os
@@ -16,6 +16,7 @@ from .results import response
 from .tasks import TaskError
 
 MAX_MEMBERS = 32768
+IMAGE_ARCHIVES = ('.tar.gz', '.tgz', '.tar', '.zip')
 
 
 def origin_path(artifact_path):
@@ -131,6 +132,62 @@ class ImageWorkspaces:
                 self.manager.artifacts.remove(artifact_id)
             raise
 
+    def import_archive(self, path, payload):
+        from .image_preparation import for_manager
+        request_id = payload.get('request_id')
+        digest = self.manager.tasks.store.request_digest({'operation':'controller-image-import', 'path':str(path)})
+        if request_id is not None:
+            previous = self.manager.tasks.store.find_request('web', request_id, digest)
+            if previous:
+                return self.manager.tasks.store.get(previous)
+        if not path.name.lower().endswith(IMAGE_ARCHIVES) or path.resolve(strict=True) != path:
+            raise TaskError('请选择控制机上的普通镜像包（tar.gz、tgz、tar 或 zip）', 400)
+        initial = path.lstat()
+        if not stat.S_ISREG(initial.st_mode) or not initial.st_size:
+            raise TaskError('镜像包为空或不是普通文件', 400)
+        artifacts = self.manager.artifacts
+        client_id = payload.get('client_id', '')
+
+        def identity(info):
+            return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+        def run(context):
+            artifact_id = None
+            try:
+                context.check()
+                if path.resolve(strict=True) != path:
+                    raise TaskError('控制机镜像包已变化', 409)
+                with open_archive(path) as source:
+                    if identity(os.fstat(source.fileno())) != identity(initial):
+                        raise TaskError('控制机镜像包已变化', 409)
+                    total = initial.st_size
+                    artifact = artifacts.create('upload', path.name, total, 'web', '', context.id)
+                    artifact_id = artifact['id']
+                    artifacts._update(artifact_id, state='writing')
+                    offset = 0
+                    context.progress(0, total, 'importing-image')
+                    while offset < total:
+                        context.check()
+                        chunk = source.read(min(1024 ** 2, total - offset))
+                        if not chunk:
+                            raise TaskError('控制机镜像包已变化', 409)
+                        artifacts.append(artifact_id, offset, chunk, task_id=context.id)
+                        offset += len(chunk)
+                        context.progress(offset, total, 'importing-image')
+                    if identity(os.fstat(source.fileno())) != identity(initial):
+                        raise TaskError('控制机镜像包已变化', 409)
+                artifact = artifacts.finish_import(artifact_id, context.id, check=context.check)
+            except BaseException:
+                if artifact_id is not None:
+                    artifacts.fail(artifact_id, context.id)
+                raise
+            prepared = for_manager(self.manager).after_upload(artifact, 'web', client_id)
+            return {'artifact': artifact, 'preparation_task': prepared}
+
+        return self.manager.tasks.start('image-prepare', 'web', client_id,
+            [{'serial':'', 'connection_id':'image-import'}], run,
+            request_id=request_id, input_digest=digest)
+
     def locate(self, artifact_id):
         from .flash_tasks import _services
         row = self.manager.artifacts.get(artifact_id, 'web')
@@ -187,15 +244,27 @@ class ImageWorkspaces:
                 if not root.is_absolute() or root.resolve(strict=True) != root or not root.is_dir():
                     raise TaskError('请选择可访问的控制机绝对目录', 400)
                 directories = []
+                archives = []
                 for child in sorted(root.iterdir(), key=lambda item:item.name.casefold()):
-                    if child.is_dir() and not child.is_symlink():
+                    if child.is_symlink():
+                        continue
+                    if child.is_dir():
                         directories.append({'name':child.name, 'path':str(child)})
-                        if len(directories) >= 1000: break
-                return response(200, {'ok':True,'directory':str(root),'parent':str(root.parent),'directories':directories})
+                    elif child.name.lower().endswith(IMAGE_ARCHIVES) and child.is_file():
+                        archives.append({'name':child.name, 'path':str(child)})
+                    if len(directories) + len(archives) >= 1000:
+                        break
+                return response(200, {'ok':True,'directory':str(root),'parent':str(root.parent),
+                                      'directories':directories,'archives':archives})
             if action == 'stage':
                 return response(200, {'ok':True, 'artifact':self.manager.artifacts.create('upload', payload.get('name'), payload.get('size'), 'web', '')})
-            if action == 'import':
-                return response(202, dict(ok=True, **self.register(payload.get('directory'), payload.get('name'))))
+            if action in ('import', 'import-archive'):
+                path = Path(payload.get('path') or payload.get('directory') or '')
+                if not path.is_absolute():
+                    raise TaskError('请输入控制机上的绝对路径', 400)
+                if action == 'import' and path.is_dir():
+                    return response(202, dict(ok=True, **self.register(str(path), payload.get('name'))))
+                return response(202, {'ok':True, 'task':self.import_archive(path, payload)})
             row, executor, root, files, editable = self.locate(payload.get('id'))
             revision = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
             if action == 'list':

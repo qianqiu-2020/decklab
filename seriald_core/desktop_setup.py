@@ -86,8 +86,7 @@ def probe(host, port, provider, timeout=1):
             return None
         if len(body) < 15 or body[-8] != 2 or body[-6:-4] != b'\x08\x00' or struct.unpack('<I', body[-4:])[0] not in (1, 2, 8):
             return dict(result, error='RDP 服务未提供可用的 TLS 协商，不能建立证书校验连接')
-        # This unauthenticated observation is NOT trust. The owner must explicitly
-        # confirm a pin; no password is sent on this discovery connection.
+        # Observation only; no password or certificate policy change during discovery.
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
@@ -112,6 +111,8 @@ def connection_fields(config):
                 'port': parts.port or (3389 if config['provider'] == 'rdp' else 5900),
                 'username': '' if vnc else unquote(parts.username or ''), 'password_saved': bool(secret),
                 'certificate_sha256': config.get('certificate_sha256', ''),
+                'certificate_policy': config.get('certificate_policy',
+                    'pin' if config.get('certificate_sha256') else 'system') if not vnc else '',
                 'engine': config.get('engine', 'aardwolf') if config['provider'] == 'rdp' else '',
                 'allow_agent': config.get('allow_agent', False)}
     except (KeyError, ValueError):
@@ -178,7 +179,7 @@ class DesktopSetup:
         self.identified(device)
         serial = device.serial
         allowed = {'key', 'serial', 'actor', 'client_id', 'revision', 'provider', 'host', 'port',
-                   'username', 'password', 'reuse_password', 'certificate_sha256', 'trust_certificate',
+                   'username', 'password', 'reuse_password', 'certificate_sha256', 'trust_certificate', 'certificate_policy',
                    'allow_agent', 'candidate_id'}
         if set(payload) - allowed:
             raise TaskError('未知的桌面连接设置')
@@ -198,6 +199,10 @@ class DesktopSetup:
         pin = payload.get('certificate_sha256', '')
         if not isinstance(pin, str) or pin and (provider != 'rdp' or not re.fullmatch(r'[0-9a-fA-F]{64}', pin)):
             raise TaskError('RDP 证书指纹必须是完整的 SHA256')
+        policy = payload.get('certificate_policy', 'pin' if pin else 'accept' if provider == 'rdp' else '')
+        if (provider == 'rdp' and (policy not in ('accept', 'system', 'pin') or bool(pin) != (policy == 'pin'))
+                or provider == 'vnc' and policy != ''):
+            raise TaskError('RDP 证书校验选项无效')
         candidate_id = payload.get('candidate_id')
         if candidate_id:
             cached = self.cache.get(serial)
@@ -205,8 +210,9 @@ class DesktopSetup:
                     or time.monotonic() - cached['created'] > 180):
                 raise TaskError('探测结果已过期或设备连接已改变，请重新检测', 409)
             candidate = next((v for v in cached['public']['candidates'] if v['id'] == candidate_id), None)
-            if (not candidate or candidate.get('error') or (provider, host, port, pin.lower()) != (
-                    candidate['provider'], candidate['host'], candidate['port'], candidate.get('certificate_sha256', '').lower())):
+            if (not candidate or candidate.get('error') or (provider, host, port) != (
+                    candidate['provider'], candidate['host'], candidate['port'])
+                    or policy == 'pin' and pin.lower() != candidate.get('certificate_sha256', '').lower()):
                 raise TaskError('所选服务与探测结果不符，请重新检测', 409)
         desktop = self.desktop
         with desktop.lock:
@@ -243,11 +249,12 @@ class DesktopSetup:
                 if key in old:
                     config[key] = old[key]
             if provider == 'rdp':
-                engine = old.get('engine', 'aardwolf') if endpoint_same and not pin else 'freerdp'
                 mode = old.get('text_input', 'unicode') if old.get('provider') == 'rdp' else 'clipboard'
-                config.update(engine=engine, text_input=mode)
+                config.update(engine='freerdp', text_input=mode)
                 if pin:
                     config['certificate_sha256'] = pin.lower()
+                elif policy == 'accept':
+                    config['certificate_policy'] = policy
             from .desktop import DesktopBook
             active = DesktopBook({'boards': dict(desktop.book.boards, **{serial: config})})
             document.setdefault('boards', {})[serial] = config

@@ -9,6 +9,7 @@ const target={target_id:'fixture-board',target_generation:'fixture-bootrom',seri
 const osImage={id:'os-fixture',name:'Debian-13-GNOME-K3-v1.0rc1-202611180100.tar.gz',kind:'package',url:'https://images.example/os.tar.gz',size:4000000000,sha256:'a'.repeat(64),state:'ready'};
 const firmware={id:'fw-fixture',name:'Debian-13-Firmware-K3-v1.0rc1-202611180055.tar.gz',kind:'package',url:'https://images.example/fw.tar.gz',size:3000000,sha256:'b'.repeat(64),state:'ready'};
 const directory={id:'directory-fixture',name:'Debian-custom.directory',size:2000,directory_bytes:12000000000,sha256:'c'.repeat(64),state:'ready'};
+const controllerArchive={id:'archive-fixture',name:'Debian-local.tar.gz',size:3000,sha256:'e'.repeat(64),state:'ready'};
 const requests=[],downloads=[],edits=[],previews=[],errors=[];let staged=Buffer.alloc(0);
 const prepared=artifact=>({id:'prepare-'+artifact.id,kind:'image-prepare',state:'completed',result:{artifact,preparation:{payload_metadata:[{partition:'rootfs',content:{size:12000000000,filesystem:{type:'ext4'},version:'Debian GNU/Linux 13（模拟）',version_state:'identified'}}]}}});
 const server=http.createServer((req,res)=>{requests.push(req.method+' '+req.url);const url=new URL(req.url,'http://localhost');res.setHeader('Cache-Control','no-store');const json=value=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));};
@@ -17,13 +18,21 @@ const server=http.createServer((req,res)=>{requests.push(req.method+' '+req.url)
  if(url.pathname==='/api/image-download'){downloads.push(p);const artifact=p.url===osImage.url?osImage:firmware;return json({task:{id:'download-'+artifact.id,kind:'image-download',state:'completed',result:{artifact,preparation_task:prepared(artifact)}}});}
  if(url.pathname==='/api/image-prepare')return json({task:prepared(p.id===osImage.id?osImage:p.id===firmware.id?firmware:directory)});
  if(url.pathname==='/api/image-workspace'){
-  if(p.action==='directories')return json({ok:true,directory:p.directory,parent:'/data',directories:p.directory==='/data/simulated'?[{name:'manual-directory',path:'/data/simulated/manual-directory'}]:[]});
+  if(p.action==='directories')return json({ok:true,directory:p.directory,parent:'/data',directories:p.directory==='/data/simulated'?[{name:'manual-directory',path:'/data/simulated/manual-directory'}]:[],archives:p.directory==='/data/simulated'?[{name:controllerArchive.name,path:'/data/simulated/'+controllerArchive.name}]:[]});
   if(p.action==='list')return json({ok:true,directory:'/data/simulated/debian-work',revision:'fixture-revision',editable:true,files:[{name:'partition_universal.json',size:200},{name:'rootfs.ext4',size:12000000000}]});
   if(p.action==='read')return json({ok:true,text:'{"format":"gpt","partitions":[{"name":"rootfs","offset":"1M"}]}'});
   if(p.action==='save'){edits.push(p);assert.equal(JSON.parse(p.text).partitions[0].offset,'2M');assert.equal(p.revision,'fixture-revision');return json({task:{id:'edit-directory',state:'completed',result:{artifact:directory,preparation_task:prepared(directory)}}});}
   if(p.action==='stage'){staged=Buffer.alloc(0);return json({artifact:{id:'replacement-file'}});}
   if(p.action==='replace'){edits.push(p);assert.equal(p.replacement_id,'replacement-file');assert.equal(staged.toString(),'replacement payload');return json({task:{id:'replace-directory',state:'completed',result:{artifact:directory,preparation_task:prepared(directory)}}});}
-  if(p.action==='import'){assert.equal(p.directory,'/data/simulated/manual-directory');return json({artifact:directory,preparation_task:prepared(directory)});}
+  if(p.action==='import'){
+   assert.match(p.request_id,/^image-import-/);
+   if(p.path==='/data/simulated/'+controllerArchive.name)return json({task:{id:'import-archive',state:'completed',result:{artifact:controllerArchive,preparation_task:prepared(controllerArchive)}}});
+   assert.equal(p.path,'/data/simulated/manual-directory');return json({artifact:directory,preparation_task:prepared(directory)});
+  }
+  if(p.action==='import-archive'){
+   assert.equal(p.path,'/data/simulated/'+controllerArchive.name);
+   return json({task:{id:'import-ram-archive',state:'completed',result:{artifact:controllerArchive,preparation_task:prepared(controllerArchive)}}});
+  }
  }
  if(url.pathname==='/api/artifact-append'){assert.equal(p.offset,staged.length);staged=Buffer.concat([staged,Buffer.from(p.data_b64,'base64')]);return json({artifact:{id:p.id,received:staged.length}});}
  if(url.pathname==='/api/artifact-seal')return json({artifact:{id:p.id,state:'ready'}});
@@ -41,7 +50,7 @@ const server=http.createServer((req,res)=>{requests.push(req.method+' '+req.url)
       {storage:'scsi:0',component:'OS',partition:'rootfs',offset:269484032,capacity:48000000000,size:12000000000}]}});}
  throw new Error('unexpected mutation '+url.pathname);
  }catch(e){errors.push(e.stack);res.statusCode=500;json({error:e.message});}});return;}
- if(url.pathname==='/'){res.setHeader('Content-Type','text/html');return res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/static/app.css"><body><p>SIMULATED · 模拟目录、镜像与板卡，无硬件操作</p>'+dialogs+['tasks','image-store','image-workspaces','flashing'].map(n=>'<script src="/static/'+n+'.js"></script>').join('')+'<script>var $=id=>document.getElementById(id),fmt=n=>n>=1e9?(n/1e9).toFixed(1)+" GB":n>=1e6?(n/1e6).toFixed(1)+" MB":n>=1e3?(n/1e3).toFixed(1)+" KB":n+" B";var store=SerialdImageStore.create({byId:$,fetch:fetch,formatBytes:fmt}),workspace=SerialdImageWorkspaces.create({byId:$,fetch:fetch,formatBytes:fmt,copyText:p=>window.copiedPath=p});window.ui=SerialdFlashing.create({byId:$,fetch:fetch,formatBytes:fmt,openImageStore:(choose,picker)=>store.open(choose,picker),openImageWorkspace:(artifact,choose)=>workspace.open(artifact,choose)});ui.open();</script></body></html>');}
+ if(url.pathname==='/'){res.setHeader('Content-Type','text/html');return res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/static/app.css"><body><p>SIMULATED · 模拟目录、镜像与板卡，无硬件操作</p>'+dialogs+['tasks','image-store','image-workspaces','flashing'].map(n=>'<script src="/static/'+n+'.js"></script>').join('')+'<script>var $=id=>document.getElementById(id),fmt=n=>n>=1e9?(n/1e9).toFixed(1)+" GB":n>=1e6?(n/1e6).toFixed(1)+" MB":n>=1e3?(n/1e3).toFixed(1)+" KB":n+" B";var store=SerialdImageStore.create({byId:$,fetch:fetch,formatBytes:fmt}),workspace=SerialdImageWorkspaces.create({byId:$,fetch:fetch,formatBytes:fmt,copyText:p=>window.copiedPath=p});window.ui=SerialdFlashing.create({byId:$,fetch:fetch,formatBytes:fmt,openImageStore:(choose,picker)=>store.open(choose,picker),openImageWorkspace:(artifact,choose,settings)=>workspace.open(artifact,choose,settings)});ui.open();</script></body></html>');}
  if(url.pathname==='/api/flash-discover')return json({targets:[target]});
  if(url.pathname==='/api/tasks')return json({tasks:[]});
  if(url.pathname==='/api/image-catalog')return json({entries:[osImage,firmware],sources:[{id:'public'}]});
@@ -88,7 +97,20 @@ let chrome,ws;const delay=ms=>new Promise(r=>setTimeout(r,ms));
  assert.equal(await evaluate('document.querySelector("#fl-start").getClientRects().length'),1);
  await evaluate('document.querySelector("#fl-edit").click()');
  assert.equal(await evaluate('document.querySelector("#fl-start").disabled'),true);
- await evaluate('document.querySelector("#fl-directory").click();document.querySelector("#iw-directory").value="/data/simulated";document.querySelector("#iw-browse").click()');await wait('document.querySelector("#iw-directories").textContent.includes("manual-directory/")');await evaluate('[...document.querySelectorAll("#iw-directories button")].find(b=>b.textContent==="manual-directory/").click()');await wait('document.querySelector("#iw-directory").value==="/data/simulated/manual-directory"');await evaluate('document.querySelector("#iw-import").click()');await wait('!document.querySelector("#image-workspace-dialog").open');
+ await evaluate('document.querySelector("#fl-directory").click();document.querySelector("#iw-directory").value="/data/simulated";document.querySelector("#iw-browse").click()');
+ await wait('document.querySelector("#iw-directories").textContent.includes("Debian-local.tar.gz")');
+ assert.equal(await evaluate('document.querySelector("#iw-title").textContent'),'从控制机导入镜像');
+ await evaluate('[...document.querySelectorAll("#iw-directories button")].find(b=>b.textContent==="Debian-local.tar.gz").click()');
+ assert.equal(await evaluate('document.querySelector("#iw-directory").value'),'/data/simulated/Debian-local.tar.gz');
+ await evaluate('document.querySelector("#iw-import").click()');
+ await wait('!document.querySelector("#image-workspace-dialog").open&&document.querySelector("#fl-artifact").value==="archive-fixture"');
+ await evaluate('document.querySelector("#fl-directory").click();document.querySelector("#iw-directory").value="/data/simulated";document.querySelector("#iw-browse").click()');await wait('document.querySelector("#iw-directories").textContent.includes("manual-directory/")');await evaluate('[...document.querySelectorAll("#iw-directories button")].find(b=>b.textContent==="manual-directory/").click()');await wait('document.querySelector("#iw-directory").value==="/data/simulated/manual-directory"');await evaluate('document.querySelector("#iw-import").click()');await wait('!document.querySelector("#image-workspace-dialog").open&&document.querySelector("#fl-artifact").value==="directory-fixture"');
  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.querySelector("#flash-dialog").scrollWidth<=document.querySelector("#flash-dialog").clientWidth+1'),true);await shot('mobile-pair-simulated');
- assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,automatic_optional_firmware_association:true,paired_downloads:downloads.length,copy_host_path:true,edit_partition_table:true,replace_partition_file:true,control_host_directory_selection:true,combined_preview:true,no_write_submitted:true,mobile_fits:true},null,2));console.log('Directory workspace and optional firmware browser flow passed');
+ await evaluate('document.querySelector("#fl-close").click();ui.open(null,null,false,"ram")');
+ assert.equal(await evaluate('document.querySelector("#fl-directory").getClientRects().length'),1);
+ await evaluate('document.querySelector("#fl-directory").click()');
+ assert.equal(await evaluate('document.querySelector("#iw-directory").placeholder'),'镜像包的绝对路径');
+ await evaluate('document.querySelector("#iw-directory").value="/data/simulated/Debian-local.tar.gz";document.querySelector("#iw-import").click()');
+ await wait('!document.querySelector("#image-workspace-dialog").open&&document.querySelector("#fl-artifact").value==="archive-fixture"');
+ assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,automatic_optional_firmware_association:true,paired_downloads:downloads.length,copy_host_path:true,edit_partition_table:true,replace_partition_file:true,control_host_directory_selection:true,control_host_archive_selection:true,combined_preview:true,no_write_submitted:true,mobile_fits:true},null,2));console.log('Controller image import, directory workspace and optional firmware browser flow passed');
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});

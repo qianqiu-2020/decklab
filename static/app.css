@@ -328,6 +328,9 @@
   .fl-stage-list{flex:none;display:flex;margin:0;padding:0;list-style:none;border-bottom:1px solid var(--line)}
   .fl-stage-list li{flex:1;padding:9px 4px;text-align:center;font-size:13px;color:var(--ink-2);border-bottom:2px solid transparent}
   .fl-stage-list [aria-current="step"]{color:var(--accent);border-bottom-color:currentColor;font-weight:650}
+  .flash-dialog:is([data-flow="fast"],[data-flow="ram"]){width:min(740px,calc(100vw - 36px))}
+  .flash-dialog[data-flow="fast"] :is(.fl-stage-list,#fl-image-section,#fl-write-section,#fl-storage-details,#fl-confirm-options label:first-child),
+  .flash-dialog[data-flow="ram"] :is(.fl-stage-list,#fl-write-section,#fl-storage-details,#fl-firmware-field,#fl-image-information-details,#fl-package-contents,#fl-workspace){display:none}
   #fl-image-information-details{margin-top:8px}
   .flash-dialog select,.flash-dialog input:not([type="checkbox"]):not([type="file"]){font:inherit;font-size:13px;min-height:34px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface);color:var(--ink)}
   .flash-dialog input::placeholder{color:var(--ink-3);opacity:1}
@@ -664,7 +667,8 @@
   .workspace:not(.selected) .toolbar{align-items:center;flex-wrap:wrap;padding:12px 16px;margin:0}
   .workspace:not(.selected) .toolbar input{max-width:380px}
   .workspace:not(.selected) .toolbar :is(input,select){font:inherit;font-size:13px;padding:7px 10px}
-  .toolbar #b-flash-discover{margin-left:auto;color:var(--accent);border-color:var(--accent-line)}
+  .toolbar #b-home-flash-menu{margin-left:auto;color:var(--accent);border-color:var(--accent-line)}
+  .workspace.selected #b-home-flash-menu{display:none}
   .serial-warning{margin:4px 12px 10px;padding:8px 12px;border-left:3px solid var(--idle);background:var(--idle-soft);font-size:12px;overflow-wrap:anywhere}
   .serial-warning summary{cursor:pointer}.serial-warning summary span{color:var(--ink-2)}
   .serial-warning p{margin:8px 0 4px}.serial-warning code{user-select:all}
@@ -695,7 +699,6 @@
     body.detail-open .workspace.selected .pane-head{display:block;padding:0 6px;margin:0 0 8px;font-size:14px}
     .workspace.selected .device-pane>.toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px}
     .workspace.selected .toolbar input,.workspace.selected #device-clear-filters{grid-column:1/-1}
-    .workspace.selected .toolbar #b-flash-discover{margin:0;font-size:11px;padding-inline:6px}
     .workspace.selected .device-pane>.grid{gap:2px}
     .workspace.selected .dev{padding:7px 8px;gap:2px;border-bottom-color:var(--line)}
     .workspace.selected .dev>.device-activity{display:none}
@@ -824,8 +827,8 @@
 .desktop-heading{display:flex;align-items:baseline;gap:10px;min-width:0;flex-wrap:wrap}
 .desktop-heading strong{font-size:13px;font-weight:600}
 #desktop-meta{font:11px/1.5 var(--font-mono);color:var(--ink-3);overflow-wrap:anywhere}
-.desktop-actions,.desktop-input-tools,.desktop-clipboard-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.desktop-actions button,.desktop-input-tools button,.desktop-clipboard-actions button,
+.desktop-actions,.desktop-input-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.desktop-actions button,.desktop-input-tools button,
 .desktop-scale-label select,.desktop-input-tools select{font-size:12px;padding:5px 8px;white-space:nowrap}
 .desktop-scale-label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)}
 .desktop-screen{position:relative;display:flex;flex:1;align-items:flex-start;justify-content:flex-start;min-width:0;min-height:160px;overflow:auto;overscroll-behavior:contain;background:var(--term)}
@@ -834,13 +837,12 @@
 .desktop-overlay{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:var(--ink-2);background:var(--surface);pointer-events:none;font-size:13px}
 .desktop-input-tools{padding:8px 12px;flex:none;border-top:1px solid var(--line)}
 #desktop-status{flex:1;min-width:200px;font-size:12px;color:var(--ink-2);overflow-wrap:anywhere}
-.desktop-clipboard{display:grid;grid-template-columns:1fr auto;gap:8px;padding:10px 12px;border-top:1px solid var(--line);flex:none}
-.desktop-clipboard>label{grid-column:1/-1;font-size:12px;color:var(--ink-2)}
+.desktop-clipboard{display:grid;gap:6px;padding:10px 12px;border-top:1px solid var(--line);flex:none}
+.desktop-clipboard>label{font-size:12px;color:var(--ink-2)}
 .desktop-clipboard textarea{width:100%;min-width:0;resize:vertical;max-height:160px;padding:8px;background:var(--ground);color:var(--ink);border:1px solid var(--line-strong);border-radius:6px;font:12px/1.5 var(--font-mono)}
-.desktop-clipboard-actions{align-content:flex-start;max-width:190px}
 .desktop-panel:fullscreen{width:100vw;height:100vh;height:100dvh;max-width:none;background:var(--surface);padding:0}
 .desktop-panel:fullscreen .desktop-screen{min-height:0}
-@media(max-width:760px){.desktop-toolbar{gap:8px}.desktop-actions{gap:4px}.desktop-actions button,.desktop-input-tools button{font-size:11px}.desktop-clipboard{grid-template-columns:1fr}.desktop-clipboard-actions{max-width:none}#desktop-status{flex-basis:100%}}
+@media(max-width:760px){.desktop-toolbar{gap:8px}.desktop-actions{gap:4px}.desktop-actions button,.desktop-input-tools button{font-size:11px}#desktop-status{flex-basis:100%}}
 
 .desktop-connection { padding: 20px; overflow: auto; background: var(--surface); }
 .desktop-connection label { display: grid; gap: 6px; font-size: 13px; }

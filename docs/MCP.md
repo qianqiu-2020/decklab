@@ -246,6 +246,8 @@ Debian 包的依赖或内置程序损坏时，先确认没有遗留的 Python �
 | `list_flash_targets` / `probe_flash_target` / `flash_capabilities` | 发现 USB 下载模式设备，读取物理 EEPROM 身份和刷机能力 |
 | `read_device_storage` | 后台读取 NOR 整片备份、系统盘分区与版本信息 |
 | `preview_flash` / `start_flash` | 预览并启动整包或指定分区刷写 |
+| `stream_flash` | 从 URL 边下载边写入选定系统盘 |
+| `boot_ram` | 使用已上传或下载的原始系统镜像启动 RAM 系统 |
 | `preview_flash_selection` / `confirm_flash_selection` | 在已有任务中预览并确认替换分区 |
 | `set_boot_priority` | 在已有存储读取任务中修改 EEPROM 第二级启动介质优先级，并回读验证 |
 | `get_flash_events` | 按游标读取刷机进度和结果 |
@@ -355,6 +357,24 @@ EEPROM 修改复用这个等待选区的任务。先读取 `storage_inventory.pr
 下载、读取、刷写和 EEPROM 修改均复用已有请求去重：响应丢失先查原任务，必要时使用**相同参数、
 相同请求 ID**查询原提交，不能换 ID 重放未知写入。设备断连、代次变化和旧布局都会阻止新写入。
 清理状态不确定时保留设备占用，由网页操作者核实并解除恢复锁；MCP 不提供绕过恢复锁的入口。
+
+### K1 / K3 刷机回归
+
+每次改动刷机执行器、设备探测、临时加载器或 MCP 接口，先跑这组六例。测试使用官方 MCP 客户端和实际鉴权、任务及请求去重代码。USB、存储和镜像内容由夹具模拟。
+
+```sh
+PYTHONPATH=.:tests python3 -m unittest -v test_mcp_flashing.MCPFlashTests.test_k1_k3_common_mcp_workflows
+```
+
+使用装有 MCP SDK 的环境。安装包的实板验收在 K1 MUSE Pi Pro 和 K3 Pico-ITX 各执行下面三项。为每个芯片固定一份经过验证的系统镜像及其 SHA-256、目标序列号和磁盘。K1 核实 Fastboot 当前盘是测试 eMMC，K3 明确指定测试 NVMe（例如 `nvme:0`）。先确认允许覆盖盘上 GPT 和系统分区，默认保留 NOR 和其他盘。
+
+| 流程 | MCP 操作 | 实板验收 |
+| --- | --- | --- |
+| 普通整包刷机 | `preview_flash(mode="full", verify="required")` → `start_flash`。K3 在预览中传入 `target_storage`。如果任务停在 `awaiting-selection`，核对原任务的最终范围后用 `preview_flash_selection`、`confirm_flash_selection` 继续。 | 预览范围命中所选系统盘的 GPT 和系统分区。写入与回读通过，复位后确认实际启动盘与系统版本。 |
+| URL 极速刷机 | `stream_flash` 指定同一系统包 URL、SHA-256 和目标盘。 | 事件经过下载、GPT 与分区写入。检查任务的写入结果和包内摘要校验结果，按需要独立回读。复位后确认实际启动盘。 |
+| 内存启动 | `boot_ram` 指定已封存的原始镜像 ID、检测到的 USB 目标和 `binding_revision`。对尚无序列号的 BootROM 目标，使用全部设备授权，由临时加载器核实 EEPROM。 | `handoff=acknowledged`、`write_result=not-started`。串口确认内核和 RAM 根系统启动，复位后原系统可启动；对照 GPT、启动分区及 NOR 的只读采样。 |
+
+三条路径都用 `get_task` 等终态。用相同 `request_id` 和参数重查应返回原任务。真实写入状态不明时先保留回执并读回。系统进 Linux 后用 `findmnt` 和 `lsblk` 确认根分区所在磁盘，避免把从另一盘启动误记为新系统盘启动成功。
 
 ## 独立服务与本地 stdio：兼容入口
 

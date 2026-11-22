@@ -175,6 +175,11 @@ class FreeRDPDesktop:
             fingerprint = config.get('certificate_sha256', '')
             if not isinstance(fingerprint, str) or fingerprint and not re.fullmatch(r'[0-9a-fA-F]{64}', fingerprint):
                 raise ValueError()
+            policy = config.get('certificate_policy')
+            if policy is not None:
+                if policy != 'accept' or fingerprint:
+                    raise ValueError()
+                fingerprint = 'accept-current'
             width, height = config.get('width', 1280), config.get('height', 800)
             if any(type(v) is not int or not 64 <= v <= 4096 for v in (width, height)):
                 raise ValueError()

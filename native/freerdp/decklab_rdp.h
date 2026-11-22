@@ -32,6 +32,7 @@ typedef struct {
     const char* username;
     const char* password;
     const char* domain;
+    /* Empty for system trust, DER SHA-256 for a pin, "accept-current" for this endpoint. */
     const char* certificate_sha256;
     uint32_t port;
     uint32_t width;

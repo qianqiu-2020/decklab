@@ -1,9 +1,13 @@
 # Start an original Debian or Bianbu image in RAM
 
-In DeckLab, enter USB download mode on the K3 Pico-ITX, detect its USB target
-in the flashing workspace, and select the original OS archive from the local
-upload, image cache or repository. Choose **从镜像内存启动**. The Linux control
-node needs a compatible DeckLab flash executor and the managed K3 RAM loader.
+In DeckLab, open **内存启动**, enter USB download mode on the K1 MUSE Pi Pro
+or K3 Pico-ITX, and detect its USB target. Select the original OS archive
+from the local upload, image cache or repository, then choose **从镜像内存启动**.
+MCP clients can use `boot_ram` as described in [the MCP guide](MCP.md#k1--k3-刷机回归).
+The Linux control node needs a compatible DeckLab flash executor and the
+matching RAM boot loader. For the verified K3 firmware bundle, DeckLab combines the
+vendor U-Boot and OpenSBI into one FIT and stages that file after the original
+FSBL. The vendor U-Boot runs with its original version string.
 The board owner can follow or cancel the operation in the task panel.
 
 DeckLab checks the EEPROM serial, the temporary loader's board model and its
@@ -37,7 +41,7 @@ an optional `bootfs.ext4`. It locates matching kernel, initramfs and device-tree
 assets within the original archive. The kernel must support initramfs, ext4,
 the loop device and overlayfs. The board model must match the device tree
 by model and compatible string. The supported offline preparation profiles
-are the K1 MUSE-Pi-Pro and the K3 Pico-ITX. DeckLab executes the K3 profile.
+are the K1 MUSE Pi Pro and the K3 Pico-ITX.
 A board image can have the boot files in the root partition or in a separate
 boot partition. Raw disks, ISO images, and architectures other than RISC-V
 64-bit are outside these layouts.

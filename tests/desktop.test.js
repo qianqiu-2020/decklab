@@ -32,7 +32,7 @@ function fixture(configuration = {}) {
     releasePointerCapture(id) { if (this.capture === id) this.capture = null; }
     contains(node) { return this.id === 'desktop-panel' && node.id === 'desktop-image'; }
     requestFullscreen() { document.fullscreenElement = this; return Promise.resolve(); }
-    fire(name, extra = {}) { for (const fn of [...(this.listeners[name] || [])]) fn(Object.assign({preventDefault() {}}, extra)); }
+    fire(name, extra = {}) { for (const fn of [...(this.listeners[name] || [])]) fn(Object.assign({type:name, preventDefault() {}, stopImmediatePropagation() {}}, extra)); }
   }
   const $ = id => nodes[id] || (nodes[id] = new Element(id));
   $('desktop-scale').value = 'fit'; $('desktop-keys').value = 'ControlLeft AltLeft Delete';
@@ -66,7 +66,7 @@ function fixture(configuration = {}) {
     inputs() { return this.sent.filter(x => x.type === 'input'); }
   }
   let view = {key: 'board-a', serial: 'SERIAL-A'}, reads = 0, writes = 0, copied = '';
-  let configured = !configuration.setup, connection = {};
+  let configured = !configuration.setup || !!configuration.saved, connection = configuration.saved || {};
   const fetch = async (url, options) => {
     const body = options && options.body && JSON.parse(options.body); calls.push({url, body});
     const serial = body && body.serial || new URL(url, 'http://decklab.test').searchParams.get('serial');
@@ -77,13 +77,13 @@ function fixture(configuration = {}) {
       {id:'rdp-service',provider:'rdp',host:'10.0.0.2',port:3389,certificate_sha256:'a'.repeat(64)},
       {id:'vnc-service',provider:'vnc',host:'10.0.0.2',port:5900}]};
     else if (url === '/api/desktop/configure') {
-      configured=true; connection={provider:body.provider,host:body.host,port:body.port,username:body.username,password_saved:true};
+      configured=true; connection={provider:body.provider,host:body.host,port:body.port,username:body.username,password_saved:true,certificate_policy:body.certificate_policy};
       data={ok:true,setup:{revision:'revision-2',connection,hosts:['10.0.0.2']}};
     }
     else if (url === '/api/desktop/close' && configuration.closeFailure)
       return {ok:false,status:configuration.closeFailure,json:async()=>({error:'desktop session not found'})};
     else if (url === '/api/desktop/open') {
-      if (configuration.connectionFailure) return {ok:false,status:502,json:async()=>configuration.connectionFailure};
+      if (configuration.connectionFailure && connection.certificate_policy !== 'accept') return {ok:false,status:502,json:async()=>configuration.connectionFailure};
       data = {session: {id: 'session-' + serial, serial}};
     }
     return {ok: true, status: 200, json: async () => data};
@@ -107,7 +107,7 @@ function fixture(configuration = {}) {
   async function open() {
     desktop.refresh(view); await tick(); $('b-desktop').fire('click'); await tick(); await tick();
     const socket = sockets.at(-1); assert.ok(socket, $('desktop-status').textContent); socket.open();
-    socket.server({type: 'ready', session: {id: 'session-' + view.serial, serial: view.serial}, capabilities: {}});
+    socket.server({type: 'ready', session: {id: 'session-' + view.serial, serial: view.serial}, capabilities: {text:true, clipboard:{read:true,write:true,encoding:'utf-8'}}});
     socket.server(frame()); await tick(); await tick(); return socket;
   }
   return {nodes, $, calls, sockets, displays, keyboards, desktop, frame, open, window, document, intervals,
@@ -176,33 +176,42 @@ function fixture(configuration = {}) {
   f.document.fullscreenElement = null; f.fireGlobal('fullscreenchange');
   assert.strictEqual(locks.at(-1), 'released');
   assert.deepStrictEqual(f.clipboard(), {reads: 0, writes: 0, copied: ''});
-  $('desktop-clipboard-read').fire('click'); ws.ackAll(); ws.server({type: 'clipboard', text: 'REMOTE', encoding: 'unicode'});
-  assert.strictEqual($('desktop-text').value, 'REMOTE'); assert.strictEqual(f.clipboard().writes, 0, 'remote clipboard never auto-writes the host clipboard');
-  $('desktop-send').fire('click'); ws.ackAll(); assert.strictEqual(ws.inputs().at(-1).event.text, 'REMOTE');
-  $('desktop-clipboard-read').fire('click'); ws.ackAll(); ws.server({type: 'clipboard', available: false, encoding: 'unicode'});
-  assert.strictEqual($('desktop-text').value, '', 'an empty remote clipboard clears old text');
+  $('desktop-clipboard-toggle').fire('click'); ws.server({type:'clipboard',text:'REMOTE'}); ws.ackAll();
+  assert.strictEqual($('desktop-text').value, 'REMOTE');
+  assert.strictEqual(f.clipboard().writes, 0, 'the fallback view never writes the host clipboard');
+  $('desktop-clipboard-toggle').fire('click');
+  const paste = text => canvas.fire('paste',{clipboardData:{getData:type=>type==='text/plain'?text:''}});
+  const beforePaste = ws.inputs().length;
+  paste('中文 😀');
+  assert.strictEqual(ws.inputs().length,beforePaste+1);
+  assert.strictEqual(ws.inputs().at(-1).event.type,'clipboard');
+  ws.ackAll();
+  assert.deepStrictEqual(ws.inputs().slice(beforePaste).map(x => x.event.code || x.event.type),
+    ['clipboard','ControlLeft','KeyV','KeyV','ControlLeft']);
+  assert.strictEqual(ws.inputs()[beforePaste].event.text,'中文 😀');
+  const beforeCopy = ws.inputs().length;
+  canvas.fire('keydown',{code:'KeyC',ctrlKey:true});
+  canvas.fire('keyup',{code:'KeyC',ctrlKey:true});
+  ws.ackAll(); await pause(170);
+  assert.deepStrictEqual(ws.inputs().slice(beforeCopy).map(x => x.event.code || x.event.type),
+    ['ControlLeft','KeyC','KeyC','ControlLeft','clipboard-read']);
+  ws.server({type:'clipboard',text:'COPIED'}); ws.ackAll(); await tick();
+  assert.deepStrictEqual(f.clipboard(),{reads:0,writes:1,copied:'COPIED'});
+  assert.strictEqual($('desktop-clipboard').hidden,true);
+  $('desktop-clipboard-toggle').fire('click'); ws.server({type:'clipboard',available:false}); ws.ackAll();
+  assert.strictEqual($('desktop-text').value,'');
   assert.ok($('desktop-status').textContent.includes('暂无可读'));
-  ws.server({type: 'ready', session: {id: 'session-SERIAL-A', serial: 'SERIAL-A'}, capabilities: {clipboard: {read: true, write: true, encoding: 'latin-1'}}});
-  const beforeInvalidClipboard = ws.inputs().length;
-  $('desktop-text').value = '中文'; $('desktop-send').fire('click');
-  assert.strictEqual(ws.inputs().length, beforeInvalidClipboard, 'unsupported Latin-1 text never reaches native VNC');
-  assert.ok($('desktop-status').textContent.includes('Latin-1'));
-  ws.server(f.frame(4, {reset: true, frame_id: 'mode-after-focus-release'})); await tick(); await tick();
-  ws.server({type: 'observed', ok: true, frame_id: 'mode-after-focus-release', sequence: 4});
-  assert.ok($('desktop-status').textContent.includes('Latin-1'), 'background resync and observation must not overwrite a rejected clipboard action');
-  $('desktop-type-text').fire('click'); ws.ackAll();
-  assert.strictEqual(ws.inputs().at(-1).event.type, 'text');
-  assert.strictEqual(ws.inputs().at(-1).event.text, '中文', 'Unicode application input is independent of the Latin-1 VNC clipboard');
-  assert.ok($('desktop-status').textContent.includes('当前应用'));
-  const beforeInvalidText = ws.inputs().length;
-  for (const invalid of ['a\0b', '\ud800', '\udc00', '中'.repeat(1025)]) {
-    $('desktop-text').value = invalid; $('desktop-type-text').fire('click');
-    assert.strictEqual(ws.inputs().length, beforeInvalidText, 'invalid or oversized text never reaches the native provider');
+  ws.server({type:'ready',session:{id:'session-SERIAL-A',serial:'SERIAL-A'},capabilities:{text:true,clipboard:{read:true,write:true,encoding:'latin-1'}}});
+  paste('中文'); ws.ackAll();
+  assert.strictEqual(ws.inputs().at(-1).event.type,'text','Unicode VNC input falls back to typing');
+  assert.strictEqual(ws.inputs().at(-1).event.text,'中文');
+  const beforeInvalid = ws.inputs().length;
+  for (const invalid of ['a\0b','\ud800','\udc00','中'.repeat(1025),'a'.repeat(32769)]) {
+    paste(invalid); ws.ackAll();
+    assert.strictEqual(ws.inputs().length,beforeInvalid,'invalid or oversized text never reaches the native provider');
   }
-  $('desktop-text').value = '😀'.repeat(1024); $('desktop-type-text').fire('click'); ws.ackAll();
-  assert.strictEqual(ws.inputs().at(-1).event.text, '😀'.repeat(1024), 'text limits count Unicode characters, not UTF-16 code units');
-  $('desktop-clipboard-local').fire('click'); await tick(); assert.strictEqual($('desktop-text').value, 'LOCAL');
-  $('desktop-clipboard-copy').fire('click'); await tick(); assert.deepStrictEqual(f.clipboard(), {reads: 1, writes: 1, copied: 'LOCAL'});
+  paste('😀'.repeat(1024)); ws.ackAll();
+  assert.strictEqual(ws.inputs().at(-1).event.text,'😀'.repeat(1024));
   const oldCanvas = canvas, oldDraws = f.displays[0].rectangles.length;
   f.switchBoard(); assert.strictEqual(ws.readyState, 3);
   ws.server(f.frame(3)); await tick(); assert.strictEqual(f.displays[0].rectangles.length, oldDraws, 'old stream cannot paint another board');
@@ -250,7 +259,7 @@ function fixture(configuration = {}) {
   tabs.intervals.find(x=>x.ms===5000).fn();
   assert.strictEqual(tabSocket.sent.at(-1).type, 'heartbeat', 'only heartbeat keeps the hidden transport alive');
   tabs.$('desktop-image').fire('pointerdown', {button:0,clientX:20,clientY:10});
-  tabs.$('desktop-clipboard-read').fire('click');
+  tabs.$('desktop-clipboard-toggle').fire('click');
   assert.strictEqual(tabSocket.inputs().length, 0, 'hidden physical events and toolbar clicks never enqueue input');
   tabs.$('b-desktop').fire('click'); await tick(); await tick();
   assert.strictEqual(tabs.sockets.length, 1, 'same-page return uses no replacement handshake or native cleanup wait');
@@ -274,7 +283,7 @@ function fixture(configuration = {}) {
   toolbar.$('desktop-image').fire('blur');
   toolbarSocket.server(toolbar.frame(2));
   assert.strictEqual(toolbarSocket.readyState, 1, 'old in-transit deltas before release ack are ignored');
-  toolbarSocket.ackAll(); toolbar.$('desktop-clipboard-read').fire('click');
+  toolbarSocket.ackAll(); toolbar.$('desktop-clipboard-toggle').fire('click');
   assert.strictEqual(toolbarSocket.inputs().length, 0, 'one new toolbar click waits for a complete observation');
   toolbarSocket.server(toolbar.frame(3, {reset: true, frame_id: 'fresh-after-release'})); await tick(); await tick();
   assert.strictEqual(toolbarSocket.inputs().length, 1);
@@ -284,14 +293,8 @@ function fixture(configuration = {}) {
   toolbarSocket.server(toolbar.frame(4)); await tick(); await tick();
   assert.strictEqual(toolbarSocket.inputs().length, 1, 'fresh display updates never repeat the toolbar action');
   toolbar.$('desktop-image').fire('blur'); toolbarSocket.ackAll();
-  toolbar.$('desktop-text').value = '中文'; toolbar.$('desktop-type-text').fire('click');
-  toolbarSocket.server(toolbar.frame(5, {reset: true, frame_id: 'text-after-release'})); await tick(); await tick();
-  assert.strictEqual(toolbarSocket.inputs().length, 2);
-  assert.strictEqual(toolbarSocket.inputs().at(-1).event.type, 'text');
-  assert.strictEqual(toolbarSocket.inputs().at(-1).frame_id, 'text-after-release');
-  toolbarSocket.ackAll();
-  toolbar.$('desktop-image').fire('blur'); toolbarSocket.ackAll();
-  toolbar.$('desktop-clipboard-read').fire('click');
+  toolbar.$('desktop-clipboard-toggle').fire('click'); // close the fallback panel
+  toolbar.$('desktop-clipboard-toggle').fire('click'); // a new read waits for observation
   toolbar.switchBoard(); toolbarSocket.server(toolbar.frame(5, {reset: true})); await tick();
   const replacement = await toolbar.open();
   assert.strictEqual(replacement.inputs().length, 0, 'a pending toolbar intent never crosses a board/version change');
@@ -310,17 +313,35 @@ function fixture(configuration = {}) {
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/discover').length,1);
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/open').length,0,'discovery never logs in');
   setup.$('desktop-services').value='rdp-service'; setup.$('desktop-services').fire('change');
-  assert.strictEqual(setup.$('desktop-trust').checked,true,'new RDP fingerprints default to pinning when the user saves');
+  assert.strictEqual(setup.$('desktop-certificate-policy').value,'accept');
+  assert.strictEqual(setup.$('desktop-pin-field').hidden,true);
+  setup.$('desktop-certificate-policy').value='pin';
   setup.$('desktop-trust').checked=false;
   setup.$('desktop-password').value='server-only'; setup.$('desktop-connection').fire('submit'); await tick();
-  assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/configure').length,0,'observed pins need explicit human trust');
-  setup.$('desktop-trust').checked=true; setup.$('desktop-connection').fire('submit'); await tick(); await tick();
+  assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/configure').length,0,'optional pins still need human trust');
+  setup.$('desktop-certificate-policy').value='accept';
+  setup.$('desktop-connection').fire('submit'); await tick(); await tick();
   const submitted=setup.calls.find(x=>x.url==='/api/desktop/configure').body;
-  assert.strictEqual(submitted.candidate_id,'rdp-service');assert.strictEqual(submitted.trust_certificate,true);
+  assert.strictEqual(submitted.candidate_id,'rdp-service');
+  assert.strictEqual(submitted.certificate_policy,'accept');
+  assert.strictEqual(submitted.certificate_sha256,'');
   assert.strictEqual(submitted.client_id,setup.window.SerialdUI.clientId);
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/open').length,1);
   assert.strictEqual(setup.$('desktop-password').value,'','passwords disappear from the form after saving');
   setup.desktop.close();
+  const pinned = fixture({setup:true,
+    saved:{provider:'rdp',host:'10.0.0.2',port:3389,username:'rdp',password_saved:true,certificate_sha256:'a'.repeat(64)},
+    connectionFailure:{code:'desktop-certificate-rejected',error:'证书已更换'}});
+  pinned.desktop.refresh({key:'board-a',serial:'SERIAL-A'}); await tick();
+  pinned.$('b-desktop').fire('click'); await tick(); await tick();
+  assert.strictEqual(pinned.$('desktop-connect-without-pin').hidden,false);
+  pinned.$('desktop-connect-without-pin').fire('click'); await tick(); await tick();
+  const recovery = pinned.calls.find(x=>x.url==='/api/desktop/configure').body;
+  assert.strictEqual(recovery.certificate_policy,'accept');
+  assert.strictEqual(recovery.reuse_password,true);
+  assert.strictEqual(recovery.password,undefined);
+  assert.strictEqual(pinned.sockets.length,1);
+  pinned.desktop.close();
   const vncSetup=fixture({setup:true});vncSetup.desktop.refresh({key:'board-a',serial:'SERIAL-A'});await tick();
   vncSetup.$('b-desktop').fire('click');await tick();await tick();
   vncSetup.$('desktop-services').value='vnc-service';vncSetup.$('desktop-services').fire('change');

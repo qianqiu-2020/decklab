@@ -45,7 +45,12 @@
     <select id="device-filter" aria-label="设备状态"><option value="all">全部设备</option><option value="active">待识别＋在线</option><option value="pending">待识别</option><option value="online">在线</option><option value="offline">历史 / 离线</option></select>
     <select id="device-sort" aria-label="设备排序"><option value="status">状态优先</option><option value="manual">手动排序</option></select>
     <button id="device-clear-filters" type="button" hidden>清除筛选</button>
-    <button id="b-flash-discover" type="button">刷机工作区</button>
+    <button id="b-home-flash-menu" type="button" class="menu-trigger" popovertarget="home-flash-menu" aria-controls="home-flash-menu">刷机与启动</button>
+    <div id="home-flash-menu" class="action-menu" popover aria-label="刷机与启动">
+      <button id="b-flash-discover" type="button">刷机工作区</button>
+      <button id="b-fast-flash" type="button">URL 极速刷机</button>
+      <button id="b-ram-boot" type="button">内存启动</button>
+    </div>
   </div>
   <details class="serial-warning" id="serial-warning" hidden>
     <summary><strong>USB 串口未就绪</strong> <span id="serial-warning-ports" data-i18n-ignore></span></summary>
@@ -79,7 +84,12 @@
           <button id="b-rescue" type="button" title="执行 USB 软解绑与重新绑定，会暂时中断该设备连接"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>重新连接串口</button>
         </div>
         <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-switch"/></svg>换板</button>
-        <button id="b-flash" type="button">刷机</button>
+        <button type="button" class="menu-trigger" popovertarget="flash-menu" aria-controls="flash-menu">刷机与启动</button>
+        <div id="flash-menu" class="action-menu" popover aria-label="刷机与启动">
+          <button id="b-flash" type="button">普通刷机</button>
+          <button id="b-device-fast-flash" type="button">URL 极速刷机</button>
+          <button id="b-device-ram-boot" type="button">内存启动</button>
+        </div>
         <button id="b-board-control" type="button" hidden title="电源与启动" aria-label="电源与启动"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>电源与启动</button>
         <button id="b-agent-share" type="button" disabled title="默认仅授权此设备，可在授权范围中更改"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>AI 接入</button>
         <button id="b-close" class="icon-button" type="button" aria-label="返回设备列表" title="返回设备列表"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button>
@@ -107,6 +117,7 @@
         <summary>连接错误详情</summary>
         <pre id="desktop-error-details" data-i18n-ignore></pre>
         <button id="desktop-error-copy" type="button">复制错误详情</button>
+        <button id="desktop-connect-without-pin" type="button" hidden>关闭证书校验并重连</button>
       </details>
       <div id="desktop-screen" class="desktop-screen">
         <canvas id="desktop-image" width="640" height="480" tabindex="0" role="application" aria-label="远程桌面，点击画面后使用鼠标和键盘"></canvas>
@@ -119,12 +130,11 @@
         <button id="desktop-super" type="button" title="向远端发送 Windows 或 Super 键">Win / Super</button>
         <select id="desktop-keys" aria-label="远程组合键"><option value="ControlLeft AltLeft Delete">Ctrl+Alt+Del</option><option value="AltLeft Tab">Alt+Tab</option><option value="ControlLeft Escape">Ctrl+Esc</option><option value="Escape">Esc</option></select>
         <button id="desktop-key" type="button">发送组合键</button>
-        <button id="desktop-clipboard-toggle" type="button" aria-expanded="false" aria-controls="desktop-clipboard">文本与剪贴板</button>
+        <button id="desktop-clipboard-toggle" type="button" aria-expanded="false" aria-controls="desktop-clipboard">剪贴板</button>
       </div>
       <div id="desktop-clipboard" class="desktop-clipboard" hidden>
-        <label for="desktop-text">文本内容</label>
-        <textarea id="desktop-text" rows="3" maxlength="65536" spellcheck="false" placeholder="在此粘贴文本，或读取远端剪贴板"></textarea>
-        <div class="desktop-clipboard-actions"><button id="desktop-type-text" type="button" title="输入到当前应用">输入文本</button><button id="desktop-clipboard-read" type="button">读取剪贴板</button><button id="desktop-send" type="button">写入剪贴板</button><button id="desktop-clipboard-local" type="button">从本机粘贴</button><button id="desktop-clipboard-copy" type="button">复制到本机</button></div>
+        <label for="desktop-text">远端剪贴板</label>
+        <textarea id="desktop-text" rows="3" readonly spellcheck="false"></textarea>
       </div>
     </section>
     <div class="terminal-tools">
@@ -218,10 +228,12 @@ PasswordAuthentication yes</code></pre>
           <label id="desktop-user-field">用户名<input id="desktop-user" autocomplete="off" spellcheck="false"></label>
           <label>密码<input id="desktop-password" type="password" autocomplete="new-password"></label>
         </div>
-        <div id="desktop-certificate-field">
-          <label>服务器证书 SHA256<input id="desktop-certificate" autocomplete="off" spellcheck="false" placeholder="留空使用系统信任链"></label>
+        <details id="desktop-certificate-field">
+          <summary>证书校验</summary>
+          <label>证书策略<select id="desktop-certificate-policy"><option value="accept">不校验（默认）</option><option value="system">校验系统信任链</option><option value="pin">固定证书指纹</option></select></label>
+          <label id="desktop-pin-field" hidden>服务器证书 SHA256<input id="desktop-certificate" autocomplete="off" spellcheck="false"></label>
           <label id="desktop-trust-field" class="desktop-check" hidden title="保存并连接后固定当前指纹；后续证书不匹配时拒绝连接"><input id="desktop-trust" type="checkbox" checked>信任并固定此证书指纹</label>
-        </div>
+        </details>
         <div id="desktop-rdp-help" class="desktop-connection-help">
           <p><strong>Debian GNOME 远程登录</strong><span>（GDM，通常 3389）：入口用户默认为 rdp；连接后再用 Linux 用户登录。</span></p>
           <p><span>在开发板串口查看入口账号和密码：</span><code id="desktop-credentials-command" data-i18n-ignore>sudo grdctl --system status --show-credentials</code><button type="button" id="desktop-credentials-stage">填入串口</button> <button type="button" id="desktop-credentials-copy">复制命令</button></p><span id="desktop-command-status" role="status"></span>
@@ -349,42 +361,27 @@ PasswordAuthentication yes</code></pre>
     <progress id="fl-overall-bar" max="100" aria-label="整体预览进度"></progress>
     <details id="fl-stage-timing"><summary>查看各阶段耗时</summary><ol id="fl-preview-stages" class="fl-preview-stages"></ol></details>
   </section>
-  <section class="fl-section" aria-labelledby="fl-image-title">
+  <section id="fl-image-section" class="fl-section" aria-labelledby="fl-image-title">
     <h3 id="fl-image-title">待刷镜像</h3>
     <div id="fl-sources" class="fl-sources">
       <div class="fl-source-actions" role="group" aria-label="选择镜像来源">
-        <button id="fl-local" type="button">选择本地文件</button><input id="fl-files" type="file" multiple hidden aria-label="选择本地文件">
+        <button id="fl-local" type="button">上传镜像文件</button><input id="fl-files" type="file" multiple hidden aria-label="上传镜像文件">
         <button id="fl-store" type="button">镜像商店</button><button id="fl-cache" type="button">已下载</button>
-        <button id="fl-directory" type="button">选择解压目录</button><button id="fl-url-toggle" type="button" aria-expanded="false" aria-controls="fl-url-panel">指定 URL</button><button id="fl-fast-toggle" type="button" hidden aria-controls="fl-fast">极速刷写</button>
+        <button id="fl-directory" type="button">从控制机导入</button><button id="fl-url-toggle" type="button" aria-expanded="false" aria-controls="fl-url-panel">从 URL 下载到控制机</button>
       </div>
       <div id="fl-url-panel" hidden>
         <label class="ft-field">镜像 URL<input id="fl-url" type="url" placeholder="粘贴链接即下载，手动输入后按回车" spellcheck="false"></label>
         <details class="fl-details"><summary>校验 SHA-256（可选，请先填写）</summary><label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label></details>
         <button id="fl-download" type="button" hidden>重试下载</button>
       </div>
-      <details id="fl-fast" class="fl-details" hidden>
-        <summary>极速刷写系统盘（边下载边写入，不落盘）</summary>
-        <p class="fl-hint">直接从 URL 流式下载 K3 系统包，在内存中解压后写入系统盘，不经过预览。按包内分区表重建 GPT，系统盘原有数据全部覆盖；结束时按包内 SHA256SUMS 核对，未刷 NOR 固件。</p>
-        <label class="ft-field">系统包 URL（.tar.gz）<input id="fl-fast-url" type="url" spellcheck="false" placeholder="https://…/Debian-13-GNOME-K3-….tar.gz"></label>
-        <label class="ft-field">目标系统盘<input id="fl-fast-storage" type="text" value="auto" spellcheck="false" placeholder="auto 或 nvme:0 / scsi:0"></label>
-        <label class="ft-check"><input id="fl-fast-confirm" type="checkbox">我确认覆盖该板系统盘的全部内容</label>
-        <button id="fl-fast-start" type="button" disabled>开始极速刷写</button>
-      </details>
-      <details id="fl-tuning" class="fl-details" hidden>
-        <summary>刷写配置 <span id="fl-tuning-state"></span></summary>
-        <p class="fl-hint">在这块板上实测 USB、板上解压、写盘和控制机压缩速度，按耗时模型选出编码、压缩级别和写盘方式。之后经此 USB 口的普通刷写和极速刷写都使用这套配置。配置只影响速度，不改变写入内容。</p>
-        <dl id="fl-tuning-summary" class="fl-tuning-summary"></dl>
-        <label class="ft-check"><input id="fl-tuning-write" type="checkbox" checked>同时测写盘速度（读出 128 MiB 后原样写回，内容不变）</label>
-        <div class="fl-tuning-actions"><button id="fl-tuning-run" type="button" disabled>实测并生成配置</button><button id="fl-tuning-forget" type="button" hidden>清除此 USB 口的配置</button></div>
-      </details>
       <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
       <select id="fl-artifact" hidden aria-label="当前镜像来源"></select>
       <div id="fl-firmware-field" class="ft-field" hidden>
         <label for="fl-firmware">配套 Firmware（可选）</label>
         <div class="fl-firmware-row">
           <select id="fl-firmware"><option value="">仅刷当前镜像</option></select>
-          <button id="fl-firmware-local" type="button">选择本地文件</button>
-          <input id="fl-firmware-file" type="file" accept=".tar.gz,.tgz,.tar,.zip" hidden aria-label="选择配套固件">
+          <button id="fl-firmware-local" type="button">上传配套固件包</button>
+          <input id="fl-firmware-file" type="file" accept=".tar.gz,.tgz,.tar,.zip" hidden aria-label="上传配套固件包">
           <button id="fl-firmware-choose" type="button">从镜像库选择</button>
         </div>
         <small id="fl-firmware-status" role="status"></small><button id="fl-firmware-retry" type="button" hidden>重试准备配套固件</button>
@@ -409,9 +406,10 @@ PasswordAuthentication yes</code></pre>
       <button id="fl-delete-confirm" type="button">确认删除</button><button id="fl-delete-cancel" type="button">保留镜像</button>
     </fieldset>
   </section>
-  <section class="fl-section" aria-labelledby="fl-connect-title">
+  <section id="fl-connect" class="fl-section" aria-labelledby="fl-connect-title">
     <h3 id="fl-connect-title">目标开发板</h3>
-    <div class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label><button id="fl-discover" type="button">检测设备</button></div>
+    <div id="fl-target-picker" class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label><button id="fl-discover" type="button">刷新 USB 列表</button></div>
+    <button id="fl-prepare-board" type="button" hidden>进入下载模式并读取设备存储</button>
     <details id="fl-storage-details" class="fl-details"><summary>板上已有内容与备份</summary>
       <div class="fl-read-action"><button id="fl-read-nor" type="button" disabled>读取设备存储</button></div>
       <span id="fl-read-status" role="status" hidden></span>
@@ -430,9 +428,27 @@ PasswordAuthentication yes</code></pre>
         </details>
       </div>
     </details>
-    <details class="fl-details"><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl></details>
+    <details id="fl-connection-details" class="fl-details" hidden><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl></details>
   </section>
-  <section class="fl-section" aria-labelledby="fl-replace-title">
+      <section id="fl-fast" class="fl-section" aria-label="系统包 URL" hidden>
+        <label class="ft-field">系统包 URL（.tar.gz）<input id="fl-fast-url" type="url" spellcheck="false" placeholder="https://…/Debian-13-GNOME-K3-….tar.gz"></label>
+        <p class="fl-hint">边下载边写入，重建 GPT 并覆盖目标系统盘。</p>
+        <details id="fl-fast-disk" class="fl-details"><summary>系统盘选项</summary>
+          <label class="ft-field">目标系统盘<input id="fl-fast-storage" type="text" value="auto" spellcheck="false" placeholder="auto 或 nvme:0 / scsi:0"></label>
+        </details>
+      </section>
+      <details id="fl-tuning" class="fl-details" hidden>
+        <summary>刷写配置 <span id="fl-tuning-state"></span></summary>
+        <p class="fl-hint">在这块板上实测 USB、板上解压、控制机压缩速度和可选的写盘速度，为当前 USB 口生成刷写配置。</p>
+        <dl id="fl-tuning-summary" class="fl-tuning-summary"></dl>
+        <label class="ft-check"><input id="fl-tuning-write" type="checkbox">同时测写盘速度（读出 128 MiB 后原样写回，内容不变）</label>
+        <label id="fl-tuning-storage-field" class="ft-field" hidden>测速目标盘
+          <input id="fl-tuning-storage" list="fl-tuning-disks" type="text" spellcheck="false" placeholder="auto（单盘）或 nvme:0 / scsi:0">
+          <datalist id="fl-tuning-disks"></datalist>
+        </label>
+        <div class="fl-tuning-actions"><button id="fl-tuning-run" type="button" disabled>实测并生成配置</button><button id="fl-tuning-forget" type="button" hidden>清除此 USB 口的配置</button></div>
+      </details>
+  <section id="fl-write-section" class="fl-section" aria-labelledby="fl-replace-title">
     <h3 id="fl-replace-title">写入目标与方式</h3>
     <div class="fl-inputs">
       <label class="ft-field fl-mode-field">刷写方式<select id="fl-mode"><option value="full">整包刷写</option><option value="partitions">指定分区</option></select></label>
@@ -473,13 +489,13 @@ PasswordAuthentication yes</code></pre>
   </fieldset>
   <details id="fl-task-details" class="fl-details" hidden><summary>执行详情</summary><p id="fl-task-id" class="log-note" data-i18n-ignore></p><dl id="fl-verification" class="fl-connections"></dl><p id="fl-event-status" role="status"></p><pre id="fl-events" data-i18n-ignore></pre></details>
   </div>
-  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-edit" type="button" hidden>返回修改</button><button id="fl-new" type="button" hidden>准备下一次刷写</button><div id="fl-confirm-options"><label>回读校验 <select id="fl-verify"><option value="none" selected>关闭</option><option value="if-supported">能力支持时校验</option><option value="required">必须通过</option></select></label><label><input type="checkbox" id="fl-reset-after">刷完自动复位</label></div><button id="fl-ram-boot" type="button" hidden>从镜像内存启动</button><button id="fl-plan" class="pri" type="button">预览写入范围</button><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-edit" type="button" hidden>返回修改</button><button id="fl-new" type="button" hidden>准备下一次刷写</button><div id="fl-confirm-options"><label>回读校验 <select id="fl-verify"><option value="none" selected>关闭</option><option value="if-supported">能力支持时校验</option><option value="required">必须通过</option></select></label><label><input type="checkbox" id="fl-reset-after">刷完自动复位</label></div><button id="fl-fast-start" class="pri" type="button" hidden disabled>确认覆盖并刷写</button><button id="fl-ram-boot" class="pri" type="button" hidden>从镜像内存启动</button><button id="fl-plan" class="pri" type="button">预览写入范围</button><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
 </dialog>
-<dialog id="image-workspace-dialog" class="ft-dialog">
-  <header><h2>镜像工作目录</h2><button id="iw-close" type="button">关闭</button></header>
-  <label class="ft-field">控制机目录<input id="iw-directory" type="text" spellcheck="false" placeholder="控制机上的已解压镜像目录"></label>
-  <div class="fl-source-actions"><button id="iw-browse" type="button">浏览控制机目录</button><button id="iw-copy" type="button">复制路径</button><button id="iw-import" type="button">读取并使用此目录</button><button id="iw-fork" type="button">创建可编辑副本</button><button id="iw-refresh" type="button">刷新文件列表</button></div>
-  <div id="iw-directories" class="fl-source-actions"></div><p id="iw-status" role="status"></p><button id="iw-cancel" type="button" hidden>取消目录准备</button><div id="iw-files" class="iw-files"></div>
+<dialog id="image-workspace-dialog" class="ft-dialog" aria-labelledby="iw-title">
+  <header><h2 id="iw-title">镜像工作目录</h2><button id="iw-close" type="button">关闭</button></header>
+  <label class="ft-field">控制机路径<input id="iw-directory" type="text" spellcheck="false" placeholder="镜像包或解压目录的绝对路径"></label>
+  <div class="fl-source-actions"><button id="iw-browse" type="button">浏览控制机</button><button id="iw-copy" type="button">复制路径</button><button id="iw-import" type="button">导入</button><button id="iw-fork" type="button">创建可编辑副本</button><button id="iw-refresh" type="button">刷新文件列表</button></div>
+  <div id="iw-directories" class="iw-files"></div><p id="iw-status" role="status"></p><button id="iw-cancel" type="button" hidden>取消准备</button><div id="iw-files" class="iw-files"></div>
   <section id="iw-editor" hidden><strong id="iw-name"></strong><textarea id="iw-text" rows="14" spellcheck="false" aria-label="文件内容"></textarea><div class="fl-source-actions"><button id="iw-save" type="button">保存为新镜像版本</button><button id="iw-replace" type="button">上传并替换文件</button><input id="iw-upload" type="file" hidden></div></section>
 </dialog>
 <dialog id="probe-settings-dialog" class="probe-settings-dialog" aria-labelledby="probe-settings-title">

@@ -17,6 +17,7 @@
     var display = new options.Display(canvas), keyboard = new options.Keyboard(canvas);
     var width = 0, height = 0, writable = false, disposed = false, grabbed = false;
     var keys = new Map(), buttons = 0, pointer = {x: 0, y: 0}, scale = 'fit';
+    var clipboardKeys = new Set(), pasteWithShift = false;
     var pendingMove = null, moveTimer = null, wheelRemainder = 0;
     var raf = options.requestAnimationFrame || global.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); };
     var caf = options.cancelAnimationFrame || global.cancelAnimationFrame || clearTimeout;
@@ -61,6 +62,7 @@
     }
     function grab() { if (!disposed && writable && !grabbed) { keyboard.grab(); grabbed = true; systemKeys(); } }
     function release(reason) {
+      clipboardKeys.clear(); pasteWithShift = false;
       unlockSystemKeys(); flushMove();
       if (grabbed) { keyboard.ungrab(); grabbed = false; }
       keys.forEach(function (keysym, code) { send({type: 'key', keysym: keysym, code: code, down: false}); });
@@ -110,6 +112,46 @@
       if (scale === 'fit') display.autoscale(Math.max(1, viewport.clientWidth), Math.max(1, viewport.clientHeight));
       else display.scale = Number(scale);
     }
+    function combination(codes, clipboard) {
+      var keysyms = {ControlLeft: 0xffe3, AltLeft: 0xffe9, ShiftLeft: 0xffe1,
+        MetaLeft: 0xffeb, Delete: 0xffff, Tab: 0xff09, Escape: 0xff1b, KeyC: 0x63, KeyV: 0x76};
+      if (!writable || codes.some(function (code) { return !keysyms[code]; })) return false;
+      if (clipboard) ['MetaLeft','MetaRight'].forEach(function (code) {
+        if (keys.has(code)) emitKey(keys.get(code), code, false);
+      });
+      var pressed = codes.filter(function (code) { return !keys.has(code); });
+      pressed.forEach(function (code) { emitKey(keysyms[code], code, true); });
+      pressed.reverse().forEach(function (code) { emitKey(keysyms[code], code, false); });
+      return true;
+    }
+    function clipboardKey(event) {
+      if (event.type === 'keyup') {
+        if (clipboardKeys.delete(event.code)) { event.preventDefault(); event.stopImmediatePropagation(); }
+        return;
+      }
+      if (!writable || event.altKey || !(event.ctrlKey || event.metaKey)
+          || !['KeyC','KeyV'].includes(event.code)) return;
+      event.stopImmediatePropagation();
+      clipboardKeys.add(event.code);
+      if (event.code === 'KeyV' && !event.repeat) {
+        pasteWithShift = event.shiftKey;
+        // Let the browser fire its native paste event, including on HTTP.
+        return;
+      }
+      event.preventDefault();
+      if (!event.repeat && options.copy && combination(pasteCodes('KeyC', event.shiftKey), true)) options.copy();
+    }
+    function pasteCodes(key, shift) { return shift ? ['ControlLeft','ShiftLeft',key] : ['ControlLeft',key]; }
+    function paste(event) {
+      if (!writable || !options.paste || !event.clipboardData) return;
+      event.preventDefault();
+      var codes = pasteCodes('KeyV', pasteWithShift);
+      pasteWithShift = false;
+      options.paste(event.clipboardData.getData('text/plain'), codes);
+    }
+    canvas.addEventListener('keydown', clipboardKey, true);
+    canvas.addEventListener('keyup', clipboardKey, true);
+    canvas.addEventListener('paste', paste);
     var handlers = {pointerdown: pointerDown, pointermove: pointerMove, pointerup: pointerUp,
       pointercancel: function () { release('pointer-cancelled'); },
       lostpointercapture: function () { if (buttons) release('pointer-capture-lost'); },
@@ -152,19 +194,16 @@
       flush: function () { return Promise.resolve(display.flush()).then(function () { return !disposed; }); },
       focus: function () { canvas.focus({preventScroll: true}); grab(); },
       release: release,
-      combination: function (codes) {
-        var keysyms = {ControlLeft: 0xffe3, AltLeft: 0xffe9, ShiftLeft: 0xffe1,
-          MetaLeft: 0xffeb, Delete: 0xffff, Tab: 0xff09, Escape: 0xff1b};
-        if (!writable || codes.some(function (code) { return !keysyms[code]; })) return;
-        codes.forEach(function (code) { emitKey(keysyms[code], code, true); });
-        codes.slice().reverse().forEach(function (code) { emitKey(keysyms[code], code, false); });
-      },
+      combination: combination,
       dispose: function () {
         if (disposed) return;
         release('viewer-closed'); writable = false; disposed = true;
         if (moveTimer !== null) caf(moveTimer);
         pendingMove = null;
         if (observer) observer.disconnect();
+        canvas.removeEventListener('keydown', clipboardKey, true);
+        canvas.removeEventListener('keyup', clipboardKey, true);
+        canvas.removeEventListener('paste', paste);
         Object.keys(handlers).forEach(function (name) { canvas.removeEventListener(name, handlers[name]); });
       }
     };
@@ -176,7 +215,7 @@
     var socket = null, surface = null, ready = false, inputAllowed = false, frame = null;
     var queue = [], inflight = null, sequence = 0, ackTimer = null, heartbeat = null;
     var renderPromise = Promise.resolve(), renderPending = 0, lastSequence = 0, mode = '', renderEpoch = 0;
-    var clipboardRequested = false, clipboardTimer = null;
+    var clipboardTimer = null;
     var capabilities = {}, needFullFrame = true, hasObserved = false;
     var releaseBarrier = '', pendingIntent = null;
     var availability = null, setupValue = null, candidates = [], candidateId = '', detecting = false, savingSetup = false;
@@ -193,6 +232,9 @@
       $('desktop-error').hidden = false;
       $('desktop-error').open = true;
       $('desktop-error-details').textContent = result.details ? JSON.stringify(result.details, null, 2) : error.message;
+      var saved = setupValue && setupValue.connection;
+      $('desktop-connect-without-pin').hidden = !(result.code === 'desktop-certificate-rejected'
+        && saved && saved.provider === 'rdp' && saved.host && saved.password_saved && saved.certificate_policy !== 'accept');
       overlay(error.message); status(error.message);
     }
     function fullscreenLabel() {
@@ -210,7 +252,6 @@
       if (ackTimer) clearTimeout(ackTimer); ackTimer = null;
       if (heartbeat) clearInterval(heartbeat); heartbeat = null;
       if (clipboardTimer) clearTimeout(clipboardTimer); clipboardTimer = null;
-      clipboardRequested = false;
     }
     function resetObservation(reason) {
       renderEpoch++; frame = null; inputAllowed = false; queue = []; needFullFrame = true;
@@ -222,6 +263,7 @@
       var old = socket; socket = null; ready = false; inputAllowed = false; frame = null;
       clearTimers(); queue = []; inflight = null;
       releaseBarrier = ''; pendingIntent = null;
+      closeClipboard();
       if (old && old.readyState < 2) old.close(1000, 'viewer-detached');
     }
     function stop(message) {
@@ -230,24 +272,25 @@
     }
     function pump() {
       if (inflight || !ready || !socket || socket.readyState !== 1 || !queue.length) return;
+      if (queue[0].copyLocal && !queue[0].copyReady) {
+        if (!clipboardTimer) {
+          var reading = queue[0];
+          // Give the remote application a turn to publish the new selection.
+          clipboardTimer = setTimeout(function () { clipboardTimer = null; reading.copyReady = true; pump(); }, 150);
+        }
+        return;
+      }
       var next = queue.shift(), seq = ++sequence;
       var message = next.release ? {type: 'release_all', seq: seq} :
         {type: 'input', seq: seq, frame_id: next.frame_id, event: next.event};
-      inflight = {seq: seq, event: next.event, release: next.release};
+      inflight = {seq: seq, event: next.event, release: next.release, copyLocal:next.copyLocal};
       if (next.release) releaseBarrier = 'sent';
       if (!send(message)) { stop('输入连接已断开，请重新观察后操作，不要重复输入。'); return; }
-      if (next.event && next.event.type === 'clipboard-read') {
-        clipboardRequested = true;
-        if (clipboardTimer) clearTimeout(clipboardTimer);
-        clipboardTimer = setTimeout(function () {
-          clipboardRequested = false; clipboardTimer = null; status('未收到远端剪贴板，请先检查连接。');
-        }, ackTimeout);
-      }
       ackTimer = setTimeout(function () {
         stop('输入结果未确认，连接已停止。请重新连接画面核对，不要重复输入。');
       }, ackTimeout);
     }
-    function enqueue(event, motion) {
+    function enqueue(event, motion, copyLocal) {
       if (event.type === 'release') {
         // Drop unsent input on focus loss. Release the server-held state after
         // the one in-flight operation; a closed socket also releases server-side.
@@ -262,7 +305,7 @@
       else if (event.type === 'clipboard' || event.type === 'text') status('正在操作…');
       else if (event.type === 'wheel' || event.type === 'key' && event.down ||
           event.type === 'pointer' && event.buttons && !motion) status('已连接 · 点击画面后控制桌面');
-      var next = {event: event, frame_id: frame.id, motion: motion};
+      var next = {event: event, frame_id: frame.id, motion: motion, copyLocal:copyLocal};
       var tail = queue[queue.length - 1];
       if (motion && tail && tail.motion && tail.event.buttons === event.buttons && tail.frame_id === next.frame_id) queue[queue.length - 1] = next;
       else {
@@ -274,6 +317,53 @@
     function dispatchIntent(intent) {
       if (intent.codes) { if (surface) surface.combination(intent.codes); }
       else enqueue(intent.event);
+    }
+    function pasteFromBrowser(text, codes) {
+      if (!text) return;
+      var clipboard = capabilities.clipboard || {}, length = 0, count = 0;
+      for (var character of text) {
+        var point = character.codePointAt(0);
+        if (point === 0 || point >= 0xd800 && point <= 0xdfff) {
+          status('剪贴板文本包含无效字符，请重新复制'); return;
+        }
+        length += point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+        if (length > 32768) { status('剪贴板文本超过 32 KiB，请缩短后再发送'); return; }
+        count++;
+      }
+      if (!clipboard.write || /^latin[-_]?1$/i.test(clipboard.encoding || '') && /[^\u0000-\u00ff]/.test(text)) {
+        if (capabilities.text && count <= 1024) enqueue({type:'text', text:text});
+        else status('此桌面无法粘贴该文本');
+        return;
+      }
+      if (enqueue({type:'clipboard', text:text}) && surface) surface.combination(codes, true);
+    }
+    function revealClipboard(focus) {
+      $('desktop-clipboard').hidden = false;
+      $('desktop-clipboard-toggle').setAttribute('aria-expanded', 'true');
+      if (surface) surface.resize();
+      if (focus) { $('desktop-text').focus(); $('desktop-text').select(); }
+    }
+    function closeClipboard() {
+      $('desktop-clipboard').hidden = true;
+      $('desktop-clipboard-toggle').setAttribute('aria-expanded', 'false');
+      $('desktop-text').value = '';
+    }
+    function copyToBrowser(text, ctx, generation, connection) {
+      function stillCurrent() { return current(ctx, generation) && socket === connection && panelVisible(); }
+      function fallback() {
+        if (!stillCurrent()) return;
+        if (options.copyText && options.copyText(text, true)) {
+          if (surface) surface.focus();
+          status('文本已复制到本机剪贴板');
+        } else {
+          revealClipboard(true); status('请按 Ctrl+C 复制远端文本');
+        }
+      }
+      var clipboard = global.navigator && global.navigator.clipboard;
+      if (!clipboard || !clipboard.writeText) { fallback(); return; }
+      clipboard.writeText(text).then(function () {
+        if (stillCurrent()) status('文本已复制到本机剪贴板');
+      }).catch(fallback);
     }
     function toolbarIntent(intent) {
       if (!panelVisible() || !ready || !socket || socket.readyState !== 1) return;
@@ -289,8 +379,9 @@
     }
     function hidePanel() {
       var wasVisible = visible;
-      visible = false; pendingIntent = null; clipboardRequested = false;
+      visible = false; pendingIntent = null;
       if (clipboardTimer) clearTimeout(clipboardTimer); clipboardTimer = null;
+      closeClipboard();
       if (wasVisible && surface) surface.release('view-hidden');
       inputAllowed = false;
       $('desktop-panel').hidden = true;
@@ -419,16 +510,14 @@
         if (acknowledged.event && acknowledged.event.type === 'text') status('文本已发送到当前应用');
         pump();
       } else if (message.type === 'clipboard') {
-        if (!clipboardRequested) return;
-        clipboardRequested = false;
-        if (clipboardTimer) clearTimeout(clipboardTimer); clipboardTimer = null;
+        if (!panelVisible() || !inflight || !inflight.event || inflight.event.type !== 'clipboard-read') return;
         if (message.available === false) {
           $('desktop-text').value = ''; status('暂无可读的远端文本剪贴板'); return;
         }
         if (typeof message.text !== 'string') throw new Error('远端剪贴板响应无效');
-        $('desktop-text').value = message.text; $('desktop-clipboard').hidden = false;
-        $('desktop-clipboard-toggle').setAttribute('aria-expanded', 'true');
-        status('已读取远端剪贴板，可编辑或复制到本机');
+        $('desktop-text').value = message.text;
+        if (inflight.copyLocal && message.text) copyToBrowser(message.text, ctx, generation, connection);
+        else status('已读取远端剪贴板');
       } else if (message.type === 'error') stop(message.error || '桌面操作结果未确认，请重新连接后观察。');
       else throw new Error('桌面连接返回了未知消息');
     }
@@ -444,6 +533,9 @@
         old.replaceWith(canvas);
         surface = createSurface({canvas: canvas, viewport: $('desktop-screen'), Display: lib.Display, Keyboard: lib.Keyboard,
           onKeyLockUnavailable: function (value) { $('desktop-system-key-hint').hidden = !value; },
+          paste:pasteFromBrowser, copy:function () {
+            if ((capabilities.clipboard || {}).read) enqueue({type:'clipboard-read'}, false, true);
+          },
           send: enqueue, requestAnimationFrame: options.requestAnimationFrame, cancelAnimationFrame: options.cancelAnimationFrame});
         surface.scale($('desktop-scale').value || 'fit');
         var url = new global.URL(query(ctx, 'stream'), global.location.href);
@@ -483,6 +575,7 @@
       $('desktop-user').value = saved.username || setupValue.suggested_user || '';
       $('desktop-password').value = '';
       $('desktop-password').placeholder = saved.password_saved ? translate('已保存，留空保留') : '';
+      $('desktop-certificate-policy').value = saved.certificate_policy || (saved.certificate_sha256 ? 'pin' : 'accept');
       $('desktop-certificate').value = saved.certificate_sha256 || '';
       $('desktop-trust').checked = true; $('desktop-agent').checked = !!saved.allow_agent;
       candidateId = ''; $('desktop-services').value = ''; setupFields();
@@ -490,7 +583,9 @@
     function setupFields() {
       var rdp = $('desktop-protocol').value === 'rdp';
       $('desktop-user-field').hidden = !rdp; $('desktop-user').required = rdp; $('desktop-certificate-field').hidden = !rdp;
-      $('desktop-trust-field').hidden = !rdp || !$('desktop-certificate').value.trim();
+      var pinned = rdp && $('desktop-certificate-policy').value === 'pin';
+      $('desktop-pin-field').hidden = !pinned;
+      $('desktop-trust-field').hidden = !pinned || !$('desktop-certificate').value.trim();
       $('desktop-rdp-help').hidden = !rdp;
     }
     function showSetup(automatic) {
@@ -547,10 +642,14 @@
       var provider = $('desktop-protocol').value, host = $('desktop-host').value.trim(), port = Number($('desktop-port').value);
       var username = provider === 'rdp' ? $('desktop-user').value : '';
       var same = saved.provider === provider && saved.host === host && saved.port === port && saved.username === username;
+      var policy = provider === 'rdp' ? $('desktop-certificate-policy').value : '';
       var payload = {key:ctx.key, serial:ctx.serial, client_id:options.clientId || '', revision:setupValue.revision,
         provider:provider, host:host, port:port, username:username,
-        certificate_sha256:provider === 'rdp' ? $('desktop-certificate').value.trim() : '',
-        trust_certificate:provider === 'rdp' && $('desktop-trust').checked, allow_agent:$('desktop-agent').checked};
+        certificate_policy:policy, certificate_sha256:policy === 'pin' ? $('desktop-certificate').value.trim() : '',
+        trust_certificate:policy === 'pin' && $('desktop-trust').checked, allow_agent:$('desktop-agent').checked};
+      if (policy === 'pin' && !/^[0-9a-f]{64}$/i.test(payload.certificate_sha256)) {
+        connectionMessage('RDP 证书指纹必须是完整的 SHA256'); return;
+      }
       if (payload.certificate_sha256 && !payload.trust_certificate && (saved.provider !== provider || saved.host !== host
           || saved.port !== port || (saved.certificate_sha256 || '').toLowerCase() !== payload.certificate_sha256.toLowerCase())) {
         connectionMessage('请核对并确认首次观察到的 RDP 证书指纹'); return;
@@ -628,6 +727,11 @@
     $('desktop-error-copy').addEventListener('click', function () {
       if (options.copyText && options.copyText($('desktop-error-details').textContent, true)) status('错误详情已复制');
     });
+    $('desktop-connect-without-pin').addEventListener('click', function () {
+      if ($('desktop-connect-without-pin').hidden || !setupValue || savingSetup) return;
+      fillSetup(); $('desktop-certificate-policy').value = 'accept'; setupFields();
+      showSetup(false); saveConnection();
+    });
     $('desktop-services').addEventListener('change', chooseService);
     $('desktop-connection').addEventListener('submit', saveConnection);
     $('desktop-connection').addEventListener('input', function () { if (detecting) detecting.edited = true; });
@@ -640,6 +744,7 @@
       setupFields();
     }); });
     $('desktop-certificate').addEventListener('input', function () { candidateId = ''; $('desktop-trust').checked = true; setupFields(); });
+    $('desktop-certificate-policy').addEventListener('change', setupFields);
     $('d-tabs').addEventListener('click', function (event) {
       if (visible) hidePanel();
       if (event.target && event.target.dataset && event.target.dataset.kind && event.target.dataset.kind !== 'serial') dismissSetup();
@@ -697,51 +802,14 @@
       global.addEventListener('decklab-language-change', function () { status(statusValue); overlay(overlayValue); fullscreenLabel(); });
     }
     $('desktop-clipboard-toggle').addEventListener('click', function () {
-      var hidden = !$('desktop-clipboard').hidden; $('desktop-clipboard').hidden = hidden;
-      $('desktop-clipboard-toggle').setAttribute('aria-expanded', String(!hidden));
-      if (surface) surface.resize();
-    });
-    $('desktop-clipboard-read').addEventListener('click', function () {
-      if (capabilities.clipboard && capabilities.clipboard.read === false) { status('此桌面不支持读取文本剪贴板'); return; }
+      if (!$('desktop-clipboard').hidden) {
+        closeClipboard();
+        if (surface) surface.resize();
+        return;
+      }
+      if (!(capabilities.clipboard || {}).read) { status('此桌面不支持读取文本剪贴板'); return; }
+      revealClipboard(false);
       toolbarIntent({event: {type: 'clipboard-read'}});
-    });
-    $('desktop-type-text').addEventListener('click', function () {
-      var text = $('desktop-text').value, length = 0;
-      for (var character of text) {
-        var point = character.codePointAt(0);
-        if (point === 0 || point >= 0xd800 && point <= 0xdfff) { status('输入文本包含无效字符，请重新粘贴'); return; }
-        if (++length > 1024) { status('输入文本最多 1024 个字符'); return; }
-      }
-      toolbarIntent({event: {type: 'text', text: text}});
-    });
-    $('desktop-send').addEventListener('click', function () {
-      var text = $('desktop-text').value, clipboard = capabilities.clipboard || {};
-      if (clipboard.write === false) { status('此桌面不支持写入文本剪贴板'); return; }
-      if (/^latin[-_]?1$/i.test(clipboard.encoding || '') && /[^\u0000-\u00ff]/.test(text)) {
-        status('此 VNC 剪贴板只支持 Latin-1 文本，当前文本含不支持的字符'); return;
-      }
-      var length = 0;
-      for (var character of text) {
-        var point = character.codePointAt(0);
-        if (point >= 0xd800 && point <= 0xdfff) { status('剪贴板文本包含无效 Unicode 字符，请重新粘贴'); return; }
-        length += point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
-      }
-      if (length > 32768) { status('剪贴板文本超过 32 KiB，请缩短后再发送'); return; }
-      toolbarIntent({event: {type: 'clipboard', text: text}});
-    });
-    $('desktop-clipboard-local').addEventListener('click', function () {
-      var clipboard = global.navigator && global.navigator.clipboard;
-      if (!clipboard || !clipboard.readText) { status('浏览器未允许读取本机剪贴板，请在文本框中手动粘贴。'); return; }
-      var generation = version, ctx = options.getView();
-      clipboard.readText().then(function (text) { if (current(ctx, generation)) $('desktop-text').value = text; })
-        .catch(function () { if (current(ctx, generation)) status('浏览器未允许读取本机剪贴板，请在文本框中手动粘贴。'); });
-    });
-    $('desktop-clipboard-copy').addEventListener('click', function () {
-      var clipboard = global.navigator && global.navigator.clipboard;
-      if (!clipboard || !clipboard.writeText) { $('desktop-text').focus(); $('desktop-text').select(); status('请手动复制文本框中的内容。'); return; }
-      var generation = version, ctx = options.getView();
-      clipboard.writeText($('desktop-text').value).then(function () { if (current(ctx, generation)) status('文本已复制到本机剪贴板'); })
-        .catch(function () { if (current(ctx, generation)) status('浏览器未允许写入剪贴板，请手动复制文本框中的内容。'); });
     });
     return {refresh: refresh, close: closePanel, showTerminal: function () {
       dismissSetup(); if (visible) hidePanel();

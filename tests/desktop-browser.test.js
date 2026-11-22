@@ -30,7 +30,7 @@ window.fetch = async (url, options) => {
     url === '/api/desktop/open' ? {session: {id: 'fixture-session', serial: 'FIXTURE-SN'}} : {ok: true};
   if(url==='/api/desktop/discover')data={candidates:fixture.discovered,reason:fixture.discovered.length?'':'未发现 VNC／RDP 服务，可填写地址手工连接'};
   if(url==='/api/desktop/configure') {
-    fixture.configured=true;fixture.connection={provider:body.provider,host:body.host,port:body.port,username:body.username,password_saved:true,certificate_sha256:body.certificate_sha256};
+    fixture.configured=true;fixture.connection={provider:body.provider,host:body.host,port:body.port,username:body.username,password_saved:true,certificate_sha256:body.certificate_sha256,certificate_policy:body.certificate_policy};
     data={ok:true,setup:setup()};
   }
   return {ok: true, status: 200, json: async () => data};
@@ -60,7 +60,7 @@ class Stream {
   constructor(url, protocol) {
     this.url = url; this.protocol = protocol; this.readyState = 0; this.sequence = 0; fixture.sockets.push(this);
     setTimeout(() => { this.readyState = 1; this.onopen(); this.server({type: 'ready',
-      session: {id: 'fixture-session', serial: 'FIXTURE-SN'}, capabilities: {}});
+      session: {id: 'fixture-session', serial: 'FIXTURE-SN'}, capabilities: {text:true,clipboard:{read:true,write:true,encoding:'utf-8'}}});
       this.frame(true); this.timer = setInterval(() => this.frame(false), 80); }, 10);
   }
   server(message) { if (this.readyState === 1) this.onmessage({data: JSON.stringify(message)}); }
@@ -80,14 +80,15 @@ class Stream {
     if (message.type === 'observed') setTimeout(() => this.server({type:'observed',ok:true,frame_id:message.frame_id,sequence:message.sequence}), 1);
     if (message.type === 'heartbeat') setTimeout(() => this.server({type:'heartbeat',ok:true}), 1);
     if (message.type === 'input' || message.type === 'release_all') setTimeout(() => {
+      if (message.event && message.event.type === 'clipboard-read') this.server({type: 'clipboard', text: 'Remote fixture text', encoding: 'utf-8'});
       this.server({type: 'ack', seq: message.seq, ok: true});
       if (message.type === 'release_all') this.frame(true);
-      if (message.event && message.event.type === 'clipboard-read') this.server({type: 'clipboard', text: 'Remote fixture text', encoding: 'utf-8'});
     }, 5);
   }
   close() { clearInterval(this.timer); this.readyState = 3; if (this.onclose) this.onclose(); }
 }
 fixture.desktop = SerialdDesktop.create({byId: $, fetch: window.fetch, clientId: 'fixture-page',
+  copyText: SerialdUI.copyText,
   getView: () => controller.current, websocketFactory: (url, protocol) => new Stream(url, protocol)});
 fixture.desktop.refresh(controller.current);
 fixture.ready = true;
@@ -192,30 +193,42 @@ let chrome, ws;
   await until('fixture.posts.some(p=>p.url==="/api/session-resize" && p.body.presentation)', 'visible serial resumes presentation negotiation');
   await evaluate('document.getElementById("b-desktop").click()');
   await until('fixture.sockets.length===1 && document.getElementById("desktop-overlay").hidden', 'same desktop transport resumed after terminal');
-  await evaluate('document.getElementById("desktop-clipboard-toggle").click(); document.getElementById("desktop-image").focus()');
-  const readButton = await evaluate('JSON.parse(JSON.stringify(document.getElementById("desktop-clipboard-read").getBoundingClientRect()))');
-  const beforeRead = await evaluate('fixture.sent.filter(m=>m.event && m.event.type==="clipboard-read").length');
+  await evaluate('document.getElementById("desktop-image").focus()');
+  const readButton = await evaluate('JSON.parse(JSON.stringify(document.getElementById("desktop-clipboard-toggle").getBoundingClientRect()))');
+  const beforeRead = await evaluate('fixture.sent.filter(m=>m.event?.type==="clipboard-read").length');
   await mouse('mousePressed', readButton.x+readButton.width/2, readButton.y+readButton.height/2, {button:'left',buttons:1,clickCount:1});
   await mouse('mouseReleased', readButton.x+readButton.width/2, readButton.y+readButton.height/2, {button:'left',buttons:0,clickCount:1});
-  await until('document.getElementById("desktop-text").value==="Remote fixture text"', 'explicit remote clipboard');
-  assert.equal(await evaluate('fixture.sent.filter(m=>m.event && m.event.type==="clipboard-read").length'),beforeRead+1, 'one real toolbar click sends one request after focus-release observation');
+  await until('document.getElementById("desktop-text").value==="Remote fixture text"', 'explicit remote clipboard fallback');
+  assert.equal(await evaluate('fixture.sent.filter(m=>m.event?.type==="clipboard-read").length'),beforeRead+1);
   await evaluate('SerialdI18n.setLocale("en")');
-  assert.equal(await evaluate('document.getElementById("desktop-status").textContent'), 'Remote clipboard read. Edit it or copy it to this computer.');
+  assert.equal(await evaluate('document.getElementById("desktop-status").textContent'), 'Remote clipboard read');
   assert.equal(await evaluate('document.getElementById("desktop-close").textContent'), 'Back to terminal');
-  assert.equal(await evaluate('document.getElementById("desktop-type-text").textContent'), 'Type text');
-  await evaluate('SerialdI18n.setLocale("zh-CN")');
-  assert.equal(await evaluate('document.getElementById("desktop-status").textContent'), '已读取远端剪贴板，可编辑或复制到本机');
-  assert.equal(await evaluate('document.getElementById("desktop-close").textContent'), '返回终端');
-  await evaluate('document.getElementById("desktop-text").value="中文输入 😀"; document.getElementById("desktop-image").focus()');
-  const textButton = await evaluate('JSON.parse(JSON.stringify(document.getElementById("desktop-type-text").getBoundingClientRect()))');
-  await mouse('mousePressed', textButton.x+textButton.width/2, textButton.y+textButton.height/2, {button:'left',buttons:1,clickCount:1});
-  await mouse('mouseReleased', textButton.x+textButton.width/2, textButton.y+textButton.height/2, {button:'left',buttons:0,clickCount:1});
-  await until('document.getElementById("desktop-status").textContent==="文本已发送到当前应用"', 'Unicode text action after focus-release observation');
-  assert.deepEqual(await evaluate('fixture.sent.filter(m=>m.event && m.event.type==="text").map(m=>m.event.text)'), ['中文输入 😀'], 'one real toolbar click sends Unicode application input exactly once');
-  await evaluate('SerialdI18n.setLocale("en")');
-  assert.equal(await evaluate('document.getElementById("desktop-status").textContent'), 'Text sent to the current application');
-  assert.equal(await evaluate('document.getElementById("desktop-text").value'), '中文输入 😀', 'locale changes never translate user text');
-  await evaluate('SerialdI18n.setLocale("zh-CN")');
+  await evaluate('SerialdI18n.setLocale("zh-CN"); document.getElementById("desktop-clipboard-toggle").click(); document.getElementById("desktop-image").focus()');
+  await until('document.getElementById("desktop-overlay").hidden', 'canvas is writable again');
+  const permission = {origin:await evaluate('location.origin'), permissions:['clipboardReadWrite','clipboardSanitizedWrite']};
+  await rpc('Browser.grantPermissions',permission);
+  async function shortcut(letter) {
+    const code = 'Key'+letter.toUpperCase(), windowsVirtualKeyCode = letter.toUpperCase().charCodeAt(0);
+    await rpc('Input.dispatchKeyEvent', {type:'keyDown',key:'Control',code:'ControlLeft',windowsVirtualKeyCode:17,modifiers:2});
+    for (const type of ['keyDown','keyUp']) await rpc('Input.dispatchKeyEvent',{type,key:letter,code,windowsVirtualKeyCode,modifiers:2});
+    await rpc('Input.dispatchKeyEvent', {type:'keyUp',key:'Control',code:'ControlLeft',windowsVirtualKeyCode:17});
+  }
+  await evaluate('navigator.clipboard.writeText("中文粘贴 😀").then(() => true)');
+  await shortcut('v');
+  await until('fixture.sent.some(m=>m.event?.code==="KeyV" && m.event?.down===false)', 'native browser paste gesture');
+  assert.deepEqual(await evaluate('fixture.sent.filter(m=>m.event?.type==="clipboard").map(m=>m.event.text)'), ['中文粘贴 😀']);
+  const ordered = await evaluate('fixture.sent.filter(m=>m.event?.type==="clipboard" || m.event?.code==="KeyV").map(m=>m.event.type)');
+  assert.deepEqual(ordered, ['clipboard','key','key']);
+  await shortcut('c');
+  await until('document.getElementById("desktop-status").textContent==="文本已复制到本机剪贴板"', 'Ctrl+C writes to local clipboard');
+  assert.equal(await evaluate('navigator.clipboard.readText()'), 'Remote fixture text');
+  assert.equal(await evaluate('document.getElementById("desktop-clipboard").hidden'),true);
+  await evaluate('window.nativeClipboard = navigator.clipboard; nativeClipboard.writeText("before fallback")');
+  await evaluate('Object.defineProperty(navigator,"clipboard",{value:undefined,configurable:true})');
+  await shortcut('c');
+  await until('document.getElementById("desktop-status").textContent==="文本已复制到本机剪贴板"', 'copy fallback without Clipboard API');
+  assert.equal(await evaluate('nativeClipboard.readText()'), 'Remote fixture text');
+  await evaluate('delete navigator.clipboard');
   await evaluate('document.getElementById("desktop-fullscreen").click()');
   await until('document.fullscreenElement===document.getElementById("desktop-panel")', 'true fullscreen');
   await evaluate('document.exitFullscreen()');
@@ -232,8 +245,8 @@ let chrome, ws;
     const layout = await evaluate('({width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,screen:document.getElementById("desktop-screen").getBoundingClientRect().height})');
     assert.ok(layout.scroll <= layout.width+1, name + ' must not overflow the page'); assert.ok(layout.screen >= 150, name + ' keeps a usable display');
     if (name === 'mobile') {
-      await evaluate('document.querySelector(".desktop-clipboard-actions button:last-child").scrollIntoView({block:"nearest"})');
-      assert.ok(await evaluate('document.querySelector(".desktop-clipboard-actions button:last-child").getBoundingClientRect().bottom <= innerHeight'), 'mobile clipboard actions remain reachable through panel scrolling');
+      await evaluate('document.getElementById("desktop-clipboard-toggle").scrollIntoView({block:"nearest"})');
+      assert.ok(await evaluate('document.getElementById("desktop-clipboard-toggle").getBoundingClientRect().bottom <= innerHeight'), 'mobile clipboard remains reachable through panel scrolling');
     }
     const shot = await rpc('Page.captureScreenshot', {format: 'png'}); fs.writeFileSync(path.join(output,name+'.png'), Buffer.from(shot.data,'base64'));
   }
@@ -251,21 +264,23 @@ let chrome, ws;
   await evaluate('SerialdI18n.setLocale("zh-CN")');
   const beforeConfigure=await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").length');
   await evaluate('document.getElementById("desktop-services").value="rdp-found";document.getElementById("desktop-services").dispatchEvent(new Event("change"));document.getElementById("desktop-password").value="fixture-only-password"');
-  assert.equal(await evaluate('document.getElementById("desktop-trust").checked'),true);
+  assert.equal(await evaluate('document.getElementById("desktop-certificate-policy").value'),'accept');
+  assert.equal(await evaluate('document.getElementById("desktop-pin-field").hidden'),true);
   assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").length'),beforeConfigure,'detecting a fingerprint never saves trust or connects by itself');
   for (const [name,width,height] of [['setup-desktop',1280,900],['setup-mobile',390,844]]) {
     await rpc('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});await delay(80);
     assert.ok(await evaluate('document.documentElement.scrollWidth<=document.documentElement.clientWidth+1'),name+' setup fits');
     if (name === 'setup-mobile') {
       await evaluate('document.getElementById("desktop-save-connect").scrollIntoView({block:"nearest"})');
-      assert.ok(await evaluate('document.getElementById("desktop-save-connect").getBoundingClientRect().bottom<=innerHeight'),'mobile connection submit remains reachable');
+      const savePosition = await evaluate('({bottom:document.getElementById("desktop-save-connect").getBoundingClientRect().bottom, height:innerHeight})');
+      assert.ok(savePosition.bottom <= savePosition.height + 1, 'mobile connection submit remains reachable: ' + JSON.stringify(savePosition));
     }
     const shot=await rpc('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(output,name+'.png'),Buffer.from(shot.data,'base64'));
   }
-  await evaluate('document.getElementById("desktop-trust").checked=true;document.getElementById("desktop-connection").requestSubmit()');
+  await evaluate('document.getElementById("desktop-connection").requestSubmit()');
   await until('fixture.sockets.length===2 && document.getElementById("desktop-overlay").hidden','save RDP settings and connect through existing viewer');
   assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").at(-1).body.provider'),'rdp');
-  assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").at(-1).body.trust_certificate'),true);
+  assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").at(-1).body.certificate_policy'),'accept');
   assert.equal(await evaluate('document.getElementById("desktop-password").value'),'');
   await evaluate('fixture.desktop.close();fixture.configured=false;fixture.connection={};fixture.discovered=[];fixture.desktop.refresh(null);fixture.desktop.refresh(fixture.controller.current);document.getElementById("b-desktop").click()');
   await until('!document.getElementById("desktop-connection").hidden && document.getElementById("desktop-detect-status").textContent.includes("未发现")','manual fallback with no detected server');

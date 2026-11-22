@@ -219,6 +219,23 @@ class SetupTests(unittest.TestCase):
             with self.assertRaises(TaskError):setup.configure(device,changed)
             settings.save({'version':1,'environment':{'UI_LANGUAGE':'en'}},settings.snapshot()['revision'])
             with self.assertRaises(TaskError):setup.configure(device,same)
+
+    def test_rdp_defaults_to_accepting_new_certificates_and_can_replace_an_old_pin(self):
+        with self.setup() as (f, device, settings, _):
+            setup = f.manager.desktop.setup
+            observed = {'host':'10.0.0.2', 'port':3389, 'provider':'rdp', 'certificate_sha256':'a' * 64}
+            with mock.patch('seriald_core.desktop_setup.probe', return_value=observed):
+                candidate = setup.discover(device, ('10.0.0.2',3389,'rdp'))['candidates'][0]
+            payload = dict(provider='rdp', host='10.0.0.2', port=3389, username='rdp')
+            result = setup.configure(device, self.payload(settings, **payload, candidate_id=candidate['id']))
+            self.assertEqual(result['setup']['connection']['certificate_policy'], 'accept')
+            config = setup.desktop.book.boards[device.serial]
+            self.assertNotIn('certificate_sha256', config)
+            setup.configure(device, self.payload(settings, **payload, certificate_sha256='a' * 64, trust_certificate=True))
+            result = setup.configure(device, self.payload(settings, **payload, certificate_policy='accept',
+                                                           password=None, reuse_password=True))
+            self.assertEqual(result['setup']['connection']['certificate_policy'], 'accept')
+            self.assertTrue(result['setup']['connection']['password_saved'])
             self.assertEqual(f.manager.desktop.book.boards[device.serial]['engine'],'freerdp')
 
     def test_other_boards_configuration_and_active_session_ownership_are_preserved(self):

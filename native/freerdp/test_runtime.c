@@ -45,9 +45,8 @@ static void check_security_modes(void)
     assert(!freerdp_settings_get_bool(defaults,FreeRDP_RdstlsSecurity));
     freerdp_settings_free(defaults);
     fprintf(stderr,"SDK defaults verified: TLS/NLA/Ext/RDP=1, RDSTLS=0\n");
-    BOOL standard_rdp[2],standard_after_handover[2];
-    const char* pins[]={NULL,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"};
-    for(unsigned i=0;i<2;i++) {
+    const char* pins[]={NULL,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","accept-current"};
+    for(unsigned i=0;i<sizeof(pins)/sizeof(pins[0]);i++) {
         dl_rdp_options options={0};options.size=sizeof(options);options.abi_version=DL_RDP_ABI_VERSION;
         options.hostname="offline.decklab.invalid";options.port=3389;options.width=4;options.height=4;
         options.certificate_sha256=pins[i];
@@ -57,7 +56,7 @@ static void check_security_modes(void)
         assert(freerdp_settings_get_bool(settings,FreeRDP_NlaSecurity));
         assert(freerdp_settings_get_bool(settings,FreeRDP_ExtSecurity));
         assert(!freerdp_settings_get_bool(settings,FreeRDP_RdstlsSecurity));
-        standard_rdp[i]=freerdp_settings_get_bool(settings,FreeRDP_RdpSecurity);
+        assert(!freerdp_settings_get_bool(settings,FreeRDP_RdpSecurity));
         /* The original library may enable RDSTLS for authenticated handover;
          * doing so must not enable standard RDP security or disable TLS/NLA. */
         assert(freerdp_settings_set_bool(settings,FreeRDP_RdstlsSecurity,TRUE));
@@ -65,17 +64,35 @@ static void check_security_modes(void)
         assert(freerdp_settings_get_bool(settings,FreeRDP_TlsSecurity));
         assert(freerdp_settings_get_bool(settings,FreeRDP_NlaSecurity));
         assert(freerdp_settings_get_bool(settings,FreeRDP_ExtSecurity));
-        standard_after_handover[i]=freerdp_settings_get_bool(settings,FreeRDP_RdpSecurity);
-        fprintf(stderr,"adapter pinned=%u: TLS/NLA/Ext=1, RDSTLS 0->1, standard RDP=%u->%u\n",
-            i,standard_rdp[i],standard_after_handover[i]);
+        assert(!freerdp_settings_get_bool(settings,FreeRDP_RdpSecurity));
+        assert(configured->accept_certificate==(i==2));
         dl_rdp_free(configured);
     }
-    assert(!standard_rdp[0] && !standard_rdp[1]);
-    assert(!standard_after_handover[0] && !standard_after_handover[1]);
 }
 
-int main(void) {
+static void check_certificate_policy(const char* path)
+{
+    FILE* source=fopen(path,"rb");assert(source);
+    BYTE pem[8192];
+    size_t length=fread(pem,1,sizeof(pem),source);
+    assert(length>0 && length<sizeof(pem) && feof(source));fclose(source);
+    dl_rdp_options options={0};options.size=sizeof(options);options.abi_version=DL_RDP_ABI_VERSION;
+    options.hostname="offline.decklab.invalid";options.port=3389;options.width=4;options.height=4;
+    options.certificate_sha256="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    dl_rdp* pinned=dl_rdp_new(&options,NULL,NULL,NULL);assert(pinned);
+    assert(dl_verify(pinned->context->instance,pem,length,options.hostname,3389,0)==0);
+    dl_rdp_free(pinned);
+    options.certificate_sha256="accept-current";
+    dl_rdp* accepted=dl_rdp_new(&options,NULL,NULL,NULL);assert(accepted);
+    assert(dl_verify(accepted->context->instance,pem,length,options.hostname,3389,0)==2);
+    assert(dl_verify(accepted->context->instance,pem,length,options.hostname,3390,0)==0);
+    assert(dl_verify(accepted->context->instance,pem,length,"other.decklab.invalid",3389,0)==0);
+    dl_rdp_free(accepted);
+}
+
+int main(int argc,char** argv) {
     check_security_modes();
+    if (argc==2) check_certificate_policy(argv[1]);
     dl_rdp session={0}; rdpContext context={0}; rdpGdi gdi={0};
     InitializeCriticalSection(&session.lock); session.context=&context; context.gdi=&gdi;
     char reason[512];

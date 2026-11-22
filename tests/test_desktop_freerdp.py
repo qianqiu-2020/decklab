@@ -122,6 +122,12 @@ class FreeRDPTests(unittest.TestCase):
                     FreeRDPDesktop(dict(CONFIG, certificate_sha256=value), library=FakeLibrary())
                 self.assertEqual(caught.exception.code, 'desktop-configuration-failed')
 
+    def test_accept_current_certificate_is_distinct_from_a_pin_and_system_trust(self):
+        _, library = self.provider(certificate_sha256='', certificate_policy='accept')
+        self.assertEqual(library.options['pin'], b'accept-current')
+        with self.assertRaises(DesktopConnectionError):
+            self.provider(certificate_policy='accept')
+
     def test_native_borrowed_frame_is_copied_and_png_is_in_memory(self):
         provider, library = self.provider()
         library.pixels[2] = 200

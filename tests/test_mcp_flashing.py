@@ -1,6 +1,7 @@
 """MCP -> authenticated control -> collector tasks, using simulated USB only."""
 import asyncio
 import base64
+from contextlib import nullcontext
 import hashlib
 import os
 from pathlib import Path
@@ -19,6 +20,7 @@ from seriald_core.tasks import TaskError
 import test_flash_discovery_integration as usb
 import test_image_download as downloads
 import test_nor_workspace as nor
+from test_flash_stream import StreamExecutor
 
 
 class MCPFlashTests(unittest.TestCase):
@@ -42,6 +44,118 @@ class MCPFlashTests(unittest.TestCase):
         sealed = adapter.seal_artifact(row['id'])['artifact']
         self.assertEqual(sealed['sha256'], hashlib.sha256(data).hexdigest())
         return sealed['id']
+
+    @unittest.skipUnless(seriald_mcp.MCPServer, 'optional MCP SDK not installed')
+    def test_k1_k3_common_mcp_workflows(self):
+        from mcp import Client, StdioServerParameters
+        from seriald_core.ramboot_tasks import K1_MUSE_PI_PRO_MODEL, K3_PICO_MODEL
+
+        async def exercise(fixture, chip, flow, token):
+            params = StdioServerParameters(command=sys.executable, args=[str(Path(seriald_mcp.__file__))],
+                env=dict(os.environ, SERIALD_URL=fixture.url, SERIALD_TOKEN=token))
+            async with Client(params) as client:
+                async def call(tool_name, **arguments):
+                    result = await client.call_tool(tool_name, arguments)
+                    self.assertFalse(result.is_error, str(result))
+                    return result.structured_content
+
+                listed = (await call('list_flash_targets'))['targets']
+                found, = listed
+                target = self.scope((await call('probe_flash_target', target=self.scope(found)))['target'])
+                caps = await call('flash_capabilities', target=target)
+                request = dict(target=target, request_id='mcp-regression-' + chip + '-' + flow)
+                if flow != 'stream':
+                    data = b'isolated test fixture'
+                    artifact = (await call('create_flash_artifact', target=target,
+                        name='test.tar.gz', size=len(data)))['artifact']['id']
+                    await call('append_artifact', artifact_id=artifact, offset=0,
+                               data_b64=base64.b64encode(data).decode())
+                    await call('seal_artifact', artifact_id=artifact)
+                if flow == 'normal':
+                    storage = 'emmc' if chip == 'k1' else 'nvme:0'
+                    plan = (await call('preview_flash', target=target, artifact_id=artifact, mode='full',
+                        target_storage=storage, verify='required', binding_revision=caps['binding_revision']))['plan']
+                    self.assertTrue(plan['write_layout'])
+                    self.assertEqual({write['storage'] for write in plan['writes']}, {storage})
+                    self.assertEqual(fixture.executor.executions, [])
+                    tool = 'start_flash'
+                    request.update(plan_id=plan['id'], binding_revision=caps['binding_revision'])
+                elif flow == 'stream':
+                    self.assertTrue(caps['stream_flash_supported'])
+                    tool = 'stream_flash'
+                    request.update(url=f'https://example.org/{chip}.tar.gz', sha256='a' * 64, reset_after=False,
+                                   system_storage='active' if chip == 'k1' else 'nvme:0')
+                else:
+                    self.assertTrue(caps['ram_boot_supported'])
+                    tool = 'boot_ram'
+                    request.update(artifact_id=artifact, binding_revision=caps['binding_revision'])
+                task_id = (await call(tool, **request))['task']['id']
+                self.assertEqual((await call(tool, **request))['task']['id'], task_id)
+                for _ in range(200):
+                    task = (await call('get_task', task_id=task_id))['task']
+                    if task['state'] not in ('queued', 'running'):
+                        break
+                    await asyncio.sleep(.01)
+                self.assertEqual(task['state'], 'completed', task)
+                if flow == 'normal':
+                    self.assertEqual(len(fixture.executor.executions), 1)
+                    self.assertEqual(task['flash']['verify_result'], 'verified')
+                elif flow == 'stream':
+                    self.assertEqual(len(fixture.executor.streams), 1)
+                    self.assertEqual(fixture.executor.streams[0]['system_storage'], request['system_storage'])
+                    self.assertEqual(fixture.executor.streams[0]['archive_sha256'], request['sha256'])
+                    self.assertEqual(task['flash']['verify_result'], 'package-digests')
+                else:
+                    self.assertEqual(task['result']['handoff'], 'acknowledged')
+                    self.assertEqual(task['result']['write_result'], 'not-started')
+                    self.assertEqual(fixture.executor.executions, [])
+                    self.assertEqual(fixture.executor.ram_calls, ['identify', 'transfer'])
+
+        for chip, model in (('k1', K1_MUSE_PI_PRO_MODEL), ('k3', K3_PICO_MODEL)):
+            serial = 'FIXTURE-' + chip.upper()
+            for flow in ('normal', 'stream', 'ram'):
+                with self.subTest(chip=chip, flow=flow), usb.automatic_flashing([(serial, chip)]) as fixture, \
+                        tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    if flow == 'stream':
+                        fixture.manager.flash_executor = fixture.executor = StreamExecutor(directory)
+                    executor = fixture.executor
+                    candidate = executor.candidates[0]
+                    candidate.update(chip=chip, serial=serial, serial_source='eeprom', strong_serial=True,
+                                     modes=['full', 'partitions'])
+                    candidate['identity'].update({'eeprom-serial': serial, 'serialno': serial})
+                    candidate['profile']['chip_family'] = chip
+                    if chip == 'k1':
+                        candidate['profile'].pop('ram_loader_protocol', None)
+                    if flow == 'ram':
+                        candidate.update(mode='bootrom', preparable=True, inspection=None)
+                        candidate.update(serial='', strong_serial=False, identity={'version-brom': '1.0'})
+                        candidate['profile'].update(id='auto-spacemit-gpt-v1', bootrom_identity={'version-brom': '1.0'},
+                            storages=[{'id': 'active', 'layout_source': 'spacemit-gpt', 'size_getvar': '__decklab_gpt_capacity',
+                                       'sector_size': 512, 'sparse': True, 'partitions': []}])
+                        executor.ram_boot_workspace = lambda *args: {'workspace': str(root),
+                            'execution_profile': candidate['profile']}
+                        executor.image_guard = lambda *_: nullcontext()
+                        executor.execution_binding = lambda binding, *args: binding
+                        final = dict(candidate['device'], usb_address=8)
+                        def prepare(binding, on_event, check, **kwargs):
+                            check()
+                            identity = {'serialno': serial, 'eeprom-serial': serial}
+                            candidate.update(device=final, mode='fastboot', serial=serial, strong_serial=True,
+                                             identity=identity)
+                            return {'final_device': final, 'final_identity': identity}
+                        executor.prepare = prepare
+                        executor.ram_calls = []
+                        def ram_boot(binding, sn, workspace=None, files=None, *args, **kwargs):
+                            self.assertEqual(sn, serial)
+                            executor.ram_calls.append('identify' if files is None else 'transfer')
+                            return {'serial': sn, 'model': model, 'ram_bytes': 16 << 30, 'handoff': 'acknowledged'}
+                        executor.ram_boot = ram_boot
+                        executor.cleanup_plan = lambda _: None
+                    _, token = self.adapter(fixture)
+                    with mock.patch('seriald_core.ramboot_tasks.availability', return_value=''), \
+                         mock.patch('seriald_core.ramboot_tasks._prepare', return_value={'files': {'Image': {}}, 'test': True}):
+                        asyncio.run(exercise(fixture, chip, flow, token))
 
     @unittest.skipUnless(seriald_mcp.MCPServer, 'optional MCP SDK not installed')
     def test_official_stdio_tools_full_and_partition_flashing_use_real_authorization(self):

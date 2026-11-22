@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core.flash_loaders import K1_RAM_BOOT_PROTOCOL, k1_ram_boot_installed, prepare_materials
+from seriald_core.flash_loaders import (K1_RAM_BOOT_PROTOCOL, K3_RAM_BOOT_PROTOCOL,
+                                       k1_ram_boot_installed, prepare_materials, ram_boot_installed)
 from seriald_core.flash_runner import FlashRunnerError, LocalFlashExecutor
 from seriald_core.tasks import TaskError
 from tools.package_flash_loaders import publish
@@ -122,10 +123,33 @@ class FlashLoaderTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(installed / 'manifest.json')}):
                 self.assertTrue(k1_ram_boot_installed())
                 normal = prepare_materials(binding, root / 'stock', lambda: None)
-                ram = prepare_materials(binding, root / 'ram', lambda: None, k1_ram_boot=True)
+                ram = prepare_materials(binding, root / 'ram', lambda: None, ram_boot=True)
             self.assertEqual(normal['protocol'], 'stock')
             self.assertEqual(Path(normal['uboot']['path']).read_bytes(), b'RAM only uboot')
             self.assertEqual(ram['protocol'], K1_RAM_BOOT_PROTOCOL)
+            self.assertEqual(Path(ram['uboot']['path']).read_bytes(), ram_fit)
+
+    def test_k3_ram_boot_pair_does_not_replace_storage_materials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.bundle(root / 'bundle')
+            document = json.loads(manifest.read_text())
+            k3 = document['families']['k3']
+            ram_fit = b'original U-Boot and OpenSBI'
+            (manifest.parent / 'ram.itb').write_bytes(ram_fit)
+            k3['ram_boot'] = {'protocol': K3_RAM_BOOT_PROTOCOL, 'fsbl': k3['fsbl'],
+                              'uboot': {'file': 'ram.itb', 'sha256': hashlib.sha256(ram_fit).hexdigest()}}
+            manifest.write_text(json.dumps(document))
+            installed = root / 'installed'
+            publish(manifest.parent, installed)
+            binding = SimpleNamespace(profile_data={'chip_family': 'k3'})
+            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(installed / 'manifest.json')}):
+                self.assertTrue(ram_boot_installed('k3'))
+                normal = prepare_materials(binding, root / 'stock', lambda: None)
+                ram = prepare_materials(binding, root / 'ram', lambda: None, ram_boot=True)
+            self.assertEqual(normal['protocol'], 'spacemit-ram-v1')
+            self.assertEqual(Path(normal['uboot']['path']).read_bytes(), b'RAM only uboot')
+            self.assertEqual(ram['protocol'], K3_RAM_BOOT_PROTOCOL)
             self.assertEqual(Path(ram['uboot']['path']).read_bytes(), ram_fit)
 
     @staticmethod

@@ -36,7 +36,7 @@
         release:release ? release[1] : '', variant:desktop ? variants[desktop[1].toLowerCase()] : '其他变体'};
     }
     function companion(item) {
-      if (picker.fileOnly || picker.firmwareOnly || osId(item.name) !== 'debian' || /[-_]firmware[-_.]/i.test(item.name)) return null;
+      if (picker.fileOnly || picker.firmwareOnly || picker.ramBoot || osId(item.name) !== 'debian' || /[-_]firmware[-_.]/i.test(item.name)) return null;
       function identity(value) {
         var info=details(value), chip=value.name.match(/(?:^|[-_])(k[13])(?=[-_.]|$)/i), major=value.name.match(/debian[-_](\d+)/i);
         return chip && major ? [info.os,major[1],chip[1].toLowerCase(),info.release.toLowerCase(),info.date].join('|') : '';
@@ -257,6 +257,7 @@
       var box = $('is-list'), filter = $('is-search').value.toLowerCase(); box.textContent = '';
       rows.filter(function (item) { return (local || supported(item)) && item.name.toLowerCase().includes(filter)
         && (!picker.fileOnly || item.kind === 'directory' || !packageFile(item))
+        && (!picker.ramBoot || item.kind === 'directory' || /\.(?:tar\.gz|tgz|tar|zip)$/i.test(item.name) && !/[-_]firmware[-_.]/i.test(item.name))
         && (!picker.firmwareOnly || item.kind === 'directory' || (/\.(?:tar\.gz|tgz|tar|zip|directory)$/i.test(item.name) && (!picker.excludeId || item.id !== picker.excludeId))); }).forEach(function (item) {
         var row = text('div', '', box); row.className = 'is-row';
         var main = text('div', '', row); main.className = 'is-main';
