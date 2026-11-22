@@ -119,5 +119,5 @@ let chrome,ws;
   assert.deepEqual(errors,[]);
   console.log('Image-store Chromium passed: OS/channel/history/variants, nested cloud navigation/return, numeric ordering, unsupported formats, no historical crawl, desktop/mobile and i18n.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
-  if(ws)ws.close();await stopBrowser(chrome);await new Promise(resolve=>server.close(resolve));fs.rmSync(profile,{recursive:true,force:true});
+  if(ws)ws.close();await stopBrowser(chrome);await new Promise(resolve=>server.close(resolve));fs.rmSync(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
 });

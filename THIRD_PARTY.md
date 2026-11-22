@@ -5,7 +5,7 @@ It does not replace the licenses of the following components.
 
 | Component | Files / distribution | License and attribution |
 | --- | --- | --- |
-| xterm.js and fit addon | `vendor/xterm.js`, `vendor/xterm.css`, `vendor/addon-fit.js` | MIT; xterm.js authors, Christopher Jeffrey. Full notice retained in `vendor/xterm.css`. Upstream: https://github.com/xtermjs/xterm.js |
+| xterm.js and fit addon | `vendor/xterm.js`, `vendor/xterm.css`, `vendor/addon-fit.js` | MIT; xterm.js authors, Christopher Jeffrey. Full notice retained in `vendor/xterm.css`. The browser viewport skips queued scroll callbacks after disposal. Upstream: https://github.com/xtermjs/xterm.js |
 | xterm headless 5.5.0 and serialize addon 0.13.0 | `vendor/terminal/` | MIT; exact upstream notices and package integrity in the adjacent LICENSE/source files. Same xterm version as the browser. |
 | noVNC 1.7.0 Display and Keyboard | `vendor/novnc/` | MPL-2.0; unmodified entry points and their complete relative ES-module dependency closure. Original notices: `LICENSE.txt`, `docs/LICENSE.MPL-2.0`, `AUTHORS`. Fixed upstream commit, archive and individual file hashes: `vendor/novnc/source.json`. Upstream: https://github.com/novnc/noVNC |
 | wsproto 1.3.2 | `vendor/python/wsproto-1.3.2-py3-none-any.whl` | MIT; the official wheel is unchanged. Original notice is retained in the wheel and copied to `vendor/python/wsproto-LICENSE`. Upstream: https://github.com/python-hyper/wsproto |

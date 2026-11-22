@@ -40,12 +40,7 @@
       if (old.refreshFrame && window.cancelAnimationFrame) window.cancelAnimationFrame(old.refreshFrame);
       // reset() 不会清空 xterm 的异步解析队列；旧 CSI 6n 还可能触发 onData，
       // 把上一台的终端应答写到新设备。销毁实例，并让所有旧回调检查所属视图。
-      if (old.viewportStarting) {
-        // xterm queues its first viewport update in open(). Keep its renderer
-        // alive until that callback runs, after detaching the old view.
-        old.term.element.remove();
-        setTimeout(function () { old.term.dispose(); }, 0);
-      } else old.term.dispose();
+      old.term.dispose();
     }
 
     /* ---------- 终端模拟器 ---------- */
@@ -93,10 +88,6 @@
       $('d-command-nav').textContent = '';
       $('command-nav-count').textContent = '0 条';
       ctx.term.open($('d-term'));
-      if (ctx.term.element) {
-        ctx.viewportStarting = true;
-        setTimeout(function () { ctx.viewportStarting = false; }, 0);
-      }
       if (sid === 'serial') {
         ctx.term.parser.registerCsiHandler({final: 't'}, function (params) {
           if (!isCurrent(ctx) || params[0] !== 8 || params.length !== 3) return false;
