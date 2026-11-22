@@ -951,7 +951,7 @@ let chrome, ws;
   for(let n=0;n<40 && !flashCalibrations.length;n++)await delay(50);
   assert.equal(flashCalibrations[0].target_id,'fixture-usb-3');
   assert.equal(flashCalibrations[0].action,'measure');
-  assert.equal(flashCalibrations[0].measure_write,true);
+  assert.equal(flashCalibrations[0].measure_write,false,'the default measurement does not write to the disk');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-status").textContent.includes("board busy")');n++)await delay(50);
   await evaluate('document.querySelector("#fl-tuning").open=false');
   await evaluate('document.querySelector("#fl-artifact").value="aaaaaaaaaaaaaaaaaaaaaaaa";document.querySelector("#fl-artifact").dispatchEvent(new Event("change"))');
