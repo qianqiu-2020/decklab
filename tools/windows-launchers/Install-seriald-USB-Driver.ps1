@@ -1,6 +1,38 @@
 #Requires -Version 5.1
-param([switch]$Elevated)
+param([switch]$Elevated, [switch]$DetectOnly)
 $ErrorActionPreference = 'Stop'
+
+function Test-InstalledFlashDriver([string]$Store) {
+    # The vendor package covers both generations of Fastboot hardware IDs.
+    # Compare the supported IDs and service so older TitanFlasher versions
+    # can be reused, including when no board is plugged in.
+    foreach ($package in @(Get-ChildItem -LiteralPath $Store -Directory -Filter 'spacemit_usb.inf_amd64_*' -ErrorAction SilentlyContinue)) {
+        $models = @{}
+        $winUsb = $false
+        $section = ''
+        foreach ($line in @(Get-Content -LiteralPath (Join-Path $package.FullName 'spacemit_usb.inf') -ErrorAction SilentlyContinue)) {
+            $entry = ($line -split ';', 2)[0].Trim()
+            if ($entry -match '^\[([^\]]+)\]$') {
+                $section = $Matches[1]
+            } elseif ($section -eq 'Google.NTamd64' -and $entry -match '=\s*USB_Install\s*,\s*USB\\(VID_[0-9A-F]{4}&PID_[0-9A-F]{4})\s*$') {
+                $models[$Matches[1]] = $true
+            } elseif ($section -eq 'USB_Install.Services' -and $entry -match '^AddService\s*=\s*WinUSB\s*,') {
+                $winUsb = $true
+            }
+        }
+        if ($winUsb -and $models.ContainsKey('VID_18D1&PID_4E11') -and $models.ContainsKey('VID_361C&PID_1001')) {
+            return $true
+        }
+    }
+    return $false
+}
+
+if (Test-InstalledFlashDriver (Join-Path $env:SystemRoot 'System32\DriverStore\FileRepository')) {
+    Write-Host 'A compatible USB flashing driver is already installed.'
+    exit 0
+}
+if ($DetectOnly) { exit 1 }
+
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $profile = Get-Content -LiteralPath (Join-Path $root 'installation.json') -Raw | ConvertFrom-Json
 if ($profile.profile -ne 'complete') { throw 'This installation does not contain a USB driver package.' }
@@ -12,16 +44,6 @@ foreach ($entry in $profile.driver_files.PSObject.Properties) {
     }
 }
 $inf = Join-Path $directory 'spacemit_usb.inf'
-$expected = (Get-FileHash -LiteralPath $inf -Algorithm SHA256).Hash
-# An identical staged package needs neither another elevation nor a device reset.
-$store = Join-Path $env:SystemRoot 'System32\DriverStore\FileRepository'
-foreach ($package in @(Get-ChildItem -LiteralPath $store -Directory -Filter 'spacemit_usb.inf_amd64_*' -ErrorAction SilentlyContinue)) {
-    $existing = Join-Path $package.FullName 'spacemit_usb.inf'
-    if ((Test-Path -LiteralPath $existing) -and (Get-FileHash -LiteralPath $existing -Algorithm SHA256).Hash -eq $expected) {
-        Write-Host 'USB flashing driver is already installed.'
-        exit 0
-    }
-}
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $admin = [Security.Principal.WindowsPrincipal]::new($identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) {

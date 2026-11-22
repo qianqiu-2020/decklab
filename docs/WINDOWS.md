@@ -8,7 +8,7 @@ AI 客户端无需安装脚本或 Python。启动、授权范围和撤销机制�
 共享串口／SSH 的终端状态与实时协议应答由后端统一维护。安装器内置经过摘要校验的
 Node 运行时及其许可证，使用者不用单独安装 Node。构建时自动准备运行时并缓存已校验的下载。
 
-1.10.0 起默认完整包包含 goflash、匹配的 RAM 材料和 USB 驱动，程序自动使用包内路径。驱动安装可能需要 Windows 管理员确认；可在安装向导勾选，或稍后运行 `Install-seriald-USB-Driver.cmd`。普通浏览器使用者无需安装驱动或组件。历史 1.9.0 精简包仍需[独立安装刷机组件](HARDWARE_EXTENSIONS.md#独立安装刷机组件)。
+完整包包含 goflash、匹配的 RAM 材料和 USB 驱动。安装器会复用 Windows 驱动存储中已有的兼容刷机驱动，包括 TitanFlasher 安装的驱动，检测时无需插板。缺少兼容驱动时，可在向导中安装，也可稍后运行 `Install-seriald-USB-Driver.cmd`，此步骤可能需要管理员确认。通过浏览器使用远端控制机无需在本机安装驱动。历史 1.9.0 精简包仍需[独立安装刷机组件](HARDWARE_EXTENSIONS.md#独立安装刷机组件)。
 
 推荐把完整 DeckLab 安装在 Linux 控制机，Windows 电脑直接通过浏览器访问。Windows 单机仍支持本机串口和刷机；无需先部署分离的 Web 节点。
 

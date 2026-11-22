@@ -16,16 +16,58 @@ function Run-Setup([string[]]$Options) {
     $process = Start-Process -FilePath $setup -ArgumentList $Options -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw "Setup failed: $($process.ExitCode)" }
 }
+
+$bundle = Join-Path $root 'dist\seriald'
+$driverScript = Join-Path $bundle 'Install-seriald-USB-Driver.ps1'
+$driverAvailable = $false
+if (Test-Path -LiteralPath $driverScript) {
+    $command = Join-Path $PSHOME 'powershell.exe'
+    & $command -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $driverScript -DetectOnly
+    if ($LASTEXITCODE -notin @(0, 1)) { throw 'USB driver detection did not run.' }
+    $driverAvailable = $LASTEXITCODE -eq 0
+
+    $syntax = [System.Management.Automation.Language.Parser]::ParseFile($driverScript, [ref]$null, [ref]$null)
+    $detector = $syntax.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-InstalledFlashDriver'
+    }, $false)
+    . ([scriptblock]::Create($detector.Extent.Text))
+    $fixtureStore = Join-Path $env:TEMP ('seriald driver store ' + [guid]::NewGuid().ToString('N'))
+    $fixturePackage = Join-Path $fixtureStore 'spacemit_usb.inf_amd64_fixture'
+    $fixtureInf = Join-Path $fixturePackage 'spacemit_usb.inf'
+    New-Item -ItemType Directory -Path $fixturePackage -Force | Out-Null
+    try {
+        if (Test-InstalledFlashDriver $fixtureStore) { throw 'An empty driver store matched.' }
+        $driver = Get-Content -LiteralPath (Join-Path $bundle 'usb-driver\spacemit_usb.inf') -Raw
+        $olderDriver = $driver -replace '(?m)^DriverVer[^\r\n]*', 'DriverVer = 01/01/2025,3.0.0.0'
+        Set-Content -LiteralPath $fixtureInf -Value $olderDriver -Encoding ASCII
+        if (-not (Test-InstalledFlashDriver $fixtureStore)) { throw 'An older compatible driver was not detected.' }
+        Set-Content -LiteralPath $fixtureInf -Value ($olderDriver -replace 'PID_1001', 'PID_FFFF') -Encoding ASCII
+        if (Test-InstalledFlashDriver $fixtureStore) { throw 'A driver missing a bootloader ID matched.' }
+        Set-Content -LiteralPath $fixtureInf -Value ($olderDriver -replace 'AddService\s*=\s*WinUSB,', 'AddService = Other,') -Encoding ASCII
+        if (Test-InstalledFlashDriver $fixtureStore) { throw 'A driver without the WinUSB service matched.' }
+        Write-Host 'USB driver detection passed for empty, compatible older, partial and wrong-service stores.'
+    } finally {
+        Remove-Item -LiteralPath $fixtureStore -Recurse -Force
+    }
+}
+
 try {
     # Simulate an existing unregistered portable directory, including user data.
     New-Item -ItemType Directory -Path $target | Out-Null
-    Get-ChildItem -LiteralPath (Join-Path $root 'dist\seriald') | Where-Object { $_.Name -ne 'data' } | ForEach-Object {
+    Get-ChildItem -LiteralPath $bundle | Where-Object { $_.Name -ne 'data' } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $target -Recurse
     }
     New-Item -ItemType Directory -Path (Join-Path $target 'data') | Out-Null
     $sentinel = Join-Path $target 'data\preserve-me.txt'
     Set-Content -LiteralPath $sentinel -Value 'logs and configuration must survive' -Encoding ASCII
-    Run-Setup -Options @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/LANG=english', '/TASKS=desktopicon', "/DIR=`"$target`"")
+    $installLog = Join-Path $target 'data\install.log'
+    $tasks = if ($driverAvailable) { 'desktopicon,usbdriver' } else { 'desktopicon' }
+    Run-Setup -Options @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/LANG=english', "/TASKS=$tasks", "/DIR=`"$target`"", "/LOG=`"$installLog`"")
+    $installResult = Get-Content -LiteralPath $installLog -Raw
+    if ($driverAvailable -and $installResult -notmatch 'Compatible USB flashing driver detected; skipping driver task\.') {
+        throw 'Setup did not skip the driver task when the Windows driver was already installed.'
+    }
     $languageFile = Join-Path $target 'data\ui-language.txt'
     if ((Get-Content -LiteralPath $languageFile -Raw).Trim() -ne 'en') { throw 'Installer did not save the English UI default.' }
     if (-not (Test-Path -LiteralPath $uninstaller)) { throw 'Uninstaller missing.' }

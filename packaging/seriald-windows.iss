@@ -42,10 +42,13 @@ Name: "chinesesimplified"; MessagesFile: "inno-languages\ChineseSimplified.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut / 创建桌面快捷方式"; Flags: unchecked
 #if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
-Name: "usbdriver"; Description: "Install USB flashing driver / 安装 USB 刷机驱动（可能需要管理员确认）"
+Name: "usbdriver"; Description: "Install USB flashing driver / 安装 USB 刷机驱动（可能需要管理员确认）"; Check: UsbDriverNeeded
 #endif
 
 [Files]
+#if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
+Source: "{#BundleDir}\Install-seriald-USB-Driver.ps1"; Flags: dontcopy
+#endif
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Excludes: "data\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
@@ -63,6 +66,30 @@ Name: "{group}\卸载 DeckLab"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\DeckLab"; Filename: "{app}\Start-seriald.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"; Tasks: desktopicon
 
 [Code]
+#if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
+var
+  DriverProbeDone, CompatibleDriverInstalled: Boolean;
+
+function UsbDriverNeeded: Boolean;
+var
+  ProbeResult: Integer;
+begin
+  if not DriverProbeDone then
+  begin
+    ExtractTemporaryFile('Install-seriald-USB-Driver.ps1');
+    CompatibleDriverInstalled :=
+      Exec(ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe'),
+        '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+        ExpandConstant('{tmp}\Install-seriald-USB-Driver.ps1') + '" -DetectOnly',
+        ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ProbeResult) and (ProbeResult = 0);
+    DriverProbeDone := True;
+    if CompatibleDriverInstalled then
+      Log('Compatible USB flashing driver detected; skipping driver task.');
+  end;
+  Result := not CompatibleDriverInstalled;
+end;
+#endif
+
 function DefaultInstallDir(Param: String): String;
 var
   SourceDir, ParentDir: String;
@@ -95,10 +122,10 @@ begin
         RaiseException('Cannot save the application default language.');
     end;
 #if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
-    if WizardIsTaskSelected('usbdriver') then
+    if UsbDriverNeeded and WizardIsTaskSelected('usbdriver') then
     begin
       DriverResult := -1;
-      if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      if not Exec(ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe'),
         '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\Install-seriald-USB-Driver.ps1') + '"',
         ExpandConstant('{app}'), SW_SHOW, ewWaitUntilTerminated, DriverResult) or (DriverResult <> 0) then
       begin
