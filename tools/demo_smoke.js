@@ -77,7 +77,9 @@ async function until(check, description) {
     document.querySelector('#device-clear-filters').click();`);
   assert.equal(await evaluate('document.querySelectorAll(".dev").length'), 3);
   await evaluate('window.BaseTerminal = Terminal; window.Terminal = class extends BaseTerminal {constructor(...args){super(...args);window.demoTerm=this;}}');
-  await evaluate('document.querySelector(\'[data-key="demo-k1"]\').click()');
+  await evaluate(`for (const key of ['demo-k1', 'demo-k3', 'demo-k1']) {
+    document.querySelector('[data-key="' + key + '"]').click();
+  }`);
   const contents = `Array.from({length: demoTerm.buffer.active.length}, (_,i) =>
     demoTerm.buffer.active.getLine(i).translateToString()).join('\\n')`;
   await until(() => evaluate('!!window.demoTerm && ' + contents + '.includes("DeckLab demo")'), 'serial output');
