@@ -67,6 +67,13 @@ class FlashRunnerError(TaskError):
         self.operation = stage
 
 
+class ImagePreparationQuotaError(FlashRunnerError):
+    def __init__(self, reclaim_bytes=0):
+        super().__init__('镜像准备缓存空间不足。可从「已下载」删除不用的镜像后重试，或使用 URL 极速刷机。',
+                         503, code='image-cache-quota')
+        self.reclaim_bytes = reclaim_bytes
+
+
 def _json(raw):
     def invalid(value):
         raise ValueError('non-finite JSON value')
@@ -807,8 +814,9 @@ class LocalFlashExecutor:
                 available = min(max(0, shutil.disk_usage(images).free - 256 * 1024 ** 2 - self._cache_reserved),
                     max(0, max_cache_bytes - self._cache_size(images) - self._cache_size(self.root / 'cache') - self._cache_size(self.root / 'workdirs') - self._cache_reserved))
                 budget = min(max_cache_bytes, existing + available)
+                required = min(max_cache_bytes, artifact['size'] + (existing or max_expanded_bytes))
                 if budget < artifact['size']:
-                    raise TaskError('insufficient image preparation cache quota', 503)
+                    raise ImagePreparationQuotaError(max(0, required - budget))
                 reserved = min(available, max_expanded_bytes + artifact['size'])
                 self._cache_reserved += reserved
                 self._active_workspaces.add(str(workspace))
@@ -879,6 +887,8 @@ class LocalFlashExecutor:
                 os.utime(workspace, None)
                 return result
             except BaseException as error:
+                if isinstance(error, ImagePreparationQuotaError):
+                    error.reclaim_bytes = max(0, required - budget)
                 if not getattr(error, 'stage', ''):
                     error.stage = 'prepare-image'
                     error.operation = 'prepare-image'
@@ -1268,6 +1278,11 @@ class LocalFlashExecutor:
                     if diagnostic_id:
                         logging.getLogger(__name__).error('flash diagnostic %s operation=%s code=%s reason=%r',
                             diagnostic_id, operation, event.get('code'), diagnostic[:8192])
+                    if operation in ('prepare-image', 'prepare-directory') and isinstance(diagnostic, str) and diagnostic.endswith((
+                            'prepared image exceeds cache quota', 'image cache budget is exhausted',
+                            'image expansion/cache budget exceeded', 'sparse cache exceeds budget',
+                            'Android sparse image exceeds total expansion/cache budget')):
+                        raise ImagePreparationQuotaError()
                     if event.get('code') in ('loader-fsbl-timeout', 'device-ram-unstable', 'loader-training-mismatch'):
                         from .flash_loaders import discard_training
                         embedded = discard_training(binding, self.root)

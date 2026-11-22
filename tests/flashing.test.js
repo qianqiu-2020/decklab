@@ -1700,7 +1700,12 @@ test('normal URL download, fast flash and RAM boot have separate submission path
   assert.equal(h.get('fl-fast-start').hidden, false);
   assert.equal(h.get('fl-fast-start').disabled, true);
   assert.equal(h.get('fl-ram-boot').hidden, true);
+  h.get('fl-fast-store').click();
+  assert.equal(h.imagePicker().streamURL('https://repo.example/os.zip'), false);
+  h.chooseImage({url:'https://repo.example/os.tar.gz'});
+  assert.equal(h.get('fl-fast-url').value,'https://repo.example/os.tar.gz');
   h.api.open(null, null, false, 'normal'); await drain();
+  assert.throws(() => h.chooseImage({url:'https://repo.example/another.tar.gz'}), /状态已变化/);
   assert.equal(h.get('fl-fast').hidden, true);
   assert.equal(h.get('fl-plan').hidden, false);
   h.get('fl-url-toggle').click();

@@ -6,7 +6,7 @@ import secrets
 import threading
 import time
 
-from .flash_runner import public_plan
+from .flash_runner import ImagePreparationQuotaError, public_plan
 from .results import response
 from .tasks import TaskError
 
@@ -32,7 +32,15 @@ class ImagePreparations:
                 "SELECT t.id FROM tasks t JOIN task_targets s ON s.task_id=t.id "
                 "WHERE t.kind='image-prepare' AND t.actor=? AND s.connection_id=? "
                 "ORDER BY t.created DESC LIMIT 1", (actor, 'image-prepare:' + artifact_id)).fetchone()
-        return self.manager.tasks.store.get(row[0]) if row else None
+        if not row:
+            return None
+        task = self.manager.tasks.store.get(row[0])
+        executor = getattr(self.manager, 'flash_executor', None)
+        artifact = (task.get('result') or {}).get('artifact')
+        if (task['state'] == 'completed' and artifact and artifact.get('sha256')
+                and hasattr(executor, 'image_workspace') and not executor.image_workspace(artifact).is_dir()):
+            return None
+        return task
 
     def start(self, artifact_id, actor='web', serial=None, client_id='', request_id=None):
         # Serialize default request selection with enqueue; explicit request IDs
@@ -118,7 +126,16 @@ class ImagePreparations:
                         if timing:
                             timing.event(value)
                         context.progress(value.get('done', 0), value.get('total', 0), value.get('phase', 'preparing-image'))
-                    result = executor.prepare_image(argv, source, event, context.check)
+                    try:
+                        result = executor.prepare_image(argv, source, event, context.check)
+                    except ImagePreparationQuotaError as error:
+                        context.check()
+                        if not error.reclaim_bytes:
+                            raise
+                        context.progress(0, 0, 'reclaiming-image-cache')
+                        if not FlashActions(self.manager).expire(reclaim_bytes=error.reclaim_bytes):
+                            raise
+                        result = executor.prepare_image(argv, source, event, context.check)
                     success = True
                     return {'artifact': {k: row[k] for k in ('id', 'name', 'size', 'sha256', 'serial', 'state')},
                             'preparation': public_plan(result)}

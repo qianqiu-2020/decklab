@@ -100,7 +100,8 @@
       var progress = current.progress || {}, active = ['queued','running'].includes(current.state);
       var directorySource = artifacts.find(function(item){return item.id===$('fl-artifact').value&&/\.directory$/i.test(item.name);});
       var phases = {'checking-image-sha256':'校验镜像 SHA-256', 'expanding-image':directorySource?'建立目录快照':'解压镜像',
-        'checking-payloads':'校验包内文件', 'reading-payload-metadata':'读取文件系统与版本信息'};
+        'checking-payloads':'校验包内文件', 'reading-payload-metadata':'读取文件系统与版本信息',
+        'reclaiming-image-cache':'正在释放闲置的镜像准备缓存'};
       setMessage('fl-image-preparation-status', current.state === 'completed' ? '镜像已准备，可复用于其他板卡'
         : active ? (phases[progress.phase] || '等待准备镜像') : current.error || '镜像准备未完成');
       $('fl-image-error-copy').hidden = !current.error || active;
@@ -699,6 +700,7 @@
       $('fl-fast-start').disabled = flow !== 'fast' || !(fast || canResolve) || busy || uploading || preparingBoard
         || submissionUnknown || !!task || !validStreamURL($('fl-fast-url').value.trim());
       $('fl-fast-url').disabled = $('fl-fast-storage').disabled = busy || preparingBoard || !!task || submissionUnknown;
+      $('fl-fast-store').disabled = $('fl-fast-url').disabled || !options.openImageStore;
       renderSource(); renderPreparation();
       var primary = artifacts.find(function(item){return item.id===$('fl-artifact').value;});
       var chip = (capabilities && capabilities.chip) || (board && board.chip);
@@ -2835,6 +2837,17 @@
     }
     $('fl-store').addEventListener('click', function () { chooseSource(); });
     $('fl-cache').addEventListener('click', function () { chooseSource({source:'local'}); });
+    $('fl-fast-store').addEventListener('click', function () {
+      if (!board || flow !== 'fast' || $('fl-fast-store').disabled) return;
+      var selected = board, seq = sequence;
+      options.openImageStore(function (item) {
+        if (!same(selected, seq) || flow !== 'fast' || $('fl-fast-store').disabled)
+          throw new Error(translate('当前设备或任务状态已变化，请重新选择。'));
+        if (!validStreamURL(item.url || '')) throw new Error(translate('请选择支持 URL 极速刷机的系统包。'));
+        $('fl-fast-url').value = item.url;
+        updateControls();
+      }, {streamURL:validStreamURL, chip:capabilities && capabilities.chip || board.chip});
+    });
     $('fl-url-toggle').addEventListener('click', function () {
       var panel = $('fl-url-panel'); panel.hidden = !panel.hidden;
       $('fl-url-toggle').setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');

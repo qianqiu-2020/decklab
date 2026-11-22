@@ -349,7 +349,7 @@ PasswordAuthentication yes</code></pre>
   <nav id="is-path" class="is-path" aria-label="镜像目录"></nav>
   <div id="is-list" class="is-list"></div>
   <p id="is-status" class="log-note" role="status"></p><div id="is-downloads" class="log-note" role="status"></div>
-  <p class="log-note">镜像下载到控制机；刷写前仍需核对板型、预览范围并确认。</p>
+  <p id="is-download-note" class="log-note">镜像下载到控制机；刷写前仍需核对板型、预览范围并确认。</p>
 </dialog>
 <dialog id="flash-dialog" class="flash-dialog" aria-labelledby="fl-title">
   <div class="fl-head"><div><strong id="fl-title">刷机工作区</strong><small id="fl-board" data-i18n-ignore></small></div><button id="fl-close" type="button">关闭</button></div>
@@ -431,7 +431,10 @@ PasswordAuthentication yes</code></pre>
     <details id="fl-connection-details" class="fl-details" hidden><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl></details>
   </section>
       <section id="fl-fast" class="fl-section" aria-label="系统包 URL" hidden>
-        <label class="ft-field">系统包 URL（.tar.gz）<input id="fl-fast-url" type="url" spellcheck="false" placeholder="https://…/Debian-13-GNOME-K3-….tar.gz"></label>
+        <div class="fl-discovery">
+          <label class="ft-field">系统包 URL<input id="fl-fast-url" type="url" spellcheck="false" placeholder="https://…/Debian-13-GNOME-K3-….tar.gz"></label>
+          <button id="fl-fast-store" type="button">镜像商店</button>
+        </div>
         <p class="fl-hint">边下载边写入，重建 GPT 并覆盖目标系统盘。</p>
         <details id="fl-fast-disk" class="fl-details"><summary>系统盘选项</summary>
           <label class="ft-field">目标系统盘<input id="fl-fast-storage" type="text" value="auto" spellcheck="false" placeholder="auto 或 nvme:0 / scsi:0"></label>

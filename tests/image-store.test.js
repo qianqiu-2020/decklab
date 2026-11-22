@@ -10,7 +10,7 @@ class Element {
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function setup(request, storage=new Map()){
-  const ids={};for(const id of ['is-version-caption','is-catalog','is-platform','is-os','is-channel','is-version','is-variants','is-title','image-store-dialog','is-list','is-search','is-path','is-status','is-refresh','is-downloads','is-source','is-close'])ids[id]=new Element();
+  const ids={};for(const id of ['is-version-caption','is-catalog','is-platform','is-os','is-channel','is-version','is-variants','is-title','image-store-dialog','is-list','is-search','is-path','is-status','is-refresh','is-downloads','is-download-note','is-source','is-close'])ids[id]=new Element();
   ids['is-source'].value='public';let consent=false;const watches=[];
   const window={crypto:{randomUUID:()=> 'fixture-request'}, confirm:()=>consent,
     localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},
@@ -27,6 +27,24 @@ function setup(request, storage=new Map()){
   const configured=setup(()=>Promise.resolve({sources:[{id:'public'},{id:'internal'}],entries:[]}));
   const configuredOption=new Element();configuredOption.value='internal';configuredOption.disabled=true;configured.ids['is-source'].appendChild(configuredOption);
   configured.store.open();await flush();assert.equal(configuredOption.disabled,false);
+  const streamImage={name:'Debian-13-GNOME-K1.tar.gz',kind:'package',url:'https://repo.example/os.tar.gz'};
+  const streamCalls=[];let streamChoice;
+  const stream=setup((url,payload)=>{
+    streamCalls.push({url,payload});
+    return Promise.resolve({entries:[streamImage,
+      {name:'Debian-13-Firmware-K1.tar.gz',kind:'package',url:'https://repo.example/firmware.tar.gz'},
+      {name:'Another.zip',kind:'package',url:'https://repo.example/other.zip'}]});
+  });
+  const localOption=new Element();localOption.value='local';stream.ids['is-source'].appendChild(localOption);
+  stream.store.open(item=>{streamChoice=item;},{streamURL:url=>url.endsWith('.tar.gz'),chip:'k1'});await flush();
+  assert.equal(stream.ids['is-platform'].value,'k1');
+  assert.equal(localOption.disabled,true);
+  assert.deepEqual(stream.buttons().map(node=>node.textContent),['填入 URL']);
+  assert.equal(stream.ids['is-list'].children.length,1);
+  stream.buttons()[0].fire();assert.equal(streamChoice,streamImage);
+  assert.equal(stream.ids['image-store-dialog'].open,false);
+  assert.ok(streamCalls.every(call=>!call.payload&&call.url.startsWith('/api/image-catalog')));
+  stream.store.open();await flush();assert.equal(localOption.disabled,false);
   let resolvePublic;
   const stale=setup(url=> url.startsWith('/api/image-library')?Promise.resolve({artifacts:[{id:'ready',name:'cached.img',size:1}],tasks:[]}):new Promise(resolve=>{resolvePublic=resolve;}));
   stale.store.open();await stale.source('local');resolvePublic({entries:[{name:'stale.img',kind:'disk-image',url:'https://old'}]});await flush();

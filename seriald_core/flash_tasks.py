@@ -1082,12 +1082,12 @@ class FlashActions:
         except (TaskError, TransactionError, ValueError, OSError) as error:
             return response(getattr(error, 'status', 503), {'ok': False, 'error': str(error)})
 
-    def expire(self, image_sha256=None):
+    def expire(self, image_sha256=None, *, reclaim_bytes=0):
         """Follow the collector's existing maintenance tick; keep active/recovery data."""
         executor = getattr(self.manager, 'flash_executor', None)
         if executor is None or not hasattr(executor, 'cleanup_plan'):
             return 0
-        removed = 0
+        removed = reclaimed = 0
         with self.manager._flash_plans_lock, self.manager.store.lock:
             rows = self.manager.store.db.execute('SELECT id,document FROM flash_plans WHERE created<?',
                                                  (time.time() - 3600,)).fetchall()
@@ -1132,15 +1132,48 @@ class FlashActions:
                         "SELECT a.sha256 FROM tasks t JOIN task_targets s ON s.task_id=t.id "
                         "JOIN transfer_artifacts a ON s.connection_id='image-prepare:' || a.id "
                         "WHERE t.kind='image-prepare' AND t.state IN ('queued','running')").fetchall()
-                    workspaces.update(str(executor.root / 'images' / value[0]) for value in active_images)
+                    images = executor.root / 'images'
+                    workspaces.update(str(images / value[0]) for value in active_images)
+                    live_images = self.manager.store.db.execute(
+                        "SELECT resource FROM flash_resource_holds WHERE resource LIKE 'flash-image:%'").fetchall()
+                    workspaces.update(str(images / row[0].split(':', 1)[1]) for row in live_images)
+                    from .image_workspaces import origin_path
+                    origins = self.manager.store.db.execute(
+                        "SELECT id FROM transfer_artifacts WHERE name LIKE '%.directory' AND state IN ('ready','claimed')")
+                    entire_cache_is_source = False
+                    for row in origins:
+                        sidecar = origin_path(self.manager.artifacts._path(row[0], '.bin'))
+                        try:
+                            if sidecar.is_symlink() or sidecar.stat().st_size > 8 * 1024 ** 2:
+                                continue
+                            source = Path(json.loads(sidecar.read_bytes())['directory'])
+                            if images.is_relative_to(source):
+                                entire_cache_is_source = True
+                                break
+                            if source.is_relative_to(images):
+                                workspaces.add(str(images / source.relative_to(images).parts[0]))
+                        except (OSError, KeyError, ValueError, TypeError):
+                            continue
                     cutoff = time.time() - self.manager.artifacts.policy.ready_seconds
-                    for image in (executor.root / 'images').glob('*'):
+                    candidates = []
+                    for image in (() if entire_cache_is_source else images.glob('*')):
                         if str(image) in workspaces or not re.fullmatch(r'[0-9a-f]{64}', image.name):
                             continue
-                        if image_sha256 != image.name and image.stat().st_mtime >= cutoff:
+                        try:
+                            modified = image.stat().st_mtime
+                        except FileNotFoundError:
                             continue
-                        removed += bool(executor.cleanup_image(image))
-        return removed
+                        if not reclaim_bytes and image_sha256 != image.name and modified >= cutoff:
+                            continue
+                        candidates.append((modified, image))
+                    for _, image in sorted(candidates):
+                        size = executor._cache_size(image) if reclaim_bytes else 0
+                        if executor.cleanup_image(image):
+                            removed += 1
+                            reclaimed += size
+                        if reclaim_bytes and reclaimed >= reclaim_bytes:
+                            break
+        return reclaimed if reclaim_bytes else removed
 
     def boot_priority(self, payload, actor='web'):
         """One idempotent EEPROM write under the existing task's USB lease."""

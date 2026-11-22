@@ -6,6 +6,7 @@ from contextlib import contextmanager, nullcontext
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -723,6 +724,60 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             self.assertFalse(workspaces['fresh'].exists())
             for receipt in aliases + [fresh]:
                 self.assertEqual(flashes.get_plan(receipt['plan_id'])['digest'], receipt['digest'])
+
+    def test_image_preparation_reclaims_only_idle_derived_cache_and_retries_original_upload(self):
+        from seriald_core.image_workspaces import origin_path
+
+        with protected_flashing() as fixture:
+            root = Path(fixture.manager.artifacts.root).parent / 'flashing'
+            executor = LocalFlashExecutor(root)
+            fixture.manager.flash_executor = executor
+            store = fixture.manager.artifacts
+            artifact = store.create('upload', 'system.tar.gz', 4)
+            store.append(artifact['id'], 0, b'pack')
+            artifact = store.seal(artifact['id'])
+            paths = {name: root / 'images' / (suffix * 64) for name, suffix in (
+                ('old', 'a'), ('unused', 'b'), ('fresh-plan', 'c'), ('import-source', 'd'))}
+            for index, (name, path) in enumerate(paths.items()):
+                path.mkdir(parents=True)
+                (path / 'payload').write_bytes(b'x' * {'old':6, 'unused':1, 'fresh-plan':2, 'import-source':2}[name])
+                modified = time.time() - 300 + index
+                os.utime(path, (modified, modified))
+            workdir = root / 'workdirs'
+            workdir.mkdir()
+            (workdir / 'edited').write_bytes(b'x')
+            FlashStore(fixture.manager.store).put_plan({'actor':'web', 'serial':'FLASH-B',
+                'source_workspaces':[str(paths['fresh-plan'])], 'created':time.time()})
+            directory = store.create('upload', 'import.directory', 1)
+            store.append(directory['id'], 0, b'x')
+            store.seal(directory['id'])
+            origin_path(store._path(directory['id'], '.bin')).write_text(
+                json.dumps({'directory':str(paths['import-source'])}))
+            prepare = executor.prepare_image
+
+            def run(binding, operation, request, **kwargs):
+                self.assertEqual(operation, 'prepare-image')
+                self.assertEqual(request['artifact']['id'], artifact['id'])
+                self.assertGreaterEqual(request['max_cache_bytes'], 7)
+                return {'artifact_sha256':artifact['sha256'], 'root_path':request['workspace'],
+                        'files':[{'name':'fastboot.yaml', 'size':1}]}
+
+            with mock.patch('seriald_core.flash_discovery.executor_command', return_value=('fixture',)), \
+                    mock.patch.object(executor, '_run', side_effect=run) as executed, \
+                    mock.patch.object(executor, 'prepare_image', side_effect=lambda *args: prepare(
+                        *args, max_cache_bytes=14, max_expanded_bytes=3)) as attempted:
+                code, started = self.request(fixture, '/api/image-prepare', {'id':artifact['id']})
+                self.assertEqual(code, 202, started)
+                result = self.terminal(fixture, started['task']['id'])
+                self.assertEqual(result['state'], 'completed', result)
+                self.assertEqual(attempted.call_count, 2)
+                executed.assert_called_once()
+            self.assertFalse(paths['old'].exists())
+            self.assertTrue(all(paths[name].exists() for name in ('unused', 'fresh-plan', 'import-source')))
+            self.assertTrue((workdir / 'edited').exists())
+            with store.open(artifact['id']) as source:
+                self.assertEqual(source.read(), b'pack')
+            self.assertEqual(store.get(directory['id'])['state'], 'ready')
 
     def test_package_partition_selection_rechecks_cached_candidates_without_reimporting(self):
         with protected_flashing() as fixture:

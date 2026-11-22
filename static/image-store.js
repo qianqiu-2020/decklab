@@ -61,6 +61,11 @@
       return ranked.length && (ranked.length === 1 || ranked[0].gap < ranked[1].gap) ? ranked[0].row : null;
     }
     function supported(item) { return !/\.(?:img|raw)(?:\.|$)/i.test(item.name || '') && item.kind !== 'disk-image'; }
+    function catalogItem(item) {
+      if (item.kind === 'directory') return true;
+      return supported(item) && (!picker.streamURL || item.kind === 'package'
+        && !/[-_]firmware[-_.]/i.test(item.name) && picker.streamURL(item.url || ''));
+    }
     function newest(a, b) {
       // Natural numeric order, with final releases ahead of the same rc/beta/alpha.
       var x = a.name.replace(/^v(?=\d)/i, ''), y = b.name.replace(/^v(?=\d)/i, '');
@@ -98,7 +103,7 @@
     function draw() {
       var rows = entries;
       if (guided && source !== 'local') {
-        var variants = Array.from(new Set(rows.filter(function (row) { return row.kind !== 'directory' && supported(row); })
+        var variants = Array.from(new Set(rows.filter(function (row) { return row.kind !== 'directory' && catalogItem(row); })
           .map(function (row) { return details(row).variant; }))).sort();
         if (variant && !variants.includes(variant)) variant = '';
         $('is-variants').hidden = variants.length < 2;
@@ -177,7 +182,7 @@
           });
         }
       }
-      direct.filter(function (row) { return supported(row); }).forEach(function (row) {
+      direct.filter(catalogItem).forEach(function (row) {
         var info = details(row), name = [info.release, info.date].filter(Boolean).join(' · ') || '当前版本';
         var group = groups.find(function (group) { return group.id === 'files:' + name; });
         if (!group) { group = {id:'files:' + name,name:name,files:[]}; groups.push(group); }
@@ -216,7 +221,7 @@
       for (var depth = 0; depth < 4; depth++) {
         var children = rows.filter(function (row) { return row.kind === 'directory'; }).sort(newest);
         if (!children.length) break;
-        var hasFiles = rows.some(function (row) { return row.kind !== 'directory' && supported(row); });
+        var hasFiles = rows.some(function (row) { return row.kind !== 'directory' && catalogItem(row); });
         var base = children[0].path.split('/').slice(0, -2).join('/');
         var selectedPath = folderChoices[base];
         if (!children.some(function (row) { return row.path === selectedPath; })) selectedPath = hasFiles ? '' : children[0].path;
@@ -255,7 +260,7 @@
     function downloadState(item) { return downloaded[item.url] || item.download_state; }
     function render(rows, local) {
       var box = $('is-list'), filter = $('is-search').value.toLowerCase(); box.textContent = '';
-      rows.filter(function (item) { return (local || supported(item)) && item.name.toLowerCase().includes(filter)
+      rows.filter(function (item) { return (local || catalogItem(item)) && item.name.toLowerCase().includes(filter)
         && (!picker.fileOnly || item.kind === 'directory' || !packageFile(item))
         && (!picker.ramBoot || item.kind === 'directory' || /\.(?:tar\.gz|tgz|tar|zip)$/i.test(item.name) && !/[-_]firmware[-_.]/i.test(item.name))
         && (!picker.firmwareOnly || item.kind === 'directory' || (/\.(?:tar\.gz|tgz|tar|zip|directory)$/i.test(item.name) && (!picker.excludeId || item.id !== picker.excludeId))); }).forEach(function (item) {
@@ -275,8 +280,8 @@
           var facts = [local ? options.formatBytes(item.size) : labels[item.kind]];
           if (!local && (item.size_label || item.size)) facts.push(item.size ? options.formatBytes(item.size) : item.size_label);
           if (item.modified) facts.push(item.modified);
-          if (!local && downloadState(item) === 'cached') facts.push('已缓存');
-          if (!local && downloadState(item) === 'downloading') facts.push('正在下载');
+          if (!local && !picker.streamURL && downloadState(item) === 'cached') facts.push('已缓存');
+          if (!local && !picker.streamURL && downloadState(item) === 'downloading') facts.push('正在下载');
           var preparation = item.preparation_task, preparing = preparation && ['queued','running'].includes(preparation.state);
           if (local && preparation) facts.push(preparing ? '准备中' : preparation.state === 'completed' ? '已准备' : '准备未完成');
           if (local && item.state === 'claimed' && !preparing) facts.push('正在使用');
@@ -298,6 +303,8 @@
               }).catch(function (error) { status(error.message); remove.disabled = false; });
             });
             remove.disabled = item.state === 'claimed';
+          } else if (picker.streamURL) {
+            button('填入 URL', row, function () { selected(item); });
           } else {
             var firmware=companion(item), includeFirmware=null;
             if(firmware){var paired=text('label','',main);includeFirmware=document.createElement('input');includeFirmware.type='checkbox';includeFirmware.checked=true;paired.appendChild(includeFirmware);text('span','同时选择 '+firmware.name,paired).setAttribute('data-i18n-ignore','');}
@@ -426,14 +433,23 @@
       ++selectionSession; picker = configuration || {}; directories = Object.create(null); downloaded = Object.create(null);
       choose = typeof onChoose === 'function' ? onChoose : null;
       var forced = ['local', 'public', 'internal'].includes(picker.source) ? picker.source : '';
-      viewKey = picker.fileOnly ? 'partition' : picker.firmwareOnly ? 'firmware' : forced || 'store';
-      var saved = views[viewKey] || {};
+      viewKey = picker.streamURL ? 'stream' : picker.fileOnly ? 'partition' : picker.firmwareOnly ? 'firmware' : forced || 'store';
+      var saved = views[viewKey] || (picker.streamURL && views.store) || {};
       source = forced || (['local', 'public', 'internal'].includes(saved.source) ? saved.source : picker.fileOnly || picker.firmwareOnly ? 'local' : 'public');
+      if (picker.streamURL && source === 'local') source = 'public';
       path = saved.path || ''; platform = saved.platform === 'k1' ? 'k1' : 'k3';
+      if (picker.streamURL && ['k1','k3'].includes(picker.chip) && picker.chip !== platform) {
+        platform = picker.chip;
+        path = '';
+      }
       operatingSystem = saved.os || ''; channel = saved.channel === 'daily' ? 'daily' : 'version';
       version = saved.version || ''; variant = saved.variant || '';
       folderChoices = Object.assign(Object.create(null), saved.folders);
       $('is-source').value = source; $('is-platform').value = platform;
+      Array.from($('is-source').children).forEach(function (option) {
+        if (option.value === 'local') option.hidden = option.disabled = !!picker.streamURL;
+      });
+      $('is-downloads').hidden = $('is-download-note').hidden = !!picker.streamURL;
       $('is-search').value = saved.search || '';
       restoreScroll = saved.scroll || {};
       $('is-title').textContent = picker.firmwareOnly ? '选择配套固件' : picker.fileOnly ? '选择分区文件' + (picker.partition ? ' · ' + picker.partition : '') : '镜像商店';
