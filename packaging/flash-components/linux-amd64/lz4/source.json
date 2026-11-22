@@ -1,0 +1,12 @@
+{
+  "package": "lz4",
+  "distribution": "Ubuntu 22.04 Jammy main",
+  "architecture": "amd64",
+  "version": "1.9.3-2build2",
+  "package_sha256": "4d1ead8ba32f4bb6583f1e006cccbbf7c98f76aba37f61b5d5bcc13b4426be29",
+  "archive_path": "pool/main/l/lz4/lz4_1.9.3-2build2_amd64.deb",
+  "binary_sha256": "a3be1711cbfce130857401564bd9f68537632eda33e5efab95e6d26fa28a269a",
+  "copyright_sha256": "a82c5d50439c6d9f32b874dbc75ae5292ba5a3e50318bed80e82a8f5254689ca",
+  "source_url": "https://packages.ubuntu.com/source/jammy/misc/lz4",
+  "packaged_copyright_sha256": "f7e10c6d6174f7c00fb86e97a9b34718e2d5583c7e038ddd6f80d0d976dd0ec8"
+}

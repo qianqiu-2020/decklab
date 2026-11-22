@@ -1,0 +1,17 @@
+The K1 RAM startup FSBL uses U-Boot revision 4a312b002711317ccf8c0ab9abea1e5ebe029413.
+The temporary U-Boot uses the same baseline and download-profile
+configuration recorded in CONFIGURATION.txt and FIT-SOURCE.txt.
+The FIT includes the vendor OpenSBI member. The default network addresses
+use the RFC 5737 documentation block.
+
+Under section 3(b) of the GNU General Public License, version 2, the
+DeckLab distributor offers any third party a complete machine-readable
+copy of the corresponding source code, including modifications and the
+scripts used to control compilation and installation. The copy is
+provided free of charge. This offer is valid for at least three years
+after distribution of each copy of these binaries.
+
+To request the source, open an issue at
+https://github.com/qianqiu-2020/decklab/issues
+and identify DeckLab 1.17.51 and the loader directory and filenames.
+The GPL license is included in ../COPYING.txt.

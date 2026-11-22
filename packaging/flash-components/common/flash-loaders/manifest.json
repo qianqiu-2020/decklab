@@ -5,26 +5,54 @@
       "protocol": "spacemit-ram-v1",
       "fsbl": {
         "file": "k3/FSBL.bin",
-        "sha256": "d56b966e3389616e55c2f32113866f29fae716776e264350fe8208d4ce6a2d38"
-      },
-      "fsbl_fallback": {
-        "file": "k3/FSBL-full.bin",
-        "sha256": "cfeeeee18728ef34a2d257311440a1bab8723cb554079de77dcf514d1b2bfdb0"
+        "sha256": "b971b060137183a77cae3a8f78dcbb24d900c2bea66d7f384f3115643aa73abe",
+        "training_slots": {
+          "lpddr5": {
+            "offset": 251560,
+            "size": 38912
+          },
+          "lpddr4x": {
+            "offset": 314800,
+            "size": 38912
+          }
+        }
       },
       "uboot": {
         "file": "k3/u-boot.itb",
-        "sha256": "216dc03232d958e9356b298016a345db80f2e8989e3b0ede8408851694ba8938"
+        "sha256": "3d2632744c9114eec446e885fb5ba2a227bb2c82edf8c1fadda587abe8b9ffa1"
+      },
+      "ram_boot": {
+        "protocol": "spacemit-k3-ramboot-v1",
+        "fsbl": {
+          "file": "k3-ram-boot/FSBL.bin",
+          "sha256": "9ba8e2c31d6dbb692a039d63703ddcadabb6519b12fd6e31faa19f11ba2971b1"
+        },
+        "uboot": {
+          "file": "k3-ram-boot/u-boot.itb",
+          "sha256": "acb32f12de373cdf2745bc0c2c7e566da2c0c5aafa3a1d69030dca8a09a3f65b"
+        }
       }
     },
     "k1": {
       "protocol": "stock",
       "fsbl": {
         "file": "k1/FSBL.bin",
-        "sha256": "9c04391720bbe729c48ebb9cce6043fa14e4147e05baf653203e2e91b91dc26b"
+        "sha256": "c6cec4f04276373aec5d8c98e58d85e419da2527a45f922757a30ad146ced54b"
       },
       "uboot": {
         "file": "k1/u-boot.itb",
-        "sha256": "28e04e5cd73b5fc7e342b41cdcb2d3c5105aa2bf47558c460a65061c406e4522"
+        "sha256": "78c411893db130c0a8b14f8aa12b10a02481f69297860139b7f22640a9b17035"
+      },
+      "ram_boot": {
+        "protocol": "spacemit-k1-ramboot-v1",
+        "fsbl": {
+          "file": "k1-ram-boot/FSBL.bin",
+          "sha256": "c6cec4f04276373aec5d8c98e58d85e419da2527a45f922757a30ad146ced54b"
+        },
+        "uboot": {
+          "file": "k1-ram-boot/u-boot.itb",
+          "sha256": "8f359d09e448d8d7dea8ed5ed89fefb8eadbbc63414a95aff146a6ce8db233d8"
+        }
       }
     }
   }

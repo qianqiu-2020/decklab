@@ -1,0 +1,16 @@
+The K3 RAM startup FSBL and U-Boot use the vendor U-Boot
+revision a6877905021898981d333251c6878d6a5feeea70. Their
+firmware archive and member digests appear in BUILD-INFO.txt.
+The included OpenSBI retains its separate license in ../k3/OPENSBI-LICENSE.txt.
+
+Under section 3(b) of the GNU General Public License, version 2, the
+DeckLab distributor offers any third party a complete machine-readable
+copy of the corresponding source code, including modifications and the
+scripts used to control compilation and installation. The copy is
+provided free of charge. This offer is valid for at least three years
+after distribution of each copy of these binaries.
+
+To request the source, open an issue at
+https://github.com/qianqiu-2020/decklab/issues
+and identify DeckLab 1.17.51 and the loader directory and filenames.
+The GPL license is included in ../COPYING.txt.

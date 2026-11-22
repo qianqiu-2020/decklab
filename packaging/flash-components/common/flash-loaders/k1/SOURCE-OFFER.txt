@@ -1,19 +1,16 @@
-DeckLab 1.17.33 — K1 RAM loader source offer
-
-The K1 FSBL.bin and u-boot.itb in this distribution were built from
-U-Boot revision 4a312b002711317ccf8c0ab9abea1e5ebe029413.
-Build parameters: k1_defconfig, K1_SPL_BUILD_ID=spl:4a312b002711,
-K1_SPL_RELEASE_VERSION=5. The installed BUILD-INFO.txt records their hashes.
+The K1 download FSBL and U-Boot use revision
+4a312b002711317ccf8c0ab9abea1e5ebe029413 with the configuration and
+digests recorded in CONFIGURATION.txt and BUILD-INFO.txt. The default
+wired network addresses use the RFC 5737 documentation block.
 
 Under section 3(b) of the GNU General Public License, version 2, the
 DeckLab distributor offers any third party a complete machine-readable
-copy of the corresponding source code for these K1 loader binaries,
-including the modifications and the scripts used to control compilation
-and installation, under the GPL. The copy is provided free of charge.
-This offer is valid for at least three years after distribution of each
-copy of these binaries.
+copy of the corresponding source code, including modifications and the
+scripts used to control compilation and installation. The copy is
+provided free of charge. This offer is valid for at least three years
+after distribution of each copy of these binaries.
 
 To request the source, open an issue at
 https://github.com/qianqiu-2020/decklab/issues
-and identify DeckLab 1.17.33 and the K1 RAM loaders. The GPL license is
-included in ../COPYING.txt. This offer concerns the K1 U-Boot materials.
+and identify DeckLab 1.17.51 and the loader directory and filenames.
+The GPL license is included in ../COPYING.txt.

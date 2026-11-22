@@ -126,16 +126,9 @@ goflash source is included. DeckLab's Apache-2.0 license does not apply to that
 component or grant additional rights to its source or binaries. Its component
 notices and dependency licenses remain in the distribution.
 
-The K3 RAM loader includes U-Boot under GPL-2.0 and a separately authorized vendor
-FSBL binary. The exact corresponding U-Boot source archive and build configuration
-are provided with the reviewed build components. Installed `flash-loaders/SOURCE.txt`
-identifies the source archive and its SHA-256; the U-Boot license is preserved as
-`COPYING.txt`. Neither the application license nor the U-Boot license relabels the
-FSBL or USB-driver components. Each retains its original license and attribution.
-
-
-The K1 FSBL and U-Boot are from the same K1 U-Boot build. Each installer
-includes its build receipt, GPL license and written source offer at
-`flash-loaders/k1/SOURCE-OFFER.txt`. Any third party may request complete
-corresponding source free of charge through DeckLab Issues for at least
-three years after distribution of their copy.
+The K1 and K3 flash and RAM startup loader directories contain their build records,
+the U-Boot GPL-2.0 license in `flash-loaders/COPYING.txt`, and written offers in
+`SOURCE-OFFER.txt` for the exact corresponding U-Boot and SPL sources. Any third
+party may request those sources free of charge through DeckLab Issues for at least
+three years after distribution of their copy. OpenSBI and the USB driver retain
+their own license and attribution.

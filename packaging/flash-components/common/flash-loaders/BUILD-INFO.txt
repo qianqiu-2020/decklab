@@ -1,19 +1,11 @@
-K3 RAM-only FSBL and U-Boot for DeckLab
-U-Boot source revision: d9bce64dfcd2920ef397adca1a466a3e1a1aee98
-U-Boot source patches: patches/0001-k3-ram-parallel-unzstd-and-background-block-write.patch (SHA-256 35857f92b8f227b8b8f9985663a07dd9e2129dc875da9cdb1b6cb0d2693bc57f).
-  Adds `unzstd` (DLZ1 zstd frame containers expanded on all harts) and `bgblk`
-  (one NVMe block write on another hart while USB download continues).
-Native Kconfig: board late-init and persistent environment disabled; CONFIG_PCI_INIT_R,
-  CMD_UNZSTD, ZSTD and CC_OPTIMIZE_LIBS_FOR_SPEED enabled. See CONFIGURATION.txt.
-OpenSBI: vendor fw_dynamic.bin (SHA-256 8774a68f9cec0205c920be022886c87fe028ea79225fe27e23099d4e980f21bc) from the Bianbu K3 firmware package,
-  added to the U-Boot FIT so U-Boot runs in S-mode with SBI HSM; BSD-2-Clause, see k3/OPENSBI-LICENSE.txt.
-FSBL (k3/FSBL.bin, SHA-256 d56b966e3389616e55c2f32113866f29fae716776e264350fe8208d4ce6a2d38): vendor U-Boot SPL revision
-  88206a912b449de51bca97104ba48fd73a7102d2 with patches/fsbl-0001-k3-spl-reuse-saved-ddr-training-in-usb-mode.patch
-  (SHA-256 5a96bffdef11ed3cd6ed4bc2682f9d6f10d83f4b7bfae4cd8fbc0e4114bc89db), k3_defconfig, see k3/FSBL-CONFIGURATION.txt.
-  In USB download mode it reuses DDR training data the board saved on its boot storage
-  (validated as in normal boot); nothing is written to the board.
-Fallback FSBL (k3/FSBL-full.bin, SHA-256 cfeeeee18728ef34a2d257311440a1bab8723cb554079de77dcf514d1b2bfdb0): the previous vendor FSBL,
-  which always trains DDR. DeckLab stages it on a USB port after the FSBL above failed to start.
+DeckLab K3 RAM-only download environment
+U-Boot source commit: c3b2fd89a30d6c70582198a88057655f707affff
+Profile: decklab-k3-download.config
+FSBL SHA-256: b971b060137183a77cae3a8f78dcbb24d900c2bea66d7f384f3115643aa73abe
+Toolchain prefix: /data/toolchains/spacemit-toolchain-linux-glibc-x86_64-v1.1.2/bin/riscv64-unknown-linux-gnu-
+Build: k3_defconfig + native RAM configuration, u-boot.bin, compressed multi-DTB FIT
+OpenSBI fw_dynamic SHA-256: 8774a68f9cec0205c920be022886c87fe028ea79225fe27e23099d4e980f21bc (started by SPL; U-Boot runs in S-mode)
+DDR training policy: decided by the staged FSBL; board_late_init disabled, so nothing is saved.
 Loaders are RAM-only, never partition payloads. NOR map selection does not save env or write storage.
-Build configuration paths normalized for distribution; RAM-ENV.txt contains the exact environment bytes.
-K1 stock RAM loaders are included. See k1/BUILD-INFO.txt and k1/SOURCE-OFFER.txt.
+EEPROM: native commands; host restricts TLV 0x83 and verifies physical readback.
+Compiled/offline checked; no physical-board acceptance implied.

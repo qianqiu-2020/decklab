@@ -1,0 +1,10 @@
+{
+  "archive": "Debian-13-Firmware-K3-202611172035.tar.gz",
+  "archive_sha256": "dd4261029906dfce7aebc299b8601b604d5bcc1502fee718ee0c98e49bf6cdc0",
+  "members": {
+    "factory/FSBL.bin": "9ba8e2c31d6dbb692a039d63703ddcadabb6519b12fd6e31faa19f11ba2971b1",
+    "fw_dynamic.itb": "714901939467fbd89e8c8819f85a94406c73fad7b4033c3681678b40e466321e",
+    "u-boot.itb": "eba1eb717dddb4b7c73f12bb59cf8a5f37a3bea4e3b7ac36a6b2652631911fc5"
+  },
+  "opensbi_payload_sha256": "bf4de6b88581313b3b5a9e55c9b53e17ed2b9e8d46b4556279c09ea3ba23ab53"
+}

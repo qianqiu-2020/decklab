@@ -1,3 +1,3 @@
-Source archive plus 0001-k3-ram-parallel-unzstd-and-background-block-write.patch.
+U-Boot source archive includes the pinned download profile.
 Native Kconfig disables board late-init and persistent env.
 Compiled symbols exclude board late-init, DDR persistence and serial provisioning.

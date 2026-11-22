@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.install_components import load
 
 
-# Keep the reviewed desktop SDK, drivers and K3 materials from these archives.
+# Keep the reviewed desktop libraries and drivers from these archives.
 # A custom complete archive supplies its own flashing components.
 BASE_ARCHIVES = {
     'linux-amd64': '804be4bc200ddefbc99a614e676ba829670100556d6da405bb3597cfb667127c',
@@ -56,6 +56,7 @@ def extract(archive, destination, platform, archive_sha256=None):
         load(root / 'manifest.json', platform)
         if archive_sha256 and archive_sha256 == BASE_ARCHIVES.get(platform):
             components = Path(__file__).resolve().parents[1] / 'packaging/flash-components'
+            shutil.rmtree(root / 'flash-loaders')
             shutil.copytree(components / 'common', root, dirs_exist_ok=True)
             shutil.copytree(components / platform, root, dirs_exist_ok=True)
             load(root / 'manifest.json', platform)

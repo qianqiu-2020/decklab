@@ -1,0 +1,104 @@
+{
+  "abi": 1,
+  "files": {
+    "lib/libfreerdp-client3.so.3": {
+      "sha256": "c0f972623550e05eb9dca57e81a5e0e2201f84271965500e1cdf7b1874e0d300",
+      "size": 488784
+    },
+    "lib/libfreerdp3.so.3": {
+      "sha256": "8f0badec838c4477192df2b5e4f2294fe0e295cb313ba0acbe3659aa6f17e27f",
+      "size": 12051048
+    },
+    "lib/libwinpr3.so.3": {
+      "sha256": "42cca45c26719b13150572d458ed0ee9e3ebc6ffb7a37ac3f2b9c6801397ce2b",
+      "size": 9090624
+    },
+    "libdecklab-freerdp.so": {
+      "sha256": "d5a10f2a1180a30686c0f7ad009ee3f42a4e9717d54259d725dfdb59afad5acd",
+      "size": 37024
+    },
+    "third-party/freerdp/GCC-11-runtime-copyright": {
+      "sha256": "c2ff6bea4ff8eb81e93a10878e3a03db5015051b32272b363a6f23d3b86b11a2",
+      "size": 70612
+    },
+    "third-party/freerdp/LICENSE": {
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "size": 11358
+    },
+    "third-party/freerdp/README.md": {
+      "sha256": "bff17fb39c0bb72fc286e9c799d3be11631bbd609cd65fba6a9002e6829af7c6",
+      "size": 2728
+    },
+    "third-party/freerdp/winpr/libwinpr/sysinfo/cpufeatures/NOTICE": {
+      "sha256": "c870d52f42a8f93023b99a85fe68d02637d6b04e5f35bbcd7f98759adb4e4d49",
+      "size": 577
+    },
+    "third-party/openh264/LICENSE": {
+      "sha256": "dd5c1c9668512530fa5a96e4c29ac4033d70a7eeb0eed7a42fddb6dd794ebdbb",
+      "size": 1295
+    },
+    "third-party/openh264/README.md": {
+      "sha256": "af1e190473efb146dc59a7b2a5c9ccdaae00c76a4c22fe9902627ae1434b6ee8",
+      "size": 7882
+    },
+    "third-party/openssl/ACKNOWLEDGEMENTS.md": {
+      "sha256": "58dee45791f007ced048114717f86672778fe75c551827c57e760861446ce3c3",
+      "size": 159
+    },
+    "third-party/openssl/AUTHORS.md": {
+      "sha256": "b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e",
+      "size": 1022
+    },
+    "third-party/openssl/LICENSE.txt": {
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+      "size": 10175
+    },
+    "third-party/openssl/README.md": {
+      "sha256": "f68c351048c11bd8499b9d6ef8b283386d4544cc556fd2679a2ff2b1c50a378b",
+      "size": 8137
+    }
+  },
+  "notices": {
+    "freerdp": [
+      "third-party/freerdp/LICENSE",
+      "third-party/freerdp/README.md",
+      "third-party/freerdp/winpr/libwinpr/sysinfo/cpufeatures/NOTICE",
+      "third-party/freerdp/GCC-11-runtime-copyright"
+    ],
+    "openh264": [
+      "third-party/openh264/LICENSE",
+      "third-party/openh264/README.md"
+    ],
+    "openssl": [
+      "third-party/openssl/LICENSE.txt",
+      "third-party/openssl/AUTHORS.md",
+      "third-party/openssl/ACKNOWLEDGEMENTS.md",
+      "third-party/openssl/README.md"
+    ]
+  },
+  "platform": "linux-amd64",
+  "schema": 1,
+  "source_files": {
+    "native/freerdp/CMakeLists.txt": "4e83fdb38dd9d0db7bb41c572d14226c98abafab5cb194e09e7eb285861dd30d",
+    "native/freerdp/decklab_rdp.c": "21837301b31b06895db916cd8b7fefbc7d199670f28dde8a92f684c8ae2b0379",
+    "native/freerdp/decklab_rdp.h": "4a63d82342bb66a4e80b9893ece24e668f3aef9180222f0f6c1459e5d51910f7"
+  },
+  "sources": {
+    "freerdp": {
+      "sha256": "4431bbf04d370545cfe2924b9d9f116b95c90c64ff156b2550bbaf82d34e7124",
+      "url": "https://pub.freerdp.com/releases/freerdp-3.33.1.tar.gz",
+      "version": "3.33.1"
+    },
+    "openh264": {
+      "sha256": "558544ad358283a7ab2930d69a9ceddf913f4a51ee9bf1bfb9e377322af81a69",
+      "url": "https://codeload.github.com/cisco/openh264/tar.gz/refs/tags/v2.6.0",
+      "version": "2.6.0"
+    },
+    "openssl": {
+      "sha256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
+      "version": "3.5.9"
+    }
+  },
+  "wrapper": "libdecklab-freerdp.so"
+}

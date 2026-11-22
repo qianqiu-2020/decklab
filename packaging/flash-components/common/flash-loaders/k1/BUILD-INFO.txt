@@ -9,24 +9,22 @@
     "env": {
       "bytes": 16384,
       "input": "env.bin",
-      "sha256": "f91f8d85420e54329cd0ecf97239bebeb22f6d058c7ea2a95a08d9de10681f90"
+      "sha256": "4cccadd19524caec77a0787be2e9c3d972bc788df34eb8f03dcf4eee45818645"
     },
     "fsbl": {
       "bytes": 198208,
       "input": "FSBL.bin",
-      "sha256": "9c04391720bbe729c48ebb9cce6043fa14e4147e05baf653203e2e91b91dc26b"
+      "sha256": "c6cec4f04276373aec5d8c98e58d85e419da2527a45f922757a30ad146ced54b"
     },
     "uboot": {
-      "bytes": 1982070,
+      "bytes": 1984406,
       "input": "u-boot.itb",
-      "sha256": "28e04e5cd73b5fc7e342b41cdcb2d3c5105aa2bf47558c460a65061c406e4522"
+      "sha256": "78c411893db130c0a8b14f8aa12b10a02481f69297860139b7f22640a9b17035"
     }
   },
-  "config_sha256": "ce3e877d3dce57b5170ecf18862064ddc1662423062cb3540a0c3e697ced0f59",
+  "config_sha256": "0f72b948b4054833c8a3338235feee169f5f4a3982427eaa64777bf12da1532d",
   "defconfig": "k1_defconfig",
   "schema_version": 1,
   "source_commit": "4a312b002711317ccf8c0ab9abea1e5ebe029413",
-  "spl_release_version": 5,
-  "archive": "Debian-13-Firmware-K1-202611180323.tar.gz",
-  "archive_sha256": "54a1ead6d50c813618ea7b496386e83c2ad225319c55d9cb0aaeb36798a2962e"
+  "spl_release_version": 5
 }

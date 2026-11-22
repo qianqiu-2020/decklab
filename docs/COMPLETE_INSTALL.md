@@ -39,7 +39,7 @@ Windows 完整安装提供勾选安装 USB 驱动和稍后安装入口。优先�
 
 仅做软件 CI 或明确不需要刷机时，Linux 使用 `--core-only`、Windows 使用 `-CoreOnly`，安装元数据明确标为 `core`。这种包不应作为完整单机安装交付。
 
-正式版及软件 CI 都下载经过审核、固定 SHA-256 的 [1.14.0 组件输入](https://github.com/qianqiu-2020/decklab/releases/tag/components-1.14.0)。构建器校验此基础归档后合入当前标签下的 `packaging/flash-components`，并按平台清单复核执行器、K1/K3 加载器及许可文件。自定义摘要的完整归档使用其自带材料。ZIP 根目录包含 `manifest.json`、刷机材料和 `desktop-runtime/`；图形 SDK 另有逐文件清单。默认公开 URL 和摘要固定在工作流，不需要设置 secrets。组织可用同名 Actions variables 或 secrets 覆盖 `COMPONENTS_LINUX_AMD64_URL` / `COMPONENTS_LINUX_AMD64_SHA256`、`COMPONENTS_WINDOWS_AMD64_URL` / `COMPONENTS_WINDOWS_AMD64_SHA256`。下载必须 HTTPS，缺失或摘要不符立即停止，不回退精简包，也不从可变的 latest 地址构建。
+正式版及软件 CI 都下载经过审核、固定 SHA-256 的 [1.14.0 组件输入](https://github.com/qianqiu-2020/decklab/releases/tag/components-1.14.0)。构建器校验基础归档后，使用当前标签中 `packaging/flash-components` 提供的执行器、K1/K3 加载器、许可文件及远程桌面桥接库。基础归档继续提供驱动和远程桌面依赖库。自定义摘要的完整归档使用其自带材料。ZIP 根目录包含 `manifest.json`、刷机材料和 `desktop-runtime/`；图形 SDK 另有逐文件清单。默认公开 URL 和摘要固定在工作流，不需要设置 secrets。组织可用同名 Actions variables 或 secrets 覆盖 `COMPONENTS_LINUX_AMD64_URL` / `COMPONENTS_LINUX_AMD64_SHA256`、`COMPONENTS_WINDOWS_AMD64_URL` / `COMPONENTS_WINDOWS_AMD64_SHA256`。下载必须 HTTPS，缺失或摘要不符立即停止，不回退精简包，也不从可变的 latest 地址构建。
 
 在 Linux 构建机下载公开输入时，将工作流里的固定 URL 与 SHA-256 分别设为 `DECKLAB_COMPONENTS_URL` 和 `DECKLAB_COMPONENTS_SHA256`，运行 `python3 tools/fetch_install_components.py --platform linux-amd64`。然后执行 `python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime`，再按上文组装。Windows 同理使用 `--platform windows-amd64`，构建时传 `-DesktopRuntime .\build\install-components\windows-amd64\desktop-runtime`。
 

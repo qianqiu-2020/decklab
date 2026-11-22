@@ -3,18 +3,18 @@
   "platform": "windows-amd64",
   "executor": {
     "path": "decklab-flash.exe",
-    "sha256": "9d3c717eab3f52907b3d540c285b7629b022c80196574f4b7a7b6cb84d9260b5"
+    "sha256": "ad05b3e755b5ab459e9206c570c45db757a7fa290d1fa10eb179ab9932ab83e6"
   },
   "loaders": {
     "path": "flash-loaders",
     "files": {
       "BUILD-INFO.txt": {
-        "sha256": "4781823826170993d3f2c2cab0cd5013da5db6ee9991d92441fd7305a7c1a434",
-        "size": 1876
+        "sha256": "ea228c7afe6a5ad0dc89421a1f1ebd1a780dcd207ec9e32e00555cf66fe7d14d",
+        "size": 891
       },
       "CONFIGURATION.txt": {
-        "sha256": "1bd57f45c2a8959b017838e141e576742e37af6b91365bdcba006075c2bc56c1",
-        "size": 56184
+        "sha256": "222ed5803d4ca4e2a8fbfa45a61408c047863c6343cbca282b06a9dd08513239",
+        "size": 56240
       },
       "COPYING.txt": {
         "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
@@ -25,39 +25,59 @@
         "size": 110
       },
       "SAFETY-CHECK.txt": {
-        "sha256": "8f934f711423d0a0e8ed0c0ea1bae9bb200388c069360e8bd31356de58823085",
-        "size": 225
+        "sha256": "e0fd91986250eaa32035077be360c65983bcdc5f05245263c3c9fcf499e212fe",
+        "size": 203
       },
       "SOURCE.txt": {
-        "sha256": "6c9322bd431e494c33755a05ee17c1ad6b330995f0a2df4d5c71765518f88c54",
-        "size": 737
+        "sha256": "2ac81808c4748c7e0b875926d64478199035d711a1c3123771128071d4a65b27",
+        "size": 158
       },
       "k1/BUILD-INFO.txt": {
-        "sha256": "18592e6c43631962fb47ca18588bd8a7b019cde6e7a80ed87b4a4aaa17522982",
-        "size": 1048
+        "sha256": "782febc661ef5968d29bcebdeab8f7e19b90f59d860ba06ab48b912e4f3873c1",
+        "size": 902
+      },
+      "k1/CONFIGURATION.txt": {
+        "sha256": "0f72b948b4054833c8a3338235feee169f5f4a3982427eaa64777bf12da1532d",
+        "size": 57683
       },
       "k1/FSBL.bin": {
-        "sha256": "9c04391720bbe729c48ebb9cce6043fa14e4147e05baf653203e2e91b91dc26b",
+        "sha256": "c6cec4f04276373aec5d8c98e58d85e419da2527a45f922757a30ad146ced54b",
         "size": 198208
       },
       "k1/SOURCE-OFFER.txt": {
-        "sha256": "befee93c048671d42351d08ca1ab94b86a58828fa46060ae696507f5a20d7365",
-        "size": 997
+        "sha256": "3f18dceddba04a0e52782a92639130f4db1446ea6b4f5a7827086270241fd655",
+        "size": 848
       },
       "k1/u-boot.itb": {
-        "sha256": "28e04e5cd73b5fc7e342b41cdcb2d3c5105aa2bf47558c460a65061c406e4522",
-        "size": 1982070
+        "sha256": "78c411893db130c0a8b14f8aa12b10a02481f69297860139b7f22640a9b17035",
+        "size": 1984406
+      },
+      "k1-ram-boot/CONFIGURATION.txt": {
+        "sha256": "c903c3bc209b9e99a0ade97c6c66cfea1fe90ba2fbeafdc0f681c1299b3529bc",
+        "size": 57678
+      },
+      "k1-ram-boot/FIT-SOURCE.txt": {
+        "sha256": "3746222b256eb2feeb2547a9c9eaa38ef38595948812799c679aae2fbc2615ca",
+        "size": 1309
+      },
+      "k1-ram-boot/FSBL.bin": {
+        "sha256": "c6cec4f04276373aec5d8c98e58d85e419da2527a45f922757a30ad146ced54b",
+        "size": 198208
+      },
+      "k1-ram-boot/SOURCE-OFFER.txt": {
+        "sha256": "9c66d78202411fc132501bf22de430ccff8e52460970db7096541bd56f595e9b",
+        "size": 931
+      },
+      "k1-ram-boot/u-boot.itb": {
+        "sha256": "8f359d09e448d8d7dea8ed5ed89fefb8eadbbc63414a95aff146a6ce8db233d8",
+        "size": 1486328
       },
       "k3/FSBL-CONFIGURATION.txt": {
         "sha256": "e061073d50ee3afc9e1c276347dbbec08bd50e579627bd0f6212d2c7515f64d5",
         "size": 56640
       },
-      "k3/FSBL-full.bin": {
-        "sha256": "cfeeeee18728ef34a2d257311440a1bab8723cb554079de77dcf514d1b2bfdb0",
-        "size": 465504
-      },
       "k3/FSBL.bin": {
-        "sha256": "d56b966e3389616e55c2f32113866f29fae716776e264350fe8208d4ce6a2d38",
+        "sha256": "b971b060137183a77cae3a8f78dcbb24d900c2bea66d7f384f3115643aa73abe",
         "size": 459712
       },
       "k3/OPENSBI-LICENSE.txt": {
@@ -65,24 +85,32 @@
         "size": 1396
       },
       "k3/SOURCE-OFFER.txt": {
-        "sha256": "c89151894105acaaa9bb19642d14eaede59d4f794ff6978b4e0782be793f07a6",
-        "size": 1089
+        "sha256": "03efda96c025298e07dd266ffbe704624518761af2ab22fc01a308d83eca1f79",
+        "size": 926
       },
       "k3/u-boot.itb": {
-        "sha256": "216dc03232d958e9356b298016a345db80f2e8989e3b0ede8408851694ba8938",
-        "size": 1100829
+        "sha256": "3d2632744c9114eec446e885fb5ba2a227bb2c82edf8c1fadda587abe8b9ffa1",
+        "size": 1155677
+      },
+      "k3-ram-boot/BUILD-INFO.txt": {
+        "sha256": "daeeb1783f22ca29d94b4ac526d720eabb8ac7ba73cd13aa0f034a64605b7cee",
+        "size": 532
+      },
+      "k3-ram-boot/FSBL.bin": {
+        "sha256": "9ba8e2c31d6dbb692a039d63703ddcadabb6519b12fd6e31faa19f11ba2971b1",
+        "size": 465504
+      },
+      "k3-ram-boot/SOURCE-OFFER.txt": {
+        "sha256": "a80668930c1a522b3627e1ad974b80c8a1572cb97d3ae3966f4374c35a40a80a",
+        "size": 859
+      },
+      "k3-ram-boot/u-boot.itb": {
+        "sha256": "acb32f12de373cdf2745bc0c2c7e566da2c0c5aafa3a1d69030dca8a09a3f65b",
+        "size": 1176365
       },
       "manifest.json": {
-        "sha256": "8cbf2a8ed9f3d8892ef79c4dd262ee533758eb70c60d27bf142af2a7bf5993f4",
-        "size": 864
-      },
-      "patches/0001-k3-ram-parallel-unzstd-and-background-block-write.patch": {
-        "sha256": "35857f92b8f227b8b8f9985663a07dd9e2129dc875da9cdb1b6cb0d2693bc57f",
-        "size": 13181
-      },
-      "patches/fsbl-0001-k3-spl-reuse-saved-ddr-training-in-usb-mode.patch": {
-        "sha256": "5a96bffdef11ed3cd6ed4bc2682f9d6f10d83f4b7bfae4cd8fbc0e4114bc89db",
-        "size": 716
+        "sha256": "a965eb6ae830fb77b0a24016016c07fd52f9c1c70a4b8da92c2173fab0f4e0f4",
+        "size": 1716
       }
     }
   },
@@ -90,8 +118,8 @@
     "path": "notices",
     "files": {
       "BUILD-INFO.txt": {
-        "sha256": "eb38eef08044b4c866eef6690e29a923e5044bdf0e8490d9ae9278e6ee443110",
-        "size": 421
+        "sha256": "8d1619a56080218237c929ff8f2c5daa179d85bb53c456e9cdaa637219eadf31",
+        "size": 203
       },
       "Go-LICENSE": {
         "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",

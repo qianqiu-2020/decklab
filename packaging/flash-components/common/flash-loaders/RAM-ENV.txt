@@ -1,0 +1,6 @@
+bootcmd=while true; do fastboot 0; done
+bootdelay=-2
+baudrate=115200
+stdin=serial
+stdout=serial
+stderr=serial
