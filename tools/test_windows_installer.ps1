@@ -21,10 +21,11 @@ $bundle = Join-Path $root 'dist\seriald'
 $driverScript = Join-Path $bundle 'Install-seriald-USB-Driver.ps1'
 $driverAvailable = $false
 if (Test-Path -LiteralPath $driverScript) {
-    $command = Join-Path $PSHOME 'powershell.exe'
-    & $command -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $driverScript -DetectOnly
-    if ($LASTEXITCODE -notin @(0, 1)) { throw 'USB driver detection did not run.' }
-    $driverAvailable = $LASTEXITCODE -eq 0
+    $command = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $driverScript + '"'), '-DetectOnly')
+    $probe = Start-Process -FilePath $command -ArgumentList $arguments -Wait -PassThru
+    if ($probe.ExitCode -notin @(0, 1)) { throw "USB driver detection did not run: $($probe.ExitCode)" }
+    $driverAvailable = $probe.ExitCode -eq 0
 
     $syntax = [System.Management.Automation.Language.Parser]::ParseFile($driverScript, [ref]$null, [ref]$null)
     $detector = $syntax.Find({
