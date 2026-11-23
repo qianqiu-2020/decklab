@@ -214,6 +214,25 @@ class SplitNodeTests(unittest.TestCase):
                 self.assertTrue(shutdown.called)
             self.assertFalse(f.backend.restart_requested)
 
+    def test_displayed_desktop_document_can_be_saved_only_on_hardware_node(self):
+        with split_nodes(self.certificate, self.key) as f:
+            path = '/api/settings?target=backend'
+            code, snapshot = api_request(f.url, path, f.token)
+            self.assertEqual(code, 200)
+            self.assertIn('desktop', snapshot['document_names'])
+            patch = {'version': 1, 'documents': {'desktop': {'boards': {}}}}
+            code, response = api_request(f.url, path, f.token, {
+                'action': 'save', 'revision': snapshot['revision'], 'configuration': patch,
+            })
+            self.assertEqual(code, 200, response)
+            self.assertEqual(f.backend_settings.read()['documents'], patch['documents'])
+            _, web = api_request(f.url, '/api/settings', f.token)
+            self.assertNotIn('desktop', web['document_names'])
+            code, _ = api_request(f.url, '/api/settings', f.token, {
+                'action': 'save', 'revision': web['revision'], 'configuration': patch,
+            })
+            self.assertEqual(code, 400)
+
     def test_upload_and_usb_discovery_use_backend_cache_and_cannot_be_delegated_to_connection_grant(self):
         with split_nodes(self.certificate, self.key) as f:
             code, listed = api_request(f.url, '/api/flash-discover', f.token)

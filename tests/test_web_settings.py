@@ -65,6 +65,33 @@ class SettingsTests(unittest.TestCase):
         self.save({'version': 1, 'documents': {'profiles': {}}})
         self.assertEqual(self.settings.effective()['documents']['profiles'], {})
 
+    def test_save_preserves_environment_defaults_and_external_documents(self):
+        path = self.path.parent / 'profiles.json'
+        path.write_text('{"profiles":{"original":{}}}', encoding='utf-8')
+        self.settings.environment.update(SERIALD_PROFILES=str(path), SERIALD_SHARE_SECONDS='7200')
+        self.save(self.patch(BAUD='9600'))
+        self.assertEqual(self.settings.read(), {
+            'version': 1, 'environment': {'BAUD': '9600'}, 'documents': {},
+        })
+        self.settings.environment['SERIALD_SHARE_SECONDS'] = '3600'
+        path.write_text('{"profiles":{"updated":{}}}', encoding='utf-8')
+        effective = self.settings.effective()
+        self.assertEqual(effective['environment']['SHARE_SECONDS'], '3600')
+        self.assertEqual(effective['documents']['profiles'], {'profiles': {'updated': {}}})
+
+    def test_configuration_path_is_checked_before_save_and_changes_effective_document(self):
+        missing = self.path.parent / 'missing.json'
+        with self.assertRaisesRegex(SettingsError, '无法读取配置文档'):
+            self.save(self.patch(PROFILES=str(missing)))
+        self.assertFalse(self.path.exists())
+        path = self.path.parent / 'available.json'
+        path.write_text('{"profiles":{"ready":{}}}', encoding='utf-8')
+        self.assertEqual(self.save(self.patch(PROFILES=str(path)), preview=True)['changes'],
+                         ['PROFILES', 'document:profiles'])
+        self.save(self.patch(PROFILES=str(path)))
+        self.assertEqual(self.settings.read()['documents'], {})
+        self.assertEqual(self.settings.effective()['documents']['profiles'], {'profiles': {'ready': {}}})
+
     def test_control_provider_preview_and_save_never_read_credentials_or_send_requests(self):
         document = {'version': 1, 'documents': {'hardware': {'boards': {'SN': {'control': {
             'provider': 'bmc', 'url': 'https://bmc.example', 'board': 'test-board-b',
@@ -81,7 +108,7 @@ class SettingsTests(unittest.TestCase):
         before = self.path.read_bytes()
         for document in [self.patch(PORT='0'), self.patch(BAUD='49'), self.patch(BASE='relative'),
                          self.patch(STOP_BITS='3'), self.patch(MCP_ENABLED='no'),
-                         self.patch(PROBE='custom', PROBE_COMMAND='echo x'),
+                         self.patch(PROBE='custom', PROBE_COMMAND='echo x', AUTO_CONFIGURE_SSH='1'),
                          self.patch(SSH_USER='-bad'), self.patch(LOG_RETENTION_DAYS='36501'),
                          self.patch(TRANSFER_MAX_FILES='0'), self.patch(UNKNOWN='x'),
                          {'version': 1, 'documents': {'hardware': {'boards': {'test': {'unknown': {}}}}}},
@@ -126,9 +153,9 @@ class SettingsTests(unittest.TestCase):
         source = '''import sys,time
 from seriald_core.web_settings import WebSettings,SettingsError
 class DelayedSettings(WebSettings):
-    def validate(self, document):
+    def _validate_effective(self, document):
         time.sleep(0.2)
-        return super().validate(document)
+        return super()._validate_effective(document)
 settings=DelayedSettings(sys.argv[1], {'SERIALD_BASE':sys.argv[2]})
 sys.stdin.read(1)
 try:

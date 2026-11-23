@@ -2,18 +2,21 @@
 
 ## Web settings, export and import
 
-Open **系统配置 / System settings** using the primary Web credential. The form
-covers all host settings below, with JSON editors for `profiles`, `hardware`,
-`flash`, `desktop` and the fixed Agent-token map. Embedded documents take precedence over
-their file paths. Saving/importing configuration never executes hardware
-commands, identifies a board, or changes a board's password.
+Open **系统配置 / System settings** using the primary Web credential. Choose
+**Access & sharing**, **Serial & login**, **Flashing & wiring**, or **Logs & files**
+for routine changes. **Device preferences** contains bulk labels and port probes.
+Service paths and node-to-node connection options are under **Advanced**. For
+split deployments choose the Web node or hardware backend in the header.
+The settings and import forms never execute hardware commands, identify a board,
+or change a board's password.
 
-1. Edit fields or import a version-1 `decklab-settings` JSON package. Import
-   validates and stages a patch; omitted keys retain existing values. Explicit
-   `{}` clears a document's assignments. Review paths, board assignments and
-   helper commands before saving.
-2. Choose **预览修改**, then **保存配置**. Revision checks reject concurrent edits.
-   Invalid imports and previews do not modify the saved file.
+1. Edit fields or use **Import & export** to load a version-1 `decklab-settings`
+   package as a draft. Embedded JSON documents take precedence over their file
+   paths. Enter `{}` to clear a document's assignments.
+2. Choose **保存配置 / Save settings**. Use **查看改动 / Review changes** to check
+   the scope before saving. Validation and revision checks apply to every save.
+   A field edit saves only the modified values, allowing other fields to continue
+   using launch defaults or external configuration files.
 3. Choose **重启并应用**. The page distinguishes saved and active revisions.
    Control-only changes preserve the collector. Collector changes close SSH
    sessions and briefly interrupt terminals; the existing process re-executes
@@ -42,8 +45,8 @@ explicitly includes private values. Exports do not include board identity/histor
 verified per-device SSH credentials or issued access grants; those remain in
 existing registry/grant stores. This export is not a full service-data backup.
 
-Device labels and port probe overrides have their own JSON section in the same
-Web dialog. They remain in the existing registry. Choose **预览设备偏好**, then
+Device labels and port probe overrides have their own JSON section under
+**Device preferences**. They remain in the existing registry. Choose **预览设备偏好**, then
 **保存设备偏好** to apply them immediately, separately from restart-based host
 settings. Export can optionally include them in the same package. Import stages
 each section without saving it; an invalid device section stays editable and

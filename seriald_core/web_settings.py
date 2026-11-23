@@ -222,15 +222,21 @@ class WebSettings:
                             'control' if name in CONTROL else 'collector'} for name in DEFAULTS],
                 'apply': 'restart-required'}
 
+    def _patched_record(self, incoming, saved, current):
+        env, docs = _shape(_restore(incoming, current))
+        for name in env.keys() & (PATHS - {'BY_PATH'}):
+            if env[name] and not os.path.isabs(env[name]):
+                raise SettingsError('路径必须为服务端绝对路径：' + name)
+        return {'version': 1, 'environment': dict(saved.get('environment', {}), **env),
+                'documents': dict(saved.get('documents', {}), **docs)}
+
     def validate(self, incoming):
-        current = self.effective()
-        document = _restore(incoming, current)
-        env, docs = _shape(document)
-        # Imports are patches; omission preserves existing settings, while an
-        # explicit empty document clears its bindings. Never drop hidden secrets.
-        combined = {'version': 1, 'environment': dict(current['environment'], **env),
-                    'documents': dict(current['documents'], **docs)}
-        merged, docs = combined['environment'], combined['documents']
+        saved = self.read()
+        proposed = self._patched_record(incoming, saved, self.effective(saved))
+        return self._validate_effective(self.effective(proposed))
+
+    def _validate_effective(self, document):
+        merged, docs = document['environment'], document['documents']
         from .image_catalog import configured_sources
         from .tasks import TaskError
         try:
@@ -276,22 +282,25 @@ class WebSettings:
                     or not isinstance(value, str) or len(value) < 32 or value == merged['AUTH_TOKEN']
                     for key, value in tokens.items()) or len(set(tokens.values())) != len(tokens)):
                 raise SettingsError('Agent 令牌配置无效')
-        if len(_bytes(combined)) > 2 * 1024 ** 2:
+        if len(_bytes(document)) > 2 * 1024 ** 2:
             raise SettingsError('配置超过 2 MiB')
-        return combined
+        return document
 
     def save(self, incoming, revision, preview=False):
         with _LOCK, _disk_lock(self.path):
             before = self.snapshot(secrets=True)
             if revision != before['revision']:
                 raise SettingsError('配置已被修改，请重新加载后再保存', 409)
-            document = self.validate(incoming)
+            saved = self.read()
+            proposed = self._patched_record(incoming, saved, before['configuration'])
+            document = self._validate_effective(self.effective(proposed))
             changes = [name for name, value in document['environment'].items()
                        if before['configuration']['environment'].get(name) != value]
-            changes += ['document:' + name for name, value in document['documents'].items()
-                        if before['configuration']['documents'].get(name) != value]
-            if not preview:
-                _atomic(self.path, _bytes(document))
+            old_docs, new_docs = before['configuration']['documents'], document['documents']
+            changes += ['document:' + name for name in dict.fromkeys((*old_docs, *new_docs))
+                        if old_docs.get(name) != new_docs.get(name)]
+            if not preview and proposed != saved:
+                _atomic(self.path, _bytes(proposed))
             return {'ok': True, 'changes': changes, 'apply': 'restart-required',
                     'preview': preview, 'revision': self.snapshot()['revision']}
 

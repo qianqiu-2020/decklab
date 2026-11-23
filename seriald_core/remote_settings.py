@@ -8,6 +8,7 @@ from .settings_restart import preflight_listener
 
 WEB_FIELDS = CONTROL | {'BASE', 'BACKEND_URL', 'BACKEND_TOKEN', 'BACKEND_CA'}
 BACKEND_NETWORK_FIELDS = {'BACKEND_BIND', 'BACKEND_PORT', 'BACKEND_TOKEN', 'BACKEND_CERT', 'BACKEND_KEY'}
+NODE_DOCUMENTS = {'web': {'agent_tokens'}, 'backend': {'profiles', 'hardware', 'flash', 'desktop'}}
 
 
 def allowed_fields(role, fields):
@@ -20,7 +21,7 @@ def node_snapshot(settings, role, secrets=False):
     result['fields'] = [field for field in result['fields'] if field['name'] in allowed]
     result['configuration']['environment'] = {key: value for key, value in
         result['configuration']['environment'].items() if key in allowed}
-    documents = {'agent_tokens'} if role == 'web' else {'profiles', 'hardware', 'flash', 'desktop'}
+    documents = NODE_DOCUMENTS[role]
     result['configuration']['documents'] = {key: value for key, value in
         result['configuration']['documents'].items() if key in documents}
     result['document_names'] = sorted(documents)
@@ -32,7 +33,7 @@ def validate_scope(settings, role, incoming):
     if not isinstance(incoming, dict):
         raise SettingsError('配置格式无效')
     allowed = allowed_fields(role, settings.effective()['environment'])
-    documents = {'agent_tokens'} if role == 'web' else {'profiles', 'hardware', 'flash'}
+    documents = NODE_DOCUMENTS[role]
     if (not isinstance(incoming.get('environment', {}), dict)
             or not isinstance(incoming.get('documents', {}), dict)):
         raise SettingsError('配置字段必须为对象')

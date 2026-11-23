@@ -56,28 +56,46 @@ let control, collector, chrome, ws;
   await wait('!!document.querySelector(".settings-dialog[open]")');
   console.log('Settings browser: checking form');
   const settingsSchema = await (await fetch(address + '/api/settings')).json();
-  assert.deepEqual(await evaluate('[...document.querySelectorAll(".settings-grid label small")].map(n=>n.textContent).sort()'),
-    settingsSchema.fields.map(field=>'SERIALD_'+field.name).sort());
-  assert.equal(await evaluate('Array.from(document.querySelectorAll(".settings-body input[type=password]")).every(input => !input.value && input.placeholder.includes("已设置"))'), false); // Empty primary credential has no saved secret.
-  assert.equal(await evaluate('Array.from(document.querySelectorAll(".settings-grid label")).find(label => label.querySelector("small").textContent === "SERIALD_SSH_PASSWORD").querySelector("input").value'), '');
-  await evaluate(`(() => {const password=Array.from(document.querySelectorAll('.settings-grid label')).find(label=>label.querySelector('small').textContent==='SERIALD_SSH_PASSWORD').querySelector('input');password.value='temporary';password.dispatchEvent(new Event('input'));password.value='';password.dispatchEvent(new Event('input'));const label=Array.from(document.querySelectorAll('.settings-grid label')).find(label=>label.querySelector('small').textContent==='SERIALD_BAUD');const input=label.querySelector('input');input.value='9600';input.dispatchEvent(new Event('input'));Array.from(document.querySelectorAll('.settings-actions button')).find(b=>b.textContent==='预览修改').click();})()`);
-  await wait('document.querySelector(".settings-status").textContent.startsWith("校验通过。")');
-  await evaluate(`Array.from(document.querySelectorAll('.settings-actions button')).find(b=>b.textContent==='保存配置').click()`);
-  await wait('document.querySelector(".settings-status").textContent.includes("配置已保存")');
-  assert.equal(JSON.parse(fs.readFileSync(path.join(temporary, 'web-settings.json'))).environment.BAUD,'9600');
-  assert.equal(JSON.parse(fs.readFileSync(path.join(temporary, 'web-settings.json'))).environment.SSH_PASSWORD,'bianbu','blank password edits must preserve the saved value');
+  assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-field]")].map(n=>n.dataset.field).sort()'),
+    settingsSchema.fields.map(field=>field.name).sort());
+  const click = selector => evaluate('document.querySelector(' + JSON.stringify(selector) + ').click()');
+  const enter = (selector, value) => evaluate(`(() => {const input=document.querySelector(${JSON.stringify(selector)}); input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input'));})()`);
+  const clickAction = name => evaluate(`Array.from(document.querySelectorAll('.settings-dialog button')).find(b=>b.textContent===${JSON.stringify(name)}).click()`);
+  assert.equal(await evaluate('document.querySelector("[role=tab][aria-selected=true]").id'), 'settings-tab-access');
+  assert.equal(await evaluate('document.querySelector("#settings-panel-advanced").hidden'), true);
+  assert.equal(await evaluate('Array.from(document.querySelectorAll(".settings-footer button")).find(b=>b.textContent==="重启并应用").hidden'), true);
+  await click('#settings-tab-serial');
+  assert.equal(await evaluate('document.querySelector("[data-field=PROBE_COMMAND]").hidden'), true);
+  await enter('#setting-probe', 'custom');
+  assert.equal(await evaluate('document.querySelector("[data-field=PROBE_COMMAND]").hidden'), false);
+  assert.equal(await evaluate('document.querySelector("#setting-auto-configure-ssh").value'), '0');
+  assert.equal(await evaluate('document.querySelector("#setting-auto-configure-ssh").disabled'), true);
+  await enter('#setting-probe', 'linux');
+  assert.equal(await evaluate('document.querySelector("#setting-auto-configure-ssh").value'), '1');
+  await evaluate('document.querySelector("#setting-ssh-password").closest("details").open = true');
+  assert.equal(await evaluate('document.querySelector("#setting-ssh-password").value'), '');
+  await enter('#setting-ssh-password', 'temporary');
+  await enter('#setting-ssh-password', '');
+  await enter('#setting-baud', '9600');
+  await wait('document.querySelector(".settings-save-state").textContent === "有未保存的配置"');
+  await clickAction('保存配置');
+  await wait('document.querySelector(".settings-save-state").textContent === "已保存，待重启"');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(temporary, 'web-settings.json'))),
+    {version:1,environment:{BAUD:'9600'},documents:{}}, 'a single edit must not pin other defaults');
   const share = await (await fetch(address + '/api/settings', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'export',include_secrets:false})})).json();
   assert.deepEqual(share.configuration.environment.SSH_PASSWORD,{$redacted:true});
+  await click('#settings-tab-transfer');
   await evaluate(`(() => {const pack={format:'decklab-settings',version:1,configuration:{version:1,environment:{BAUD:'19200'}},browser:{language:'zh-CN',deviceOrder:{version:1,ids:['board:fixture-a','board:fixture-b']}},preferences:{version:1,boards:{'FIXTURE-A':{label:'fixture-imported'}},ports:{'fixture-port':{label:'fixture-imported-left'}}}};const file=new File([JSON.stringify(pack)],'preferences.json',{type:'application/json'});const transfer=new DataTransfer();transfer.items.add(file);const input=document.querySelector('.settings-dialog input[type=file]');input.files=transfer.files;input.dispatchEvent(new Event('change'));})()`);
-  await wait('document.querySelector(".settings-status").textContent.includes("导入校验通过")');
+  await wait('document.querySelector(".settings-status").textContent.includes("已载入配置，尚未保存")');
   assert.equal(JSON.parse(fs.readFileSync(path.join(temporary, 'web-settings.json'))).environment.BAUD,'9600','import must not save automatically');
   assert.equal((await (await fetch(address+'/api/device-preferences')).json()).configuration.boards['FIXTURE-A'].label,'fixture-a','import must not apply registry preferences automatically');
-  await evaluate(`document.querySelector('.settings-footer input[type=checkbox]').click();Array.from(document.querySelectorAll('.settings-actions button')).find(b=>b.textContent==='预览修改').click()`);
-  await wait('document.querySelector(".settings-status").textContent.startsWith("校验通过。")');
-  await evaluate(`Array.from(document.querySelectorAll('.settings-actions button')).find(b=>b.textContent==='保存配置').click()`);
+  await clickAction('查看改动');
+  await wait('document.querySelector(".settings-status").textContent.includes("将保存：波特率")');
+  await clickAction('保存配置');
   await wait('document.querySelector(".settings-status").textContent.includes("配置已保存")');
   assert.equal(await evaluate('JSON.parse(localStorage.getItem("decklab.device-order.v1")).ids[0]'),'board:fixture-a');
   assert.equal(JSON.parse(fs.readFileSync(path.join(temporary, 'web-settings.json'))).environment.BAUD,'19200');
+  await click('#settings-tab-devices');
   await evaluate(`(() => {const section=Array.from(document.querySelectorAll('.settings-body details')).find(s=>s.querySelector('summary').textContent==='设备标签与端口探测覆盖（JSON）');section.open=true;const editor=section.querySelector('textarea');editor.value=JSON.stringify({version:1,boards:{'FIXTURE-A':{label:'fixture-renamed'}},ports:{'fixture-port':{label:'fixture-right',probe:{mode:'custom',command:'echo fixture-only'}}}});editor.dispatchEvent(new Event('input'));Array.from(section.querySelectorAll('button')).find(b=>b.textContent==='预览设备偏好').click();})()`);
   await wait(`Array.from(document.querySelectorAll('.settings-body button')).some(b=>b.textContent==='保存设备偏好' && !b.disabled)`);
   await evaluate(`Array.from(document.querySelectorAll('.settings-body button')).find(b=>b.textContent==='保存设备偏好').click()`);
@@ -87,13 +105,18 @@ let control, collector, chrome, ws;
   assert.equal(preferences.configuration.ports['fixture-port'].label,'fixture-right');
   assert.equal(preferences.configuration.ports['fixture-port'].probe.command,'echo fixture-only');
   assert.deepEqual(Object.keys(preferences.configuration.boards),['FIXTURE-A'],'preferences cannot manufacture board identities');
-  await evaluate(`(() => {const originalURL=URL.createObjectURL;URL.createObjectURL=function(blob){window.exportedSettingsBlob=blob;return originalURL.call(URL,blob)};const originalClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download==='decklab-settings.json')return;return originalClick.call(this)};document.querySelectorAll('.settings-footer input[type=checkbox]')[1].click();Array.from(document.querySelectorAll('.settings-actions button')).find(b=>b.textContent==='导出分享配置').click();})()`);
+  await click('#settings-tab-transfer');
+  await evaluate(`(() => {const originalURL=URL.createObjectURL;URL.createObjectURL=function(blob){window.exportedSettingsBlob=blob;return originalURL.call(URL,blob)};const originalClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download==='decklab-settings.json')return;return originalClick.call(this)};document.querySelectorAll('#settings-panel-transfer input[type=checkbox]')[1].click();Array.from(document.querySelectorAll('#settings-panel-transfer button')).find(b=>b.textContent==='导出分享配置').click();})()`);
   await wait('!!window.exportedSettingsBlob');
   const exported = await evaluate('exportedSettingsBlob.text().then(text=>JSON.parse(text))');
   assert.equal(exported.preferences.boards['FIXTURE-A'].label,'fixture-renamed');
   assert.equal(exported.preferences.ports['fixture-port'].label,'fixture-right');
   assert.equal(exported.browser.deviceOrder.ids[0],'board:fixture-a');
   assert.deepEqual(exported.configuration.environment.SSH_PASSWORD,{$redacted:true});
+  await click('#settings-tab-access');
+  await evaluate('SerialdI18n.setLocale("en")');
+  await wait('document.querySelector("#settings-tab-access").textContent === "Access & sharing"');
+  await evaluate('SerialdI18n.setLocale("zh-CN")');
   const output = path.join(root,'dist/settings-ui'); fs.mkdirSync(output,{recursive:true});
   for (const [name,width,height] of [['desktop',1360,1000],['mobile',390,844]]) {
     await rpc('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<600});
@@ -102,6 +125,18 @@ let control, collector, chrome, ws;
     const shot = await rpc('Page.captureScreenshot',{format:'png'});
     fs.writeFileSync(path.join(output,name+'.png'),Buffer.from(shot.data,'base64'));
   }
+  const savedConfig = await (await fetch(address+'/api/settings')).json();
+  assert.notEqual(savedConfig.active_revision,savedConfig.revision);
+  await clickAction('重启并应用');
+  let applied;
+  for (let n=0; n<100; n++) {
+    try { applied=await (await fetch(address+'/api/settings',{signal:AbortSignal.timeout(1000)})).json(); }
+    catch (_) { applied=null; }
+    if (applied && applied.active_revision===savedConfig.revision) break;
+    await delay(100);
+  }
+  assert.equal(applied && applied.active_revision,savedConfig.revision);
+  assert.equal(applied.configuration.environment.BAUD,'19200');
   assert.deepEqual(errors,[]);
   console.log('Settings browser checks passed: real control API, private storage, masked credentials, preview/save/import, personal order, desktop/mobile. Isolated collector scans an empty directory; all registry devices are explicit fixtures, no real board access.');
 })().catch(error => {console.error(error);process.exitCode=1;}).finally(async () => {
