@@ -30,6 +30,12 @@ from .tasks import TaskError, _check_result_fields
 MAX_LINE = 256 * 1024
 MAX_OUTPUT = 64 * 1024 * 1024
 MAX_REQUEST = 8 * 1024 * 1024
+_COMMAND = re.compile(
+    r'(?:getvar:[A-Za-z0-9_.:-]+|download:[0-9a-fA-F]+|flash:[A-Za-z0-9_.:-]+|'
+    r'continue|upload|reboot(?:-bootloader)?|(?:UCmd:|ACmd:|oem )[A-Za-z0-9_ .=,:;?&|+*\x24{}()!<>/-]+)\Z')
+_COMMAND_PRIVATE = re.compile(r'://|(?:password|token|authorization|cookie|secret)\b', re.I)
+_COMMAND_STATUSES = {'issuing', 'send-error', 'read-error', 'invalid-reply', 'DATA', 'OKAY', 'FAIL'}
+
 _IDENTIFIER = re.compile(r'[A-Za-z0-9_.:/ -]{1,160}\Z')
 
 
@@ -304,6 +310,13 @@ def safe_event(event):
             output[field] = value
     if 'done' in output and 'total' in output and output['done'] > output['total']:
         raise FlashRunnerError('invalid flashing progress range')
+    if output.get('event') == 'command' and output.get('status') in _COMMAND_STATUSES:
+        command = event.get('command')
+        if (isinstance(command, str) and len(command) <= 256 and _COMMAND.fullmatch(command)
+                and not _COMMAND_PRIVATE.search(command)):
+            output['command'] = command
+        else:
+            output['redacted'] = True
     return output
 
 
@@ -1081,11 +1094,12 @@ class LocalFlashExecutor:
         request = dict(self._request(binding), mode='partitions')
         if on_event:
             on_event({'event': 'progress', 'phase': 'reading-system-layout', 'done': 0, 'total': 0})
-        document = self._run(binding, 'storage-inventory', request, check=check)
+        document = self._run(binding, 'storage-inventory', request, on_event=on_event, check=check)
         if geometry_only:
             return read_inventory(document, None, check)
         def fetch(extent):
-            return self._run(binding, 'storage-metadata', dict(request, storage_read=extent), check=check)
+            return self._run(binding, 'storage-metadata', dict(request, storage_read=extent),
+                             on_event=on_event, check=check)
         def progress(done, total):
             if on_event:
                 on_event({'event': 'progress', 'phase': 'reading-system-metadata', 'done': done, 'total': 0})

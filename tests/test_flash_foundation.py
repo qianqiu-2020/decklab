@@ -187,6 +187,19 @@ class FlashFoundationTests(unittest.TestCase):
         with self.assertRaises(TaskError):
             self.flashes.append_event(task_id, {'password': 'must-not-persist'})
 
+    def test_command_evidence_survives_expired_progress(self):
+        with self.maintenance.admission('BOARD-A') as resources:
+            task_id = self.tasks.store.create_board('flash', 'web', '', 'BOARD-A', 'audit-events',
+                'a' * 64, {}, resources)
+        command = {'event': 'command', 'command': 'flash:gpt', 'status': 'OKAY'}
+        self.flashes.append_event(task_id, command)
+        for number in range(MAX_EVENTS + 5):
+            self.flashes.append_event(task_id, {'event': 'progress', 'done': number})
+        page = self.flashes.events(task_id, limit=1)
+        self.assertEqual(page['events'], [dict(command, cursor=1)])
+        self.assertTrue(page['has_more'])
+        self.assertGreater(self.flashes.events(task_id, after=1)['events'][0]['cursor'], 2)
+
     def test_plan_scope_digest_and_identity_migration_with_completed_history(self):
         plan = self.flashes.put_plan({'actor': 'agent-one', 'serial': 'BOARD-A', 'binding_revision': 1})
         self.assertEqual(len(plan['digest']), 64)

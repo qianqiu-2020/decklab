@@ -11,7 +11,7 @@ import threading
 import time
 
 from .board_maintenance import maintenance_for
-from .flash_store import FlashStore
+from .flash_store import AUDIT_EVENTS, FlashStore
 from .results import response
 from .tasks import TaskCancelled, TaskError
 from .transactions import TransactionError
@@ -866,6 +866,8 @@ class FlashActions:
                     started = {'writing': False}
                     def event(value):
                         store.append_event(context.id, value)
+                        if value.get('event') in AUDIT_EVENTS:
+                            return
                         phase = value.get('phase', 'flash')
                         started['writing'] = started['writing'] or phase in ('writing-gpt', 'writing')
                         done, total = value.get('done', 0), value.get('total', 0)
@@ -948,6 +950,8 @@ class FlashActions:
                             request['loader']['trained_for'] = materials['trained_for']
                     def event(value):
                         store.append_event(context.id, value)
+                        if value.get('event') in AUDIT_EVENTS:
+                            return
                         done, total = value.get('done', 0), value.get('total', 0)
                         if type(done) is int and type(total) is int and 0 <= done <= max(total, done):
                             context.progress(done, max(total, done), value.get('phase', 'calibrating'))
@@ -1526,6 +1530,8 @@ class FlashOperation:
         def event(value):
             value = _public(value)
             store.append_event(context.id, value)
+            if value.get('event') in AUDIT_EVENTS:
+                return
             phase = value.get('phase', 'flash')
             done, total = value.get('done', 0), value.get('total', 0)
             if type(done) is int and type(total) is int and 0 <= done and (done <= total

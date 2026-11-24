@@ -107,6 +107,14 @@ class FlashBookTests(unittest.TestCase):
 
 
 class FlashRunnerTests(unittest.TestCase):
+    def test_safe_command_evidence_keeps_wire_status_without_raw_reply(self):
+        event = {'event': 'command', 'command': 'UCmd:mmc write 0x100 0x200 0x1',
+                 'status': 'OKAY', 'message': 'raw board output'}
+        self.assertEqual(safe_event(event), {k: v for k, v in event.items() if k != 'message'})
+        event['command'] = 'UCmd:echo password'
+        self.assertTrue(safe_event(event)['redacted'])
+        self.assertNotIn('command', safe_event(event))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()

@@ -6,7 +6,8 @@
     var board = null, capabilities = null, artifacts = [], plan = null, task = null, discovered = [];
     var flow = 'normal';
     var pageBoard = null, preparingBoard = false, downloadWiring = null, downloadControl = null;
-    var fastUSBChoices = false;
+    var fastUSBChoices = false, fastImage = null;
+    var fastFirmwareTables = new Set(), pendingCommand = null;
     var reenterOffer = null, reenterCheckedTask = '';
     var sequence = 0, busy = false, uploading = false, requestId = '', cursor = 0;
     var selectionRequestId = '', selectionPlan = null, payloadCandidates = [], inspection = null;
@@ -714,6 +715,17 @@
         || submissionUnknown || !!task || !$('fl-fast-storage').value || !validStreamURL($('fl-fast-url').value.trim());
       $('fl-fast-url').disabled = $('fl-fast-storage').disabled = busy || preparingBoard || !!task || submissionUnknown;
       $('fl-fast-store').disabled = $('fl-fast-url').disabled || !options.openImageStore;
+      $('fl-fast-normal').disabled = $('fl-fast-store').disabled;
+      var firmware = fastImage && fastImage.url === $('fl-fast-url').value.trim() && fastImage.companionFirmware;
+      var firmwareLabel = [];
+      if (firmware) firmwareLabel.push(translate('配套 Firmware') + ' · ' + firmware);
+      var skipped = fastFirmwareTables.size ? translate('包内 NOR 固件已跳过') + ' · '
+        + Array.from(fastFirmwareTables).join('、') : '';
+      $('fl-result-firmware').textContent = skipped;
+      $('fl-result-firmware').hidden = !skipped;
+      $('fl-copy-events').disabled = !$('fl-events').textContent;
+      $('fl-fast-firmware').textContent = firmwareLabel.join(' · ');
+      $('fl-fast-firmware').hidden = !firmwareLabel.length;
       $('fl-fast-disk').hidden = (capabilities && capabilities.chip || board && board.chip) === 'k1';
       $('fl-fast-read-disks').disabled = $('fl-fast-url').disabled || !(canResolve || fast);
       $('fl-fast-read-disks').textContent = translate(canResolve && downloadWiring
@@ -1512,7 +1524,7 @@
       invalidatePlan(); $('fl-connections').textContent = ''; $('fl-partitions').textContent = '';
       $('fl-task-id').textContent = ''; $('fl-events').textContent = ''; $('fl-results').textContent = '';
       $('fl-task-status').textContent = '';
-      $('fl-event-status').textContent = ''; cursor = 0; eventLines = [];
+      $('fl-event-status').textContent = ''; cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear();
       $('fl-board').textContent = targetName(target); $('fl-device').value = selected.target_id;
       updateControls(); status('正在读取下载设备身份和刷机能力…');
       try {
@@ -2136,7 +2148,8 @@
       }
       if (!uploading && !(downloadTask && ['queued', 'running'].includes(downloadTask.state)))
         setProgress(p.phase, p.done, p.total, ['queued', 'running'].includes(current.state), p);
-      $('fl-task-id').textContent = current.id + ' · ' + current.state + (p.phase ? ' · ' + p.phase : '');
+      var activePhase = ['queued', 'running'].includes(current.state) && p.phase;
+      $('fl-task-id').textContent = current.id + ' · ' + current.state + (activePhase ? ' · ' + activePhase : '');
       var box = $('fl-results'); box.textContent = '';
       if (current.kind === 'ram-boot' && result.handoff === 'acknowledged') {
         text('dt', '内存启动', box);
@@ -2180,17 +2193,51 @@
     async function loadEvents(selected, seq, current) {
       var eventSeq = ++eventSequence;
       try {
-        var result = await client.request('/api/flash-events?id=' + encodeURIComponent(current.id)
-          + '&after=' + cursor + query(selected));
-        if (!same(selected, seq) || !task || task.id !== current.id || eventSeq !== eventSequence) return;
-        if (result.truncated_before && cursor < result.truncated_before) eventLines.push('较早的事件已超出保留范围。');
-        $('fl-event-status').textContent = '';
-        (result.events || []).forEach(function (event) {
-          eventLines.push([event.seq, event.phase || event.type, event.message,
-            event.done !== undefined ? event.done + ' / ' + event.total : ''].filter(function (part) { return part !== undefined && part !== ''; }).join(' · '));
-        });
-        eventLines = eventLines.slice(-300); cursor = result.next_after === undefined ? cursor : result.next_after;
+        var result;
+        do {
+          result = await client.request('/api/flash-events?id=' + encodeURIComponent(current.id)
+            + '&after=' + cursor + query(selected));
+          if (!same(selected, seq) || !task || task.id !== current.id || eventSeq !== eventSequence) return;
+          if (result.truncated_before) eventLines.push(translate('较早的进度事件已超出保留范围。'));
+          $('fl-event-status').textContent = '';
+          (result.events || []).forEach(function (event) {
+            var number = event.cursor || event.seq;
+            if (event.event === 'command') {
+              var command = 'Fastboot ' + (event.command || translate('命令参数已隐藏'));
+              var reply = {'issuing': '发送中', 'send-error': '发送失败', 'read-error': '未收到完整应答',
+                'invalid-reply': '应答格式无效'}[event.status];
+              if (event.status === 'issuing' || !pendingCommand || command !== pendingCommand.command) {
+                pendingCommand = {command:command, line:eventLines.length, number:number, replies:[]};
+                eventLines.push('');
+              }
+              if (event.status && event.status !== 'issuing') pendingCommand.replies.push(reply ? translate(reply) : event.status);
+              eventLines[pendingCommand.line] = [pendingCommand.number, command,
+                pendingCommand.replies.join(' → ') || translate('发送中')].filter(Boolean).join(' · ');
+              return;
+            }
+            if (event.event === 'command-limit') {
+              eventLines.push(translate('本次执行器命令记录达到上限，后续命令未记录。'));
+              return;
+            }
+            if (event.event === 'loader-material') {
+              eventLines.push([number, translate('加载文件到板上 RAM'), event.partition].join(' · '));
+              return;
+            }
+            if (event.event === 'firmware-skipped') {
+              fastFirmwareTables.add(event.partition);
+              eventLines.push([number, translate('包内 NOR 固件已跳过'), event.partition].join(' · '));
+              return;
+            }
+            eventLines.push([number, event.phase || event.event || event.type, event.message,
+              event.done !== undefined ? (event.total ? event.done + ' / ' + event.total : event.done) : '']
+              .filter(function (part) { return part !== undefined && part !== ''; }).join(' · '));
+          });
+          var next = result.next_after === undefined ? cursor : result.next_after;
+          if (next <= cursor) break;
+          cursor = next;
+        } while (result.has_more);
         $('fl-events').textContent = eventLines.join('\n');
+        updateControls();
       } catch (error) {
         if (same(selected, seq)) $('fl-event-status').textContent = '事件读取失败，将继续查询：' + error.message;
       }
@@ -2229,6 +2276,9 @@
         // Serial-board capabilities describe a different scope; reload the
         // task's USB target capabilities instead of reusing them.
         capabilities = null; restoring = true;
+      }
+      if (task && task.id !== current.id) {
+        cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear();
       }
       renderTask(current); loadEvents(selected, seq, current);
       offerReenter(current, selected, seq);
@@ -2648,11 +2698,11 @@
           || pageBoard.connection_id !== selected.connection_id) downloadControl = null;
       pageBoard = selected.key && !selected.target_id ? Object.assign({}, selected) : null;
       downloadWiring = null;
-      busy = false; previewTask = null; previewRequestId = ''; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; $('fl-execution').hidden = true; cursor = 0; eventLines = []; ++eventSequence;
+      busy = false; previewTask = null; previewRequestId = ''; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; $('fl-execution').hidden = true; cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear(); ++eventSequence;
       inspection = null; payloadCandidates = []; selectionRequestId = ''; selectionPlan = null; renderedBackup = '';
       downloadRetry = false; automaticDownloadIdentity = '';
       $('fl-files').value = ''; $('fl-url').value = ''; $('fl-url-sha256').value = '';
-      $('fl-fast-url').value = ''; fastUSBChoices = false; setFastDisks(null);
+      $('fl-fast-url').value = ''; fastImage = null; fastUSBChoices = false; setFastDisks(null);
       $('fl-url-panel').hidden = true; $('fl-url-toggle').setAttribute('aria-expanded', 'false');
       $('fl-target-storage').value = ''; $('fl-recovery-reason').value = '';
       $('fl-tuning-storage').value = ''; $('fl-tuning-disks').textContent = '';
@@ -2971,6 +3021,12 @@
         } else status('已选择控制机缓存中的镜像；请核对写入范围并预览。');
       }, Object.assign({}, configuration, {serial:selected.serial || '', ramBoot:flow === 'ram'}));
     }
+    $('fl-copy-events').addEventListener('click', function () {
+      if ($('fl-copy-events').disabled) return;
+      var exported = $('fl-task-id').textContent + '\n\n' + $('fl-events').textContent;
+      $('fl-event-status').textContent = translate(options.copyText(exported, true)
+        ? '执行记录已复制' : '复制失败，请手动选中执行记录。');
+    });
     $('fl-store').addEventListener('click', function () { chooseSource(); });
     $('fl-cache').addEventListener('click', function () { chooseSource({source:'local'}); });
     $('fl-fast-store').addEventListener('click', function () {
@@ -2980,9 +3036,15 @@
         if (!same(selected, seq) || flow !== 'fast' || $('fl-fast-store').disabled)
           throw new Error(translate('当前设备或任务状态已变化，请重新选择。'));
         if (!validStreamURL(item.url || '')) throw new Error(translate('请选择支持 URL 极速刷机的系统包。'));
+        fastImage = item;
         $('fl-fast-url').value = item.url;
         updateControls();
       }, {streamURL:validStreamURL, chip:capabilities && capabilities.chip || board.chip});
+    });
+    $('fl-fast-normal').addEventListener('click', function () {
+      if (!board || flow !== 'fast' || $('fl-fast-normal').disabled) return;
+      applyFlow('normal'); updateControls();
+      chooseSource({fromStream:true});
     });
     $('fl-url-toggle').addEventListener('click', function () {
       var panel = $('fl-url-panel'); panel.hidden = !panel.hidden;

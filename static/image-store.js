@@ -182,7 +182,7 @@
           });
         }
       }
-      direct.filter(catalogItem).forEach(function (row) {
+      direct.filter(supported).forEach(function (row) {
         var info = details(row), name = [info.release, info.date].filter(Boolean).join(' · ') || '当前版本';
         var group = groups.find(function (group) { return group.id === 'files:' + name; });
         if (!group) { group = {id:'files:' + name,name:name,files:[]}; groups.push(group); }
@@ -233,6 +233,17 @@
         selectOptions(chooser, choices, selectedPath, false);
         (function (node, key) { node.addEventListener('change', function () { folderChoices[key] = node.value; load(); }); })(chooser, base);
         if (!selectedPath) break;
+        if (picker.streamURL && operatingSystem === 'debian') {
+          var firmwarePages = await Promise.all(children.filter(function (row) {
+            return /^firmware$/i.test(row.name) && row.path !== selectedPath;
+          }).map(function (row) {
+            return directory(current, row.path, force).catch(function () { return {entries:[]}; });
+          }));
+          if (!valid()) return;
+          firmwarePages.forEach(function (page) {
+            branchFiles = branchFiles.concat(page.entries.filter(function (row) { return row.kind !== 'directory'; }));
+          });
+        }
         rows = (await directory(current, selectedPath, force)).entries;
         if (!valid()) return;
         branchFiles = branchFiles.concat(rows.filter(function (row) { return row.kind !== 'directory'; }));
@@ -304,7 +315,14 @@
             });
             remove.disabled = item.state === 'claimed';
           } else if (picker.streamURL) {
-            button('填入 URL', row, function () { selected(item); });
+            var companionImage = companion(item);
+            if (companionImage) {
+              text('small', '配套 Firmware · ' + companionImage.name, main).setAttribute('data-i18n-ignore','');
+              text('small', '极速刷机只更新系统盘。若要同时刷写配套 Firmware，请使用普通刷机。', main);
+            }
+            button('填入 URL', row, function () {
+              selected(companionImage ? Object.assign({}, item, {companionFirmware:companionImage.name}) : item);
+            });
           } else {
             var firmware=companion(item), includeFirmware=null;
             if(firmware){var paired=text('label','',main);includeFirmware=document.createElement('input');includeFirmware.type='checkbox';includeFirmware.checked=true;paired.appendChild(includeFirmware);text('span','同时选择 '+firmware.name,paired).setAttribute('data-i18n-ignore','');}
@@ -434,7 +452,7 @@
       choose = typeof onChoose === 'function' ? onChoose : null;
       var forced = ['local', 'public', 'internal'].includes(picker.source) ? picker.source : '';
       viewKey = picker.streamURL ? 'stream' : picker.fileOnly ? 'partition' : picker.firmwareOnly ? 'firmware' : forced || 'store';
-      var saved = views[viewKey] || (picker.streamURL && views.store) || {};
+      var saved = picker.fromStream && views.stream || views[viewKey] || (picker.streamURL && views.store) || {};
       source = forced || (['local', 'public', 'internal'].includes(saved.source) ? saved.source : picker.fileOnly || picker.firmwareOnly ? 'local' : 'public');
       if (picker.streamURL && source === 'local') source = 'public';
       path = saved.path || ''; platform = saved.platform === 'k1' ? 'k1' : 'k3';

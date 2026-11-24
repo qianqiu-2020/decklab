@@ -9,6 +9,7 @@ from .tasks import TaskError, _check_result_fields
 
 
 MAX_EVENTS = 256
+AUDIT_EVENTS = ('command', 'command-limit', 'loader-material', 'firmware-skipped')
 
 
 def encode_document(document, limit=65536):
@@ -150,8 +151,13 @@ class FlashStore:
             cursor = row[0] + 1
             self.store.db.execute('UPDATE flash_details SET next_event=? WHERE task_id=?', (cursor, task_id))
             self.store.db.execute('INSERT INTO flash_events VALUES(?,?,?)', (task_id, cursor, encoded))
-            self.store.db.execute('DELETE FROM flash_events WHERE task_id=? AND cursor<=?',
-                                  (task_id, cursor - MAX_EVENTS))
+            # Progress expires, while the executor's bounded audit trail survives
+            # later progress and remains reviewable after reopening the task.
+            if event.get('event') not in AUDIT_EVENTS:
+                self.store.db.execute(
+                    "DELETE FROM flash_events WHERE task_id=? AND cursor<=? "
+                    "AND COALESCE(json_extract(document, '$.event'), '') NOT IN (?,?,?,?)",
+                    (task_id, cursor - MAX_EVENTS, *AUDIT_EVENTS))
         return cursor
 
     def events(self, task_id, after=0, limit=100):
@@ -161,7 +167,8 @@ class FlashStore:
             self.details(task_id)
             first = self.store.db.execute('SELECT MIN(cursor) FROM flash_events WHERE task_id=?', (task_id,)).fetchone()[0]
             rows = self.store.db.execute('SELECT cursor,document FROM flash_events WHERE task_id=? AND cursor>? '
-                                         'ORDER BY cursor LIMIT ?', (task_id, after, limit)).fetchall()
+                                         'ORDER BY cursor LIMIT ?', (task_id, after, limit + 1)).fetchall()
+        more, rows = len(rows) > limit, rows[:limit]
         return {'events': [dict(json.loads(row['document']), cursor=row['cursor']) for row in rows],
-                'next_cursor': rows[-1]['cursor'] if rows else after,
+                'next_cursor': rows[-1]['cursor'] if rows else after, 'has_more': more,
                 'gap': first is not None and after < first - 1}

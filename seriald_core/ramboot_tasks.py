@@ -170,6 +170,10 @@ def _run(actions, executor, binding, serial, row, context, attempt_id, maintenan
             raise TaskError('RAM boot USB attachment changed', 409)
 
     def event(value):
+        from .flash_store import AUDIT_EVENTS
+        if value.get('event') in AUDIT_EVENTS:
+            actions.store.append_event(context.id, value)
+            return
         phase = value.get('phase', '')
         if phase in ('preparing-loader', 'ramboot-transfer', 'ramboot-handoff'):
             actions.store.append_event(context.id, value)

@@ -83,6 +83,15 @@ function setup(request, storage=new Map()){
   assert.equal(pairCalls.filter(c=>c.url==='/api/image-download').length,2);assert.equal(paired.watches.length,2);
   paired.watches[0].resolve({artifact:{id:'os-selected',name:pairedOS.name}});paired.watches[1].resolve({artifact:{id:'fw-selected',name:pairedFW.name}});await flush();await flush();
   assert.equal(pairChoice.id,'os-selected');assert.equal(pairChoice.firmware.id,'fw-selected');
+  let streamedPair;
+  const streamVersion = setup(() => Promise.resolve({entries:[pairedOS,pairedFW]}));
+  streamVersion.store.open(item => { streamedPair = item; }, {streamURL:url => url.endsWith('.tar.gz')});
+  await flush();
+  assert.equal(streamVersion.ids['is-list'].children.length, 1);
+  assert.match(streamVersion.ids['is-list'].textContent, /配套 Firmware.*Debian-13-Firmware-K3/);
+  streamVersion.buttons()[0].fire();
+  assert.equal(streamedPair.url, pairedOS.url);
+  assert.equal(streamedPair.companionFirmware, pairedFW.name);
   let cachedPair;
   const savedPair=setup((url,payload)=>Promise.resolve(url.startsWith('/api/image-catalog')
     ? {entries:[{...pairedOS,download_state:'cached'},{...pairedFW,download_state:'cached'}]}

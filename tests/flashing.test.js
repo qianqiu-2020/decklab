@@ -937,6 +937,23 @@ test('event cursors resume without replay and untrusted event text remains text'
   assert.match(h.take('/api/flash-events').url, /after=2/);
 });
 
+test('completed URL flash drains all trace pages and shows commands and skipped firmware', async () => {
+  const h = harness();
+  h.api.open(board, {id:'finished-stream',kind:'flash',state:'completed',progress:{phase:'preparing-loader'},
+    flash:{operation:'stream'},result:{write_result:'completed'}});
+  h.take('/api/flash-capabilities').resolve(capabilities); await drain();
+  h.take('/api/flash-events').resolve({events:[{cursor:1,event:'command',command:'download:00000400',status:'issuing'},
+    {cursor:2,event:'command',command:'download:00000400',status:'DATA'}],has_more:true,next_after:2});
+  await drain();
+  const next = h.take('/api/flash-events'); assert.match(next.url, /after=2/);
+  next.resolve({events:[{cursor:3,event:'command',command:'download:00000400',status:'OKAY'},
+    {cursor:4,event:'firmware-skipped',partition:'partition_nor.json'}],next_after:4});
+  await drain();
+  assert.match(h.get('fl-events').textContent, /Fastboot download:00000400 · DATA → OKAY/);
+  assert.match(h.get('fl-events').textContent, /包内 NOR 固件已跳过 · partition_nor.json/);
+  assert.doesNotMatch(h.get('fl-task-id').textContent, /preparing-loader/);
+});
+
 test('live Go partition names are submitted with their storage id when no synthetic id exists', async () => {
   const h = harness(); h.api.open(board);
   h.take('/api/flash-capabilities').resolve({...capabilities, storages: [

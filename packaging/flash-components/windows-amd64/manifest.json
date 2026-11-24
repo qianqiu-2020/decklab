@@ -3,7 +3,7 @@
   "platform": "windows-amd64",
   "executor": {
     "path": "decklab-flash.exe",
-    "sha256": "bc817715f272a5713c0e781f6baf8552dd5fdd607626600f3e16913bb88b8c8c"
+    "sha256": "7d12821dc7a0cdeb00742f1c21cf8dc0bc6849ab606f59ae16c2161166cf18b7"
   },
   "loaders": {
     "path": "flash-loaders",
