@@ -1,6 +1,7 @@
 (function (global) {
   'use strict';
   function install(ctx, options) {
+    var pasting = false;
     function suppressReply() {
       // The collector owns protocol replies for every shared live session.
       // Browsers retain keyboard/mouse input, never answer historical queries.
@@ -36,7 +37,7 @@
       ctx.term.parser.registerDcsHandler({ intermediates: intermediates, final: 'q' }, suppressReply);
     });
     ctx.term.onData(function (data) {
-      if (!options.isCurrent(ctx) || !options.keyboardEnabled()) return;
+      if (!options.isCurrent(ctx) || (!pasting && !options.keyboardEnabled())) return;
       options.send(data, ctx);
     });
     ctx.term.onSelectionChange(function () {
@@ -61,6 +62,13 @@
       }
       return true;
     });
+    return function paste(text) {
+      // xterm normalizes line endings and honors the remote application's
+      // bracketed paste mode. Its onData callback is synchronous for paste.
+      pasting = true;
+      try { ctx.term.paste(text); }
+      finally { pasting = false; }
+    };
   }
   global.SerialdTerminalPolicy = { install: install };
 })(window);

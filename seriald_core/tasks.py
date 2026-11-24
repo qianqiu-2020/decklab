@@ -178,7 +178,7 @@ class TaskStore:
         """Atomically bind one execution, idempotency key and durable resource holds."""
         from .flash_store import encode_document, validate_request
         validate_request(request_id, input_digest)
-        if kind not in ('flash', 'flash-inspect', 'ram-boot') or not isinstance(actor, str) or not actor or len(actor) > 80:
+        if kind not in ('flash', 'flash-inspect', 'ram-boot', 'board-test') or not isinstance(actor, str) or not actor or len(actor) > 80:
             raise TaskError('invalid board task kind or actor')
         if not isinstance(client_id, str) or len(client_id) > 80:
             raise TaskError('invalid board task client')
@@ -535,7 +535,7 @@ class TaskManager:
 
     def start_board(self, kind, actor, client_id, serial, run, *, request_id, input_digest,
                     details=None, resources=(), maintenance=None, connection_id=None,
-                    target_id=None, target_generation=None):
+                    target_id=None, target_generation=None, tracks_outcome=False):
         from .flash_store import FlashStore
         if not callable(run) or maintenance is None:
             raise TaskError('board task requires a runner and maintenance coordinator')
@@ -556,7 +556,7 @@ class TaskManager:
                 task_id = self.store.create_board(kind, actor, client_id, serial, request_id, input_digest,
                     details if details is not None else {}, selected, connection_id,
                     target_id=target_id, target_generation=target_generation)
-            context = TaskContext(task_id, self.store, lambda: self._check_actor(actor))
+            context = TaskContext(task_id, self.store, lambda: self._check_actor(actor), tracks_outcome)
             worker = threading.Thread(target=self._run_board, args=(context, run, maintenance), daemon=True)
             self._active[task_id] = (context, worker)
             try:

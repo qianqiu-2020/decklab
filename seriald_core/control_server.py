@@ -231,7 +231,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     share_seconds = SHARE_SECONDS
     default_language = ''
     settings = None
-    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/control-slots.js', '/static/board-control.js', '/static/desktop.js',
+    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js'))
     try:
@@ -631,6 +631,12 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             body = self.rfile.read(length) if length else None
             if length and len(body) != length:
                 return self._json(400, {'error': 'incomplete body'})
+            if self.command == 'POST' and route == '/api/task-start' and not self._owner_authorized():
+                try:
+                    if load_object(body or b'').get('kind') == 'board-test':
+                        return self._json(403, {'error': '板卡用例仅限主访问身份'})
+                except (ValueError, AttributeError):
+                    return self._json(400, {'error': 'bad json'})
             target_path = target_override or self.path
             if self.command == 'POST' and agent_actor:
                 try:
@@ -908,7 +914,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         if urlparse(self.path).path.startswith('/vendor/novnc/'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
-                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/control-slots.js', '/static/board-control.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
+                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()
 

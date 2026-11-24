@@ -10,6 +10,7 @@ from . import ha_slots
 from .board_maintenance import maintenance_for
 from .hardware import HardwareBook
 from .tasks import TaskError
+from .transactions import transactions_for
 
 
 def legacy_slots(document, url, inventory):
@@ -40,6 +41,7 @@ class ControlSlots:
         self.settings = None
         self.lock = threading.RLock()
         self.in_use = set()
+        self.onboarding = set()
         self.scans = {}
         self.active_revision = None
 
@@ -140,6 +142,8 @@ class ControlSlots:
                     self.scans.pop(next(iter(self.scans)))
                 self.scans[scan] = (now + 600, snapshot['revision'], url, token, inventory, old)
             return dict(result, scan=scan, slots=rows, origin=url)
+        if op == 'identify-slot':
+            return self.identify_slot(payload, snapshot, document, connections)
         if op != 'save':
             raise TaskError('未知接线操作')
         with self.lock:
@@ -149,6 +153,8 @@ class ControlSlots:
             if self.manager.hardware.document != document:
                 raise TaskError('硬件配置另有待应用的更改，请先应用', 409)
             _, _, url, token, inventory, old = scan
+            if any(origin == url for origin, _, _ in self.onboarding):
+                raise TaskError('此控制器正在识别新板，请等待任务结束', 423)
             changes = payload.get('changes')
             if not isinstance(changes, dict) or len(changes) > 512:
                 raise TaskError('槽位变更无效')
@@ -184,3 +190,108 @@ class ControlSlots:
             revision = self._apply(edited, snapshot['revision'])
             self.scans.pop(payload['scan'])
             return {'ok': True, 'revision': revision}
+
+    def identify_slot(self, payload, snapshot, document, connections):
+        """Use an explicitly picked empty HA slot; USB/UART proof precedes binding."""
+        from .flash_tasks import FlashActions, _discovery
+        from .flash_store import FlashStore
+
+        slot, request_id = payload.get('slot'), payload.get('request_id')
+        connection_id = payload.get('connection_id')
+        if not all(isinstance(value, str) and value for value in (slot, request_id, connection_id)):
+            raise TaskError('请选择槽位和当前串口连接')
+        tasks = self.manager.tasks
+        digest = tasks.store.request_digest({key: payload.get(key) for key in ('action', 'slot', 'scan', 'connection_id')})
+        previous = FlashStore(self.manager.store).find_request('web', request_id, digest)
+        if previous:
+            return {'task': tasks.store.get(previous)}
+        with self.lock:
+            scan = self.scans.get(payload.get('scan')) if isinstance(payload.get('scan'), str) else None
+            if not scan or scan[0] < time.monotonic() or scan[1] != snapshot['revision'] or self.manager.hardware.document != document:
+                raise TaskError('接线清单已变化，请重新检测槽位', 409)
+            _, _, origin, token, inventory, old = scan
+            live = inventory.get(slot, {})
+            entity = live.get('entities', {}).get('enter-download')
+            if not entity or slot in old or slot in connections.get(origin, {}).get('slots', {}):
+                raise TaskError('请选择支持下载模式的未绑定槽位', 409)
+        device = self.manager.resolve(payload.get('key'))
+        if not device or not device.present or device.serial or device.connection_id != connection_id:
+            raise TaskError('待识别串口已变化，请重新打开', 409)
+        command = ha_slots.SlotAction(origin, token, slot, 'enter-download', entity, False)
+        transactions = transactions_for(device)
+        client_id = payload.get('client_id', '')
+
+        def run(context):
+            def check():
+                context.check()
+                if device.connection_id != connection_id or not device.present or device.stop.is_set():
+                    raise TaskError('串口连接已变化，无法核对接线', 409)
+
+            with self.lock:
+                resource = (origin, slot, connection_id)
+                if (any(item[:2] == resource[:2] or item[2] == connection_id for item in self.onboarding)
+                        or self.manager.hardware.document != document):
+                    raise TaskError('槽位正在识别或配置已变化', 423)
+                self.onboarding.add(resource)
+            try:
+                discovery = _discovery(self.manager)
+                if not discovery.argv:
+                    raise TaskError('控制机未安装 USB 刷机执行器', 409)
+                with transactions.actor_scope('web', client_id), transactions.begin('hardware-enter-download', 31, require_open=False):
+                    check()
+                    before = {target['target_generation'] for target in discovery.refresh()['targets'] if target['present']}
+                    command.run(check, outcome=lambda value: context.issued() if value == 'issued' else context.mark_outcome(value))
+                context.store.update(context.id, result={'control_result': 'acknowledged'})
+                context.progress(0, 0, 'checking-usb-identity')
+                seen, deadline = set(), time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    check()
+                    for target in discovery.refresh()['targets']:
+                        generation = target['target_generation']
+                        if not target['present'] or generation in before or generation in seen:
+                            continue
+                        seen.add(generation)
+                        target_id = target['target_id']
+                        try:
+                            probed = discovery.probe(target_id, generation)
+                            row = discovery.get(target_id, generation)
+                        except (TaskError, OSError) as error:
+                            if getattr(error, 'recovery_task_id', None):
+                                raise
+                            continue
+                        link = row['document'].get('uart_link') or {}
+                        if link.get('connection_id') != connection_id:
+                            continue
+                        if link.get('state') == 'linked' and device.serial and device.serial == probed['serial']:
+                            return {'serial': device.serial, 'key': device.key, 'control_result': 'acknowledged'}
+                        if link.get('state') != 'paired' or probed['mode'] != 'bootrom' or probed['serial']:
+                            raise TaskError('刷机 USB 与当前串口身份不一致，请核对接线', 409)
+                        result = FlashActions(self.manager).backup({'target_id': target_id, 'target_generation': generation,
+                            'binding_revision': 1, 'request_id': 'identify-usb-' + context.id, 'client_id': client_id},
+                            None, identity_only=True)
+                        if result.status != 202:
+                            raise TaskError(result.payload['error'], result.status)
+                        identity_task = result.payload['task']['id']
+                        context.store.update(context.id, result={'identity_task_id': identity_task, 'control_result': 'acknowledged'})
+                        context.progress(0, 0, 'reading-board-serial')
+                        while True:
+                            identity = tasks.store.get(identity_task)
+                            if identity['state'] not in ('queued', 'running'):
+                                break
+                            time.sleep(.5)
+                        check()
+                        if identity['state'] != 'completed':
+                            raise TaskError(identity['error'] or '未能从下载设备读取序列号', 409)
+                        if not device.serial or device.serial != (identity.get('result') or {}).get('serial'):
+                            raise TaskError('已读取 USB 序列号，但无法关联到当前串口', 409)
+                        return {'serial': device.serial, 'key': device.key, 'control_result': 'acknowledged',
+                                'identity_task_id': identity_task}
+                    context.cancelled.wait(.5)
+                raise TaskError('槽位已进入下载模式，但未能用串口确认新 USB 连接，请核对两根线', 409)
+            finally:
+                with self.lock:
+                    self.onboarding.discard(resource)
+
+        task = tasks.start('hardware-enter-download', 'web', client_id, [{'serial': '', 'connection_id': connection_id}],
+                           run, request_id=request_id, input_digest=digest, tracks_outcome=True)
+        return {'task': task}

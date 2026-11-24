@@ -957,5 +957,9 @@ dialog :is(button,input,textarea,select){max-width:100%}
 .wiring-row { display: grid; grid-template-columns: minmax(6rem,1fr) minmax(9rem,3fr) auto auto; align-items: center; gap: .6rem; padding: .75rem 0; border-bottom: 1px solid var(--line); }
 .wiring-row small { display: block; }
 .wiring-row select { min-width: 0; }
+.wiring-row[data-current],.wiring-handoff { background: var(--accent-soft); border-radius: 8px; padding-inline: .6rem; }
+.wiring-handoff { padding-block: .65rem; }
+.wiring-handoff small { display: block; margin-top: .25rem; }
+.wiring-row .wiring-remove { color: var(--dead); }
 .wiring-footer span { margin-right: auto; }
 @media (max-width: 600px) { .wiring-row { grid-template-columns: 1fr 2fr; } }

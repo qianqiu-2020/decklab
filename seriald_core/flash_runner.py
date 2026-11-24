@@ -472,8 +472,10 @@ class LocalFlashExecutor:
                 request['ram_boot']['image_sha256'] = image_sha256
         return self._run(binding, 'ram-boot', request, on_event, check, timeout=1800 if files else 60)
 
-    def prepare(self, binding, on_event=None, check=lambda: None, task_id='', attempt_id=''):
+    def prepare(self, binding, on_event=None, check=lambda: None, task_id='', attempt_id='', *, identity_only=False):
         request = dict(self._request(binding), task_id=task_id, attempt_id=attempt_id)
+        if identity_only:
+            request['identity_only'] = True
         return self._run(binding, 'prepare', request, on_event, check)
 
     def execution_binding(self, binding, profile, workspace, check=lambda: None):
@@ -1074,12 +1076,14 @@ class LocalFlashExecutor:
         request = dict(self._request(binding), boot_priority={'expected': expected, 'value': value})
         return self._run(binding, 'boot-priority', request, check=check)
 
-    def storage_inventory(self, binding, check=lambda: None, on_event=None):
+    def storage_inventory(self, binding, check=lambda: None, on_event=None, geometry_only=False):
         from .storage_metadata import read_inventory
         request = dict(self._request(binding), mode='partitions')
         if on_event:
             on_event({'event': 'progress', 'phase': 'reading-system-layout', 'done': 0, 'total': 0})
         document = self._run(binding, 'storage-inventory', request, check=check)
+        if geometry_only:
+            return read_inventory(document, None, check)
         def fetch(extent):
             return self._run(binding, 'storage-metadata', dict(request, storage_read=extent), check=check)
         def progress(done, total):

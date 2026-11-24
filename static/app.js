@@ -89,6 +89,7 @@
     retrySSH: function (task) {
       openSshCredentials(terminalView.current, task.result.ssh_user);
     },
+    openBoardTest: function (task) { if (boardTests) boardTests.open(task); },
     openFlash: function (task) {
       var target = task.flash_targets && task.flash_targets[0];
       if (target && flashing) {
@@ -100,15 +101,26 @@
       if (selected) flashing.open(selected, task);
     }
   });
+  var boardTests = window.SerialdBoardTests && window.SerialdBoardTests.create({
+    byId:$, fetch:fetch, getView:function () { return terminalView.current; }
+  });
   var imageStore = window.SerialdImageStore && window.SerialdImageStore.create({byId:$,fetch:fetch,formatBytes:fmt});
   $('b-image-store').addEventListener('click', function () { if (imageStore) imageStore.open(); });
   var imageWorkspaces = window.SerialdImageWorkspaces && window.SerialdImageWorkspaces.create({byId:$,fetch:fetch,copyText:copyText,formatBytes:fmt});
   var flashing = window.SerialdFlashing && window.SerialdFlashing.create({
     byId: $, fetch: fetch, formatBytes: fmt, copyText: copyText,
+    canBind: function () { return boardRecoveryAuthorized && !!window.SerialdControlSlots; },
+    bindControl: function (context) {
+      var ctx = terminalView.current;
+      if (ctx && ctx.connectionId === context.connection_id) boardControl.bind(ctx);
+    },
     openImageStore: function (choose, picker) { if (imageStore) imageStore.open(choose, picker); },
     openImageWorkspace: function (artifact, choose, settings) { if (imageWorkspaces) imageWorkspaces.open(artifact, choose, settings); }
   });
-  window.addEventListener('decklab-wiring-saved', function () { if (boardControl) boardControl.invalidate(); });
+  window.addEventListener('decklab-wiring-saved', function () {
+    if (boardControl) boardControl.invalidate();
+    if (flashing) flashing.refreshWiring();
+  });
   var boardControl = window.SerialdBoardControl && window.SerialdBoardControl.create({
     byId: $, fetch: fetch, getView: function () { return terminalView.current; },
     canBind: function () { return boardRecoveryAuthorized; },
@@ -189,7 +201,7 @@
       Array.from(text).forEach(function (char) { send(char, ctx, true); });
       $('d-status').textContent = ' 正在逐字符粘贴 ' + Array.from(text).length + ' 字符（固件模式）';
     } else {
-      send(text, ctx);
+      ctx.paste(text);
       $('d-status').textContent = ' 已粘贴 ' + text.length + ' 字符';
     }
   }

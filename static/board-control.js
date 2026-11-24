@@ -5,15 +5,17 @@
     var $ = options.byId, client = global.SerialdTasks.createClient(options.fetch);
     var names = {reset: '复位', 'power-on': '上电', 'power-off': '断电', 'enter-download': '进入下载模式'};
     var selection = '', generation = 0, actions = [], wiring = null, target = null, pending = Object.create(null);
-    function scope(ctx) { return ctx && ctx.serial ? ctx.serial + ':' + ctx.connectionId : ''; }
+    function scope(ctx) { return ctx && ctx.connectionId ? (ctx.serial || ctx.key || '') + ':' + ctx.connectionId : ''; }
     function current(ctx) { return !!ctx && scope(options.getView()) === scope(ctx); }
     function close() { $('board-control-dialog').close(); target = null; }
     function refresh(ctx) {
       var key = scope(ctx);
       var owner = !!(options.canBind && options.canBind());
       if (key + owner === selection) return;
-      selection = key + owner; generation++; actions = []; close(); $('b-board-control').hidden = true;
+      selection = key + owner; generation++; actions = []; wiring = null; close(); $('b-board-control').hidden = true;
+      $('b-board-slot-bind').hidden = !key || !owner;
       if (!key) return;
+      if (!ctx.serial) return;
       var version = generation;
       client.request('/api/hardware?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial)
         + '&connection_id=' + encodeURIComponent(ctx.connectionId)).then(function (data) {
@@ -21,14 +23,14 @@
         wiring = data.wiring || null;
         actions = (data.actions || []).filter(function (action) { return Object.prototype.hasOwnProperty.call(names, action); });
         $('b-board-control').hidden = (!data.supported || !actions.length) && !owner;
+        $('b-board-slot-bind').hidden = !owner || !!wiring && !data.slot_handoff;
         if ($('board-slot-bind')) $('board-slot-bind').textContent = data.slot_handoff ? '确认换板接线' : '绑定控制槽位';
       }).catch(function () { if (version === generation) selection = ''; });
     }
-    function open() {
-      var ctx = options.getView();
+    function open(ctx) {
       if (!scope(ctx) || (!actions.length && !(options.canBind && options.canBind())) || pending[scope(ctx)]) return;
       target = {key: ctx.key, serial: ctx.serial, connectionId: ctx.connectionId};
-      $('board-control-target').textContent = ctx.serial + (wiring ? ' · ' + wiring.name + ' / ' + wiring.number : '');
+      $('board-control-target').textContent = (ctx.serial || ctx.key) + (wiring ? ' · ' + wiring.name + ' / ' + wiring.number : '');
       $('board-control-action').textContent = '';
       if ($('board-slot-bind')) {
         $('board-slot-bind').hidden = !(options.canBind && options.canBind());
@@ -62,15 +64,21 @@
       // One submission per dialog. Reopening is an explicit new operation;
       // late replies cannot re-enable a button or act on another board.
     }
-    $('b-board-control').addEventListener('click', open);
+    function bind(ctx) {
+      if (!current(ctx) || !(options.canBind && options.canBind())) return;
+      global.SerialdControlSlots.open(ctx.serial, ctx.serial ? null : {key:ctx.key, connection_id:ctx.connectionId});
+    }
+    $('b-board-control').addEventListener('click', function () { open(options.getView()); });
+    $('b-board-slot-bind').addEventListener('click', function () { bind(options.getView()); });
     if ($('board-slot-bind')) $('board-slot-bind').addEventListener('click', function () {
-      if (target && current(target)) global.SerialdControlSlots.open(target.serial);
+      if (!target || !current(target) || !(options.canBind && options.canBind())) return;
+      bind(options.getView());
     });
     $('board-control-close').addEventListener('click', close);
     $('board-control-cancel').addEventListener('click', close);
     $('board-control-submit').addEventListener('click', submit);
     $('board-control-dialog').addEventListener('cancel', close);
-    return {refresh: refresh, close: close, invalidate: function () { selection = ''; refresh(options.getView()); }};
+    return {refresh: refresh, close: close, bind: bind, invalidate: function () { selection = ''; refresh(options.getView()); }};
   }
   global.SerialdBoardControl = {create: create};
 })(window);

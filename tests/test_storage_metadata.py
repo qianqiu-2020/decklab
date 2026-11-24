@@ -49,6 +49,20 @@ class StorageMetadataTests(unittest.TestCase):
         self.assertEqual(result['default_storage'], '')
         self.assertEqual(result['default_candidate'], 'nvme:0')
 
+    def test_unavailable_mmc_remains_visible_without_becoming_a_target(self):
+        document, fetch = self.fixture()
+        document['storages'].append({'id': 'mmc:0', 'size': 0, 'sector_size': 0,
+                                     'state': 'layout-unavailable', 'capacity_verified': False,
+                                     'partitions': [], 'error': 'MMC did not respond'})
+        result = read_inventory(document, fetch)
+        self.assertEqual(result['storages'][1]['error'], 'MMC did not respond')
+        self.assertFalse(result['storages'][1]['capacity_verified'])
+        self.assertTrue(all(extent['storage_id'] == 'nvme:0' for extent in self.reads))
+        self.assertEqual(default_storage_for_priority(result['storages'], 'eeprom:MMC'), '')
+        document['default_storage'] = 'mmc:0'
+        with self.assertRaisesRegex(TaskError, 'default storage identity'):
+            read_inventory(document, fetch)
+
     def test_partition_ranges_and_disk_identity_are_strict(self):
         for mutation in [lambda d: d['storages'][0].update(id='nvme:0;erase'),
                          lambda d: d['storages'][0]['partitions'][0].update(offset=-1),

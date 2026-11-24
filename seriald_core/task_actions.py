@@ -11,7 +11,7 @@ from .flash_tasks import FlashActions
 
 
 class TaskActions:
-    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download', 'flash', 'nor-backup')) | frozenset(
+    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test')) | frozenset(
         'hardware-' + action for action in ACTIONS)
 
     def __init__(self, manager):
@@ -33,6 +33,13 @@ class TaskActions:
                 raise TaskError('unsupported task kind')
             if not isinstance(actor, str) or not actor or len(actor) > 80:
                 raise TaskError('invalid task actor')
+            if kind == 'board-test':
+                from .board_cases import start
+                if device is None or not device.serial or payload.get('serial') != device.serial:
+                    raise TaskError('板卡用例需要已识别的设备', 404)
+                if not device.present or payload.get('connection_id') != device.connection_id:
+                    raise TaskError('板卡串口连接已变化', 409)
+                return response(202, {'ok': True, 'task': start(self.manager, device, payload, actor)})
             if kind == 'nor-backup':
                 return FlashActions(self.manager).backup(payload, device, actor)
             if kind == 'flash':

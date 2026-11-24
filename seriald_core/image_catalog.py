@@ -9,7 +9,7 @@ import threading
 import time
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
-from .image_download import ImageConnection, download_keys, download_matches, preferred_download
+from .image_download import ImageConnection, download_keys, download_matches, image_url, preferred_download
 from .tasks import TaskError
 
 SOURCES = {
@@ -18,6 +18,20 @@ SOURCES = {
 }
 MAX_PAGE = 2 * 1024 ** 2
 _CACHE, _LOCK = {}, threading.Lock()
+NEXUS_BROWSE = '/service/rest/repository/browse/'
+
+
+def _https_directory(value, allow_origin=False):
+    try:
+        url = image_url(value)
+    except TaskError:
+        raise TaskError('组织镜像源必须是无凭据的 HTTPS 地址') from None
+    if (len(value) > 2048 or url.scheme != 'https' or url.query or url.path.startswith('//')
+            or '?' in value or '#' in value or unquote(url.path) != url.path
+            or any(part in ('.', '..') for part in url.path.split('/'))
+            or not (url.path.endswith('/') or allow_origin and not url.path)):
+        raise TaskError('组织镜像源必须是无凭据的 HTTPS 地址，目录地址须以 / 结尾')
+    return url
 
 
 def configured_sources(environment=None):
@@ -26,16 +40,35 @@ def configured_sources(environment=None):
     browse = environment.get('SERIALD_IMAGE_INTERNAL_BROWSE', '').strip()
     download = environment.get('SERIALD_IMAGE_INTERNAL_DOWNLOAD', '').strip()
     if browse or download:
-        for value in (browse, download):
-            try:
-                url = urlsplit(value)
-            except ValueError:
-                raise TaskError('组织镜像源必须是有效的 HTTPS 目录地址') from None
-            if (not value or len(value) > 2048 or url.scheme != 'https' or not url.hostname
-                    or url.username or url.password or url.query or url.fragment or not value.endswith('/')):
-                raise TaskError('组织镜像源必须配置两个无凭据、以 / 结尾的 HTTPS 目录地址')
+        url = _https_directory(browse, allow_origin=True)
+        origin = 'https://' + url.netloc
+        if url.path in ('', '/'):
+            browse, download = origin + NEXUS_BROWSE + 'image/', origin + '/repository/image/'
+        elif not download:
+            match = re.fullmatch(re.escape(NEXUS_BROWSE) + r'([A-Za-z0-9_.-]+)/', url.path)
+            if not match:
+                raise TaskError('自定义目录需要填写组织镜像下载地址')
+            download = origin + '/repository/' + match[1] + '/'
+        _https_directory(download)
         result['internal'] = {'name': '组织镜像', 'browse': browse, 'download': download}
     return result
+
+
+def organization_download(url):
+    spec = configured_sources().get('internal')
+    if not spec or url.scheme != 'https':
+        return False
+    base = urlsplit(spec['download'])
+    if (url.hostname, url.port or 443) != (base.hostname, base.port or 443):
+        return False
+    path = unquote(url.path)
+    if not path.startswith(base.path):
+        return False
+    relative = path[len(base.path):]
+    try:
+        return bool(relative and not relative.endswith('/') and catalog_path(relative))
+    except TaskError:
+        return False
 
 
 def catalog_path(value):
@@ -135,9 +168,9 @@ def parse_index(source, path, raw):
     return sorted(entries, key=lambda e: (e['kind'] != 'directory', e['name'].casefold()))[:1024]
 
 
-def _fetch(url):
+def _fetch(url, verify_tls=True):
     parsed = urlsplit(url)
-    connection = ImageConnection(parsed.hostname, 443, True)
+    connection = ImageConnection(parsed.hostname, parsed.port or 443, True, verify_tls=verify_tls)
     deadline = time.monotonic() + 15
     try:
         connection.request('GET', parsed.path, headers={'Accept': 'text/html', 'Accept-Encoding': 'identity',
@@ -170,7 +203,8 @@ def catalog(source='public', path='', refresh=False):
         if cached and not refresh and time.monotonic() - cached[0] < 60:
             return json.loads(json.dumps(cached[1]))
     try:
-        entries = parse_index(source, path, _fetch(sources[source]['browse'] + quote(path, safe='/')))
+        entries = parse_index(source, path, _fetch(sources[source]['browse'] + quote(path, safe='/'),
+                                                verify_tls=source != 'internal'))
     except ssl.SSLCertVerificationError:
         raise TaskError('镜像源 HTTPS 证书不受信任，请由管理员在控制机配置组织 CA 或更新系统证书', 502) from None
     except (OSError, ValueError, UnicodeError, http.client.HTTPException):

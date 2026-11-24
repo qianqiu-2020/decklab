@@ -30,6 +30,24 @@ async function tab(port, url, width, height) {
   return {rpc,evaluate};
 }
 function input(t, text) { return t.evaluate('testTerm.input(' + JSON.stringify(text) + ')'); }
+const pasteSample = '#!/bin/sh\r\nif true; then\r\n\t  printf "PASTE汉字"\n\n\tprintf "second line"\r\nfi';
+async function checkVimPaste(t, name, toolbar) {
+  const file = path.join(path.dirname(geometryFile), name);
+  await input(t, '\x1b:%delete _\r:set autoindent expandtab shiftwidth=4 tabstop=4\ri');
+  await wait(()=>t.evaluate('testTerm.modes.bracketedPasteMode'),'Vim enabled bracketed paste');
+  await t.evaluate(`(() => {
+    const clipboard = new DataTransfer();
+    clipboard.setData('text/plain', ${JSON.stringify(pasteSample)});
+    document.querySelector('#d-kbd').checked = false;
+    if (${toolbar}) document.querySelector('#b-paste').click();
+    const target = ${toolbar} ? document.activeElement : testTerm.textarea;
+    target.dispatchEvent(new ClipboardEvent('paste', {clipboardData:clipboard,bubbles:true,cancelable:true}));
+    document.querySelector('#d-kbd').checked = true;
+  })()`);
+  await input(t, '\x1b:w! ' + name + '\r');
+  await wait(()=>fs.existsSync(file),'Vim saved ' + name);
+  assert.equal(fs.readFileSync(file,'utf8'),pasteSample.replace(/\r\n/g,'\n')+'\n',name+' bytes');
+}
 const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.cols,rows:testTerm.rows,x:b.cursorX,y:b.cursorY,type:b.type,lines:Array.from({length:testTerm.rows},(_,i)=>b.getLine(b.baseY+i)?.translateToString()||'')};})()`;
 (async () => {
   fixture=spawn(process.env.PYTHON||'python3',[path.join(__dirname,'shared_terminal_fixture.py')],{stdio:['ignore','pipe','pipe']});
@@ -53,9 +71,7 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   await delay(300);
   await input(a, 'iSHARED-EDIT\x1b');
   await wait(()=>b.evaluate('Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+i)?.translateToString()||"").some(s=>s.includes("SHARED-EDIT"))'),'live shared edit');
-  await input(a, 'i');
-  await delay(100);
-  await a.evaluate('testTerm.paste("PASTE汉字\\nsecond-line")');
+  await checkVimPaste(a, 'ssh-paste.txt', false);
   await wait(()=>b.evaluate('Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+i)?.translateToString()||"").some(s=>s.includes("PASTE汉字"))'),'UTF-8 multiline paste');
   await input(a, '\x1b');
   await wait(async()=>JSON.stringify(await a.evaluate(screen))===JSON.stringify(await b.evaluate(screen)), 'live screens converge after escape');
@@ -111,9 +127,10 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   await wait(()=>b.evaluate('testTerm.buffer.active.type==="alternate"'),'serial observer snapshot');
   await delay(200);
   assert.deepEqual(await b.evaluate(screen),await a.evaluate(screen),'serial Vim has the same grid and screen for both viewers');
+  await checkVimPaste(a, 'serial-paste.txt', true);
   await input(a, '\x1b:q!\r');
   await wait(()=>a.evaluate('testTerm.buffer.active.type==="normal"'),'serial Vim exit');
-  console.log('Shared terminal smoke passed: real Vim over serial/SSH PTYs, late join, live edits, takeover, resize, quiet tab restoration and exit.');
+  console.log('Shared terminal smoke passed: real Vim over serial/SSH PTYs, exact native and toolbar paste bytes, late join, live edits, takeover, resize, quiet tab restoration and exit.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   for(const socket of sockets)socket.close();
   await stopBrowser(chrome);if(fixture){fixture.kill('SIGTERM');await delay(700);}

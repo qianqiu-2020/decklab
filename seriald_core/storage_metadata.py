@@ -15,7 +15,8 @@ def default_storage_for_priority(storages, priority_source):
     """Match a verified EEPROM choice to one enumerated disk, never by order."""
     kind = {'eeprom:UFS': 'scsi', 'eeprom:SSD': 'nvme',
             'eeprom:MMC': 'mmc', 'eeprom:USB': 'usb'}.get(priority_source)
-    matches = [disk['id'] for disk in storages if kind and disk['id'].startswith(kind + ':')]
+    matches = [disk['id'] for disk in storages
+               if kind and disk['id'].startswith(kind + ':') and disk.get('size') != 0]
     return matches[0] if len(matches) == 1 else ''
 
 
@@ -76,13 +77,22 @@ def read_inventory(document, fetch, check=lambda: None, progress=lambda done, to
     for disk in rows:
         check()
         if (not isinstance(disk, dict) or not _DISK.fullmatch(str(disk.get('id', '')))
-                or disk['id'] in seen or type(disk.get('size')) is not int or not 512 <= disk['size'] <= MAX_DISK
+                or disk['id'] in seen or type(disk.get('size')) is not int):
+            raise TaskError('invalid system storage geometry', 502)
+        seen.add(disk['id'])
+        if (disk['size'] == 0 and disk.get('sector_size') == 0
+                and disk.get('state') == 'layout-unavailable' and disk.get('capacity_verified') is False
+                and disk.get('partitions') == []):
+            disks.append({'id': disk['id'], 'size': 0, 'sector_size': 0, 'state': 'layout-unavailable',
+                          'capacity_verified': False, 'error': str(disk.get('error', ''))[:500],
+                          'partitions': [], 'read_only': True})
+            continue
+        if (not 512 <= disk['size'] <= MAX_DISK
                 or disk.get('sector_size') not in (512, 4096) or disk['size'] % disk['sector_size']
                 or not isinstance(disk.get('partitions'), list) or len(disk['partitions']) > 128
                 or any(not isinstance(part, dict) or type(part.get('offset')) is not int
                        or type(part.get('size')) is not int for part in disk['partitions'])):
             raise TaskError('invalid system storage geometry', 502)
-        seen.add(disk['id'])
         parts = []
         previous_end = 0
         for part in sorted(disk['partitions'], key=lambda item: item.get('offset', -1)):
@@ -93,6 +103,8 @@ def read_inventory(document, fetch, check=lambda: None, progress=lambda done, to
                     or not isinstance(part.get('name'), str) or len(part['name']) > 160):
                 raise TaskError('invalid system storage partition', 502)
             previous_end = part['offset'] + part['size']
+            if fetch is None:
+                continue
             source = MetadataReader(fetch, disk, part['offset'], part['size'], budget, check)
             try:
                 content = image_content(source, part['size'], partition=part['name'], metadata_only=True,
@@ -103,12 +115,13 @@ def read_inventory(document, fetch, check=lambda: None, progress=lambda done, to
             parts.append({'name': part['name'], 'offset': part['offset'], 'size': part['size'], 'content': content})
             progress(MAX_READ - budget[0], MAX_READ)
         disks.append({'id': disk['id'], 'size': disk['size'], 'sector_size': disk['sector_size'],
+                      'capacity_verified': disk.get('capacity_verified') is True,
                       'state': disk.get('state', 'ready'), 'error': str(disk.get('error', ''))[:500],
                       'partitions': parts, 'read_only': True})
     selected = document.get('default_storage') or ''
     if not isinstance(selected, str):
         raise TaskError('invalid default storage identity', 502)
-    if selected and selected not in seen:
+    if selected and not any(disk['id'] == selected and disk['size'] > 0 for disk in disks):
         raise TaskError('default storage identity changed', 502)
     result = {'storages': disks, 'default_storage': selected, 'default_candidate': document.get('default_candidate', ''),
             'priority_source': document.get('priority_source', ''), 'metadata_bytes_read': MAX_READ - budget[0],

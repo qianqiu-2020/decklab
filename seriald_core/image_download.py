@@ -112,9 +112,10 @@ def image_ssl_context():
 
 
 class ImageConnection(http.client.HTTPConnection):
-    def __init__(self, host, port, secure):
+    def __init__(self, host, port, secure, verify_tls=True):
         super().__init__(host, port, timeout=15)
         self.secure = secure
+        self.verify_tls = verify_tls
 
     def connect(self):
         entries = _addresses(self.host, self.port)
@@ -124,8 +125,10 @@ class ImageConnection(http.client.HTTPConnection):
             stream.settimeout(self.timeout)
             try:
                 stream.connect(address)
-                self.sock = (image_ssl_context().wrap_socket(stream, server_hostname=self.host)
-                             if self.secure else stream)
+                if self.secure:
+                    tls = image_ssl_context() if self.verify_tls else ssl._create_unverified_context()
+                    stream = tls.wrap_socket(stream, server_hostname=self.host)
+                self.sock = stream
                 return
             except OSError as error:
                 stream.close()
@@ -136,6 +139,8 @@ class ImageConnection(http.client.HTTPConnection):
 def fetch_image(artifacts, context, url, serial, name=None, sha256=None, actor='web'):
     """No retries: partial imports fail; a repeated request finds its original task."""
     original = image_url(url)
+    from .image_catalog import organization_download
+    organization = actor == 'web' and organization_download(original)
     if sha256 is not None and (not isinstance(sha256, str) or not re.fullmatch('[a-f0-9]{64}', sha256)):
         raise TaskError('invalid expected image SHA-256')
     filename = name or unquote(original.path.rsplit('/', 1)[-1]) or 'image.bin'
@@ -146,7 +151,7 @@ def fetch_image(artifacts, context, url, serial, name=None, sha256=None, actor='
             context.check()
             parsed = image_url(url)
             connection = ImageConnection(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80),
-                                         parsed.scheme == 'https')
+                                         parsed.scheme == 'https', verify_tls=not (organization and organization_download(parsed)))
             context.on_cancel(connection.close)
             try:
                 path = parsed.path or '/'

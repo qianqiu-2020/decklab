@@ -27,7 +27,7 @@
     ]]
   ];
   var labels = {
-    IMAGE_INTERNAL_BROWSE: '组织镜像目录 HTTPS 地址', IMAGE_INTERNAL_DOWNLOAD: '组织镜像下载 HTTPS 地址',
+    IMAGE_INTERNAL_BROWSE: '组织 Nexus 地址', IMAGE_INTERNAL_DOWNLOAD: '自定义下载地址（可选）',
     DESKTOP: '图形接入配置文件',
     BACKEND_URL: '后端 HTTPS 地址', BACKEND_TOKEN: '节点间访问密钥', BACKEND_CA: '后端 CA 证书文件',
     BACKEND_BIND: '后端监听地址', BACKEND_PORT: '后端监听端口', BACKEND_CERT: '后端 TLS 证书文件', BACKEND_KEY: '后端 TLS 私钥文件',
@@ -312,8 +312,14 @@
     }
     input.id = 'setting-' + name.toLowerCase().replace(/_/g, '-');
     input.autocomplete = field.secret ? 'new-password' : 'off'; input.spellcheck = false;
-    if (name === 'IMAGE_INTERNAL_BROWSE') input.placeholder = 'https://repo.example.test/service/rest/repository/browse/images/';
-    if (name === 'IMAGE_INTERNAL_DOWNLOAD') input.placeholder = 'https://repo.example.test/repository/images/';
+    if (name === 'IMAGE_INTERNAL_BROWSE') {
+      input.placeholder = 'https://repo.example.test/';
+      el('small', '填写 Nexus 根地址即可使用 image 仓库。组织镜像支持自签证书。', wrapper);
+    }
+    if (name === 'IMAGE_INTERNAL_DOWNLOAD') {
+      input.placeholder = 'https://repo.example.test/repository/image/';
+      el('small', '仅自定义浏览目录时填写。', wrapper);
+    }
     if (name === 'BIND') el('small', '127.0.0.1 仅本机访问，0.0.0.0 监听所有网卡。', wrapper);
     if (name === 'AUTH_TOKEN') el('small', '清空后，能访问此地址的人可以直接打开 DeckLab。', wrapper);
     if (name === 'AUTO_CONFIGURE_SSH') el('small', '仅在内置 Linux 探测模式下可用。', wrapper);

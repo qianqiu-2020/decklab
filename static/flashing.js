@@ -6,6 +6,8 @@
     var board = null, capabilities = null, artifacts = [], plan = null, task = null, discovered = [];
     var flow = 'normal';
     var pageBoard = null, preparingBoard = false, downloadWiring = null, downloadControl = null;
+    var fastUSBChoices = false;
+    var reenterOffer = null, reenterCheckedTask = '';
     var sequence = 0, busy = false, uploading = false, requestId = '', cursor = 0;
     var selectionRequestId = '', selectionPlan = null, payloadCandidates = [], inspection = null;
     var eventSequence = 0, eventLines = [], pollTimer = null, submissionUnknown = false;
@@ -578,6 +580,10 @@
       return current && current.state === 'failed'
         && current.error === 'flash partition selection timed out; storage was not written';
     }
+    function failedBeforeWriting(current) {
+      var flash = current && current.flash;
+      return flash && current.state === 'failed' && flash.write_result === 'not-started' && !flash.recovery_required;
+    }
     function preparationPending() {
       // Supported BootROM targets still need an image-provided loader before
       // they expose a live layout. Readiness is separate from support.
@@ -594,7 +600,7 @@
       var preparingReview = active && !selecting && task.id !== confirmedTaskId && !flash.selection_request
         && (!flash.write_result || flash.write_result === 'not-started')
         && (preparingReviewTaskId === task.id || flash.plan && flash.plan.requires_prepare && flash.plan.confirm_after_prepare);
-      var reading = active && !selecting && (flash.operation === 'nor-workspace' || task.kind === 'nor-backup')
+      var reading = active && !selecting && (['nor-workspace', 'storage-inventory'].includes(flash.operation) || task.kind === 'nor-backup')
         && !flash.selection_request && (!flash.write_result || flash.write_result === 'not-started')
         && !/^(writing|verifying|resetting)/.test((task.progress || {}).phase || '');
       var readEnded = task && flash.operation === 'nor-workspace' && !active && !flash.selection_request
@@ -628,7 +634,7 @@
       }
       if (reading) {
         readStatus.textContent = (task.progress || {}).phase ? $('fl-progress-text').textContent : '等待读取板上存储…';
-        $('fl-execution').hidden = true;
+        $('fl-execution').hidden = flash.operation !== 'storage-inventory';
       }
       var links = $('fl-backup-files');
       var slot = $(stage === 'run' ? 'fl-result-backup' : stage === 'review' ? 'fl-review-backup' : 'fl-board-backup');
@@ -649,9 +655,10 @@
       if (stage === 'review' && !$('fl-review').hidden) $('fl-execution').hidden = true;
       $('fl-edit').hidden = stage !== 'review' || !((plan && !task) || (selectionPlan && !fullConfirmation()));
       $('fl-edit').disabled = busy || uploading || submissionUnknown;
-      $('fl-new').hidden = stage !== 'run' || active || selectionExpired(task) || !!(task.flash && task.flash.recovery_required);
-      $('fl-new').textContent = flow === 'ram' ? '再次内存启动' : '准备下一次刷写';
-      $('fl-new').disabled = busy || uploading || submissionUnknown;
+      var canRedetect = failedBeforeWriting(task);
+      $('fl-new').hidden = (stage !== 'run' && !canRedetect) || active || selectionExpired(task) || !!flash.recovery_required;
+      $('fl-new').textContent = canRedetect ? '重新检测设备' : flow === 'ram' ? '再次内存启动' : '准备下一次刷写';
+      $('fl-new').disabled = busy || uploading || preparingBoard || submissionUnknown;
       $('fl-plan').hidden = flow !== 'normal' || stage !== 'setup' || !!selecting || preparingReview || !!previewTask || !!previewRequestId && busy;
       $('fl-start').hidden = stage !== 'review' || !plan || !!active;
       $('fl-fast-start').hidden = flow !== 'fast' || stage !== 'setup';
@@ -670,6 +677,7 @@
       }
     }
     function updateControls() {
+      $('fl-reenter').hidden = !canReenter();
       var available = capabilities && capabilities.supported !== false && !(board && board.observingTask);
       var preparable = preparationPending();
       var uploadAvailable = board && !board.observingTask;
@@ -680,8 +688,13 @@
       var canResolve = pageBoard && pageBoard.serial && !(board && board.target_id && capabilities);
       var fast = !!(board && board.target_id && capabilities && capabilities.stream_flash_supported && !board.observingTask);
       $('fl-fast').hidden = flow !== 'fast';
-      $('fl-target-picker').hidden = !!pageBoard;
-      $('fl-connect').hidden = !!pageBoard && flow !== 'normal';
+      $('fl-target-picker').hidden = !!pageBoard && !(flow === 'fast' && fastUSBChoices);
+      $('fl-connect').hidden = !!pageBoard && flow === 'ram';
+      $('fl-fast-connect').hidden = flow !== 'fast' || !pageBoard || !!(board && board.target_id && capabilities);
+      $('fl-fast-attach-hint').hidden = flow !== 'fast' || !pageBoard || !fastUSBChoices;
+      $('fl-fast-detect').disabled = busy || preparingBoard || submissionUnknown || !!task;
+      $('fl-fast-bind').hidden = !pageBoard?.connection_id || !!downloadWiring || !(options.canBind && options.canBind());
+      $('fl-fast-bind').disabled = $('fl-fast-detect').disabled;
       $('fl-connection-details').hidden = !capabilities;
       var prepare = $('fl-prepare-board');
       prepare.hidden = flow !== 'normal' || !canResolve || !!active;
@@ -698,9 +711,13 @@
       $('fl-tuning-forget').disabled = $('fl-tuning-run').disabled;
       if (tuning) renderTuning(capabilities.flash_configuration);
       $('fl-fast-start').disabled = flow !== 'fast' || !(fast || canResolve) || busy || uploading || preparingBoard
-        || submissionUnknown || !!task || !validStreamURL($('fl-fast-url').value.trim());
+        || submissionUnknown || !!task || !$('fl-fast-storage').value || !validStreamURL($('fl-fast-url').value.trim());
       $('fl-fast-url').disabled = $('fl-fast-storage').disabled = busy || preparingBoard || !!task || submissionUnknown;
       $('fl-fast-store').disabled = $('fl-fast-url').disabled || !options.openImageStore;
+      $('fl-fast-disk').hidden = (capabilities && capabilities.chip || board && board.chip) === 'k1';
+      $('fl-fast-read-disks').disabled = $('fl-fast-url').disabled || !(canResolve || fast);
+      $('fl-fast-read-disks').textContent = translate(canResolve && downloadWiring
+        ? '进入下载模式并读取磁盘' : '读取磁盘列表');
       renderSource(); renderPreparation();
       var primary = artifacts.find(function(item){return item.id===$('fl-artifact').value;});
       var chip = (capabilities && capabilities.chip) || (board && board.chip);
@@ -978,7 +995,8 @@
         text('option', '请选择系统盘', select).value = '';
         disks.forEach(function (disk) {
           var kind = disk.id.split(':')[0], names = {nvme:'NVMe',scsi:'UFS / SCSI',mmc:'eMMC / SD',usb:'USB'};
-          var node = text('option', (names[kind] || kind) + ' · ' + disk.id + ' · ' + format(disk.size), select);
+          var node = text('option', (names[kind] || kind) + ' · ' + disk.id + ' · '
+            + (disk.size ? format(disk.size) : translate('未能读取容量')), select);
           node.value = disk.id; node.dataset.i18nIgnore = '';
         });
         select.value = disks.some(function (disk) { return disk.id === previous; }) ? previous : defaultStorage;
@@ -990,6 +1008,7 @@
       var parts = $('fl-system-parts'); parts.textContent = '';
       var disk = disks.find(function (item) { return item.id === select.value; });
       if (!disk) return;
+      if (!disk.size) { text('p', disk.error || '未能读取容量', parts); return; }
       drawStorageMap(parts, disk, [], [], '板上已有布局');
       (disk.partitions || []).forEach(function (part) {
         var row = document.createElement('div'); row.className = 'fl-system-part';
@@ -1409,6 +1428,7 @@
       var select = $('fl-device'); select.textContent = '';
       text('option', '选择下载模式设备', select).value = '';
       discovered.forEach(function (target) {
+        if (pageBoard && flow === 'fast' && !manualFlashTarget(target)) return;
         var option = text('option', targetName(target), select);
         option.value = target.target_id || target.id; option.dataset.i18nIgnore = '';
       });
@@ -1416,6 +1436,30 @@
         var current = text('option', targetName(board), select); current.value = board.target_id; current.dataset.i18nIgnore = '';
       }
       select.value = board && board.target_id || '';
+    }
+    function manualFlashTarget(target) {
+      var link = target.console_link || {};
+      var serial = linkedSerial(target);
+      return target.present !== false && !['mismatch','ambiguous'].includes(link.state)
+        && (!serial || !pageBoard.serial || serial === pageBoard.serial);
+    }
+    function setFastDisks(inventory) {
+      var select = $('fl-fast-storage'); select.textContent = '';
+      var disks = inventory && inventory.storages || [];
+      var usable = disks.filter(function (disk) { return disk.capacity_verified === true && disk.size > 0; });
+      var auto = text('option', '自动选择（仅在只有一块盘时）', select);
+      auto.value = 'auto'; auto.disabled = !!inventory && disks.length !== 1;
+      if (auto.disabled) text('option', '请选择要覆盖的磁盘', select).value = '';
+      disks.forEach(function (disk) {
+        var names = {nvme:'NVMe',scsi:'UFS / SCSI',mmc:'eMMC / SD',usb:'USB'};
+        var option = text('option', names[disk.id.split(':')[0]] + ' · ' + disk.id + ' · '
+          + (disk.size ? format(disk.size) : translate('未能读取容量')), select);
+        option.value = disk.id; option.disabled = !usable.includes(disk);
+      });
+      select.value = !inventory || usable.length === 1 && disks.length === 1 ? 'auto' : '';
+      if (inventory && !usable.length) select.value = '';
+      $('fl-fast-disk-status').textContent = inventory ? translate(usable.length ? '请确认要覆盖的磁盘。' : '未发现容量已核验的系统盘。')
+        : translate('有多块盘时，先读取磁盘列表再选择。');
     }
     async function loadHistory(selected, seq, existing, fresh) {
       if (existing) {
@@ -1455,7 +1499,7 @@
       }
       return false;
     }
-    async function selectTarget(target, fresh, probed) {
+    async function selectTarget(target, fresh, probed, expectedSerial) {
       if (!target || busy || uploading || task && ['queued', 'running'].indexOf(task.state) >= 0) return;
       var selected = { target_id: target.target_id || target.id, serialIdentity: pageBoard && pageBoard.serial,
         target_generation: target.target_generation || target.generation, label: target.label, serial: target.serial || '',
@@ -1483,8 +1527,9 @@
         var result = probed || await client.request('/api/flash-target', scope(selected));
         if (!same(selected, seq)) return;
         var resolved = result.target || target;
-        if (pageBoard && linkedSerial(resolved) !== pageBoard.serial) {
-          board = pageBoard; busy = false; updateControls();
+        var resolvedSerial = linkedSerial(resolved);
+        if (pageBoard && resolvedSerial !== pageBoard.serial || expectedSerial && resolvedSerial && resolvedSerial !== expectedSerial) {
+          board = pageBoard || {}; busy = false; updateControls();
           status('USB 设备身份已变化，请检查当前开发板的接线。', true); return;
         }
         selected.serial = resolved.serial || '';
@@ -1550,7 +1595,7 @@
       // BootROM may lack a serial in the USB descriptor. Probe identity only;
       // never infer board identity from the number of connected devices.
       for (var candidate of candidates) {
-        if (pageBoard !== context || candidate.serial || candidate.console_link) continue;
+        if (pageBoard !== context || candidate.serial || ['mismatch','ambiguous'].includes((candidate.console_link || {}).state)) continue;
         var targetId = candidate.target_id || candidate.id, generation = candidate.target_generation || candidate.generation;
         if (!targetId || !generation || attempted.has(generation)) continue;
         attempted.add(generation);
@@ -1559,6 +1604,7 @@
         catch (error) { if (error.result && error.result.recovery_required) throw error; continue; }
         if (probe.target && conflicting(probe.target)) throw new Error(translate('USB 与串口身份冲突，请核对当前开发板接线。'));
         if (probe.target && linkedSerial(probe.target) === context.serial) return {target:probe.target, probe:probe};
+        if (probe.target) Object.assign(candidate, probe.target);
       }
       return null;
     }
@@ -1574,24 +1620,58 @@
       return (result.actions || []).includes('enter-download') ? result.wiring || {} : null;
     }
     function manualDownloadMessage() {
-      return '请让当前开发板进入下载模式，并接好 USB 刷机线。';
+      return flow === 'fast' && fastUSBChoices ? 'USB 下载设备已出现。请选择本次要刷写的 USB 设备。'
+        : '请让当前开发板进入下载模式，并接好 USB 刷机线。';
     }
-    async function prepareDevice(operation) {
-      if (board && board.target_id && capabilities) return true;
+    function canReenter() {
+      return reenterOffer && task && task.id === reenterOffer.taskId
+        && same(reenterOffer.selected, reenterOffer.seq) && pageBoard === reenterOffer.context
+        && !preparingBoard && !downloadControl && !submissionUnknown;
+    }
+    function showReenter() {
+      if (!canReenter() || !$('flash-dialog').open || $('fl-reenter-dialog').open) return;
+      $('fl-reenter-board').textContent = pageBoardName();
+      $('fl-reenter-dialog').showModal();
+    }
+    async function offerReenter(current, selected, seq) {
+      if (!failedBeforeWriting(current)
+          || !/\b(?:loader-fsbl-timeout|loader-training-mismatch|loader-superspeed-failed|device-ram-unstable)$/.test(current.error || '')
+          || !pageBoard || !pageBoard.connection_id || !$('flash-dialog').open || reenterCheckedTask === current.id) return;
+      var context = pageBoard;
+      reenterCheckedTask = current.id;
+      var wiring = await getDownloadWiring(context).catch(function () { return null; });
+      if (!wiring || !same(selected, seq) || !task || task.id !== current.id
+          || !$('flash-dialog').open || pageBoard !== context) return;
+      reenterOffer = {taskId:current.id, selected:selected, seq:seq, context:context, wiring:wiring};
+      updateControls(); showReenter();
+    }
+    async function prepareDevice(operation, reenter) {
+      if (!reenter && board && board.target_id && capabilities) return true;
       if (!pageBoard) return !!capabilities;
       if (preparingBoard) return false;
       var context = pageBoard;
       preparingBoard = true; updateControls();
       try {
-        // Recheck first so a board already in download mode is never reset.
-        if (!await discover()) return false;
-        if (task || flow !== operation || submissionUnknown) return false;
-        if (board.target_id && capabilities) { downloadControl = null; return true; }
-        if (!downloadWiring) throw new Error(translate(manualDownloadMessage()));
+        var previous;
+        if (reenter) {
+          // Remember the live USB generations so a failed loader cannot be
+          // mistaken for the new BootROM connection after the reset.
+          var before = await flashTargets();
+          if (!same(reenter.selected, reenter.seq) || !task || task.id !== reenter.taskId
+              || !$('flash-dialog').open) return false;
+          previous = new Set(before.targets.map(function (target) { return target.target_generation || target.generation; }));
+          previous.add(reenter.selected.target_generation);
+        } else {
+          if (!await discover()) return false;
+          if (task || flow !== operation || submissionUnknown) return false;
+          if (board.target_id && capabilities) { downloadControl = null; return true; }
+        }
+        var wiring = reenter ? reenter.wiring : downloadWiring;
+        if (!wiring) throw new Error(translate(manualDownloadMessage()));
         if (downloadControl) throw new Error(translate('尚未核对到该板的 USB 身份，请检查原控制任务和刷机线。'));
         status('正在让当前开发板进入下载模式…');
         var details = Object.assign(downloadScope(context), {
-          kind:'hardware-enter-download', actor:'web', wiring_revision:downloadWiring.revision || '', request_id:id()
+          kind:'hardware-enter-download', actor:'web', wiring_revision:wiring.revision || '', request_id:id()
         });
         downloadControl = details.request_id;
         try { await client.start(details, function (current) {
@@ -1605,7 +1685,10 @@
         var attempted = new Set(), deadline = Date.now() + 20000;
         do {
           var result = await flashTargets();
-          var match = await findBoardTarget(result.targets, context, attempted);
+          var fresh = previous ? result.targets.filter(function (target) {
+            return !previous.has(target.target_generation || target.generation);
+          }) : result.targets;
+          var match = await findBoardTarget(fresh, context, attempted);
           if (match) {
             discovered = result.targets;
             await selectTarget(match.target, true, match.probe);
@@ -1633,6 +1716,7 @@
       clearTimeout(pollTimer); ++eventSequence;
       busy = true; capabilities = null; task = null; inspection = null; payloadCandidates = [];
       if (pageBoard) downloadWiring = null;
+      if (flow === 'fast') { fastUSBChoices = false; setFastDisks(null); }
       sourceInspection = null; sourceCatalogue = null; sourceAnalysedId = '';
       $('fl-package-contents').textContent = '';
       $('fl-connections').textContent = ''; $('fl-partitions').textContent = '';
@@ -1656,6 +1740,8 @@
           var wiring = pageBoard.serial && await getDownloadWiring(pageBoard).catch(function () { return null; });
           if (!same(selected, seq)) return;
           downloadWiring = wiring;
+          fastUSBChoices = flow === 'fast' && discovered.some(manualFlashTarget);
+          renderDiscovered();
           status(wiring ? '可由 DeckLab 让当前开发板进入下载模式。' : manualDownloadMessage());
           return true;
         }
@@ -2145,6 +2231,12 @@
         capabilities = null; restoring = true;
       }
       renderTask(current); loadEvents(selected, seq, current);
+      offerReenter(current, selected, seq);
+      if ((current.flash || {}).operation === 'storage-inventory' && current.state === 'completed'
+          && flow === 'fast' && current.flash.storage_inventory) {
+        reopenFastTarget(current, selected, seq);
+        return;
+      }
       if (restoring) restoreTaskCapabilities(current, selected, seq);
       clearTimeout(pollTimer);
       if (['queued', 'running'].indexOf(current.state) < 0) return;
@@ -2159,18 +2251,44 @@
         }
       }, 1000);
     }
-    async function readNOR() {
+    async function reopenFastTarget(current, selected, seq) {
+      busy = true; updateControls();
+      try {
+        var result = await flashTargets();
+        if (!same(selected, seq)) return;
+        var generation = (current.result || {}).target_generation;
+        if (!generation) throw new Error(translate('缺少磁盘列表对应的 USB 连接，请重新检测设备。'));
+        var target = result.targets.find(function (candidate) {
+          return candidate.present !== false && (candidate.target_id || candidate.id) === selected.target_id
+            && (candidate.target_generation || candidate.generation) === generation;
+        });
+        if (!target) throw new Error(translate('读取后 USB 连接已变化，请重新检测设备。'));
+        discovered = result.targets;
+        busy = false;
+        var reopened = selectTarget(target, true), currentTarget = board, currentSequence = sequence;
+        await reopened;
+        if (same(currentTarget, currentSequence) && flow === 'fast' && !task && board.target_id === selected.target_id
+            && board.target_generation === generation && capabilities) {
+          setFastDisks(current.flash.storage_inventory); updateControls();
+        }
+      } catch (error) { if (same(selected, seq)) status(error.message, true); }
+      finally { if (same(selected, seq)) { busy = false; updateControls(); } }
+    }
+    async function readNOR(inventoryOnly) {
       if (!board || busy || uploading || submissionUnknown || task && ['queued', 'running'].includes(task.state)
           || !capabilities || !capabilities.nor_workspace_supported
           || !capabilities.storage_inventory_supported && $('fl-mode').value !== 'partitions') return;
       var selected = board, seq = sequence;
       invalidatePlan(); requestId = id(); busy = true; updateControls();
       sourceInspection=null;sourceCatalogue=null;sourceAnalysedId='';
-      status(capabilities.storage_inventory_supported ? '正在读取 NOR 和系统盘信息…' : '正在提交 NOR 读取与备份任务…');
+      status(inventoryOnly === true ? '正在读取系统盘列表…'
+        : capabilities.storage_inventory_supported ? '正在读取 NOR 和系统盘信息…' : '正在提交 NOR 读取与备份任务…');
       try {
         var payload = Object.assign(scope(selected), {
           kind: 'nor-backup', temporary_snapshot:true, binding_revision: capabilities.binding_revision, request_id: requestId });
         if (capabilities.storage_inventory_supported) payload.read_system = true;
+        if (inventoryOnly === true) payload.inventory_only = true;
+        operationReference(selected, 'write/' + requestId);
         var result = await client.request('/api/task-start', payload);
         if (!same(selected, seq)) return;
         if (!result.task || !result.task.id) throw new Error('缺少备份任务回执');
@@ -2179,7 +2297,7 @@
         if (!same(selected, seq)) return;
         if (!error.result || error.status >= 500) {
           submissionUnknown = true; status('提交结果未确认；请查询原任务，勿重新刷写。');
-        } else status(error.message);
+        } else { operationReference(selected, null); status(error.message); }
       } finally { if (same(selected, seq)) { busy = false; updateControls(); } }
     }
     async function startRamBoot() {
@@ -2516,6 +2634,8 @@
           && (busy || task || plan || submissionUnknown || selectedPreparation())) {
         $('flash-dialog').show(); return;
       }
+      reenterOffer = null; reenterCheckedTask = '';
+      $('fl-reenter-dialog').close();
       applyFlow(requestedFlow || (existing && existing.kind === 'ram-boot' ? 'ram'
         : existing && (existing.flash || {}).operation === 'stream' ? 'fast' : 'normal'));
       sourceInspection = null; sourceCatalogue = null; sourceAnalysedId=''; $('fl-package-contents').textContent='';
@@ -2532,7 +2652,7 @@
       inspection = null; payloadCandidates = []; selectionRequestId = ''; selectionPlan = null; renderedBackup = '';
       downloadRetry = false; automaticDownloadIdentity = '';
       $('fl-files').value = ''; $('fl-url').value = ''; $('fl-url-sha256').value = '';
-      $('fl-fast-url').value = ''; $('fl-fast-storage').value = 'auto'; $('fl-fast-disk').open = false;
+      $('fl-fast-url').value = ''; fastUSBChoices = false; setFastDisks(null);
       $('fl-url-panel').hidden = true; $('fl-url-toggle').setAttribute('aria-expanded', 'false');
       $('fl-target-storage').value = ''; $('fl-recovery-reason').value = '';
       $('fl-tuning-storage').value = ''; $('fl-tuning-disks').textContent = '';
@@ -2675,8 +2795,19 @@
     $('fl-system-storage').addEventListener('change', renderSystemInventory);
     $('fl-boot-priority').addEventListener('change', updateBootControls);
     $('fl-boot-save').addEventListener('click', saveBootPriority);
-    $('fl-close').addEventListener('click', function () { $('flash-dialog').close(); });
-    $('fl-discover').addEventListener('click', function () { if (!pageBoard) discover(); });
+    $('fl-close').addEventListener('click', function () { $('fl-reenter-dialog').close(); $('flash-dialog').close(); });
+    $('fl-reenter').addEventListener('click', showReenter);
+    $('fl-reenter-cancel').addEventListener('click', function () { $('fl-reenter-dialog').close(); });
+    $('fl-reenter-submit').addEventListener('click', async function () {
+      $('fl-reenter-dialog').close();
+      if (canReenter() && await prepareDevice(flow, reenterOffer))
+        status('已重新进入下载模式，可以重试原操作。');
+    });
+    $('fl-discover').addEventListener('click', function () { if (!pageBoard || flow === 'fast') discover(); });
+    $('fl-fast-detect').addEventListener('click', function () { if (!$('fl-fast-detect').disabled) discover(); });
+    $('fl-fast-bind').addEventListener('click', function () {
+      if (pageBoard && !$('fl-fast-bind').hidden && !$('fl-fast-bind').disabled) options.bindControl(pageBoard);
+    });
     $('fl-prepare-board').addEventListener('click', async function () {
       if ($('fl-prepare-board').hidden || $('fl-prepare-board').disabled || !await prepareDevice('normal')) return;
       if (capabilities && capabilities.nor_workspace_supported
@@ -2695,9 +2826,14 @@
       if (!$('fl-restart').disabled && selectionExpired(task)) discover();
     });
     $('fl-device').addEventListener('change', function () {
-      if (pageBoard) return;
       var target = discovered.find(function (entry) { return (entry.target_id || entry.id) === $('fl-device').value; });
-      if (target) selectTarget(target, true);
+      var expectedSerial = pageBoard && pageBoard.serial;
+      if (pageBoard) {
+        if (flow !== 'fast' || !fastUSBChoices || !target || !manualFlashTarget(target) || busy || preparingBoard || submissionUnknown) return;
+        pageBoard = null; fastUSBChoices = false; downloadWiring = null; downloadControl = null;
+      }
+      if (flow === 'fast') setFastDisks(null);
+      if (target) selectTarget(target, true, null, expectedSerial);
       else if (!busy && !(task && ['queued', 'running'].indexOf(task.state) >= 0)) {
         board = {}; ++sequence; ++eventSequence; clearTimeout(pollTimer);
         task = null; capabilities = null; inspection = null; payloadCandidates = [];
@@ -2857,13 +2993,13 @@
     async function fastFlash() {
       if (!board || $('fl-fast-start').disabled) return;
       var url = $('fl-fast-url').value.trim();
-      var storage = $('fl-fast-storage').value.trim() || 'auto';
-      if (storage !== 'auto' && !/^(nvme|scsi|mmc|usb):[0-3]$/.test(storage)) { status('目标系统盘应为 auto 或 nvme:0、scsi:0 这类编号。', true); return; }
       if (pageBoard && !(board.target_id && capabilities) && !await prepareDevice('fast')) return;
       if ($('fl-fast-start').disabled) {
         if (board.target_id && capabilities && !capabilities.stream_flash_supported) status('当前设备不支持 URL 极速刷机。', true);
         return;
       }
+      var storage = capabilities.chip === 'k1' ? 'auto' : $('fl-fast-storage').value;
+      if (!storage) { status('请选择要覆盖的系统盘。', true); return; }
       var selected = board, seq = sequence;
       requestId = id();
       busy = true; updateControls(); status('正在提交极速刷写任务…');
@@ -2935,6 +3071,14 @@
     $('fl-tuning-run').addEventListener('click', function () { calibrate('measure'); });
     $('fl-tuning-forget').addEventListener('click', function () { calibrate('forget'); });
     $('fl-fast-start').addEventListener('click', fastFlash);
+    $('fl-fast-read-disks').addEventListener('click', async function () {
+      if ($('fl-fast-read-disks').disabled) return;
+      if (pageBoard && !(board.target_id && capabilities) && !await prepareDevice('fast')) return;
+      if (!board.target_id || !capabilities?.storage_inventory_supported) {
+        status('当前下载环境无法读取磁盘列表。', true); return;
+      }
+      await readNOR(true);
+    });
     ['fl-tuning-write', 'fl-tuning-storage'].forEach(function (name) {
       $(name).addEventListener('input', updateControls);
       $(name).addEventListener('change', updateControls);
@@ -3000,7 +3144,10 @@
       updateControls();
     });
     updateControls();
-    return { open: open, discover: function () { return open(null, null, true, 'normal'); } };
+    return { open: open, discover: function () { return open(null, null, true, 'normal'); },
+      refreshWiring: function () {
+        if (flow === 'fast' && pageBoard && $('flash-dialog').open && !task && !preparingBoard) discover();
+      } };
   }
   global.SerialdFlashing = { create: create };
 })(window);

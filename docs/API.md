@@ -407,6 +407,13 @@ not the flash target. Other connection-bound operations keep their existing guar
 | POST `/api/task-start`, `kind=flash` | `key`, `serial`, `plan_id`, `binding_revision` and unique `request_id`; creates or retrieves the same durable task |
 | POST `/api/task-start`, `kind=nor-backup` | Human-only K3 NOR workspace: `target_id`, `target_generation`, `binding_revision` and unique `request_id`; no image or write scope. Loads pinned RAM materials, backs up the entire NOR, then waits for selection in the same `flash` task |
 
+For the URL flashing disk picker, `kind=nor-backup` accepts `read_system: true` and
+`inventory_only: true` from the owner. The same preparation checks the USB board
+and, when required, loads the RAM environment. The task completes with the disk
+list in `flash.storage_inventory` and the accepted USB generation in
+`result.target_generation`. It skips the NOR
+backup and filesystem metadata sampling and does not wait for a write selection.
+
 NOR workspaces expose `flash.nor_before` and `flash.nor_after` with scoped download
 artifact IDs and bounded partition content metadata. Versions are embedded fields
 or component banners; build timestamps are not firmware versions. Environment values

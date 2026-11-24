@@ -45,7 +45,7 @@ class BoardMaintenance:
                                   (time.time(),))
             self.store.db.execute("UPDATE flash_details SET document=json_set(document,'$.recovery_required',json('true')) "
                 "WHERE task_id IN (SELECT t.id FROM tasks t JOIN flash_resource_holds h ON h.task_id=t.id "
-                "WHERE t.kind='image-prepare' AND t.state='interrupted')")
+                "WHERE t.kind IN ('image-prepare','board-test') AND t.state='interrupted')")
 
     @staticmethod
     def resources(serial, resources=()):
@@ -452,7 +452,7 @@ class BoardMaintenance:
             tasks, flashes = TaskStore(self.store), FlashStore(self.store)
             task = tasks.get(task_id)
             details = flashes.details(task_id)
-            if (task['kind'] not in ('flash', 'flash-inspect', 'image-prepare', 'ram-boot') or not isinstance(expected_attempt_id, str)
+            if (task['kind'] not in ('flash', 'flash-inspect', 'image-prepare', 'ram-boot', 'board-test') or not isinstance(expected_attempt_id, str)
                     or not expected_attempt_id or details.get('attempt_id') != expected_attempt_id):
                 raise TaskError('flash recovery execution attempt changed', 409)
             if task['state'] not in ('failed', 'cancelled', 'interrupted', 'completed'):

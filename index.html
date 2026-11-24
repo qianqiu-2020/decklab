@@ -90,7 +90,9 @@
           <button id="b-device-fast-flash" type="button">URL 极速刷机</button>
           <button id="b-device-ram-boot" type="button">内存启动</button>
         </div>
+        <button id="b-board-tests" type="button">用例库</button>
         <button id="b-board-control" type="button" hidden title="电源与启动" aria-label="电源与启动"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>电源与启动</button>
+        <button id="b-board-slot-bind" type="button" hidden>绑定控制槽位</button>
         <button id="b-agent-share" type="button" disabled title="默认仅授权此设备，可在授权范围中更改"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>AI 接入</button>
         <button id="b-close" class="icon-button" type="button" aria-label="返回设备列表" title="返回设备列表"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button>
       </div>
@@ -296,6 +298,21 @@ PasswordAuthentication yes</code></pre>
   </div>
   <div class="ft-actions"><span id="shortcuts-status" role="status"></span><button id="shortcuts-reset" type="button">恢复默认快捷键</button></div>
 </dialog>
+<dialog id="board-tests-dialog" class="ft-dialog" aria-labelledby="board-tests-title">
+  <header><h2 id="board-tests-title">用例库</h2><button id="board-tests-close" type="button">关闭</button></header>
+  <div class="ft-fields">
+    <label class="ft-field">用例<select id="board-tests-case"></select></label>
+    <label class="ft-field">测试量<input id="board-tests-count" type="number" min="1" max="10000" value="1"></label>
+    <label class="ft-field">单位<select id="board-tests-unit"><option value="rounds">轮</option><option value="minutes">分钟</option></select></label>
+  </div>
+  <div class="ft-actions"><button class="pri" id="board-tests-run" type="button">开始用例</button>
+    <button id="board-tests-cancel" type="button" hidden>停止后续轮次</button>
+    <button id="board-tests-lookup" type="button" hidden>查询原任务</button>
+    <button id="board-tests-release" type="button" hidden>确认结束并释放板卡</button></div>
+  <p id="board-tests-status" role="status"></p>
+  <label class="ft-field">运行记录<select id="board-tests-history"></select></label>
+  <section id="board-tests-result"></section>
+</dialog>
 <dialog id="board-control-dialog" class="identity-association-dialog" aria-labelledby="board-control-title">
   <div class="agent-share-head"><strong id="board-control-title">板卡控制</strong><button id="board-control-close" type="button">关闭</button></div>
   <p id="board-control-target" data-i18n-ignore></p>
@@ -409,6 +426,11 @@ PasswordAuthentication yes</code></pre>
   <section id="fl-connect" class="fl-section" aria-labelledby="fl-connect-title">
     <h3 id="fl-connect-title">目标开发板</h3>
     <div id="fl-target-picker" class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label><button id="fl-discover" type="button">刷新 USB 列表</button></div>
+    <div id="fl-fast-connect" class="ft-actions" hidden>
+      <button id="fl-fast-detect" type="button">检测 USB 下载设备</button>
+      <button id="fl-fast-bind" type="button" hidden>绑定控制槽位</button>
+    </div>
+    <p id="fl-fast-attach-hint" class="fl-hint" hidden>请按物理 USB 位置确认本次目标。选择 USB 设备用于本次刷机。</p>
     <button id="fl-prepare-board" type="button" hidden>进入下载模式并读取设备存储</button>
     <details id="fl-storage-details" class="fl-details"><summary>板上已有内容与备份</summary>
       <div class="fl-read-action"><button id="fl-read-nor" type="button" disabled>读取设备存储</button></div>
@@ -436,9 +458,11 @@ PasswordAuthentication yes</code></pre>
           <button id="fl-fast-store" type="button">镜像商店</button>
         </div>
         <p class="fl-hint">边下载边写入，重建 GPT 并覆盖目标系统盘。</p>
-        <details id="fl-fast-disk" class="fl-details"><summary>系统盘选项</summary>
-          <label class="ft-field">目标系统盘<input id="fl-fast-storage" type="text" value="auto" spellcheck="false" placeholder="auto 或 nvme:0 / scsi:0"></label>
-        </details>
+        <div id="fl-fast-disk" class="fl-discovery">
+          <label class="ft-field">目标系统盘<select id="fl-fast-storage"><option value="auto">自动选择（仅在只有一块盘时）</option></select></label>
+          <button id="fl-fast-read-disks" type="button">读取磁盘列表</button>
+        </div>
+        <p id="fl-fast-disk-status" class="fl-hint" role="status"></p>
       </section>
       <details id="fl-tuning" class="fl-details" hidden>
         <summary>刷写配置 <span id="fl-tuning-state"></span></summary>
@@ -492,7 +516,13 @@ PasswordAuthentication yes</code></pre>
   </fieldset>
   <details id="fl-task-details" class="fl-details" hidden><summary>执行详情</summary><p id="fl-task-id" class="log-note" data-i18n-ignore></p><dl id="fl-verification" class="fl-connections"></dl><p id="fl-event-status" role="status"></p><pre id="fl-events" data-i18n-ignore></pre></details>
   </div>
-  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-edit" type="button" hidden>返回修改</button><button id="fl-new" type="button" hidden>准备下一次刷写</button><div id="fl-confirm-options"><label>回读校验 <select id="fl-verify"><option value="none" selected>关闭</option><option value="if-supported">能力支持时校验</option><option value="required">必须通过</option></select></label><label><input type="checkbox" id="fl-reset-after">刷完自动复位</label></div><button id="fl-fast-start" class="pri" type="button" hidden disabled>确认覆盖并刷写</button><button id="fl-ram-boot" class="pri" type="button" hidden>从镜像内存启动</button><button id="fl-plan" class="pri" type="button">预览写入范围</button><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-edit" type="button" hidden>返回修改</button><button id="fl-new" type="button" hidden>准备下一次刷写</button><div id="fl-confirm-options"><label>回读校验 <select id="fl-verify"><option value="none" selected>关闭</option><option value="if-supported">能力支持时校验</option><option value="required">必须通过</option></select></label><label><input type="checkbox" id="fl-reset-after">刷完自动复位</label></div><button id="fl-fast-start" class="pri" type="button" hidden disabled>确认覆盖并刷写</button><button id="fl-ram-boot" class="pri" type="button" hidden>从镜像内存启动</button><button id="fl-plan" class="pri" type="button">预览写入范围</button><button id="fl-reenter" type="button" hidden>重新进入下载模式</button><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+</dialog>
+<dialog id="fl-reenter-dialog" class="identity-association-dialog" aria-labelledby="fl-reenter-title">
+  <div class="agent-share-head"><strong id="fl-reenter-title">重新进入下载模式？</strong></div>
+  <p id="fl-reenter-board" data-i18n-ignore></p>
+  <p>原任务尚未写入。确认后将重启此板并等待 USB 重新连接，镜像选择会保留。</p>
+  <div class="ft-actions"><button id="fl-reenter-cancel" type="button" autofocus>稍后</button><button id="fl-reenter-submit" class="pri" type="button">立即进入下载模式</button></div>
 </dialog>
 <dialog id="image-workspace-dialog" class="ft-dialog" aria-labelledby="iw-title">
   <header><h2 id="iw-title">镜像工作目录</h2><button id="iw-close" type="button">关闭</button></header>
@@ -571,6 +601,7 @@ Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\seriald-mcp.exe'</code></pre>
 <script src="/static/image-store.js"></script>
 <script src="/static/control-slots.js"></script>
 <script src="/static/board-control.js"></script>
+<script src="/static/board-tests.js"></script>
 <script src="/static/desktop.js"></script>
 <script src="/static/file-transfer.js"></script>
 <script src="/static/image-workspaces.js"></script>

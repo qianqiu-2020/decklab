@@ -230,6 +230,33 @@ class NORWorkspaceTests(unittest.TestCase):
             self.assertEqual(code, 409, result)
             self.assertEqual(executor.workspaces, [])
 
+    def test_fast_disk_inventory_finishes_without_nor_backup_or_selection(self):
+        with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:
+            executor, target = self.setup_workspace(fixture, root, bootrom=True)
+            executor.supports_storage_metadata = True
+            calls = []
+
+            def inventory(binding, check, event, *, geometry_only):
+                check()
+                calls.append((binding.device['usb_address'], geometry_only))
+                return {'storages': [{'id': 'scsi:0', 'size': 32 << 30, 'capacity_verified': True}]}
+
+            executor.storage_inventory = inventory
+            payload = dict(self.scope(target), kind='nor-backup', binding_revision=1,
+                           request_id='fast-disk-inventory-001', read_system=True, inventory_only=True)
+            code, result = self.request(fixture, '/api/task-start', payload)
+            self.assertEqual(code, 202, result)
+            finished = self.terminal(fixture, result['task']['id'])
+            self.assertEqual(finished['state'], 'completed', finished)
+            self.assertEqual(finished['flash']['operation'], 'storage-inventory')
+            self.assertEqual(finished['flash']['write_result'], 'not-started')
+            self.assertEqual(finished['flash']['storage_inventory']['storages'][0]['id'], 'scsi:0')
+            self.assertNotEqual(finished['result']['target_generation'], target['target_generation'])
+            self.assertEqual(finished['result']['target_generation'], self.discover(fixture)[0]['target_generation'])
+            self.assertEqual(calls, [(8, True)])
+            self.assertEqual(executor.snapshots, [])
+            self.assertEqual(executor.executions, [])
+
     def test_ram_without_physical_eeprom_proof_keeps_temporary_identity(self):
         for identity in ({}, {'serialno': 'ENV-ONLY-SERIAL'}):
             with self.subTest(identity=identity), usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:

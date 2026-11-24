@@ -134,7 +134,7 @@
         if (event.stopPropagation) event.stopPropagation();
       };
       $('d-term').addEventListener('wheel', ctx.wheelHandler, { passive: false });
-      SerialdTerminalPolicy.install(ctx, {
+      ctx.paste = SerialdTerminalPolicy.install(ctx, {
         isCurrent: isCurrent,
         keyboardEnabled: function () { return $('d-kbd').checked; },
         send: send,

@@ -153,7 +153,7 @@ class BoundCommand:
 class HardwareBook:
     def __init__(self, document=None):
         document = {} if document is None else document
-        if not isinstance(document, dict) or set(document) - {'boards', 'home_assistant'} or not isinstance(document.get('boards', {}), dict):
+        if not isinstance(document, dict) or set(document) - {'boards', 'home_assistant', 'board_tests'} or not isinstance(document.get('boards', {}), dict):
             raise ValueError('hardware configuration requires a boards object')
         self.document = document
         self.boards: dict[str, dict[str, ControlAction]] = {}
@@ -178,6 +178,8 @@ class HardwareBook:
                                                             values.get('exclusive_serial', False))
 
         add_slots(self.boards, document.get('home_assistant', {}))
+        from .board_cases import config
+        self.board_tests = config(document.get('board_tests', {}))
 
     @classmethod
     def from_env(cls):

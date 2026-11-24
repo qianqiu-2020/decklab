@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
+from contextlib import nullcontext
 import tempfile
 import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -10,6 +12,8 @@ from seriald_core.control_slots import ControlSlots
 from seriald_core.ha_slots import SlotAction, inventory
 from seriald_core.hardware import HardwareBook
 from seriald_core.tasks import TaskError
+from seriald_core.tasks import TaskManager
+from seriald_core.storage import Store
 from seriald_core.web_settings import WebSettings
 
 
@@ -18,10 +22,11 @@ TOKEN = 'fixture-token'
 ONE, TWO = 'controllerA/1', 'controllerB/1'
 
 
-def slot(prefix):
-    return {'device': prefix, 'number': 1, 'name': prefix, 'area': 'desk',
-            'entities': {'reset': 'switch.' + prefix.lower() + '_board_1_reset',
-                         'enter-download': 'button.' + prefix.lower() + '_board_1_fastboot_mode'}}
+def slot(prefix, number=1):
+    entity_prefix = f'{prefix.lower()}_board_{number}'
+    return {'device': prefix, 'number': number, 'name': prefix, 'area': 'desk',
+            'entities': {'reset': 'switch.' + entity_prefix + '_reset',
+                         'enter-download': 'button.' + entity_prefix + '_fastboot_mode'}}
 
 
 class ControlSlotsTests(unittest.TestCase):
@@ -45,6 +50,59 @@ class ControlSlotsTests(unittest.TestCase):
     def save(self, scan, changes):
         return self.slots.execute(dict(action='save', scan=scan['scan'], revision=scan['revision'],
                                        changes={k:{'serial':sn, 'allow_agent':True} for k,sn in changes.items()}))
+
+    def test_first_use_pulses_only_selected_empty_slot_and_requires_the_current_uart(self):
+        scan = self.scan()
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / 'tasks.sqlite3')
+            self.addCleanup(store.close)
+            self.manager.store = store
+            tasks = self.manager.tasks = TaskManager(store)
+            self.addCleanup(tasks.close)
+            device = SimpleNamespace(key='fixture-console', serial='', present=True, connection_id='uart-fixture', stop=threading.Event())
+            self.manager.resolve = lambda key: device if key == device.key else None
+            action = dict(action='identify-slot', revision=scan['revision'], scan=scan['scan'], slot=TWO,
+                          request_id='fixture-onboarding-1', key=device.key, connection_id=device.connection_id)
+            def target(name):
+                return {'target_id': name, 'target_generation': name + '-generation', 'present': True}
+
+            old, unrelated, attached = map(target, ('before', 'other', 'attached'))
+            discovery = Mock(argv=('fixture-executor',))
+            discovery.refresh.side_effect = [{'targets': [old]}, {'targets': [old, unrelated, attached]}]
+            discovery.get.side_effect = [{'document': {'uart_link': {'connection_id': 'another-uart'}}},
+                                         {'document': {'uart_link': {'connection_id': device.connection_id, 'state': 'linked'}}}]
+
+            def probe(target_id, generation):
+                if target_id == attached['target_id']:
+                    device.serial = 'verified-board'
+                return {'serial': device.serial}
+            discovery.probe.side_effect = probe
+            transaction = Mock()
+            transaction.actor_scope.return_value = transaction.begin.return_value = nullcontext()
+
+            def trigger(check, outcome):
+                check()
+                outcome('issued')
+                outcome('acknowledged')
+
+            with patch('seriald_core.flash_tasks._discovery',return_value=discovery), \
+                    patch('seriald_core.control_slots.transactions_for', return_value=transaction), \
+                    patch('seriald_core.ha_slots.SlotAction') as actuator:
+                actuator.return_value.run.side_effect = trigger
+                started = self.slots.execute(action)['task']
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    task = tasks.store.get(started['id'])
+                    if task['state'] not in ('queued', 'running'):
+                        break
+                    time.sleep(.01)
+                self.assertEqual(task['state'], 'completed', task)
+                self.assertEqual(task['result']['serial'], 'verified-board')
+                self.assertEqual(self.slots.execute(action)['task']['id'], started['id'])
+                actuator.assert_called_once_with(URL, TOKEN, TWO, 'enter-download', slot('controllerB')['entities']['enter-download'], False)
+                actuator.return_value.run.assert_called_once()
+                self.assertEqual([call.args[0] for call in discovery.probe.call_args_list], ['other', 'attached'])
+                self.assertEqual(self.slots.execute({})['bindings'], [])
 
     def test_bulk_assign_same_slot_numbers_swap_and_restart(self):
         first = self.scan()
@@ -132,3 +190,21 @@ class ControlSlotsTests(unittest.TestCase):
         with patch('seriald_core.ha_slots.registries', return_value=([],
                 [{'id':'abc','name':'Desk'},{'id':'def','name':'Desk'}],rows)):
             self.assertEqual(set(inventory(URL,TOKEN)),{'abc/1','def/1'})
+
+    def test_zero_based_slots_use_exact_home_assistant_numbers(self):
+        rows = [{'device_id': device, 'entity_id': entity, 'platform': 'esphome'}
+                for device, numbers in [('abc', range(4)), ('def', range(1, 5))]
+                for number in numbers for entity in slot(device, number)['entities'].values()]
+        self.inventory.side_effect = inventory
+        with patch('seriald_core.ha_slots.registries', return_value=([],
+                [{'id':'abc','name':'Desk'}, {'id':'def','name':'Desk'}], rows)):
+            first = self.scan()
+            self.assertEqual([row['key'] for row in first['slots']],
+                             ['abc/0', 'abc/1', 'abc/2', 'abc/3', 'def/1', 'def/2', 'def/3', 'def/4'])
+            self.assertEqual(first['slots'][1]['serial'], '')
+            self.save(first, {'abc/0': 'A', 'abc/2': 'B'})
+        restored = HardwareBook(self.settings.effective()['documents']['hardware'])
+        self.assertEqual(restored.wiring('A')['number'], 0)
+        self.assertEqual(restored.command('A', 'enter-download', 'agent').entity,
+                         'button.abc_board_0_fastboot_mode')
+        self.assertEqual(restored.command('B', 'reset', 'web').entity, 'switch.abc_board_2_reset')

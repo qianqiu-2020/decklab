@@ -316,3 +316,37 @@ that task's `layout_digest`, then accepts its immutable `plan_id` and a unique
 selection `request_id`. The commit is deduplicated; it does not create another
 task or prepare the loader again. Cancellation or expiry stops the waiting
 operation without writing storage.
+
+## 板卡用例
+
+板卡页的「用例库」用同一个后台任务 API。控制机按板卡序列号预约，
+串口继续被动采集。主访问身份可用 `kind=board-test` 提交，
+附带 `key`、`serial`、`connection_id`、唯一 `request_id`、固定 `case`
+以及 `rounds` 或 `seconds`。取消停止后续轮次，已触发的一轮继续观察
+到结果或超时。浏览器关闭后任务继续运行。采集器重启后在原任务中确认
+旧服务已停止再释放板卡。观察超时且板端操作仍未确认结束时，也在原任务中
+释放板卡。用例不会重复触发未确认的轮次，也不会自动复位。
+
+Linux 控制机需要能通过本机 adb 访问板卡，目标系统需要 root ADB shell、
+systemd、Python 3 和可写的板端测试串口。在控制机硬件 JSON 中合并以下配置，
+其中 USB 路径来自本机 `adb devices -l` 的 `usb:` 栏，串口是**板上的设备节点**。
+
+```json
+{
+  "board_tests": {
+    "YOUR-BOARD-SERIAL": {"usb_port": "2-1.3", "uart": "/dev/ttyS0", "cases": ["rtc-wake"]}
+  }
+}
+```
+
+- `reboot-aging` 用于 K3 Pico-ITX 的 NOR → UFS → Debian。要求 Kingston
+  TY7B-128、UFS EFI 启动项和实际 UFS 根盘，逐轮核对新启动编号、固件、
+  ESP 和根盘与起始状态一致，并从串口核对 NOR 启动记录。
+- `rtc-wake` 要求 Linux 已选中 deep，并支持 `rtc@pmic` 的可读中断计数。
+  同一板端进程设 RTC 闹钟、报告已布防、挂起并在唤醒后取证。等待窗口为 235 秒。
+  恢复命令由操作者另行提交，在任务历史单独留痕。
+
+结果页可查看最近轮次和首个异常，下载完整轮次清单及命令回读。首个异常的
+原始串口按采集范围附上，显示最后一行的行号。串口连接改变或缓冲丢失会
+标记证据缺口。每轮发送命令前都会核对当前 USB transport ID、板卡序列号
+和启动编号。连接缺失期间只等待并观察，观察不足记为无结果。

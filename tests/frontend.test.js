@@ -101,6 +101,10 @@ function harness(options = {}) {
     open() {}
     dispose() { this.disposed = true; }
     onData(fn) { this.data = fn; }
+    paste(text) {
+      text = text.replace(/\r?\n/g, '\r');
+      this.data(this.bracketedPaste ? '\x1b[200~' + text + '\x1b[201~' : text);
+    }
     onSelectionChange(fn) { this.selection = fn; }
     attachCustomKeyEventHandler(fn) { this.key = fn; }
     getSelection() { return ''; }
@@ -1067,8 +1071,27 @@ test('Ctrl+V is handed back to the browser so native paste can reach the termina
   h.document.emit('paste', { clipboardData: { getData: () => 'ls\n' },
     preventDefault() {}, stopPropagation() {} });
   await drain();
-  assert.deepEqual(h.sends().map(r => r.body.data), ['ls\n']);
+  assert.deepEqual(h.sends().map(r => r.body.data), ['ls\r']);
   assert.ok(h.get('d-status').textContent.includes('已粘贴'));
+});
+
+test('both paste entry points preserve Vim indentation with keyboard passthrough disabled', async () => {
+  for (const toolbar of [false,true]) {
+    const h = await setup();
+    const term = h.select('A');
+    term.bracketedPaste = true;
+    h.get('d-kbd').checked = false;
+    let destination = h.document;
+    if (toolbar) {
+      h.get('b-paste').click();
+      destination = h.document.body.children.at(-1);
+    }
+    destination.emit('paste', {clipboardData:{getData:()=> 'one\r\n\t  two\n\nthree'},
+      preventDefault(){}, stopPropagation(){}});
+    term.data('ordinary keyboard input');
+    await drain();
+    assert.deepEqual(h.sends().map(r=>r.body.data), ['\x1b[200~one\r\t  two\r\rthree\x1b[201~']);
+  }
 });
 
 test('opt-in firmware paste sends one serial character per acknowledged write', async () => {

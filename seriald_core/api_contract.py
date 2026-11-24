@@ -10,7 +10,7 @@ CONTRACT_REVISION = 1
 
 OUTCOMES = ('not-issued', 'issued', 'acknowledged', 'observed', 'verified', 'unknown')
 BASE_TASK_KINDS = ('identify', 'ssh-enable', 'ssh-connect', 'file-copy',
-                   'file-upload', 'file-download', 'flash', 'nor-backup')
+                   'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test')
 
 
 def execution_capabilities(version, hardware_actions, hardware_adapter):
@@ -72,7 +72,7 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
                 'supported': True, 'parameter': 'request_id',
                 'scope': ['actor', 'request_id'], 'persistent': True,
                 'kinds': submitted + ['desktop-input', 'image-download', 'image-prepare'],
-                'required_kinds': ['flash', 'nor-backup', 'desktop-input', 'image-download'],
+                'required_kinds': ['flash', 'nor-backup', 'desktop-input', 'image-download', 'board-test'],
                 'format': '[A-Za-z0-9_-]{8,100}',
                 'same_input': 'return-existing-task', 'changed_input_http_status': 409,
             },

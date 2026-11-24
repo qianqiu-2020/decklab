@@ -21,13 +21,32 @@ class CatalogTests(unittest.TestCase):
     def test_organization_source_is_opt_in_and_requires_safe_paired_urls(self):
         self.assertEqual(list(catalog.configured_sources({})), ['public'])
         for url in ('http://images.example.test/', 'https://[broken/', 'https://user:password@images.example.test/',
-                    'https://images.example.test/?token=private', 'https://images.example.test'):
+                    'https://images.example.test/?token=private', 'https://images.example.test/not-a-directory'):
             with self.subTest(url=url), self.assertRaises(TaskError):
                 catalog.configured_sources({'SERIALD_IMAGE_INTERNAL_BROWSE': url,
                                             'SERIALD_IMAGE_INTERNAL_DOWNLOAD': url})
         with mock.patch.dict(os.environ, {'SERIALD_IMAGE_INTERNAL_BROWSE': '', 'SERIALD_IMAGE_INTERNAL_DOWNLOAD': ''}):
             with self.assertRaisesRegex(TaskError, '尚未配置'):
                 catalog.catalog('internal')
+
+    def test_nexus_origin_resolves_the_image_catalog_and_download_paths(self):
+        spec = catalog.configured_sources({'SERIALD_IMAGE_INTERNAL_BROWSE': 'https://images.example.test:8443'})['internal']
+        self.assertEqual(spec['browse'], 'https://images.example.test:8443/service/rest/repository/browse/image/')
+        self.assertEqual(spec['download'], 'https://images.example.test:8443/repository/image/')
+        with mock.patch.object(catalog, '_CACHE', {}), mock.patch.object(catalog, '_fetch', return_value='<a href="k3/">K3</a>') as fetch:
+            catalog.catalog('internal')
+            fetch.assert_called_once_with(os.environ['SERIALD_IMAGE_INTERNAL_BROWSE'], verify_tls=False)
+            catalog.catalog('public')
+            self.assertTrue(fetch.call_args.kwargs['verify_tls'])
+
+    def test_organization_tls_is_limited_to_exact_repository_paths(self):
+        from seriald_core.image_download import image_url
+        root = 'https://images.example.test/repository/image/'
+        self.assertTrue(catalog.organization_download(image_url(root + 'k3/signed%20image.tar.gz')))
+        for url in (root, root + 'k3/%2e%2e/other.tar', root.replace('https:', 'http:') + 'k3/test.tar',
+                    root.replace('.test', '.test:8443') + 'k3/test.tar', root.replace('.test', '.test.evil.test') + 'k3/test.tar',
+                    root.replace('/image/', '/image-copy/') + 'k3/test.tar'):
+            self.assertFalse(catalog.organization_download(image_url(url)), url)
 
     def test_library_keeps_global_and_device_images_without_name_replacement(self):
         with fixture() as (manager, _):

@@ -351,6 +351,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             result = hardware.available(device.serial or '', actor)
             if actor == 'web':
                 result['wiring'] = hardware.wiring(device.serial)
+                cases = getattr(hardware, 'board_tests', {}).get(device.serial)
+                if cases:
+                    from shutil import which
+                    result['test_cases'] = cases['cases'] if which('adb') else []
+                    result['test_cases_configured'] = True
             if actor == 'web' and device.by_path:
                 result['slot_handoff'] = any(slot.get('suspended_on') == device.by_path
                     for cfg in getattr(hardware, 'document', {}).get('home_assistant', {}).values()

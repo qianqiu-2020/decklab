@@ -13,7 +13,7 @@ from .websocket_io import _protocol_modules
 
 from .tasks import TaskError
 
-SUFFIX = re.compile(r'(switch|button)\.[a-z0-9_]*board_([1-4])_(reset|fastboot_mode)\Z')
+SUFFIX = re.compile(r'(switch|button)\.[a-z0-9_]*board_([0-4])_(reset|fastboot_mode)\Z')
 
 
 def origin(value):
@@ -201,7 +201,7 @@ def add_slots(boards, connections):
         if not isinstance(config['slots'], dict):
             raise ValueError('槽位配置无效')
         for key, s in config['slots'].items():
-            if not re.fullmatch(r'[a-zA-Z0-9_-]{1,100}/[1-4]', key) or not isinstance(s, dict):
+            if not re.fullmatch(r'[a-zA-Z0-9_-]{1,100}/[0-4]', key) or not isinstance(s, dict):
                 raise ValueError('槽位标识无效')
             serial, entities, agent = s.get('serial'), s.get('entities'), s.get('allow_agent')
             if (not isinstance(serial, str) or not serial or len(serial.encode()) > 100 or serial in bound

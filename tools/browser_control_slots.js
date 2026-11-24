@@ -9,9 +9,11 @@ const {launchBrowser, stopBrowser} = require('./browser_launch');
 const source = fs.readFileSync(path.join(__dirname, '../static/control-slots.js'));
 const origin = 'https://fixture.invalid';
 const groups = ['North', 'South'];
-const boards = [{serial:'A', label:'Alpha', uart:'COM7'}, {serial:'B', label:'Beta', uart:'COM9'}];
+const boards = [{serial:'A', label:'Alpha', uart:'COM7'}, {serial:'B', label:'Beta', uart:'COM9'},
+  {serial:'C', label:'Replacement', uart:'COM7'}];
 const bindings = new Map();
 const saved = [];
+let handoff;
 const server = http.createServer(async (req, res) => {
   if (req.url === '/static/control-slots.js') {
     res.setHeader('Content-Type','text/javascript; charset=utf-8');
@@ -19,17 +21,17 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.url !== '/api/control-slots') {
     res.setHeader('Content-Type','text/html; charset=utf-8');
-    return res.end('<meta charset="utf-8"><script>window.SerialdUI={fetch:window.fetch.bind(window)};window.confirm=()=>true</script>' +
+    return res.end('<meta charset="utf-8"><script>window.SerialdUI={fetch:window.fetch.bind(window)};window.confirmCalls=0;window.confirm=()=>{window.confirmCalls++;return true}</script>' +
       '<script src="/static/control-slots.js"></script><button onclick="SerialdControlSlots.open()">Bulk</button>');
   }
   let body = '';
   for await (const chunk of req) body += chunk;
   const op = JSON.parse(body);
-  const slots = groups.flatMap(name => [1,2,3].map(number => ({
+  const slots = groups.flatMap(name => (name === 'North' ? [0,1,2,3] : [1,2,3,4]).map(number => ({
     key:name+'/'+number, name, area:'Lab', entities:{reset:'reset'}, present:true,
-    serial:bindings.get(name+'/'+number)?.serial || '', allow_agent:false
+    serial:bindings.get(name+'/'+number)?.serial || '', allow_agent:false, suspended:handoff?.key===name+'/'+number
   })));
-  const data = op.action==='list' ? {revision:'v1',connections:[origin],boards,bindings:[]} :
+  const data = op.action==='list' ? {revision:'v1',connections:[origin],boards,bindings:[],handoff} :
     op.action==='discover' ? {slots,scan:'scan'} : {ok:true};
   if (op.action==='save') {
     saved.push(op.changes);
@@ -73,29 +75,43 @@ async function test() {
     await evaluate('SerialdControlSlots.open()');
     const rows = 'document.querySelectorAll(".wiring-row")';
     assert.equal(await evaluate(rows+'.length'),4, await evaluate('document.querySelector(".wiring-footer").textContent'));
-    assert.match(await evaluate(rows+'[3].textContent'),/未发现/);
+    assert.deepEqual(await evaluate('Array.from('+rows+', row => row.querySelector("strong").textContent)'),
+                     ['槽位 0','槽位 1','槽位 2','槽位 3']);
     async function choose(selector,value) {
       await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.value=${JSON.stringify(value)};e.dispatchEvent(new Event("change"));})()`);
     }
-    await choose('[aria-label="槽位 1 的板卡"]','A');
+    await choose('[aria-label="槽位 0 的板卡"]','A');
     await choose('[aria-label="控制器"]','South');
+    assert.deepEqual(await evaluate('Array.from('+rows+', row => row.querySelector("strong").textContent)'),
+                     ['槽位 1','槽位 2','槽位 3','槽位 4']);
     await evaluate('const f=document.querySelector("input[type=search]"); f.value="COM9";f.oninput()');
     assert.equal(await evaluate('document.querySelector("[aria-label=\\"槽位 1 的板卡\\"]").options.length'),2);
     await choose('[aria-label="槽位 1 的板卡"]','B');
     await evaluate('document.querySelector(".wiring-footer button").click()');
     await wait('!document.querySelector(".wiring-dialog")');
-    assert.deepEqual(saved[0],{'North/1':{serial:'A',allow_agent:false},'South/1':{serial:'B',allow_agent:false}});
+    assert.deepEqual(saved[0],{'North/0':{serial:'A',allow_agent:false},'South/1':{serial:'B',allow_agent:false}});
     await evaluate('SerialdControlSlots.open("A")');
     await choose('[aria-label="控制器"]','South');
     await evaluate(rows+'[1].querySelector("button").click()');
     await evaluate('document.querySelector(".wiring-footer button").click()');
     await wait('!document.querySelector(".wiring-dialog")');
-    assert.deepEqual(saved[1],{'North/1':{serial:'',allow_agent:false},'South/2':{serial:'A',allow_agent:false}});
-    console.log('Chromium passed bulk wiring, UART filter, missing fourth slot and single-board move');
+    assert.deepEqual(saved[1],{'North/0':{serial:'',allow_agent:false},'South/2':{serial:'A',allow_agent:false}});
+    handoff = {key:'South/2', origin};
+    const confirmations = await evaluate('window.confirmCalls');
+    await evaluate('SerialdControlSlots.open("C")');
+    assert.match(await evaluate('document.querySelector(".wiring-handoff").textContent'),/已选槽位 2.*A → C/);
+    assert.equal(await evaluate('document.querySelector(".wiring-footer button").textContent'),'确认换板接线');
+    assert.equal(await evaluate('document.querySelector(".wiring-row[data-current] select").value'),'C');
+    assert.equal(saved.length,2);
+    await evaluate('document.querySelector(".wiring-footer button").click()');
+    await wait('!document.querySelector(".wiring-dialog")');
+    assert.deepEqual(saved[2],{'South/2':{serial:'C',allow_agent:false}});
+    assert.equal(await evaluate('window.confirmCalls'),confirmations);
+    console.log('Chromium passed slot numbering, UART filter, board move and preselected handoff');
   } finally {
     if(ws) ws.close();
     await stopBrowser(chrome);
-    server.close(); fs.rmSync(profile,{recursive:true,force:true});
+    server.close(); fs.rmSync(profile,{recursive:true,force:true,maxRetries:5});
   }
 }
 test().catch(error=>{console.error(error);process.exitCode=1;});

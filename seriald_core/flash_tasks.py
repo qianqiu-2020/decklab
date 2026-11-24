@@ -720,17 +720,20 @@ class FlashActions:
             if pins:
                 pins.close()
 
-    def backup(self, payload, device, actor='web'):
+    def backup(self, payload, device, actor='web', *, identity_only=False):
         """Start one durable read/selection/write task, initially without images."""
         try:
             if not isinstance(payload, dict) or set(payload) - {
                     'kind', 'key', 'serial', 'actor', 'client_id', 'request_id',
-                    'binding_revision', 'target_id', 'target_generation', 'read_system', 'temporary_snapshot'}:
+                    'binding_revision', 'target_id', 'target_generation', 'read_system', 'temporary_snapshot', 'inventory_only'}:
                 raise TaskError('NOR backup accepts only the fixed USB target')
             _services(self.manager)
             read_system = payload.get('read_system', False)
             if type(read_system) is not bool:
                 raise TaskError('read_system must be boolean')
+            inventory_only = payload.get('inventory_only', False)
+            if type(inventory_only) is not bool or inventory_only and (not read_system or actor != 'web'):
+                raise TaskError('disk inventory only requires a system storage read by the owner')
             identity = {key: payload.get(key) for key in ('serial', 'binding_revision', 'target_id', 'target_generation')}
             temporary = payload.get('temporary_snapshot', False)
             if type(temporary) is not bool:
@@ -739,6 +742,10 @@ class FlashActions:
                 identity['temporary_snapshot'] = True
             if read_system:
                 identity['read_system'] = True
+            if inventory_only:
+                identity['inventory_only'] = True
+            if identity_only:
+                identity['identity_only'] = True
             input_digest = _digest(dict(identity, operation='nor-workspace'))
             with self.manager._flash_plans_lock:
                 previous = self.store.find_request(actor, payload.get('request_id'), input_digest)
@@ -748,9 +755,10 @@ class FlashActions:
                 binding, executor = self._target(device, actor, payload)
                 if read_system and not getattr(executor, 'supports_storage_metadata', False):
                     raise TaskError('system storage metadata requires an updated executor', 409)
+                family = binding.profile_data.get('chip_family')
                 if (not binding.target_id or binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
-                        or binding.profile_data.get('chip_family') != 'k3'
-                        or not getattr(executor, 'supports_nor_snapshot', False)):
+                        or family not in (('k1', 'k3') if identity_only else ('k3',))
+                        or not identity_only and not getattr(executor, 'supports_nor_snapshot', False)):
                     raise TaskError('NOR backup requires a detected K3 USB target and updated executor', 409)
                 if (type(payload.get('binding_revision')) is not int
                         or payload['binding_revision'] != binding.binding_revision):
@@ -760,7 +768,7 @@ class FlashActions:
                     raise TaskError('invalid flash client')
                 record = self.store.put_plan({
                     'operation': 'nor-workspace', 'actor': actor, 'serial': device.serial,
-                    'read_system': read_system,
+                    'read_system': read_system, 'inventory_only': inventory_only, 'identity_only': identity_only,
                     'target_id': binding.target_id, 'target_generation': binding.target_generation,
                     'binding_revision': binding.binding_revision, 'binding_digest': _binding_digest(binding),
                     'intent': {'artifact_id': None, 'mode': 'partitions', 'verify': 'required',
@@ -773,7 +781,8 @@ class FlashActions:
                 operation = FlashOperation(self, binding, executor, record, actor)
                 task = self.manager.tasks.start_board('flash', actor, client, device.serial, operation.run,
                     request_id=payload.get('request_id'), input_digest=input_digest,
-                    details={'operation': 'nor-workspace', 'temporary_snapshot': temporary, 'plan_id': record['plan_id'],
+                    details={'operation': 'usb-identity' if identity_only else 'storage-inventory' if inventory_only else 'nor-workspace',
+                        'temporary_snapshot': temporary, 'plan_id': record['plan_id'],
                         'plan_digest': record['digest'], 'binding_revision': binding.binding_revision,
                         'target_id': binding.target_id, 'target_generation': binding.target_generation,
                         'attempt_id': operation.attempt_id, 'executor': binding.endpoint,
@@ -798,6 +807,7 @@ class FlashActions:
                     'url', 'sha256', 'system_storage', 'reset_after', 'memory_budget'}:
                 raise TaskError('invalid fast flashing request')
             from .image_download import image_url
+            from .image_catalog import organization_download
             parsed = image_url(payload.get('url'))
             if not parsed.path.lower().endswith(('.tar.gz', '.tgz', '.tar')):
                 raise TaskError('fast flashing streams .tar.gz or .tar system packages')
@@ -842,6 +852,8 @@ class FlashActions:
                                'system_storage': storage, 'reset_after': reset_after, 'memory_budget': budget}
                     if actor != 'web':
                         request['restrict_source'] = True
+                    elif organization_download(parsed):
+                        request['insecure_source'] = True
                     if checksum:
                         request['archive_sha256'] = checksum
                     if binding.profile_data.get('bootrom_identity'):
@@ -1527,7 +1539,9 @@ class FlashOperation:
             check()
             workspace_mode = record.get('operation') == 'nor-workspace'
             if workspace_mode:
-                prepared_read = self.executor.nor_workspace(self.binding, check)
+                prepare_workspace = (self.executor.ram_boot_workspace if record.get('identity_only')
+                                     and self.binding.profile_data.get('chip_family') == 'k1' else self.executor.nor_workspace)
+                prepared_read = prepare_workspace(self.binding, check)
                 self.binding = self.executor.execution_binding(self.binding, prepared_read['execution_profile'],
                                                                prepared_read['workspace'], check)
                 record.update(prepared_read)
@@ -1551,8 +1565,9 @@ class FlashOperation:
                     raise TaskError('automatic loader preparation requires a verified image execution profile', 409)
                 self.preparing = bool(self.binding.target_id)
                 try:
+                    options = {'identity_only': True} if record.get('identity_only') else {}
                     prepared = self.executor.prepare(self.binding, event, check,
-                                                     task_id=context.id, attempt_id=self.attempt_id)
+                                                     task_id=context.id, attempt_id=self.attempt_id, **options)
                 finally:
                     self.preparing = False
                 if self.binding.target_id:
@@ -1590,6 +1605,18 @@ class FlashOperation:
                             _write_scope(submitted['executor_plan']) != _write_scope(record['executor_plan'])
                             or submitted['executor_plan'].get('write_layout') != record['executor_plan'].get('write_layout')):
                         raise TaskError('prepared write scope differs from preview; create a new preview', 409)
+            if workspace_mode and record.get('identity_only'):
+                if not self.resolved_serial:
+                    raise TaskError('未从板卡读出已核验的序列号，请检查板载 EEPROM', 409)
+                context.mark_outcome('observed')
+                return {'serial': self.resolved_serial, 'write_result': 'not-started'}
+            if workspace_mode and record.get('inventory_only'):
+                inventory = self.executor.storage_inventory(self.binding, check, event, geometry_only=True)
+                result = {'storage_inventory': inventory, 'write_result': 'not-started',
+                          'target_generation': self.final_generation or self.binding.target_generation}
+                store.update_details(context.id, result)
+                context.mark_outcome('observed')
+                return result
             snapshot = None
             if workspace_mode:
                 snapshot = self.executor.snapshot(self.binding, record['workspace'], event, check,

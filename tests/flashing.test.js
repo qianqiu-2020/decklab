@@ -17,10 +17,11 @@ class Element {
   emit(type, event = {}) { for (const fn of this.events[type] || []) fn(event); }
   click() { if (!this.disabled) this.emit('click'); }
   show() { this.open = true; }
+  showModal() { this.show(); }
   close() { this.open = false; }
   focus() { this.focused = true; }
 }
-function harness(storage) {
+function harness(storage, controls = {}) {
   const elements = new Map(), requests = [], timers = new Map(); let timer = 0, imageChoice, imagePicker;
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('fl-mode').value = 'full'; get('fl-verify').value = 'none';
@@ -33,7 +34,7 @@ function harness(storage) {
     setItem:(key,value) => storage.set(key,value), removeItem:key => storage.delete(key)};
   sandbox.window = sandbox;
   vm.runInNewContext(source, sandbox);
-  const api = sandbox.SerialdFlashing.create({byId: get, formatBytes: value => value + ' B',
+  const api = sandbox.SerialdFlashing.create({byId: get, formatBytes: value => value + ' B', ...controls,
     openImageStore: (choose,picker) => {imageChoice=choose;imagePicker=picker;},
     fetch: (url, options = {}) => new Promise((resolve, reject) => requests.push({url, options,
       payload: options.body && JSON.parse(options.body), reject,
@@ -1790,6 +1791,89 @@ test('ordinary flash enters download and reads storage without a write plan', as
   assert.equal(h.requests.some(r => r.payload),false);
 });
 
+test('a pre-write loader failure can re-enter download without leaving the flash workspace', async () => {
+  const h = harness();
+  await openWithoutUSB(h,'normal');
+  h.get('fl-cache').click(); h.chooseImage(artifact);
+  await confirmDownload(h,'fl-prepare-board');
+  const error = {id:'failed-loader',kind:'flash',state:'failed',error:'加载器超时: loader-fsbl-timeout',
+    flash:{operation:'nor-workspace',write_result:'not-started'}};
+  h.take('/api/task-start').resolve({task:error}); await drain();
+  h.take('/api/flash-events').resolve({events:[],details:error.flash}); await drain();
+  h.take('/api/hardware').resolve({actions:['enter-download'],wiring:{revision:'reentry-wiring'}}); await drain();
+  assert.equal(h.get('fl-reenter-dialog').open,true);
+  h.get('fl-reenter-cancel').click();
+  assert.equal(h.get('fl-reenter-dialog').open,false);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+  h.get('fl-reenter').click();
+  h.get('fl-reenter-submit').click(); h.get('fl-reenter-submit').click();
+  h.take('/api/flash-discover').resolve({targets:[scopedUSB]}); await drain();
+  const control = h.take('/api/task-start');
+  assert.equal(control.payload.kind,'hardware-enter-download');
+  assert.equal(control.payload.serial,controlledBoard.serial);
+  assert.equal(control.payload.connection_id,controlledBoard.connection_id);
+  assert.equal(control.payload.wiring_revision,'reentry-wiring');
+  control.resolve({task:{id:'reentered',state:'completed'}}); await drain();
+  h.take('/api/flash-discover').resolve({targets:[scopedUSB]}); await drain();
+  assert.equal(h.requests.some(r=>r.url==='/api/flash-target'||r.url==='/api/task-start'),false);
+  const timer = h.timers.values().next().value; h.timers.clear(); timer(); await drain();
+  const fresh = {...scopedUSB,target_generation:'usb-generation-3'};
+  h.take('/api/flash-discover').resolve({targets:[scopedUSB,fresh]}); await drain();
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  const probe = h.take('/api/flash-target');
+  assert.equal(probe.payload.target_generation,fresh.target_generation);
+  probe.resolve({target:fresh,capabilities:usbCapabilities}); await drain();
+  assert.equal(h.get('flash-dialog').open,true);
+  assert.equal(h.get('fl-artifact').value,artifact.id);
+  assert.match(h.get('fl-status').textContent,/已重新进入下载模式/);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('re-entry is only offered with a supported control and a confirmed no-write result', async () => {
+  for (const writeResult of ['not-started','unknown-or-partial']) {
+    const h = harness();
+    await openWithoutUSB(h,'normal');
+    await confirmDownload(h,'fl-prepare-board');
+    const error = {id:'failed-loader',kind:'flash',state:'failed',error:'加载器超时: loader-fsbl-timeout',
+      flash:{operation:'nor-workspace',write_result:writeResult}};
+    h.take('/api/task-start').resolve({task:error}); await drain();
+    h.take('/api/flash-events').resolve({events:[],details:error.flash}); await drain();
+    if (writeResult === 'not-started') {
+      h.take('/api/hardware').resolve({actions:['reset']}); await drain();
+    }
+    assert.equal(h.get('fl-reenter-dialog').open,false);
+    assert.equal(h.get('fl-reenter').hidden,true);
+    assert.equal(h.requests.some(r=>r.url.startsWith('/api/hardware') || r.url==='/api/task-start'),false);
+  }
+});
+
+test('a failed storage read can redetect the board in place without resetting or losing the image', async () => {
+  const h = harness();
+  await openWithoutUSB(h,'normal');
+  h.get('fl-cache').click(); h.chooseImage(artifact);
+  await confirmDownload(h,'fl-prepare-board');
+  const error = {id:'storage-failure',kind:'flash',state:'failed',error:'flashing executor reported failure: protocol-failed',
+    progress:{phase:'reading-system-layout'},flash:{operation:'nor-workspace',write_result:'not-started'}};
+  h.take('/api/task-start').resolve({task:error}); await drain();
+  h.take('/api/flash-events').resolve({events:[],details:error.flash}); await drain();
+  assert.equal(h.get('flash-dialog').dataset.stage,'setup');
+  assert.match(h.get('fl-task-status').textContent,/protocol-failed/);
+  assert.equal(h.get('fl-new').hidden,false);
+  assert.equal(h.get('fl-new').textContent,'重新检测设备');
+  h.get('fl-new').click();
+  const fresh = {...scopedUSB,target_generation:'fresh-usb'};
+  h.take('/api/flash-discover').resolve({targets:[fresh]}); await drain();
+  h.take('/api/tasks').resolve({tasks:[error]}); await drain();
+  const probe = h.take('/api/flash-target');
+  assert.equal(probe.payload.target_generation,fresh.target_generation);
+  probe.resolve({target:fresh,capabilities:usbCapabilities}); await drain();
+  assert.equal(h.get('fl-task-status').textContent,'');
+  assert.equal(h.get('fl-artifact').value,artifact.id);
+  assert.equal(h.get('flash-dialog').open,true);
+  assert.equal(h.get('fl-read-nor').disabled,false);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
 test('a matching USB target already in download mode bypasses hardware control', async () => {
   const h = harness(); await openWithoutUSB(h,'fast');
   h.get('fl-fast-url').value='https://images.example/os.tar.gz';h.get('fl-fast-url').emit('input');
@@ -1802,6 +1886,61 @@ test('a matching USB target already in download mode bypasses hardware control',
   assert.equal(stream.payload.serial,undefined);
   assert.equal(stream.payload.target_generation,scopedUSB.target_generation);
   assert.equal(h.requests.some(r => r.url.startsWith('/api/hardware') || r.url === '/api/task-start' || r.url === '/api/flash-target'),false);
+});
+
+test('first-use fast flash offers binding and lets an unpaired BootROM be selected explicitly', async () => {
+  const bindings = [];
+  const h = harness(new Map(), {canBind:()=>true, bindControl:board=>bindings.push(board.serial)});
+  h.api.open(controlledBoard, null, false, 'fast');
+  h.take('/api/flash-capabilities').resolve({...capabilities,supported:false}); await drain();
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-discover').resolve({targets:[]}); await drain();
+  h.take('/api/hardware').resolve({actions:[]}); await drain();
+  assert.equal(h.get('fl-fast-bind').hidden,false);
+  h.get('fl-fast-bind').click(); assert.deepEqual(bindings,[controlledBoard.serial]);
+  h.get('fl-fast-url').value='https://images.example/os.tar.gz';
+  h.get('fl-fast-detect').click();
+  const unpaired = {...scopedUSB,serial:'',console_link:{state:'paired'}};
+  h.take('/api/flash-discover').resolve({targets:[unpaired,otherUSB]}); await drain();
+  h.take('/api/flash-target').resolve({target:unpaired,capabilities:usbCapabilities}); await drain();
+  h.take('/api/hardware').resolve({actions:[]}); await drain();
+  assert.equal(h.get('fl-target-picker').hidden,false);
+  assert.deepEqual(h.get('fl-device').children.map(node=>node.value),['',unpaired.target_id]);
+  assert.equal(h.requests.length,0);
+  h.get('fl-device').value=unpaired.target_id; h.get('fl-device').emit('change');
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-target').resolve({target:unpaired,capabilities:usbCapabilities}); await drain();
+  assert.equal(h.get('fl-fast-start').disabled,false);
+  assert.equal(h.get('fl-fast-url').value,'https://images.example/os.tar.gz');
+  assert.equal(h.requests.length,0);
+});
+
+test('fast flash lists verified disks from the prepared USB generation and waits for an explicit choice', async () => {
+  const h = harness(new Map()); await openWithoutUSB(h, 'fast');
+  h.get('fl-fast-url').value='https://images.example/os.tar.gz';
+  await confirmDownload(h,'fl-fast-read-disks');
+  const read=h.take('/api/task-start');
+  assert.equal(read.payload.inventory_only,true);
+  assert.equal(read.payload.read_system,true);
+  const replacement={...scopedUSB,target_generation:'prepared-generation'};
+  const inventory={storages:[{id:'scsi:0',size:100,capacity_verified:true},
+    {id:'nvme:0',size:200,capacity_verified:true},{id:'mmc:0',size:0,capacity_verified:false}]};
+  const ready={id:'fast-inventory',kind:'flash',state:'completed',request_id:read.payload.request_id,
+    result:{target_generation:replacement.target_generation},flash:{operation:'storage-inventory',storage_inventory:inventory}};
+  read.resolve({task:ready}); await drain();
+  h.take('/api/flash-events').resolve({events:[]});
+  h.take('/api/flash-discover').resolve({targets:[replacement]}); await drain();
+  h.take('/api/tasks').resolve({tasks:[ready]}); await drain();
+  h.take('/api/flash-target').resolve({target:replacement,capabilities:usbCapabilities}); await drain();
+  const select=h.get('fl-fast-storage');
+  assert.equal(select.children.find(node=>node.value==='auto').disabled,true);
+  assert.equal(select.children.find(node=>node.value==='mmc:0').disabled,true);
+  assert.equal(h.get('fl-fast-start').disabled,true);
+  assert.equal(h.requests.length,0);
+  select.value='scsi:0'; select.emit('change'); h.get('fl-fast-start').click();
+  const start=h.take('/api/flash-stream');
+  assert.equal(start.payload.system_storage,'scsi:0');
+  assert.equal(start.payload.target_generation,replacement.target_generation);
 });
 
 test('a physical USB and UART mismatch stops the one-click flow before reset or write', async () => {

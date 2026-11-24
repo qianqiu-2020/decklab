@@ -437,4 +437,4 @@ The backend verifies the chip family and SHA-256 before staging either file.
 
 ## 组织镜像目录
 
-`SERIALD_IMAGE_INTERNAL_BROWSE` 与 `SERIALD_IMAGE_INTERNAL_DOWNLOAD` 默认为空，组织镜像源关闭。两项必须同时设置为不含账号密码、查询参数或片段、以 `/` 结尾的 HTTPS 目录；分别选择目录浏览和实际文件下载根。可通过 Web 配置的对应字段导入、导出、保存和应用，属于采集器配置，重启后生效。默认公开源不受影响。不要把凭据放进目录地址；需要组织 CA 时在控制机配置信任。详见 [镜像商店](IMAGE_STORE.md)。
+在 Web 系统配置中填写组织 Nexus 根地址，或设置 `SERIALD_IMAGE_INTERNAL_BROWSE`，DeckLab 会使用 `image` 仓库的浏览和下载路径。已有显式浏览和下载目录继续可用，自定义下载目录通过 `SERIALD_IMAGE_INTERNAL_DOWNLOAD` 设置。地址须为无凭据、查询参数或片段的 HTTPS 地址。应用配置后由采集器读取；组织镜像允许自签证书。详见 [镜像商店](IMAGE_STORE.md)。

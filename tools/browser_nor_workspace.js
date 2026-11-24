@@ -360,9 +360,22 @@ let chrome,ws;
   await evaluate('document.querySelector("#fl-close").click();sessionStorage.setItem("decklab-flash-task:'+target.target_id+'","old-write");ui.open('+JSON.stringify(target)+')');
   await wait('document.querySelector("#flash-dialog").dataset.stage==="setup" && !document.querySelector("#fl-files").disabled');
   assert.equal(await evaluate('document.querySelector("#fl-task-id").textContent'),'');
+  current={id:'failed-storage-read',kind:'flash',state:'failed',
+    error:'flashing executor reported failure: protocol-failed',progress:{phase:'reading-system-layout'},
+    flash:{operation:'nor-workspace',write_result:'not-started'}};
+  await evaluate('ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
+  await wait('document.querySelector("#fl-task-status").textContent.includes("protocol-failed")');
+  assert.equal(await evaluate('document.querySelector("#flash-dialog").dataset.stage'),'setup');
+  assert.equal(await evaluate('document.querySelector("#fl-new").getClientRects().length'),1);
+  assert.equal(await evaluate('document.querySelector("#fl-new").textContent'),'重新检测设备');
+  const readsAfterFailure=targetReads.length;
+  await evaluate('document.querySelector("#fl-new").click()');
+  await wait('!document.querySelector("#fl-files").disabled && !document.querySelector("#fl-task-status").textContent');
+  assert.equal(targetReads.length,readsAfterFailure+1);
   assert.equal(submissions.length,submissionsBeforeRedetect);
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,preparations,fullWrites,async_preview_progress:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,
-    verification_skips:verificationSkips,redetect_after_completed_task:true,screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
+    verification_skips:verificationSkips,redetect_after_completed_task:true,redetect_after_failed_storage_read:true,
+    screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
   console.log('NOR browser workflow passed: full package preview, automatic URL/file imports, persistent errors, image-free read, six partition rows, same-task confirmation, byte progress, backups, desktop/mobile and light/dark (simulated data).');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
