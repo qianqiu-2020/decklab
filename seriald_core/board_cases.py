@@ -31,23 +31,25 @@ BUILTIN_CASES = (
     {'id': 'rtc-wake', 'name': '深度挂起与 RTC 唤醒', 'kind': 'builtin',
      'description': '每轮设置 35 秒 RTC 闹钟，进入深度挂起后通过串口核对唤醒。',
      'steps': [
-         '检查 /sys/power/mem_sleep 选中 deep、pm_test 为 none、console_suspend 为 Y、RTC 没有旧闹钟，记录 rtc@pmic 中断计数和内核日志游标。',
-         '执行 rtcwake -m no -s 35 设置闹钟，向串口写入布防标记，再执行 systemctl suspend。',
+         '检查 deep、pm_test、串口挂起策略和已有闹钟，记录当前 RTC 的唤醒证据计数和内核日志游标。',
+         '用 rtcwake 在 rtc0 设置 35 秒闹钟，向串口写入布防标记，再执行 systemctl suspend。',
          '同一次启动内必须出现一次 deep 进入和一次退出，RTC 中断增加，systemd-suspend 成功，闹钟清除。',
      ],
      'mechanisms': [
-         '板端临时服务在挂起前记录内核日志游标和 RTC 中断。唤醒后从原游标读取内核日志，结合中断、挂起服务状态和闹钟判定。',
+         'K1 读取专用 RTC 中断，K3 核对 RTC 设备自身的唤醒事件。板端用内核日志、计数变化、挂起服务状态和闹钟共同判定。',
          '控制机通过串口等待同一次启动的布防标记和结果，观察上限为 235 秒。证据不足的轮次记为无结果。',
      ]},
 )
 CASES = tuple(case['id'] for case in BUILTIN_CASES)
 BUILTIN_COMMANDS = {
     'reboot-aging': 'systemctl --no-block reboot',
-    'rtc-wake': 'rtcwake -m no -s 35\nsystemctl suspend',
+    'rtc-wake': 'rtcwake -m no -s 35 -d rtc0\nsystemctl suspend',
 }
 CUSTOM_CASE = re.compile(r'shell-[0-9a-f]{24}')
 MAX_SERIAL = 8 * 1024 * 1024
 BOOT_ID = re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}')
+USB_PORT = re.compile(r'[1-9]\d*-[1-9]\d*(?:\.[1-9]\d*)*')
+UART = re.compile(r'ttyS\d{1,3}')
 START_REJECTED = re.compile(
     r'^Failed to start transient service unit: (?:Cannot set property\b.*|Unknown property\b.*|'
     r'Access denied\.?|Permission denied\.?|Invalid argument\.?)$', re.MULTILINE | re.IGNORECASE)
@@ -149,8 +151,8 @@ def config(document):
     for serial, row in document.items():
         if (not isinstance(serial, str) or not serial or len(serial.encode()) > 100
                 or not isinstance(row, dict) or set(row) != {'usb_port', 'uart', 'cases'}
-                or not isinstance(row['usb_port'], str) or not re.fullmatch(r'[1-9]\d*-[1-9]\d*(?:\.[1-9]\d*)*', row['usb_port'])
-                or not isinstance(row['uart'], str) or not re.fullmatch(r'/dev/ttyS\d{1,3}', row['uart'])
+                or not isinstance(row['usb_port'], str) or not USB_PORT.fullmatch(row['usb_port'])
+                or not isinstance(row['uart'], str) or not row['uart'].startswith('/dev/') or not UART.fullmatch(row['uart'][5:])
                 or not isinstance(row['cases'], list) or not row['cases']
                 or any(case not in CASES for case in row['cases'])
                 or len(set(row['cases'])) != len(row['cases']) or row['usb_port'] in ports):
@@ -171,6 +173,59 @@ def select_transport(output, port):
     if len(matches) != 1:
         raise ConnectionError('板卡 USB 调试连接未就绪或身份不唯一')
     return matches[0]
+
+def adb_command(executable, *args, timeout=10):
+    return subprocess.run([executable, *args], capture_output=True, text=True, errors='replace', timeout=timeout,
+                          env={**os.environ, 'ADB_SERVER_SOCKET': 'tcp:127.0.0.1:5037'})
+
+
+def resolve_connection(executable, serial, registered):
+    listing = adb_command(executable, 'devices', '-l', timeout=3)
+    if listing.returncode:
+        raise ConnectionError('无法读取控制机的 USB 调试连接')
+    ports = {registered['usb_port']} if registered else {
+        field[4:] for line in listing.stdout.splitlines() for field in line.split()
+        if field.startswith('usb:') and USB_PORT.fullmatch(field[4:])}
+    matches = []
+    for port in sorted(ports):
+        try:
+            endpoint = select_transport(listing.stdout, port)
+            response = adb_command(executable, '-t', endpoint, 'shell',
+                IDENTITY + "printf 'uid='; id -u; printf 'consoles='; cat /sys/class/tty/console/active", timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        facts = dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
+        if not response.returncode and facts.get('serial') == serial and BOOT_ID.fullmatch(facts.get('boot_id', '')):
+            matches.append((port, facts))
+    if len(matches) > 1:
+        raise ConnectionError('多个 USB 调试连接报告同一板卡身份，请核对接线')
+    if not matches:
+        raise ConnectionError('未找到与当前板卡匹配的在线 USB 调试连接，请检查数据线和板端 ADB 服务')
+    port, facts = matches[0]
+    if facts.get('uid') != '0':
+        raise ConnectionError('当前板卡的 USB 调试连接缺少 root 权限')
+    if registered:
+        return dict(registered, cases=list(dict.fromkeys([*registered['cases'], 'rtc-wake'])))
+    consoles = [name for name in facts.get('consoles', '').split() if UART.fullmatch(name)]
+    if len(consoles) != 1:
+        raise ConnectionError('无法唯一确认板端串口控制台，请在硬件配置中登记接线')
+    return {'usb_port':port, 'uart':'/dev/' + consoles[0], 'cases':['rtc-wake']}
+
+
+def case_availability(manager, device):
+    executable = shutil.which('adb')
+    if not executable:
+        return {'test_cases': [], 'test_cases_reason': '控制机缺少 adb'}
+    if not device.present or not device.serial:
+        return {'test_cases': [], 'test_cases_reason': '请先连接并识别当前板卡的串口'}
+    registered = manager.hardware.board_tests.get(device.serial)
+    try:
+        row = resolve_connection(executable, device.serial, registered)
+    except ConnectionError as error:
+        return {'test_cases': [], 'test_cases_reason': str(error)}
+    except (OSError, subprocess.TimeoutExpired):
+        return {'test_cases': [], 'test_cases_reason': 'USB 调试连接暂时不可用，请重试检测'}
+    return {'test_cases': row['cases'], 'test_case_connection': {key: row[key] for key in ('usb_port', 'uart')}}
 
 
 def verify_boot(facts, expected=None):
@@ -222,10 +277,10 @@ class BoardCase:
         self.connection = device.connection_id
         self.board = device.board
         self.custom = custom
+        self.registered = manager.hardware.board_tests.get(self.serial)
 
     def command(self, *args):
-        return subprocess.run([self.adb, *args], capture_output=True, text=True, errors='replace', timeout=10,
-                              env={**os.environ, 'ADB_SERVER_SOCKET': 'tcp:127.0.0.1:5037'})
+        return adb_command(self.adb, *args)
 
     def endpoint(self):
         listing = self.command('devices', '-l')
@@ -343,7 +398,7 @@ class BoardCase:
             serial_log = tempfile.TemporaryFile()
             if not self.device.present or self.device.stop.is_set() or self.device.connection_id != self.connection:
                 raise TaskError('板卡串口连接已改变', 409)
-            if self.manager.hardware.board_tests.get(self.serial) != self.row:
+            if self.manager.hardware.board_tests.get(self.serial) != self.registered:
                 raise TaskError('板卡用例接线已变化', 409)
             script = Path(__file__).with_name('board_case_target.py').read_text(encoding='utf-8')
             start = time.monotonic()
@@ -361,7 +416,7 @@ class BoardCase:
                     device = getattr(self.board, 'connection', None)
                     if device is None or not device.present:
                         raise ValueError('未确认目标板串口连接')
-                    if self.manager.hardware.board_tests.get(self.serial) != self.row:
+                    if self.manager.hardware.board_tests.get(self.serial) != self.registered:
                         raise ValueError('板卡用例接线已变化')
                     endpoint, before = self.preflight(context, row)
                     row['boot_before'] = before['boot_id']
@@ -518,7 +573,7 @@ def start(manager, device, payload, actor):
             (rounds is not None and (type(rounds) is not int or not 1 <= rounds <= 10000)) or
             (seconds is not None and (type(seconds) is not int or not 1 <= seconds <= 7 * 86400))):
         raise TaskError('请填写轮数或时长')
-    row = manager.hardware.board_tests.get(device.serial, {})
+    registered = manager.hardware.board_tests.get(device.serial)
     executable = shutil.which('adb')
     revision = payload.get('case_revision')
     custom_case = isinstance(case, str) and CUSTOM_CASE.fullmatch(case) is not None
@@ -536,8 +591,21 @@ def start(manager, device, payload, actor):
     previous = FlashStore(manager.store).find_request(actor, request_id, digest)
     if previous is not None:
         return manager.tasks.store.get(previous)
-    if not executable or not row or (not custom_case and case not in row.get('cases', [])):
-        raise TaskError('用例尚未配置固定 USB 接线或控制机缺少 adb', 409)
+    if not executable:
+        raise TaskError('控制机缺少 adb', 409)
+    if registered:
+        row = registered
+        if case == 'reboot-aging' and case not in row['cases']:
+            raise TaskError('当前板卡尚未配置此用例', 409)
+    else:
+        if case == 'reboot-aging':
+            raise TaskError('软件重启老化用例需要配置预期的启动环境', 409)
+        try:
+            row = resolve_connection(executable, device.serial, None)
+        except ConnectionError as error:
+            raise TaskError(str(error), 409) from error
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise TaskError('USB 调试连接暂时不可用，请重试检测', 409) from error
     custom = None
     if custom_case:
         with manager.store.lock:
@@ -545,6 +613,10 @@ def start(manager, device, payload, actor):
         if saved is None:
             raise TaskError('用例已更新，重新选择后再运行', 409)
         custom = saved_case(saved)
+    if not device.present or device.connection_id != payload['connection_id']:
+        raise TaskError('板卡串口连接已变化', 409)
+    if manager.hardware.board_tests.get(device.serial) != registered:
+        raise TaskError('板卡用例接线已变化', 409)
     operation = BoardCase(manager, device, row, case, rounds, seconds, executable, custom=custom)
     return manager.tasks.start_board('board-test', actor, payload.get('client_id', ''), device.serial, operation.run,
         request_id=request_id, input_digest=digest, details={'attempt_id': request_id}, resources=['board-test-usb:' + row['usb_port']],

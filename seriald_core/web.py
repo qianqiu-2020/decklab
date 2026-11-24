@@ -386,6 +386,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     from shutil import which
                     result['test_cases'] = cases['cases'] if which('adb') else []
                     result['test_cases_configured'] = True
+                if q.get('test_cases') == ['1']:
+                    from .board_cases import case_availability
+                    result.update(case_availability(self.manager, device))
             if actor == 'web' and device.by_path:
                 result['slot_handoff'] = any(slot.get('suspended_on') == device.by_path
                     for cfg in getattr(hardware, 'document', {}).get('home_assistant', {}).values()

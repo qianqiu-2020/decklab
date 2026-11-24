@@ -13,6 +13,35 @@ import time
 
 BOOT = '/proc/sys/kernel/random/boot_id'
 SERIAL = '/sys/class/dmi/id/product_serial'
+RTC = '/sys/class/rtc/rtc0'
+
+
+def rtc_evidence(step):
+    _, name = step(['cat', RTC + '/name'])
+    if 'rpmi' not in name.lower():
+        def pmic_irq():
+            code, interrupts = step(['cat', '/proc/interrupts'])
+            rows = [line for line in interrupts.splitlines() if ',' not in line and line.rstrip().endswith(' rtc@pmic')]
+            if code or len(rows) != 1:
+                return None
+            match = re.match(r'^\s*\d+:\s+((?:\d+\s+)+)', rows[0])
+            return sum(map(int, match[1].split())) if match else None
+        count = pmic_irq()
+        if count is not None:
+            return 'RTC 专用中断', pmic_irq, count
+
+    # The RTC and other devices may share an IRQ, so count events on rtc0's
+    # wakeup source. Never treat another action on a shared IRQ as RTC proof.
+    counters = list(Path(RTC).glob('device/wakeup/wakeup*/event_count'))
+    if len(counters) != 1:
+        return None
+
+    def wake_events():
+        code, count = step(['cat', str(counters[0])])
+        return int(count.strip()) if not code and re.fullmatch(r'[0-9]+', count.strip()) else None
+
+    count = wake_events()
+    return ('RTC 设备唤醒事件', wake_events, count) if count is not None else None
 
 
 def run_command(argv, timeout, emit, *, capture_stdout=True, merge_output=False):
@@ -85,14 +114,6 @@ def main(case, uart, tag, serial, boot_id, encoded_script='', shell_timeout='60'
     def done(status, reason):
         emit(tag + ' RESULT ' + json.dumps(dict(status=status, reason=reason, **identity())))
 
-    def rtc_count():
-        _, interrupts = step(['cat', '/proc/interrupts'])
-        rows = [line.split()[1:] for line in interrupts.splitlines() if line.split() and line.split()[-1] == 'rtc@pmic']
-        if len(rows) != 1:
-            return None
-        counters = re.match(r'(?:\d+ )+', ' '.join(rows[0]) + ' ')
-        return sum(map(int, counters[0].split())) if counters else None
-
     emit(tag + ' 开始')
     code, _ = step(['cat', SERIAL if Path(SERIAL).exists() else '/proc/device-tree/serial-number', BOOT])
     if code or identity() != {'serial': serial, 'boot_id': boot_id}:
@@ -131,16 +152,20 @@ def main(case, uart, tag, serial, boot_id, encoded_script='', shell_timeout='60'
     modes = step(['cat', '/sys/power/mem_sleep'])[1]
     pm_test = step(['cat', '/sys/power/pm_test'])[1]
     console = step(['cat', '/sys/module/printk/parameters/console_suspend'])[1]
-    alarm = step(['cat', '/sys/class/rtc/rtc0/wakealarm'])[1]
-    before = rtc_count()
+    alarm_status, alarm = step(['cat', RTC + '/wakealarm'])
+    evidence = rtc_evidence(step)
     code, journal = step(['journalctl', '-k', '-b', '-n', '1', '--show-cursor', '-o', 'cat', '--no-pager'])
     cursor = re.search(r'^-- cursor: ([0-9a-zA-Z;=]+)$', journal, re.M)
     if (code or not cursor or '[deep]' not in modes or '[none]' not in pm_test
-            or console.strip() != 'Y' or alarm.strip() not in ('', '0') or before is None):
+            or console.strip() != 'Y' or alarm_status or alarm.strip() not in ('', '0')):
         done('uncertain', '深度挂起、RTC 或内核日志预检未通过')
         return
+    if not evidence:
+        done('uncertain', '没有找到 RTC 专用中断或设备级唤醒计数')
+        return
+    counter_name, rtc_count, before = evidence
 
-    if step(['rtcwake', '-m', 'no', '-s', '35'])[0] != 0:
+    if step(['rtcwake', '-m', 'no', '-s', '35', '-d', 'rtc0'])[0] != 0:
         done('failed', '设置 RTC 闹钟失败')
         return
     emit(tag + ' ARMED')
@@ -155,7 +180,7 @@ def main(case, uart, tag, serial, boot_id, encoded_script='', shell_timeout='60'
         code, trace = step(['journalctl', '-k', '-b', '--after-cursor=' + cursor[1], '-o', 'cat', '--no-pager'])
         after = rtc_count()
         _, result = step(['systemctl', 'show', 'systemd-suspend.service', '-p', 'Result', '-p', 'ExecMainStatus'])
-        alarm = step(['cat', '/sys/class/rtc/rtc0/wakealarm'])[1]
+        alarm_status, alarm = step(['cat', RTC + '/wakealarm'])
         if identity()['boot_id'] != boot_id:
             break
         if 'Failed to suspend' in trace or re.search(r'^Result=(exit-code|signal|timeout)$', result, re.M):
@@ -163,8 +188,8 @@ def main(case, uart, tag, serial, boot_id, encoded_script='', shell_timeout='60'
             return
         if (not code and trace.count('PM: suspend entry (deep)') == 1 and trace.count('PM: suspend exit') == 1
                 and after is not None and after > before and 'Result=success' in result
-                and 'ExecMainStatus=0' in result and alarm.strip() in ('', '0')):
-            done('passed', f'同一次启动恢复，RTC 中断 {before} → {after}')
+                and 'ExecMainStatus=0' in result and not alarm_status and alarm.strip() in ('', '0')):
+            done('passed', f'同一次启动恢复，{counter_name} {before} → {after}')
             return
         if time.monotonic() >= deadline:
             break

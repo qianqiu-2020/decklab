@@ -242,6 +242,7 @@
         || !usable(item) || !!draft || !!task?.flash?.recovery_required;
       $('board-tests-view-case').disabled = !item;
       $('board-tests-new-case').disabled = !canCreate;
+      $('board-tests-retry-connection').hidden = !canCreate || !!allowedBuiltins.length;
       $('board-tests-description').textContent = item ? (item.description || '在当前板卡运行 Shell 脚本，按退出码判定。')
         + (usable(item) ? '' : ' 当前板卡尚未配置此用例。') : '';
       $('board-tests-cancel').hidden = !active();
@@ -338,7 +339,7 @@
       render();
       try {
         const [hardware, history, definitions]=await Promise.all([
-          client.request('/api/hardware?'+query().slice(1)+'&connection_id='+encodeURIComponent(selected.connectionId || '')),
+          client.request('/api/hardware?'+query().slice(1)+'&test_cases=1&connection_id='+encodeURIComponent(selected.connectionId || '')),
           client.request('/api/tasks?limit=100&target_serial='+encodeURIComponent(selected.serial)),
           client.request('/api/board-test-cases')
         ]);
@@ -353,13 +354,16 @@
         for(const run of runs) rememberRun(run);
         if (requestId) await follow(requestId,true);
         else if (existing || runs.length) await follow((existing || running || runs[0]).id);
-        if (current(gen) && !allowedBuiltins.length) message(hardware.test_cases_configured
-          ? '控制机缺少 adb。' : '请先在控制机的硬件配置中登记此板的 USB 路径和串口。');
-        else if (current(gen) && !task && !requestId) message('');
+        if (current(gen) && !allowedBuiltins.length) message(hardware.test_cases_reason || '当前板卡的测试连接暂不可用。');
+        else if (current(gen) && !task && !requestId) {
+          const link = hardware.test_case_connection;
+          message(link ? '已核对 USB 调试连接 '+link.usb_port+' · 板端串口 '+link.uart : '');
+        }
         if (current(gen)) render();
       } catch(error) { if(current(gen)) message(error.message); }
     }
     $('b-board-tests').addEventListener('click',()=>open());
+    $('board-tests-retry-connection').addEventListener('click',()=>open());
     $('board-tests-close').addEventListener('click',()=>dialog.close());
     dialog.addEventListener('close',()=>{
       if (!dialog.open) {sequence++;clearTimeout(timer);resetInspector();}

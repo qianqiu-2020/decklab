@@ -350,9 +350,11 @@ printf '检查系统版本文件\n'
 test -r /etc/os-release
 ```
 
-Linux 控制机需要能通过本机 adb 访问板卡，目标系统需要 root ADB shell、
-systemd、Python 3 和可写的板端测试串口。在控制机硬件 JSON 中合并以下配置，
-其中 USB 路径来自本机 `adb devices -l` 的 `usb:` 栏，串口是**板上的设备节点**。
+Linux 控制机需要通过本机 ADB（USB 调试桥）访问板卡，目标系统需要 root ADB shell、
+systemd、Python 3 和可写的板端串口。用例库默认读取已在线的 USB 调试连接，
+按连接回读板卡真实序列号，匹配成功后读取板端串口。板端必须有唯一的 ttyS 控制台。
+若需固定接线或启用指定启动路径的重启老化，可在硬件 JSON 中登记 USB 路径及
+**板上的设备节点**。USB 路径来自本机 `adb devices -l` 的 `usb:` 栏。
 
 ```json
 {
@@ -365,8 +367,10 @@ systemd、Python 3 和可写的板端测试串口。在控制机硬件 JSON 中�
 - `reboot-aging` 用于 K3 Pico-ITX 的 NOR → UFS → Debian。要求 Kingston
   TY7B-128、UFS EFI 启动项和实际 UFS 根盘，逐轮核对新启动编号、固件、
   ESP 和根盘与起始状态一致，并从串口核对 NOR 启动记录。
-- `rtc-wake` 要求 Linux 已选中 deep，并支持 `rtc@pmic` 的可读中断计数。
-  同一板端进程设 RTC 闹钟、报告已布防、挂起并在唤醒后取证。等待窗口为 235 秒。
+- `rtc-wake` 要求 Linux 已选中 deep。K1 可读 PMIC RTC 专用中断计数，K3 读取
+  `rtc0` 设备自身的唤醒事件计数。带多个设备的共享中断不能作为 RTC 的证据。
+  板端进程用 RTC 闹钟、串口布防标记、同一次启动内的挂起日志与唤醒计数共同取证，
+  控制机等待窗口为 235 秒。
   恢复命令由操作者另行提交，在任务历史单独留痕。
 
 结果页可查看最近轮次和首个异常，下载完整轮次清单及命令回读。首个异常的

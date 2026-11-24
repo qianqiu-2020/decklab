@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [1.17.81] - 2026-11-24
+
+### Added
+
+- 用例库从 USB 调试连接回读板卡真实序列号，自动确认在线板卡及板端串口，并支持重新检测。
+
+### Fixed
+
+- 深度挂起用例支持 K1 PMIC RTC 和 K3 RPMI RTC。K3 使用 RTC 自身的唤醒计数，避免受共用中断的电源键干扰。
+
 ## [1.17.80] - 2026-11-24
 
 ### Fixed
@@ -385,7 +395,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.80...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.81...HEAD
+[1.17.81]: https://github.com/qianqiu-2020/decklab/compare/v1.17.80...v1.17.81
 [1.17.80]: https://github.com/qianqiu-2020/decklab/compare/v1.17.79...v1.17.80
 [1.17.79]: https://github.com/qianqiu-2020/decklab/compare/v1.17.78...v1.17.79
 [1.17.78]: https://github.com/qianqiu-2020/decklab/compare/v1.17.77...v1.17.78

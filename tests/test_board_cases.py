@@ -8,7 +8,7 @@ import threading
 import unittest
 from unittest.mock import Mock, mock_open, patch
 
-from seriald_core.board_cases import BoardCase, SerialEvidence, config, library, save_case, select_transport, verify_boot
+from seriald_core.board_cases import BoardCase, SerialEvidence, config, library, resolve_connection, save_case, select_transport, verify_boot
 from seriald_core import board_case_target
 from seriald_core.board_case_target import run_command
 from seriald_core.board_maintenance import maintenance_for
@@ -158,6 +158,43 @@ class BoardCasesTests(unittest.TestCase):
             with self.assertRaises(ConnectionError):
                 select_transport(value, '2-1.3')
 
+    def test_auto_discovery_matches_the_board_identity_not_the_adb_serial(self):
+        listing = ('cloned device usb:2-1.2 transport_id:81\n'
+                   'cloned device usb:2-1.3 transport_id:82\n'
+                   'third offline usb:2-1.4 transport_id:83\n')
+        def execute(_executable, *args, **_kwargs):
+            if args[0] == 'devices':
+                return SimpleNamespace(returncode=0, stdout=listing)
+            self.assertIn(args[1], ('81','82'))
+            serial = SERIAL if args[1] == '82' else 'OTHER-BOARD'
+            return SimpleNamespace(returncode=0, stdout=f'serial={serial}\nboot_id={BOOT1}\nuid=0\nconsoles=ttyS0 tty0\n')
+        with patch('seriald_core.board_cases.adb_command', side_effect=execute):
+            self.assertEqual(resolve_connection('/fixture/adb', SERIAL, None),
+                             {'usb_port':'2-1.3','uart':'/dev/ttyS0','cases':['rtc-wake']})
+            with self.assertRaisesRegex(ConnectionError, '未找到'):
+                resolve_connection('/fixture/adb', 'OFFLINE-BOARD', None)
+            registered = {'usb_port':'2-1.3','uart':'/dev/ttyS0','cases':['reboot-aging']}
+            self.assertEqual(resolve_connection('/fixture/adb', SERIAL, registered)['cases'], ['reboot-aging', 'rtc-wake'])
+
+    def test_rpmi_clock_uses_its_wakeup_event_counter_instead_of_the_shared_irq(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(board_case_target, 'RTC', directory):
+            count_file = Path(directory) / 'device/wakeup/wakeup11/event_count'
+            count_file.parent.mkdir(parents=True)
+            count_file.write_text('10\n')
+            def step(args):
+                source = Path(args[-1])
+                if source.name == 'name':
+                    return 0, 'riscv-rpmi-rtc soc:rpmi_rtc@0\n'
+                self.assertEqual(source, count_file)
+                return 0, source.read_text()
+            label, read_count, before = board_case_target.rtc_evidence(step)
+            self.assertEqual(label, 'RTC 设备唤醒事件')
+            self.assertEqual(before, 10)
+            count_file.write_text('11\n')
+            self.assertEqual(read_count(), 11)
+            count_file.unlink()
+            self.assertIsNone(board_case_target.rtc_evidence(step))
+
     def test_config_rejects_duplicate_ports_and_arbitrary_commands(self):
         row = {'usb_port': '2-1.2', 'uart': '/dev/ttyS0', 'cases': ['rtc-wake']}
         self.assertEqual(config({SERIAL:row}), {SERIAL:row})
@@ -190,6 +227,7 @@ class BoardCasesTests(unittest.TestCase):
         case.manager = SimpleNamespace(store=Mock(), hardware=SimpleNamespace(board_tests={SERIAL:row}),
                                        artifacts=SimpleNamespace(policy=SimpleNamespace(max_file=8192)))
         case.row, case.case, case.rounds, case.seconds = row, 'rtc-wake', 2, None
+        case.registered = row
         case.maintenance = Mock()
         case.endpoint = Mock(return_value='82')
         case.facts = Mock(return_value={'serial':SERIAL,'boot_id':BOOT1})
