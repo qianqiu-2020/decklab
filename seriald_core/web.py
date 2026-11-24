@@ -3,6 +3,7 @@ import base64
 import http.server
 import json
 import os
+import re
 import shutil
 import sqlite3
 import threading
@@ -256,17 +257,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except (TaskError, OSError) as error:
                 return self._json(getattr(error, 'status', 503), {'error': str(error)})
             with source:
+                start, length = 0, row['size']
+                requested_range = self.headers.get('Range')
+                if requested_range is not None:
+                    bounds = re.fullmatch(r'bytes=([0-9]{1,18})-([0-9]{1,18})', requested_range)
+                    if not bounds:
+                        return self._json(416, {'error': 'invalid artifact byte range'})
+                    start, last = map(int, bounds.groups())
+                    last = min(last, row['size'] - 1)
+                    if start > last:
+                        return self._json(416, {'error': 'artifact byte range is outside the file'})
+                    length = last - start + 1
                 name = row['name']
                 fallback = ''.join(char if 32 <= ord(char) < 127 and char not in '"\\' else '_' for char in name)
-                self.send_response(200)
+                self.send_response(206 if requested_range is not None else 200)
                 self.send_header('Content-Type', 'application/octet-stream')
                 self.send_header('Content-Disposition', 'attachment; filename="%s"; filename*=UTF-8\'\'%s'
                                  % (fallback, quote(name)))
-                self.send_header('Content-Length', str(row['size']))
-                self.send_header('X-Checksum-SHA256', row['sha256'])
+                self.send_header('Content-Length', str(length))
+                if requested_range is not None:
+                    self.send_header('Content-Range', f"bytes {start}-{last}/{row['size']}")
+                else:
+                    self.send_header('X-Checksum-SHA256', row['sha256'])
                 self.send_header('Cache-Control', 'no-store')
                 self.end_headers()
-                shutil.copyfileobj(source, self.wfile, length=65536)
+                if requested_range is None:
+                    shutil.copyfileobj(source, self.wfile, length=65536)
+                else:
+                    source.seek(start)
+                    while length and (chunk := source.read(min(65536, length))):
+                        self.wfile.write(chunk)
+                        length -= len(chunk)
             return
 
         if route in ('/api/tasks', '/api/task'):

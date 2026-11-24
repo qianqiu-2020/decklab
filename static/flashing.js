@@ -8,6 +8,7 @@
     var pageBoard = null, preparingBoard = false, downloadWiring = null, downloadControl = null;
     var fastUSBChoices = false, fastImage = null;
     var fastFirmwareTables = new Set(), pendingCommand = null;
+    var streamProgress = {};
     var commandTotals = {}, keyCommands = [], commandCount = 0;
     var traceStages = {loader:'加载临时环境', read:'读取与核对', write:'写入分区', verify:'回读校验', boot:'复位与启动'};
     var reenterOffer = null, reenterCheckedTask = '';
@@ -1141,12 +1142,14 @@
       });
     }
     function setProgress(phase, done, total, active, progress) {
+      $('fl-stream-progress').hidden = true;
       var names = {'checking-upload': '核对上传文件 SHA-256', 'checking-image-sha256': '核对镜像 SHA-256',
         'expanding-image': '解压镜像（压缩包读取）', 'checking-payloads': '核对包内载荷',
         'checking-layout': '核对现场布局', 'reading-payload-metadata': '读取分区文件系统信息', 'reading-nor': '读取整片 NOR', 'checking-nor-baseline': '检查备份后板上内容是否变化',
         'checking-image': '核对写入计划与载荷', 'verifying': '回读校验', 'verifying-nor': '回读整片 NOR 并校验', 'verifying-system': '回读所选系统盘分区', 'writing': '整体写入', 'resetting': '刷写完成，正在复位',
         'preparing-loader': '加载临时刷机器', 'prepare': '准备临时刷机器', 'calibrating': '实测刷写参数',
         'awaiting-selection': '等候核对写入范围', 'image-download': '后端下载镜像',
+        'streaming-image': '压缩包读取', 'writing-gpt': '写入系统盘分区表',
         'image-ready': '镜像已准备', 'uploading-image': '上传替换文件',
         'ramboot-identify': '核对板型与内存', 'ramboot-prepare': '准备临时内存镜像',
         'ramboot-transfer': '传送并核验内存载荷', 'ramboot-handoff': '交接给临时系统',
@@ -1187,6 +1190,34 @@
         : uploading ? '准备镜像与设备' : task && task.kind === 'nor-backup' && phase !== 'writing' && !/^verifying/.test(phase || '') && phase !== 'resetting'
           ? '读取设备存储' : flow === 'ram' ? '内存启动' : flow === 'fast' ? 'URL 极速刷机' : '刷写与校验');
       drawPreviewProgress(names);
+    }
+    function rememberStreamProgress(progress) {
+      if (!progress || !Number.isSafeInteger(progress.done) || progress.done < 0) return;
+      if (progress.phase === 'streaming-image' && (!streamProgress.read || progress.done >= streamProgress.read.done))
+        streamProgress.read = progress;
+      else if (progress.phase === 'writing' && progress.partition) streamProgress.write = progress;
+    }
+    function renderStreamProgress(current) {
+      if (current?.flash?.operation !== 'stream' || !['queued','running'].includes(current.state)
+          || !['streaming-image','writing-gpt','writing'].includes(current.progress?.phase)) return false;
+      $('fl-execution').hidden = false;
+      $('fl-progress').hidden = $('fl-write-partition').hidden = true;
+      $('fl-stream-progress').hidden = false;
+      $('fl-progress-text').textContent = translate('边读边写');
+      $('fl-stream-write-title').textContent = translate('当前分区写入')
+        + (streamProgress.write ? ' · ' + streamProgress.write.partition : '');
+      for (var kind of ['read', 'write']) {
+        var part = streamProgress[kind], bar = $('fl-stream-' + kind + '-bar');
+        var size = part && part.total > 0 ? part.total : 0;
+        bar.max = size || 1;
+        if (size) bar.value = Math.min(part.done, size);
+        else if (part && bar.removeAttribute) bar.removeAttribute('value');
+        else bar.value = 0;
+        $('fl-stream-' + kind + '-count').textContent = part
+          ? format(part.done) + (size ? ' / ' + format(size) + ' · ' + Math.floor(Math.min(part.done,size) / size * 100) + '%' : '')
+          : translate('等待开始');
+      }
+      return true;
     }
     function drawPreviewProgress(names) {
       var box = $('fl-preview-stages'), overall = $('fl-preview-overall'); box.textContent = '';
@@ -2201,8 +2232,11 @@
             && !!checked.reset_after === $('fl-reset-after').checked) selectionPlan = checked;
         renderPlan(checked);
       }
-      if (!uploading && !(downloadTask && ['queued', 'running'].includes(downloadTask.state)))
-        setProgress(p.phase, p.done, p.total, ['queued', 'running'].includes(current.state), p);
+      if (!uploading && !(downloadTask && ['queued', 'running'].includes(downloadTask.state))) {
+        if (details.operation === 'stream') rememberStreamProgress(p);
+        if (!renderStreamProgress(current))
+          setProgress(p.phase, p.done, p.total, ['queued', 'running'].includes(current.state), p);
+      }
       var taskState = {queued:'排队中',running:'运行中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
       var started = current.started || current.created;
       var taskLabel = [translate(taskState[current.state] || current.state)];
@@ -2287,6 +2321,7 @@
     }
     function resetEventLog() {
       cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear();
+      streamProgress = {};
       commandTotals = {}; commandCount = 0; keyCommands = [];
       $('fl-event-raw').open = false; $('fl-events').textContent = '';
       renderEventSummary();
@@ -2302,6 +2337,7 @@
           if (result.truncated_before) eventLines.push(translate('较早的进度事件已超出保留范围。'));
           $('fl-event-status').textContent = '';
           (result.events || []).forEach(function (event) {
+            if (current.flash?.operation === 'stream' && event.event === 'progress') rememberStreamProgress(event);
             var number = event.cursor || event.seq;
             if (event.event === 'command') {
               var command = 'Fastboot ' + (event.command || translate('命令参数已隐藏'));
@@ -2343,6 +2379,10 @@
           if (next <= cursor) break;
           cursor = next;
         } while (result.has_more);
+        if (current.flash?.operation === 'stream') {
+          rememberStreamProgress(task.progress);
+          renderStreamProgress(task);
+        }
         $('fl-events').textContent = eventLines.join('\n');
         renderEventSummary(); updateControls();
       } catch (error) {

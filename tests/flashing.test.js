@@ -978,6 +978,24 @@ test('event cursors resume without replay and untrusted event text remains text'
   assert.match(h.take('/api/flash-events').url, /after=2/);
 });
 
+test('URL flash retains independent archive and partition progress through interleaved events', async () => {
+  const h = harness();
+  const current = {id:'active-stream',kind:'flash',state:'running',
+    flash:{operation:'stream'},progress:{phase:'streaming-image',done:40,total:100}};
+  h.api.open(board,current);
+  h.take('/api/flash-capabilities').resolve(capabilities); await drain();
+  h.take('/api/flash-events').resolve({events:[
+    {cursor:1,event:'progress',phase:'streaming-image',done:20,total:100},
+    {cursor:2,event:'progress',phase:'writing',partition:'rootfs',done:200,total:500},
+    {cursor:3,event:'progress',phase:'streaming-image',done:40,total:100}
+  ],next_after:3}); await drain();
+  assert.equal(h.get('fl-stream-progress').hidden,false);
+  assert.equal(h.get('fl-progress').hidden,true);
+  assert.match(h.get('fl-stream-read-count').textContent,/40%/);
+  assert.match(h.get('fl-stream-write-title').textContent,/rootfs/);
+  assert.match(h.get('fl-stream-write-count').textContent,/200 B \/ 500 B/);
+});
+
 test('completed URL flash drains all trace pages and shows commands and skipped firmware', async () => {
   const h = harness();
   h.api.open(board, {id:'finished-stream',kind:'flash',state:'completed',progress:{phase:'preparing-loader'},

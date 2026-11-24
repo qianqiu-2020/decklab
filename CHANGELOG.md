@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [1.17.76] - 2026-11-24
+
+### Added
+
+- 用例库在线查看通过轮与失败轮的命令、输出和串口日志，支持按轮号查找和下载完整归档。
+
+### Changed
+
+- URL 极速刷机并排保留压缩包读取和当前分区写入两项进度。
+
 ## [1.17.75] - 2026-11-24
 
 ### Added
@@ -344,7 +354,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.75...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.76...HEAD
+[1.17.76]: https://github.com/qianqiu-2020/decklab/compare/v1.17.75...v1.17.76
 [1.17.75]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.17.75
 [1.17.74]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.74
 [1.17.54]: https://github.com/qianqiu-2020/decklab/compare/v1.17.53...v1.17.54

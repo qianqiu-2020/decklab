@@ -1,5 +1,4 @@
 """Built-in, one-round-at-a-time board tests."""
-import io
 import json
 import os
 from pathlib import Path
@@ -222,10 +221,11 @@ class BoardCase:
         recent, completed = [], 0
         result = {'case': self.case, 'completed_rounds': 0, 'recent_rounds': recent}
         first_issue = None
-        report = None
+        report = serial_log = None
         in_flight = False
         try:
             report = tempfile.TemporaryFile()
+            serial_log = tempfile.TemporaryFile()
             if not self.device.present or self.device.stop.is_set() or self.device.connection_id != self.connection:
                 raise TaskError('板卡串口连接已改变', 409)
             if self.manager.hardware.board_tests.get(self.serial) != self.row:
@@ -290,23 +290,23 @@ class BoardCase:
                     break
                 if evidence:
                     row['serial_incomplete'] = evidence.incomplete
+                    if evidence.data:
+                        offset = serial_log.tell()
+                        if offset + len(evidence.data) <= self.manager.artifacts.policy.max_file:
+                            try:
+                                serial_log.write(evidence.data)
+                                row.update(serial_offset=offset, serial_size=len(evidence.data),
+                                           serial_lines=evidence.data.count(b'\n') + int(not evidence.data.endswith(b'\n')))
+                            except OSError as error:
+                                row['serial_artifact_error'] = str(error)
+                        else:
+                            row['serial_artifact_error'] = '本次串口归档已达到文件大小上限'
                 if row['status'] == 'passed':
                     completed += 1
                     expected_boot = row.get('boot_after')
                     context.mark_outcome('observed')
                 else:
                     first_issue = {key: value for key, value in row.items() if key not in ('preflight', 'submit', 'last_readback')}
-                    if evidence and evidence.data:
-                        raw = bytes(evidence.data)
-                        source = io.BytesIO(raw)
-                        source.seek(0, 2)
-                        try:
-                            first_issue['serial_artifact_id'] = self.artifact(context, f'{context.id}-round-{number}-serial.log', source)
-                        except (OSError, TaskError) as error:
-                            first_issue['serial_artifact_error'] = str(error)
-                        first_issue['serial_lines'] = raw.count(b'\n') + int(not raw.endswith(b'\n'))
-                        last = raw.splitlines()
-                        first_issue['last_serial_line'] = last[-1].decode(errors='replace')[:300] if last else ''
                     result['first_issue'] = first_issue
                 report.write((json.dumps(row, ensure_ascii=False) + '\n').encode())
                 recent.append({key: value for key, value in row.items() if key not in ('preflight', 'submit', 'last_readback')})
@@ -315,6 +315,11 @@ class BoardCase:
                 context.store.update(context.id, result=result)
                 if first_issue or context.cancelled.is_set():
                     break
+            if serial_log.tell():
+                try:
+                    result['serial_artifact_id'] = self.artifact(context, f'{context.id}-serial.log', serial_log)
+                except (OSError, TaskError) as error:
+                    result['serial_artifact_error'] = str(error)
             if report.tell():
                 try:
                     result['report_artifact_id'] = self.artifact(context, f'{context.id}-rounds.jsonl', report)
@@ -329,6 +334,8 @@ class BoardCase:
         finally:
             if report:
                 report.close()
+            if serial_log:
+                serial_log.close()
             if in_flight:
                 self.maintenance.keep_recovery(context.id)
                 FlashStore(self.manager.store).update_details(context.id, {'recovery_required': True})

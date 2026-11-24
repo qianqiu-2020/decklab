@@ -3,6 +3,8 @@
   'use strict';
   var dictionary = {
     '整体写入':'Overall write progress', '平均写入速率':'Average write rate', '测速中…':'Measuring…', '按展开载荷字节计算':'Based on expanded payload bytes', '当前分区写入进度':'Current partition write progress',
+    '边读边写':'Reading and writing', '压缩包读取':'Reading compressed archive', '压缩包读取进度':'Archive read progress',
+    '当前分区写入':'Writing current partition', '写入系统盘分区表':'Writing system partition table', '等待开始':'Waiting to start',
     '刷后复位': 'After flashing',
     '必须通过': 'Required',
     '能力支持时执行': 'If supported',

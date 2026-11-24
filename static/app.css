@@ -508,6 +508,10 @@
   #fl-confirm-options[hidden]{display:none}
   #fl-confirm-options label{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
   #fl-write-partition{margin-top:14px}
+  #fl-stream-progress:not([hidden]){display:grid;gap:6px;margin-top:14px}
+  #fl-stream-progress .fl-progress-heading{flex-direction:row;align-items:baseline;font-size:13px}
+  #fl-stream-progress progress{width:100%;height:8px;accent-color:var(--accent);margin:0 0 8px}
+  #fl-stream-progress span{color:var(--ink-2);font-variant-numeric:tabular-nums}
   #fl-write-count{font-variant-numeric:tabular-nums;color:var(--ink-2)}
   #fl-partition-progress::-webkit-progress-value{background:var(--live)}
   #fl-partition-progress::-moz-progress-bar{background:var(--live)}
@@ -929,6 +933,46 @@
 .fl-changes li { display:flex; gap:1em; margin:4px 0 }
 #fl-keep-field,#fl-backup-files { margin-top:10px }
 #fl-read-status { color:var(--ink-3); font-size:13px }
+
+.board-tests-dialog{width:min(1040px,calc(100vw - 28px));max-height:calc(100dvh - 28px);padding:0;
+  border:1px solid var(--line-strong);border-radius:12px;color:var(--ink);background:var(--ground);overflow:hidden}
+.board-tests-dialog[open]{display:flex;flex-direction:column}
+.board-tests-dialog::backdrop{background:rgba(12,24,27,.55)}
+.board-tests-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 20px;
+  border-bottom:1px solid var(--line);background:var(--surface);flex:none}
+.board-tests-head h2{margin:0;font-size:19px}
+.board-tests-head small{display:block;margin-top:4px;color:var(--ink-2);overflow-wrap:anywhere}
+.board-tests-body{padding:16px 20px 20px;overflow:auto;min-height:0}
+.board-tests-form,.board-tests-runs{border:1px solid var(--line);border-radius:9px;background:var(--surface);padding:14px}
+.board-tests-form{display:grid;grid-template-columns:minmax(0,1fr) 6rem 6rem auto;align-items:end;gap:8px 12px}
+.board-tests-form p,#board-tests-status,#board-tests-result p,#board-tests-log-note{margin:0;color:var(--ink-2);font-size:13px;overflow-wrap:anywhere}
+.board-tests-form .ft-field,.board-tests-runs .ft-field{margin:0;min-width:0}
+.board-tests-form p{grid-column:1/-1}
+.board-tests-dialog button{min-height:34px}
+.board-tests-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0}
+.board-tests-actions p:empty{display:none}
+.board-tests-summary{display:flex;align-items:baseline;gap:10px}
+.board-tests-summary>span{white-space:nowrap}
+.board-tests-dialog .log-download{color:var(--accent)}
+#board-tests-result{display:grid;gap:7px;margin:12px 0}
+.board-tests-detail{display:grid;grid-template-columns:160px minmax(0,1fr);gap:14px;border-top:1px solid var(--line);padding-top:14px}
+.board-tests-rounds ul{list-style:none;padding:0;margin:0;display:grid;gap:4px;max-height:365px;overflow:auto}
+.board-tests-rounds form:not([hidden]){display:flex;gap:6px;align-items:end;margin-bottom:8px}
+.board-tests-rounds li button{width:100%;display:flex;justify-content:space-between;gap:6px;text-align:left}
+.board-tests-rounds li button[aria-pressed="true"]{border-color:var(--accent-line);background:var(--accent-soft)}
+.board-tests-dialog [data-state="passed"],.board-tests-dialog [data-state="completed"]{color:var(--live)}
+.board-tests-dialog [data-state="failed"],.board-tests-dialog [data-state="uncertain"]{color:var(--dead)}
+.board-tests-log-head,.board-tests-log-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.board-tests-log-head{justify-content:space-between;margin-bottom:6px}
+#board-tests-log{margin:9px 0 0;max-height:365px;min-height:140px;overflow:auto;padding:12px;border-radius:7px;
+  background:var(--term);color:var(--term-ink,#dce5f0);font:12px/1.5 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:630px){
+  .board-tests-head,.board-tests-body{padding:12px}
+  .board-tests-form{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .board-tests-form .ft-field:first-child{grid-column:1/-1}
+  .board-tests-detail{grid-template-columns:minmax(0,1fr)}
+  .board-tests-rounds ul{grid-template-columns:repeat(2,minmax(0,1fr));max-height:120px}
+}
 
 #image-workspace-dialog{width:min(1060px,calc(100vw - 32px));max-height:90dvh;overflow:auto;padding:18px}
 #image-workspace-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}

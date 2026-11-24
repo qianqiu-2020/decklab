@@ -895,7 +895,9 @@ class FlashActions:
                         started['writing'] = started['writing'] or phase in ('writing-gpt', 'writing')
                         done, total = value.get('done', 0), value.get('total', 0)
                         if type(done) is int and type(total) is int and 0 <= done <= max(total, done):
-                            context.progress(done, max(total, done), phase)
+                            partition = value.get('partition')
+                            details = {'partition': partition} if phase == 'writing' and isinstance(partition, str) else {}
+                            context.progress(done, max(total, done), phase, **details)
                     try:
                         with _release_when_stopped(self.manager, context.id):
                             result = executor.stream_flash(binding, request, event, context.check)

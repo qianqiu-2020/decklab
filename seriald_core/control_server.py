@@ -698,6 +698,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                     target_path = urlunparse(parsed._replace(query=urlencode(query)))
             headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
                        'Content-Length': str(length)} if length else {}
+            if route == '/api/artifact-download' and self.headers.get('Range') is not None:
+                headers['Range'] = self.headers['Range']
             if agent_actor or route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware',
                                        '/api/flash-capabilities', '/api/flash-events', '/api/image-catalog', '/api/image-library'):
                 headers['X-Seriald-Actor'] = agent_actor or 'web'
@@ -746,7 +748,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                                        'server_time': devices_payload.get('server_time')}
                 return self._json(200, devices_payload)
             self.send_response(response.status)
-            for name in ('Content-Type', 'Cache-Control', 'Content-Disposition', 'X-Checksum-SHA256'):
+            for name in ('Content-Type', 'Cache-Control', 'Content-Disposition', 'X-Checksum-SHA256', 'Content-Range'):
                 value = response.getheader(name)
                 if value:
                     self.send_header(name, value)

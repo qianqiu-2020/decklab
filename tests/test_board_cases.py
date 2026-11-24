@@ -115,7 +115,8 @@ class BoardCasesTests(unittest.TestCase):
         case = BoardCase.__new__(BoardCase)
         case.device, case.connection, case.serial = device, device.connection_id, SERIAL
         case.board = SimpleNamespace(connection=device)
-        case.manager = SimpleNamespace(store=Mock(), hardware=SimpleNamespace(board_tests={SERIAL:row}))
+        case.manager = SimpleNamespace(store=Mock(), hardware=SimpleNamespace(board_tests={SERIAL:row}),
+                                       artifacts=SimpleNamespace(policy=SimpleNamespace(max_file=8192)))
         case.row, case.case, case.rounds, case.seconds = row, 'rtc-wake', 2, None
         case.maintenance = Mock()
         case.endpoint = Mock(return_value='82')
@@ -144,10 +145,37 @@ class BoardCasesTests(unittest.TestCase):
         last = context.store.update.call_args.kwargs['result']
         self.assertEqual(last['first_issue']['trigger'], 'unknown')
         self.assertEqual(last['first_issue']['serial_lines'], 1)
-        self.assertEqual(last['first_issue']['serial_artifact_id'], 'artifact')
+        self.assertEqual(last['serial_artifact_id'], 'artifact')
+        self.assertEqual(last['first_issue']['serial_offset'], 0)
+        self.assertEqual(last['first_issue']['serial_size'], len(b'<raw line>\n'))
         case.maintenance.release.assert_not_called()
         case.maintenance.keep_recovery.assert_called_once_with(context.id)
         flash.return_value.update_details.assert_called_once_with(context.id, {'recovery_required': True})
+
+    def test_passing_and_failing_rounds_are_ranges_in_one_serial_archive(self):
+        case, context = self.fake_case()
+        case.command = Mock(return_value=SimpleNamespace(returncode=0, stdout='', stderr=''))
+        logs = [b'first command and output\n', b'second command, error and UART\n']
+        def observe(tag, before, baseline, evidence, row):
+            index = row['round'] - 1
+            case.device.buf.extend(logs[index])
+            evidence.read(case.device)
+            row.update(round_finished=True, boot_after=BOOT1)
+            return ('failed', 'fixture failure') if index else ('passed', 'fixture pass')
+        case.observe = Mock(side_effect=observe)
+        saved = {}
+        def archive(context, name, source):
+            source.seek(0)
+            saved[name] = source.read()
+            return name
+        case.artifact = archive
+        with self.assertRaisesRegex(TaskError, 'fixture failure'):
+            case.run(context)
+        result = context.store.update.call_args.kwargs['result']
+        self.assertEqual(saved[result['serial_artifact_id']], b''.join(logs))
+        for row, raw in zip(result['recent_rounds'], logs):
+            start = row['serial_offset']
+            self.assertEqual(saved[result['serial_artifact_id']][start:start+row['serial_size']], raw)
 
     def test_systemd_rejection_ends_without_waiting_or_holding_board(self):
         case, context = self.fake_case()

@@ -102,7 +102,10 @@
     }
   });
   var boardTests = window.SerialdBoardTests && window.SerialdBoardTests.create({
-    byId:$, fetch:fetch, getView:function () { return terminalView.current; }
+    byId:$, fetch:fetch, copyText:copyText, getView:function () {
+      var ctx = terminalView.current;
+      return ctx && {key:ctx.key, serial:ctx.serial, connectionId:ctx.connectionId, label:deviceDirectory.find(ctx.key)?.label};
+    }
   });
   var imageStore = window.SerialdImageStore && window.SerialdImageStore.create({byId:$,fetch:fetch,formatBytes:fmt});
   $('b-image-store').addEventListener('click', function () { if (imageStore) imageStore.open(); });

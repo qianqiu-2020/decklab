@@ -300,20 +300,38 @@ PasswordAuthentication yes</code></pre>
   </div>
   <div class="ft-actions"><span id="shortcuts-status" role="status"></span><button id="shortcuts-reset" type="button">恢复默认快捷键</button></div>
 </dialog>
-<dialog id="board-tests-dialog" class="ft-dialog" aria-labelledby="board-tests-title">
-  <header><h2 id="board-tests-title">用例库</h2><button id="board-tests-close" type="button">关闭</button></header>
-  <div class="ft-fields">
-    <label class="ft-field">用例<select id="board-tests-case"></select></label>
-    <label class="ft-field">测试量<input id="board-tests-count" type="number" min="1" max="10000" value="1"></label>
-    <label class="ft-field">单位<select id="board-tests-unit"><option value="rounds">轮</option><option value="minutes">分钟</option></select></label>
+<dialog id="board-tests-dialog" class="board-tests-dialog" aria-labelledby="board-tests-title">
+  <header class="board-tests-head"><div><h2 id="board-tests-title">用例库</h2><small id="board-tests-board" data-i18n-ignore></small></div><button id="board-tests-close" type="button">关闭</button></header>
+  <div class="board-tests-body">
+    <section class="board-tests-form" aria-label="运行用例">
+      <label class="ft-field">用例<select id="board-tests-case"></select></label>
+      <label class="ft-field">测试量<input id="board-tests-count" type="number" min="1" max="10000" value="1"></label>
+      <label class="ft-field">单位<select id="board-tests-unit"><option value="rounds">轮</option><option value="minutes">分钟</option></select></label>
+      <button class="pri" id="board-tests-run" type="button">开始用例</button>
+      <p id="board-tests-description"></p>
+    </section>
+    <div class="board-tests-actions">
+      <button id="board-tests-cancel" type="button" hidden>停止后续轮次</button>
+      <button id="board-tests-lookup" type="button" hidden>查询原任务</button>
+      <button id="board-tests-release" type="button" hidden>确认结束并释放板卡</button>
+      <p id="board-tests-status" role="status"></p>
+    </div>
+    <section id="board-tests-runs" class="board-tests-runs" hidden aria-label="运行记录">
+      <label class="ft-field">运行记录<select id="board-tests-history"></select></label>
+      <div id="board-tests-result"></div>
+      <div class="board-tests-detail">
+        <div class="board-tests-rounds">
+          <form id="board-tests-jump" hidden><label class="ft-field">轮次<input id="board-tests-round-number" type="number" min="1" required></label><button type="submit">查看</button></form>
+          <ul id="board-tests-rounds" aria-label="轮次结果"></ul>
+        </div>
+        <section id="board-tests-inspector" class="board-tests-inspector" aria-labelledby="board-tests-log-title">
+          <div class="board-tests-log-head"><strong id="board-tests-log-title">本轮串口日志</strong><div class="board-tests-log-actions"><button id="board-tests-copy" type="button" hidden>复制日志</button><a id="board-tests-log-download" class="log-download" hidden>下载串口</a></div></div>
+          <p id="board-tests-log-note" role="status"></p>
+          <pre id="board-tests-log" aria-label="本轮原始串口日志" tabindex="0" data-i18n-ignore hidden></pre>
+        </section>
+      </div>
+    </section>
   </div>
-  <div class="ft-actions"><button class="pri" id="board-tests-run" type="button">开始用例</button>
-    <button id="board-tests-cancel" type="button" hidden>停止后续轮次</button>
-    <button id="board-tests-lookup" type="button" hidden>查询原任务</button>
-    <button id="board-tests-release" type="button" hidden>确认结束并释放板卡</button></div>
-  <p id="board-tests-status" role="status"></p>
-  <label class="ft-field">运行记录<select id="board-tests-history"></select></label>
-  <section id="board-tests-result"></section>
 </dialog>
 <dialog id="board-control-dialog" class="identity-association-dialog" aria-labelledby="board-control-title">
   <div class="agent-share-head"><strong id="board-control-title">板卡控制</strong><button id="board-control-close" type="button">关闭</button></div>
@@ -511,6 +529,12 @@ PasswordAuthentication yes</code></pre>
   <section id="fl-execution" class="fl-section fl-execution" aria-labelledby="fl-execution-title" hidden>
     <div class="fl-progress-heading"><h3 id="fl-execution-title">刷写与校验</h3><span id="fl-progress-text" role="status">尚未开始</span></div>
     <progress id="fl-progress" max="1" value="0" aria-label="当前阶段进度"></progress>
+    <div id="fl-stream-progress" hidden>
+      <div class="fl-progress-heading"><strong>压缩包读取</strong><span id="fl-stream-read-count"></span></div>
+      <progress id="fl-stream-read-bar" max="1" aria-label="压缩包读取进度"></progress>
+      <div class="fl-progress-heading"><strong id="fl-stream-write-title">当前分区写入</strong><span id="fl-stream-write-count"></span></div>
+      <progress id="fl-stream-write-bar" max="1" aria-label="当前分区写入进度"></progress>
+    </div>
     <div id="fl-write-partition" hidden><div class="fl-progress-heading"><strong id="fl-write-target"></strong><span id="fl-write-count"></span></div>
       <progress id="fl-partition-progress" max="1" value="0" aria-label="当前分区写入进度"></progress>
     </div>
