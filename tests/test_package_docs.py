@@ -12,6 +12,15 @@ from tools.package_docs import LINK, publish, render
 
 
 class PackageDocsTests(unittest.TestCase):
+    def test_ace_browser_assets_match_the_pinned_distribution(self):
+        root = Path(__file__).resolve().parents[1]
+        directory = root / 'vendor/ace'
+        source = json.loads((directory / 'source.json').read_text())
+        self.assertEqual(source['license'], 'BSD-3-Clause')
+        self.assertEqual(set(source['files']), {path.name for path in directory.iterdir() if path.name != 'source.json'})
+        for name, expected in source['files'].items():
+            self.assertEqual(hashlib.sha256((directory / name).read_bytes()).hexdigest(), expected, name)
+
     def test_desktop_vendor_sources_cover_exact_hashes_and_complete_module_closure(self):
         root = Path(__file__).resolve().parents[1]
         directory = root / 'vendor/novnc'

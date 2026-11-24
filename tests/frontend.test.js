@@ -1752,8 +1752,8 @@ test('serial size mode restriction is explicit and does not retry at the same ou
   h.take('/api/session-resize').resolve({ok: false, code: 'terminal-mode-disabled',
     error: '当前探测模式未启用 Linux 终端尺寸同步'}, 409);
   await drain();
-  assert.match(h.get('d-status').textContent, /当前探测模式未启用 Linux 终端尺寸同步/);
-  assert.doesNotMatch(h.get('d-status').textContent, /等待空闲|等待新的空闲/);
+  assert.match(h.get('d-size-status').textContent, /当前探测模式未启用 Linux 终端尺寸同步/);
+  assert.doesNotMatch(h.get('d-size-status').textContent, /等待空闲|等待新的空闲/);
   h.fire(h.timer(400)[0]); await drain();
   assert.equal(h.requests.filter(r => r.url === '/api/session-resize').length, 1,
     'the queued automatic attempt cannot retry the same rejected resize');
@@ -2030,18 +2030,18 @@ test('serial size waiting notice clears when a quiet shared state confirms succe
   h.get('b-serial-size').click();
   h.take('/api/session-resize').resolve({ok:false,code:'not-idle',error:'等待新的空闲 Linux shell 提示符'},409);
   await drain();
-  assert.ok(h.get('d-status').textContent.includes('等待'));
-  assert.ok(!h.get('d-status').textContent.includes('写入失败'), 'an idle-prompt race is a deferred setup');
-  const waiting=h.get('d-status').textContent;
+  assert.ok(h.get('d-size-status').textContent.includes('等待'));
+  assert.ok(!h.get('d-size-status').textContent.includes('写入失败'), 'an idle-prompt race is a deferred setup');
+  const waiting=h.get('d-size-status').textContent;
   stream.emit({...readResponse('A','',20),terminal_state:{...state,serial_configured:true,
     internal_output:true,geometry:{cols:140,rows:42},revision:2}});
   await drain();
-  assert.equal(h.get('d-status').textContent,waiting,'internal helper output does not confirm completion');
-  h.get('d-status').firstChild.nodeValue='Waiting for an idle console to synchronize size';
+  assert.equal(h.get('d-size-status').textContent,waiting,'internal helper output does not confirm completion');
+  h.get('d-size-status').firstChild.nodeValue='Waiting for an idle console to synchronize size';
   stream.emit({...readResponse('A','',30),terminal_state:{...state,serial_configured:true,
     geometry:{cols:140,rows:42},revision:2}});
   await drain();
-  assert.equal(h.get('d-status').textContent,'', 'metadata alone clears the completed setup notice');
+  assert.equal(h.get('d-size-status').textContent,'', 'metadata alone clears the completed setup notice');
 });
 
 test('late serial resize failure cannot undo success or overwrite a newer action notice', async () => {
@@ -2073,11 +2073,11 @@ test('completed serial size sync preserves unrelated failures and verifies the r
   terminal.flush(); await drain(); h.get('b-serial-size').click();
   h.take('/api/session-resize').resolve({ok:false,code:'not-idle',error:'等待新的空闲 Linux shell 提示符'},409);
   await drain();
-  const waiting=h.get('d-status').textContent;
+  const waiting=h.get('d-size-status').textContent;
   stream.emit({...readResponse('A','',20),terminal_state:{...state,serial_configured:true,
     geometry:{cols:100,rows:30},revision:2}});
   await drain();
-  assert.equal(h.get('d-status').textContent,waiting,'a different grid does not satisfy the request');
+  assert.equal(h.get('d-size-status').textContent,waiting,'a different grid does not satisfy the request');
   h.get('d-status').textContent=' 写入失败：实际串口输入失败';
   stream.emit({...readResponse('A','',30),terminal_state:{...state,serial_configured:true,
     geometry:{cols:140,rows:42},revision:3}});

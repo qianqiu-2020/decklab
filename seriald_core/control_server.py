@@ -233,7 +233,9 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
     settings = None
     allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
-                                '/vendor/xterm.css', '/vendor/addon-fit.js'))
+                                '/vendor/xterm.css', '/vendor/addon-fit.js', '/vendor/ace/ace.js',
+                                '/vendor/ace/mode-json.js', '/vendor/ace/mode-yaml.js',
+                                '/vendor/ace/theme-github.js', '/vendor/ace/theme-tomorrow_night.js'))
     try:
         _novnc_manifest = json.loads((Path(__file__).resolve().parents[1] / 'vendor/novnc/source.json').read_text())
         allowed_static |= frozenset('/vendor/novnc/' + name for name in _novnc_manifest['files']

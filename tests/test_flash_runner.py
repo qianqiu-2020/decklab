@@ -161,7 +161,7 @@ class FlashRunnerTests(unittest.TestCase):
         workspace = self.runner._directory(self.runner.root / 'cache' / 'plan-audit-snapshot')
         observed = []
         result = self.runner.snapshot(binding, workspace, on_event=observed.append)
-        self.assertEqual(observed, audit)
+        self.assertEqual(observed, [dict(event, operation='snapshot-nor') for event in audit])
         self.assertEqual(result['write_result'], 'not-started')
 
     def test_execute_passes_snapshot_reference_without_changing_the_fixed_plan(self):

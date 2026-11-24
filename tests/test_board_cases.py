@@ -115,6 +115,34 @@ class BoardCasesTests(unittest.TestCase):
         case.maintenance.keep_recovery.assert_called_once_with(context.id)
         flash.return_value.update_details.assert_called_once_with(context.id, {'recovery_required': True})
 
+    def test_systemd_rejection_ends_without_waiting_or_holding_board(self):
+        case, context = self.fake_case()
+        stderr = 'Failed to start transient service unit: Cannot set property JobTimeoutUSec, or unknown property.'
+        case.command = Mock(return_value=SimpleNamespace(returncode=1, stdout='', stderr=stderr))
+        case.observe = Mock()
+        with self.assertRaisesRegex(TaskError, '临时服务启动失败.*JobTimeoutUSec'):
+            case.run(context)
+        args = case.command.call_args.args[3]
+        self.assertIn('--property=RuntimeMaxSec=230s', args)
+        self.assertNotIn('--property=JobTimeoutSec', args)
+        case.observe.assert_not_called()
+        context.mark_outcome.assert_called_once_with('not-issued')
+        self.assertEqual(context.store.update.call_args.kwargs['result']['first_issue']['trigger'], 'not-issued')
+        case.maintenance.release.assert_called_once_with(context.id, confirmed=True)
+        case.maintenance.keep_recovery.assert_not_called()
+
+    def test_systemd_missing_dbus_reply_still_observes_the_original_round(self):
+        case, context = self.fake_case()
+        stderr = 'Failed to start transient service unit: Connection timed out'
+        case.command = Mock(return_value=SimpleNamespace(returncode=1, stdout='', stderr=stderr))
+        case.observe = Mock(return_value=('uncertain', 'no evidence of a wake'))
+        with patch('seriald_core.board_cases.FlashStore'), self.assertRaisesRegex(TaskError, 'no evidence'):
+            case.run(context)
+        case.command.assert_called_once()
+        case.observe.assert_called_once()
+        case.maintenance.keep_recovery.assert_called_once_with(context.id)
+        case.maintenance.release.assert_not_called()
+
     def test_rtc_receipt_requires_same_boot_and_an_armed_marker(self):
         case, context = self.fake_case()
         evidence = SerialEvidence(case.device)

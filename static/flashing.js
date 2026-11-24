@@ -8,6 +8,8 @@
     var pageBoard = null, preparingBoard = false, downloadWiring = null, downloadControl = null;
     var fastUSBChoices = false, fastImage = null;
     var fastFirmwareTables = new Set(), pendingCommand = null;
+    var commandTotals = {}, keyCommands = [], commandCount = 0;
+    var traceStages = {loader:'加载临时环境', read:'读取与核对', write:'写入分区', verify:'回读校验', boot:'复位与启动'};
     var reenterOffer = null, reenterCheckedTask = '';
     var sequence = 0, busy = false, uploading = false, requestId = '', cursor = 0;
     var selectionRequestId = '', selectionPlan = null, payloadCandidates = [], inspection = null;
@@ -1561,7 +1563,7 @@
       invalidatePlan(); $('fl-connections').textContent = ''; $('fl-partitions').textContent = '';
       $('fl-task-id').textContent = ''; $('fl-events').textContent = ''; $('fl-results').textContent = '';
       $('fl-task-status').textContent = '';
-      $('fl-event-status').textContent = ''; cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear();
+      $('fl-event-status').textContent = ''; resetEventLog();
       $('fl-board').textContent = targetName(target); $('fl-device').value = selected.target_id;
       updateControls(); status('正在读取下载设备身份和刷机能力…');
       try {
@@ -2185,8 +2187,12 @@
       }
       if (!uploading && !(downloadTask && ['queued', 'running'].includes(downloadTask.state)))
         setProgress(p.phase, p.done, p.total, ['queued', 'running'].includes(current.state), p);
-      var activePhase = ['queued', 'running'].includes(current.state) && p.phase;
-      $('fl-task-id').textContent = current.id + ' · ' + current.state + (activePhase ? ' · ' + activePhase : '');
+      var taskState = {queued:'排队中',running:'运行中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
+      var started = current.started || current.created;
+      var taskLabel = [translate(taskState[current.state] || current.state)];
+      if (started && Number.isFinite(Number(started))) taskLabel.push(new Date(Number(started) * 1000).toLocaleString());
+      taskLabel.push(translate('任务 ID') + ' ' + current.id);
+      $('fl-task-id').textContent = taskLabel.join(' · ');
       var box = $('fl-results'); box.textContent = '';
       if (current.kind === 'ram-boot' && result.handoff === 'acknowledged') {
         text('dt', '内存启动', box);
@@ -2227,6 +2233,48 @@
       if (workspaceSelection() && !busy && !uploading && !sourceCatalogue && sourceAnalysedId !== sourceIdentity() && imageReady()
           && packageFile(artifacts.find(function (item) { return item.id === $('fl-artifact').value; }))) { $('fl-target-storage').value=''; inspectSource(); }
     }
+    function commandStage(event) {
+      var command = event.command || '', phase = event.phase || '';
+      if (/^(?:reboot|ACmd:)/i.test(command) || /^(?:resetting|ramboot-handoff)$/.test(phase)) return 'boot';
+      if (/^flash:|^(?:UCmd:)?(?:mtd (?:erase|write)|gpt write|(?:mmc|nvme|scsi|usb) (?:write|erase))\b/i.test(command)) return 'write';
+      if (/^verifying/.test(phase)) return 'verify';
+      if (event.operation === 'prepare' || phase === 'preparing-loader' || /^continue$/.test(command)) return 'loader';
+      if (event.operation === 'ram-boot') return 'boot';
+      if (/^writ/.test(phase)) return 'write';
+      return 'read';
+    }
+    function isKeyCommand(event) {
+      return /^(?:flash:|continue$|reboot|ACmd:|UCmd:(?:gpt write|mtd (?:erase|write)|(?:mmc|nvme|scsi|usb) (?:write|erase))\b)/i.test(event.command || '');
+    }
+    function rememberKey(entry) {
+      keyCommands.push(entry);
+      if (keyCommands.length > 8) keyCommands.shift();
+    }
+    function renderEventSummary() {
+      var list = $('fl-event-summary'); list.textContent = '';
+      Object.keys(traceStages).forEach(function (stage) {
+        var count = commandTotals[stage] || 0;
+        if (!count) return;
+        var row = text('li', '', list);
+        text('strong', translate(traceStages[stage]), row);
+        text('span', translate('命令') + ' ' + count, row).dataset.i18nIgnore = '';
+      });
+      list.hidden = !list.children.length;
+      list = $('fl-key-command-list'); list.textContent = '';
+      keyCommands.forEach(function (entry) {
+        var row = text('li', '', list);
+        text('code', entry.command, row).dataset.i18nIgnore = '';
+        text('span', entry.replies.join(' → ') || translate('发送中'), row).dataset.i18nIgnore = '';
+      });
+      $('fl-key-commands').hidden = !keyCommands.length;
+      $('fl-event-caption').textContent = translate('完整命令与应答') + (commandCount ? ' · ' + commandCount + ' ' + translate('条命令') : '');
+    }
+    function resetEventLog() {
+      cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear();
+      commandTotals = {}; commandCount = 0; keyCommands = [];
+      $('fl-event-raw').open = false; $('fl-events').textContent = '';
+      renderEventSummary();
+    }
     async function loadEvents(selected, seq, current) {
       var eventSeq = ++eventSequence;
       try {
@@ -2245,6 +2293,10 @@
                 'invalid-reply': '应答格式无效'}[event.status];
               if (event.status === 'issuing' || !pendingCommand || command !== pendingCommand.command) {
                 pendingCommand = {command:command, line:eventLines.length, number:number, replies:[]};
+                var stage = commandStage(event);
+                commandTotals[stage] = (commandTotals[stage] || 0) + 1;
+                commandCount++;
+                if (isKeyCommand(event)) rememberKey(pendingCommand);
                 eventLines.push('');
               }
               if (event.status && event.status !== 'issuing') pendingCommand.replies.push(reply ? translate(reply) : event.status);
@@ -2257,7 +2309,9 @@
               return;
             }
             if (event.event === 'loader-material') {
-              eventLines.push([number, translate('加载文件到板上 RAM'), event.partition].join(' · '));
+              var material = translate('加载文件到板上 RAM') + ' · ' + event.partition;
+              eventLines.push([number, material].join(' · '));
+              rememberKey({command:material,replies:[translate('开始传输')]});
               return;
             }
             if (event.event === 'firmware-skipped') {
@@ -2274,7 +2328,7 @@
           cursor = next;
         } while (result.has_more);
         $('fl-events').textContent = eventLines.join('\n');
-        updateControls();
+        renderEventSummary(); updateControls();
       } catch (error) {
         if (same(selected, seq)) $('fl-event-status').textContent = '事件读取失败，将继续查询：' + error.message;
       }
@@ -2315,7 +2369,7 @@
         capabilities = null; restoring = true;
       }
       if (task && task.id !== current.id) {
-        cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear();
+        resetEventLog();
       }
       renderTask(current); loadEvents(selected, seq, current);
       offerReenter(current, selected, seq);
@@ -2735,7 +2789,7 @@
           || pageBoard.connection_id !== selected.connection_id) downloadControl = null;
       pageBoard = selected.key && !selected.target_id ? Object.assign({}, selected) : null;
       downloadWiring = null;
-      busy = false; previewTask = null; previewRequestId = ''; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; $('fl-execution').hidden = true; cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear(); ++eventSequence;
+      busy = false; previewTask = null; previewRequestId = ''; capabilities = null; artifacts = []; task = null; $('flash-dialog').dataset.taskState = ''; $('fl-execution').hidden = true; resetEventLog(); ++eventSequence;
       inspection = null; payloadCandidates = []; selectionRequestId = ''; selectionPlan = null; renderedBackup = '';
       downloadRetry = false; automaticDownloadIdentity = '';
       $('fl-files').value = ''; $('fl-url').value = ''; $('fl-url-sha256').value = '';

@@ -1,0 +1,16 @@
+{
+  "version": "1.44.0",
+  "license": "BSD-3-Clause",
+  "upstream": "https://github.com/ajaxorg/ace-builds",
+  "archive": "https://registry.npmjs.org/ace-builds/-/ace-builds-1.44.0.tgz",
+  "integrity": "sha512-PFNMSYqFdEUkul2Ntud0HvA09AgY+F1ag0UYdpMH60wNI/qOA8cB8tlTgoALMEwIdUPJK2CjrIQ7OnbiSS/ugQ==",
+  "distribution": "src-min-noconflict",
+  "files": {
+    "LICENSE": "850f545c5254e8c08204edb2a6d50bbb72727c38a82982c17a84bebf6064cdf8",
+    "ace.js": "072d13e53d11e2ceccfffe1a0fa7f15cf69c5435d897df53d98c71be1c4a2e7f",
+    "mode-json.js": "010feab73fd75cfcdee30cdc71bdcc868e4f914465a59a7141c5ee4983a8afec",
+    "mode-yaml.js": "24faa242ac5085656ff0b9fe283edc8d8565c2ad84f5a824b5868eb5a7ca5cb3",
+    "theme-github.js": "1931c7f9c49d94a9b3ac8f4389698d3fc1a3387c9716a6bdf5c722a5d8ff696f",
+    "theme-tomorrow_night.js": "757fb017f0ff7a6f2b47f30a3ff7bd6211529deceebf07909d4647ae1175a38a"
+  }
+}

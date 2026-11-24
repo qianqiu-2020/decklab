@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-## [1.17.71] - 2026-11-24
+## [1.17.72] - 2026-11-24
 
 ### Added
 
@@ -19,6 +19,8 @@
 
 ### Changed
 
+- 镜像工作目录改为文件列表与预览并排，JSON、YAML 等文本使用随包提供的 Ace 编辑器。
+- 刷机详情先显示当前任务身份、阶段和最近的关键操作，完整命令与应答可展开或复制。
 - 组织镜像仓库可填写 Nexus 根地址，由 DeckLab 探测浏览与下载入口。配置的组织仓库支持自签名证书。
 - 工位接线沿用控制器槽位编号，从 0 开始。换板同时解除原串口、刷机 USB 和控制槽位关联，离线旧板的槽位可在核对后重新绑定。
 - 新绑定默认允许 AI，在保存前可以取消。
@@ -27,6 +29,8 @@
 
 ### Fixed
 
+- 串口终端尺寸同步提示浮于终端上方，显示和清除时不再改变终端高度。
+- Debian 13 的板卡用例可正常创建临时服务。收到服务拒绝时显示原错误并释放板卡；触发结果未知时继续观察。
 - 读取设备存储时接收执行器的命令与应答记录，避免将这类记录误判为无效事件并中止读取。
 - 单刷 NOR 固件时隐藏系统盘选择，固件预览不再继承上次的目标系统盘。清除待刷选择和删除镜像缓存有独立按钮，删除确认紧跟在镜像旁。
 - 修复临时加载器从 USB 2 切到 USB 3 后，目标口存在历史任务导致刷机无法继续的问题。
@@ -327,8 +331,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.71...HEAD
-[1.17.71]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.71
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.72...HEAD
+[1.17.72]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.72
 [1.17.54]: https://github.com/qianqiu-2020/decklab/compare/v1.17.53...v1.17.54
 [1.17.53]: https://github.com/qianqiu-2020/decklab/compare/v1.17.52...v1.17.53
 [1.17.52]: https://github.com/qianqiu-2020/decklab/compare/v1.17.51...v1.17.52

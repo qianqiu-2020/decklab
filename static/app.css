@@ -243,7 +243,11 @@
   .terminal-status:empty{display:none}
   .console-layout{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;min-height:0;flex:1;overflow:hidden}
   .console-layout.records-open{grid-template-columns:minmax(0,1fr) minmax(300px,360px)}
-  .console-main{min-width:0;min-height:0;display:flex;flex-direction:column}
+  .console-main{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column}
+  .terminal-size-status{position:absolute;z-index:5;inset-block-start:8px;inset-inline-end:24px;
+    max-width:calc(100% - 36px);pointer-events:none;padding:5px 9px;border:1px solid var(--line);
+    border-radius:6px;background:var(--surface);color:var(--ink);font-size:12px;box-shadow:var(--shadow)}
+  .terminal-size-status:empty{display:none}
   .termhost{min-height:0;flex:1;background:var(--term);border:solid var(--term);border-width:10px 0 16px 10px;
     overflow:hidden;overscroll-behavior:contain}
   .tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);min-height:39px;
@@ -479,6 +483,17 @@
   #fl-task-details{margin:14px 0}
   #fl-status,#fl-event-status{font-size:12px;color:var(--ink-2);overflow-wrap:anywhere}
   #fl-status:empty,#fl-event-status:empty,#fl-task-id:empty,#fl-results:empty,#fl-verification:empty{display:none}
+  .fl-task-label{font-size:12px;color:var(--ink-2);overflow-wrap:anywhere;margin:8px 0 12px}
+  .fl-event-summary{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-wrap:wrap;gap:8px 16px}
+  .fl-event-summary li{display:flex;gap:6px;align-items:baseline;font-size:12px}
+  .fl-event-summary span,.fl-key-commands li>span{color:var(--ink-3);white-space:nowrap}
+  .fl-key-commands{padding:10px 12px;background:var(--ground);border-radius:6px}
+  .fl-key-commands>strong{font-size:13px}
+  .fl-key-commands ol{list-style:none;margin:6px 0 0;padding:0}
+  .fl-key-commands li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 10px;padding:4px 0}
+  .fl-key-commands code{overflow-wrap:anywhere;font:12px var(--font-mono)}
+  .fl-event-raw{margin-top:12px;font-size:12px}
+  .fl-event-raw .ft-actions{margin-top:8px}
   #fl-events{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 var(--font-mono);margin:10px 0 0;padding:10px;background:var(--term);color:var(--term-ink);border-radius:6px}
   .fl-actions{position:sticky;bottom:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px -22px 0;padding:12px 22px;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -8px 20px -16px rgba(0,0,0,.35)}
   #fl-confirm-options{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin:0;padding:4px 12px;border-inline-start:2px solid var(--accent)}
@@ -907,11 +922,48 @@
 #fl-keep-field,#fl-backup-files { margin-top:10px }
 #fl-read-status { color:var(--ink-3); font-size:13px }
 
-#image-workspace-dialog { width: min(1000px, 94vw); max-height: 90vh; overflow: auto; }
-#image-workspace-dialog header { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
-.iw-files { display:grid; gap:.3rem; margin:1rem 0; max-height:35vh; overflow:auto; }
-.iw-files button { text-align:left; overflow-wrap:anywhere; }
-#iw-text { width:100%; box-sizing:border-box; font-family:monospace; margin:.6rem 0; }
+#image-workspace-dialog{width:min(1060px,calc(100vw - 32px));max-height:90dvh;overflow:auto;padding:18px}
+#image-workspace-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+#image-workspace-dialog header h2{margin:0}
+#iw-image-name{margin:5px 0 0;overflow-wrap:anywhere}
+#iw-image-name:empty,#iw-status:empty,.iw-footer:has(button[hidden]){display:none}
+.iw-location{margin:12px 0}
+.iw-location>.ft-field{margin:8px 0}
+.iw-status-row{display:flex;align-items:center;gap:8px}
+#iw-status{margin:0 0 8px;color:var(--ink-2);font-size:12px;overflow-wrap:anywhere}
+.iw-workspace{display:grid;grid-template-columns:minmax(220px,29%) minmax(0,1fr);border:1px solid var(--line);
+  border-radius:8px;overflow:hidden;min-width:0}
+.iw-file-panel{min-width:0;border-right:1px solid var(--line);background:var(--ground)}
+.iw-file-head,.iw-editor-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  min-height:42px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.iw-file-head button{width:28px;height:28px;display:grid;place-content:center;padding:0}
+.iw-files,.iw-directories{max-height:min(50dvh,470px);overflow:auto;overscroll-behavior:contain}
+.iw-files{padding:4px}
+.iw-folder>summary{padding:7px 9px;color:var(--ink-2);overflow-wrap:anywhere;font:12px var(--font-mono)}
+.iw-file-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;text-align:start;align-items:center;
+  width:100%;min-width:0;border:0;border-radius:5px;background:transparent;padding:7px 9px}
+.iw-folder .iw-file-row{padding-inline-start:22px}
+.iw-file-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px var(--font-mono)}
+.iw-file-row small{color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.iw-file-row:hover,.iw-file-row[aria-pressed=true]{background:var(--accent-soft);color:var(--ink)}
+.iw-file-row[aria-pressed=true]{box-shadow:inset 2px 0 var(--accent)}
+.iw-directories{display:grid;gap:2px;margin:8px 0}
+.iw-directories button{text-align:start;overflow-wrap:anywhere}
+.iw-preview,#iw-editor{min-width:0}
+.iw-editor-head strong{overflow-wrap:anywhere;font:600 13px var(--font-mono)}
+#iw-meta{white-space:nowrap}
+.iw-placeholder{padding:18px 12px;color:var(--ink-3);font-size:13px}
+.iw-code,#iw-text{width:100%;height:clamp(190px,42dvh,420px);box-sizing:border-box}
+#iw-text{display:block;border:0;resize:vertical;padding:10px;background:var(--surface);color:var(--ink);font-family:var(--font-mono)}
+.iw-edit-actions{padding:8px 12px;justify-content:space-between;border-top:1px solid var(--line)}
+.iw-footer{display:flex;justify-content:flex-end;margin-top:10px}
+@media(max-width:640px){
+  #image-workspace-dialog{width:calc(100vw - 20px);padding:12px}
+  .iw-workspace{grid-template-columns:minmax(0,1fr)}
+  .iw-file-panel{border-right:0;border-bottom:1px solid var(--line)}
+  .iw-files{max-height:23dvh}
+  .iw-code,#iw-text{height:30dvh}
+}
 
 .fl-firmware-row { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; }
 .fl-firmware-row select { flex:1 1 18rem; min-width:0; max-width:100%; }

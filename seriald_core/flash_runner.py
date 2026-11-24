@@ -1175,6 +1175,7 @@ class LocalFlashExecutor:
         process, reader, stopping = None, None, threading.Event()
         cleanup_attempted = False
         outcome, nor_snapshots = {}, {}
+        trace_phase = ''
         events = queue.Queue(maxsize=32)
         try:
             with os.fdopen(descriptor, 'wb') as target:
@@ -1349,6 +1350,12 @@ class LocalFlashExecutor:
                         raise FlashRunnerError('flashing executor reported an unsuccessful result', outcome=outcome)
                 else:
                     safe = safe_event(event)
+                    if safe['event'] in AUDIT_EVENTS:
+                        safe['operation'] = operation
+                        if trace_phase:
+                            safe['phase'] = trace_phase
+                    elif safe.get('phase'):
+                        trace_phase = safe['phase']
                     if on_event:
                         on_event(safe)
             check()

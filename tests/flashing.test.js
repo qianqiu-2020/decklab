@@ -990,6 +990,24 @@ test('completed URL flash drains all trace pages and shows commands and skipped 
   assert.doesNotMatch(h.get('fl-task-id').textContent, /preparing-loader/);
 });
 
+test('current run shows compact key operations and retains the full trace behind a collapsed disclosure', async () => {
+  const h = harness();
+  h.api.open(board, {id:'current-run',kind:'flash',state:'completed',created:1795500000,
+    flash:{operation:'stream'},result:{write_result:'completed'}});
+  h.take('/api/flash-capabilities').resolve(capabilities); await drain();
+  const read = {event:'command',operation:'storage-inventory',command:'getvar:version',status:'issuing'};
+  const write = {event:'command',operation:'execute',command:'flash:rootfs',status:'issuing'};
+  h.take('/api/flash-events').resolve({events:[
+    {...read,cursor:1},{...read,cursor:2,status:'OKAY'},{...write,cursor:3},{...write,cursor:4,status:'OKAY'}
+  ],next_after:4}); await drain();
+  assert.match(h.get('fl-task-id').textContent,/任务 ID current-run/);
+  assert.match(h.get('fl-event-summary').textContent,/读取与核对.*写入分区/);
+  assert.match(h.get('fl-key-command-list').textContent,/flash:rootfs.*OKAY/);
+  assert.doesNotMatch(h.get('fl-key-command-list').textContent,/getvar/);
+  assert.match(h.get('fl-events').textContent,/getvar:version/);
+  assert.equal(h.get('fl-event-raw').open,false);
+});
+
 test('live Go partition names are submitted with their storage id when no synthetic id exists', async () => {
   const h = harness(); h.api.open(board);
   h.take('/api/flash-capabilities').resolve({...capabilities, storages: [
@@ -1031,7 +1049,7 @@ test('rare recovery release requires stopped evidence and preserves the original
     attempt_id: 'attempt-1', reason: 'Checked external process list; no flasher remains', confirm_stopped: true});
   release.resolve({task: {...failed, flash: {...failed.flash, recovery_required: false}}}); await drain();
   assert.equal(h.get('fl-recovery-field').hidden, true);
-  assert.match(h.get('fl-task-id').textContent, /recovery-task.*failed/);
+  assert.match(h.get('fl-task-id').textContent, /失败.*任务 ID recovery-task/);
   assert.match(h.get('fl-results').textContent, /可能部分写入，结果待确认/);
   assert.match(h.get('fl-status').textContent, /不表示写入成功/);
   assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
@@ -1053,7 +1071,7 @@ test('refresh restores a terminal inspection recovery hold as well as ordinary f
   h.take('/api/tasks').resolve({tasks: [{id: 'old-inspection', kind: 'flash-inspect', state: 'interrupted', progress: {},
     flash: {attempt_id: 'old-attempt', recovery_required: true}}]}); await drain();
   assert.equal(h.get('fl-recovery-field').hidden, false);
-  assert.match(h.get('fl-task-id').textContent, /old-inspection.*interrupted/);
+  assert.match(h.get('fl-task-id').textContent, /已中断.*任务 ID old-inspection/);
   assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
 });
 

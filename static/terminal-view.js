@@ -34,6 +34,7 @@
       clearTimeout(old.inputTimer);
       clearTimeout(old.sizeTimer);
       clearTimeout(old.serialSizeTimer);
+      clearSerialSizeStatus(old);
       clearTimeout(old.selTimer);
       clearTimeout(old.navTimer);
       options.clearCommandDecorations(old);
@@ -203,14 +204,14 @@
       return !!line && /^(?:[^\s@]+@[^\s]+[#$]|\[[^\]\r\n]*@[^\]\r\n]+\][#$]|(?:~(?:\/[^\s#$]+)?|\/[^\s#$]*)[ \t]+[#$])[ \t]*$/.test(line.translateToString(true));
     }
     function serialSizeStatus(ctx, text, initial) {
-      var status = $('d-status');
+      var status = $('d-size-status');
       if (!initial && (!ctx.serialSizeNotice || status.firstChild !== ctx.serialSizeNotice)) return;
       status.textContent = text;
       // Text-node identity survives translation; another action replaces it.
       ctx.serialSizeNotice = status.firstChild;
     }
     function clearSerialSizeStatus(ctx) {
-      var status = $('d-status');
+      var status = $('d-size-status');
       if (ctx.serialSizeNotice && status.firstChild === ctx.serialSizeNotice) status.textContent = '';
       ctx.serialSizeNotice = null;
     }
@@ -239,6 +240,8 @@
       var rows = viewport && cell && cell.height ? Math.floor((viewport.clientHeight - 2) * ratio / cell.height) : dimensions.rows;
       var cols = viewport && cell && cell.width ? Math.floor((viewport.clientWidth - 17) * ratio / cell.width) : dimensions.cols;
       rows = Math.max(2, Math.min(200, rows)); cols = Math.max(20, Math.min(500, cols));
+      var currentGrid = ctx.screenManaged ? ctx.screenGeometry : {cols:ctx.serialCols, rows:ctx.serialRows};
+      if (automatic && ctx.serialConfigured && currentGrid && currentGrid.cols === cols && currentGrid.rows === rows) return;
       var signature = ctx.off + ':' + cols + ':' + rows;
       if (automatic && signature === ctx.autoSizeAttempt) return;
       ctx.autoSizeAttempt = signature; ctx.serialSizePending = true;

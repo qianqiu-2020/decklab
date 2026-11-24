@@ -55,6 +55,15 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   const url=await new Promise((resolve,reject)=>{let output='';fixture.stdout.on('data',data=>{output+=data;const line=output.split('\n')[0];try{const info=JSON.parse(line);geometryFile=info.geometry_file;resolve(info.url);}catch{}});fixture.once('exit',code=>reject(new Error('fixture exited '+code+'\n'+diagnostics)));});
   const launched=await launchBrowser(profile);chrome=launched.chrome;
   const a=await tab(launched.port,url,1500,900);
+  const fitsWithNotice=await a.evaluate(`(() => {
+    const host=document.querySelector('#d-term'), notice=document.querySelector('#d-size-status');
+    const before=host.getBoundingClientRect().height;
+    notice.textContent='正在同步串口终端尺寸…';
+    const during=host.getBoundingClientRect().height;
+    notice.textContent='';
+    return before > 0 && before === during && during === host.getBoundingClientRect().height;
+  })()`);
+  assert.ok(fitsWithNotice,'serial size notice leaves the terminal viewport unchanged');
   await wait(()=>a.evaluate('Array.from(document.querySelectorAll("#d-tabs button")).some(b=>b.dataset.kind==="ssh")'),'SSH tab');
   await a.evaluate('Array.from(document.querySelectorAll("#d-tabs button")).find(b=>b.dataset.kind==="ssh").click()');
   await wait(()=>a.evaluate('testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+testTerm.buffer.active.cursorY)?.translateToString().includes("root@fixture")'),'SSH root prompt');

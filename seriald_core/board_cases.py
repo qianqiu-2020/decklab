@@ -17,6 +17,9 @@ from .tasks import TaskCancelled, TaskError
 CASES = ('reboot-aging', 'rtc-wake')
 MAX_SERIAL = 8 * 1024 * 1024
 BOOT_ID = re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}')
+START_REJECTED = re.compile(
+    r'^Failed to start transient service unit: (?:Cannot set property\b.*|Unknown property\b.*|'
+    r'Access denied\.?|Permission denied\.?|Invalid argument\.?)$', re.MULTILINE | re.IGNORECASE)
 IDENTITY = r"""
 serial=$(cat /sys/class/dmi/id/product_serial 2>/dev/null)
 case "$(printf '%s' "$serial" | tr '[:upper:]' '[:lower:]')" in
@@ -254,10 +257,9 @@ class BoardCase:
                     evidence = SerialEvidence(device)
                     tag = f'DECKLAB-CASE {context.id} {number}'
                     unit = f'decklab-case-{context.id}-{number}'
-                    payload = shlex.join(['systemd-run', '--no-block', '--collect', '--unit=' + unit,
-                                          '--property=RuntimeMaxSec=230s', '--property=JobTimeoutSec=15s',
-                                          '/usr/bin/python3', '-c', script,
-                                          self.case, self.row['uart'], tag, self.serial, before['boot_id']])
+                    payload = 'LC_ALL=C ' + shlex.join(['systemd-run', '--no-block', '--collect', '--unit=' + unit,
+                                                       '--property=RuntimeMaxSec=230s', '/usr/bin/python3', '-c', script,
+                                                       self.case, self.row['uart'], tag, self.serial, before['boot_id']])
                     context.check()
                     context.issued()
                     row.update(trigger='unknown', service=unit)
@@ -270,10 +272,16 @@ class BoardCase:
                                          'stderr': submitted.stderr[:2048]}
                         if submitted.returncode == 0:
                             row['trigger'] = 'acknowledged'
+                        elif rejected := START_REJECTED.search(submitted.stderr[:2048]):
+                            row.update(trigger='not-issued', status='failed',
+                                       reason='临时服务启动失败：' + rejected[0][:220])
+                            in_flight = False
+                            context.mark_outcome('not-issued')
                     except (OSError, subprocess.TimeoutExpired):
                         row['submit'] = {'error': '触发回执未收到，继续观察原轮次'}
-                    row['status'], row['reason'] = self.observe(tag, before, baseline, evidence, row)
-                    in_flight = not row.get('round_finished', False)
+                    if in_flight:
+                        row['status'], row['reason'] = self.observe(tag, before, baseline, evidence, row)
+                        in_flight = not row.get('round_finished', False)
                     if evidence.incomplete and row['status'] == 'passed':
                         row.update(status='uncertain', reason='原串口证据有缺口')
                 except (ConnectionError, OSError, ValueError, subprocess.TimeoutExpired) as error:

@@ -19,7 +19,7 @@ const server=http.createServer((req,res)=>{requests.push(req.method+' '+req.url)
  if(url.pathname==='/api/image-prepare')return json({task:prepared(p.id===osImage.id?osImage:p.id===firmware.id?firmware:directory)});
  if(url.pathname==='/api/image-workspace'){
   if(p.action==='directories')return json({ok:true,directory:p.directory,parent:'/data',directories:p.directory==='/data/simulated'?[{name:'manual-directory',path:'/data/simulated/manual-directory'}]:[],archives:p.directory==='/data/simulated'?[{name:controllerArchive.name,path:'/data/simulated/'+controllerArchive.name}]:[]});
-  if(p.action==='list')return json({ok:true,directory:'/data/simulated/debian-work',revision:'fixture-revision',editable:true,files:[{name:'partition_universal.json',size:200},{name:'rootfs.ext4',size:12000000000}]});
+  if(p.action==='list')return json({ok:true,directory:'/data/simulated/debian-work',revision:'fixture-revision',editable:true,files:[{name:'partition_universal.json',size:200},{name:'rootfs.ext4',size:12000000000},{name:'factory/FSBL.bin',size:420326}]});
   if(p.action==='read')return json({ok:true,text:'{"format":"gpt","partitions":[{"name":"rootfs","offset":"1M"}]}'});
   if(p.action==='save'){edits.push(p);assert.equal(JSON.parse(p.text).partitions[0].offset,'2M');assert.equal(p.revision,'fixture-revision');return json({task:{id:'edit-directory',state:'completed',result:{artifact:directory,preparation_task:prepared(directory)}}});}
   if(p.action==='stage'){staged=Buffer.alloc(0);return json({artifact:{id:'replacement-file'}});}
@@ -54,7 +54,7 @@ const server=http.createServer((req,res)=>{requests.push(req.method+' '+req.url)
  if(url.pathname==='/api/flash-discover')return json({targets:[target]});
  if(url.pathname==='/api/tasks')return json({tasks:[]});
  if(url.pathname==='/api/image-catalog')return json({entries:[osImage,firmware],sources:[{id:'public'}]});
- if(url.pathname.startsWith('/static/')&&/^\/static\/[a-z-]+\.(js|css)$/.test(url.pathname)){res.setHeader('Content-Type',url.pathname.endsWith('.css')?'text/css':'application/javascript');return res.end(fs.readFileSync(path.join(root,url.pathname)));}
+ if(/^\/(?:static|vendor\/ace)\/[a-z_-]+\.(js|css)$/.test(url.pathname)){res.setHeader('Content-Type',url.pathname.endsWith('.css')?'text/css':'application/javascript');return res.end(fs.readFileSync(path.join(root,url.pathname)));}
  res.statusCode=404;res.end();
 });
 let chrome,ws;const delay=ms=>new Promise(r=>setTimeout(r,ms));
@@ -75,8 +75,12 @@ let chrome,ws;const delay=ms=>new Promise(r=>setTimeout(r,ms));
  await evaluate('document.querySelector("#fl-discover").click()');
  await wait('document.querySelector("#fl-firmware").value==="fw-fixture"&&!document.querySelector("#fl-plan").disabled');assert.equal(downloads.length,2);await shot('paired-images-simulated');
  await evaluate('document.querySelector("#fl-workspace").click()');await wait('document.querySelector("#iw-files").textContent.includes("partition_universal.json")');await evaluate('document.querySelector("#iw-copy").click()');assert.equal(await evaluate('window.copiedPath'),'/data/simulated/debian-work');
- await evaluate('[...document.querySelectorAll("#iw-files button")].find(b=>b.textContent.startsWith("partition_universal.json")).click()');await wait('document.querySelector("#iw-text").value.includes("1M")');
- await evaluate('document.querySelector("#iw-text").value=JSON.stringify({format:"gpt",partitions:[{name:"rootfs",offset:"2M"}]})');await shot('partition-editor-simulated');await evaluate('document.querySelector("#iw-save").click()');
+ await evaluate('[...document.querySelectorAll("#iw-files button")].find(b=>b.textContent.startsWith("partition_universal.json")).click()');
+ await wait('!document.querySelector("#iw-code").hidden && window.ace && ace.edit("iw-code").getValue().includes("1M")');
+ assert.equal(await evaluate('document.querySelector("#iw-files .iw-folder summary").textContent'),'factory/');
+ assert.equal(await evaluate('ace.edit("iw-code").session.getMode().$id'),'ace/mode/json');
+ assert.equal(await evaluate('document.querySelector("#iw-files [aria-pressed=true]").title'),'partition_universal.json');
+ await evaluate('ace.edit("iw-code").setValue(JSON.stringify({format:"gpt",partitions:[{name:"rootfs",offset:"2M"}]},null,2),-1)');await shot('partition-editor-simulated');await evaluate('document.querySelector("#iw-save").click()');
  await wait('!document.querySelector("#image-workspace-dialog").open&&document.querySelector("#fl-artifact").value==="directory-fixture"');assert.equal(edits.length,1);assert.equal(await evaluate('document.querySelector("#fl-firmware").value'),firmware.id);
  await evaluate('document.querySelector("#fl-workspace").click()');await wait('document.querySelector("#iw-files").textContent.includes("rootfs.ext4")');await evaluate('[...document.querySelectorAll("#iw-files button")].find(b=>b.textContent.startsWith("rootfs.ext4")).click()');
  await evaluate('(()=>{const d=new DataTransfer();d.items.add(new File(["replacement payload"],"rootfs.ext4"));const input=document.querySelector("#iw-upload");input.files=d.files;input.dispatchEvent(new Event("change"));})()');await wait('!document.querySelector("#image-workspace-dialog").open');assert.equal(edits.length,2);
@@ -106,6 +110,13 @@ let chrome,ws;const delay=ms=>new Promise(r=>setTimeout(r,ms));
  await wait('!document.querySelector("#image-workspace-dialog").open&&document.querySelector("#fl-artifact").value==="archive-fixture"');
  await evaluate('document.querySelector("#fl-directory").click();document.querySelector("#iw-directory").value="/data/simulated";document.querySelector("#iw-browse").click()');await wait('document.querySelector("#iw-directories").textContent.includes("manual-directory/")');await evaluate('[...document.querySelectorAll("#iw-directories button")].find(b=>b.textContent==="manual-directory/").click()');await wait('document.querySelector("#iw-directory").value==="/data/simulated/manual-directory"');await evaluate('document.querySelector("#iw-import").click()');await wait('!document.querySelector("#image-workspace-dialog").open&&document.querySelector("#fl-artifact").value==="directory-fixture"');
  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.querySelector("#flash-dialog").scrollWidth<=document.querySelector("#flash-dialog").clientWidth+1'),true);await shot('mobile-pair-simulated');
+ await evaluate('document.querySelector("#fl-workspace").click()');
+ await wait('document.querySelector("#iw-files button") !== null');
+ await evaluate('[...document.querySelectorAll("#iw-files button")].find(b=>b.textContent.startsWith("partition_universal.json")).click()');
+ await wait('!document.querySelector("#iw-code").hidden');
+ assert.ok(await evaluate('document.querySelector("#image-workspace-dialog").scrollWidth <= document.querySelector("#image-workspace-dialog").clientWidth + 1'));
+ await shot('mobile-workspace-simulated');
+ await evaluate('document.querySelector("#iw-close").click()');
  await evaluate('document.querySelector("#fl-close").click();ui.open(null,null,false,"ram")');
  assert.equal(await evaluate('document.querySelector("#fl-directory").getClientRects().length'),1);
  await evaluate('document.querySelector("#fl-directory").click()');
@@ -115,7 +126,8 @@ let chrome,ws;const delay=ms=>new Promise(r=>setTimeout(r,ms));
  await evaluate('document.querySelector("#fl-close").click();ui.open(null,null,false,"fast")');
  await evaluate('document.querySelector("#fl-fast-store").click()');
  await wait('[...document.querySelectorAll("#is-list button")].some(b=>b.textContent==="填入 URL")');
- assert.equal(await evaluate('document.querySelector("#is-list").textContent.includes("Firmware")'),false);
+ assert.equal(await evaluate('document.querySelector("#is-list").textContent.includes("Firmware")'),true);
+ assert.equal(await evaluate('[...document.querySelectorAll("#is-list button")].some(b=>b.textContent==="下载并选用固件")'),true);
  await evaluate('[...document.querySelectorAll("#is-list button")].find(b=>b.textContent==="填入 URL").click()');
  await wait('!document.querySelector("#image-store-dialog").open&&document.querySelector("#fl-fast-url").value==="https://images.example/os.tar.gz"');
  assert.equal(downloads.length,2);
