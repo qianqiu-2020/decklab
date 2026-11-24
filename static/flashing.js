@@ -501,6 +501,26 @@
     function packageFile(artifact) {
       return artifact && /\.(tar(?:\.(?:gz|xz|bz2|zst))?|tgz|zip|7z|directory)$/i.test(artifact.name || '');
     }
+    function norOnlySource(artifact) {
+      if (!packageFile(artifact)) return false;
+      var job = imagePreparations[artifact.id], result = job && job.result;
+      var tables = result && result.preparation && result.preparation.catalogue;
+      if (!tables || !tables.length) return /(?:^|[-_])firmware(?:[-_.]|$)/i.test(artifact.name);
+      return tables.some(function (table) { return table.format === 'mtd' && table.name !== 'partition_flash.json'; })
+        && !tables.some(function (table) { return table.format === 'gpt' && table.name !== 'partition_flash.json'; });
+    }
+    function currentNOROnly() {
+      return norOnlySource(artifacts.find(function (item) { return item.id === $('fl-artifact').value; }));
+    }
+    function selectFirmwareOnly(artifact) {
+      if (flow === 'fast') applyFlow('normal');
+      $('fl-mode').value = 'full';
+      $('fl-target-storage').value = '';
+      renderFirmwareOptions('');
+      addSource(Object.assign({}, artifact, {firmware:null}));
+      if (workspaceSelection()) inspectSource();
+      status('已选择固件包。请预览并确认 NOR 写入范围。');
+    }
     function partitionOptions(select, selected, storage, partition) {
       select.textContent = '';
       text('option', '选择分区内容', select).value = '';
@@ -751,10 +771,15 @@
       Array.from(loader.children).forEach(function (option) { option.disabled = !choices.includes(option.value); });
       if (!choices.includes(loader.value)) loader.value = choices[0] || '';
       loader.disabled = busy || uploading || !!active || submissionUnknown || !choices.length;
-      $('fl-firmware-field').hidden = $('fl-mode').value !== 'full' || !packageFile(primary) || /(?:^|[-_])firmware(?:[-_.]|$)/i.test(primary.name);
+      var onlyNOR = norOnlySource(primary);
+      $('fl-firmware-only-note').hidden = !onlyNOR;
+      $('fl-firmware-field').hidden = $('fl-mode').value !== 'full' || !packageFile(primary) || onlyNOR;
+      var companion = artifacts.find(function (item) { return item.id === selectedFirmware; });
       var firmwareLocked = $('fl-firmware-field').hidden || busy || uploading || submissionUnknown || !!(!workspace && (active || board && board.observingTask));
       $('fl-firmware-local').disabled = $('fl-firmware').disabled = firmwareLocked;
       $('fl-firmware-choose').disabled = firmwareLocked || !options.openImageStore;
+      $('fl-firmware-only').hidden = $('fl-firmware-field').hidden || !norOnlySource(companion);
+      $('fl-firmware-only').disabled = firmwareLocked || $('fl-firmware-only').hidden;
       $('fl-workspace').hidden = !$('fl-artifact').value;
       $('fl-workspace').disabled = busy || uploading || !!active || !options.openImageWorkspace || !(primary && /\.directory$/i.test(primary.name)) && (!capabilities || capabilities.image_preparation_supported) && !(selectedPreparation() && selectedPreparation().state === 'completed');
       $('fl-directory').disabled = busy || uploading || !!active || !options.openImageWorkspace;
@@ -774,6 +799,8 @@
       $('fl-delete').disabled = busy || uploading || submissionUnknown || !!active || !!(board && board.observingTask)
         || !board || !artifacts.some(function (item) { return item.id === $('fl-artifact').value; });
       $('fl-delete').hidden = !$('fl-artifact').value;
+      $('fl-source-clear').hidden = $('fl-delete').hidden;
+      $('fl-source-clear').disabled = $('fl-delete').disabled;
       if (selecting) uploadAvailable = true;
       $('fl-device').disabled = busy || preparingBoard || submissionUnknown || !!active || uploading;
       $('fl-discover').disabled = busy || preparingBoard || submissionUnknown || !!active || uploading;
@@ -824,7 +851,7 @@
         else setProgress('awaiting-selection', 0, 0, false);
       }
       $('fl-partitions-field').hidden = !sourceInspection && $('fl-mode').value !== 'partitions' && (!selecting || fullConfirmation());
-      $('fl-target-storage-field').hidden = !capabilities && !workspace || (sourceInspection ? !sourceInspection.storages.some(function (item) { return item.physical_device; }) : $('fl-mode').value !== 'full' && !workspace);
+      $('fl-target-storage-field').hidden = onlyNOR || !capabilities && !workspace || (sourceInspection ? !sourceInspection.storages.some(function (item) { return item.physical_device; }) : $('fl-mode').value !== 'full' && !workspace);
       $('fl-select').hidden = !selecting;
       var needsCatalogue = workspace && packageFile(artifacts.find(function (item) { return item.id === $('fl-artifact').value; })) && !sourceCatalogue;
       $('fl-select').disabled = busy || uploading || submissionUnknown || !selecting || !imageReady() || !!mismatched.length;
@@ -1297,6 +1324,7 @@
 
     function dismissDelete() {
       pendingDelete = null; $('fl-delete-field').hidden = true;
+      $('fl-delete').setAttribute('aria-expanded', 'false');
       $('fl-delete-name').textContent = '';
     }
     function beginDelete() {
@@ -1308,6 +1336,18 @@
       $('fl-delete-name').textContent = artifact.name + ' · ' + format(artifact.size)
         + ' · SHA-256 ' + artifact.sha256;
       $('fl-delete-field').hidden = false;
+      $('fl-delete').setAttribute('aria-expanded', 'true');
+      if ($('fl-delete-field').scrollIntoView) $('fl-delete-field').scrollIntoView({block:'nearest'});
+      $('fl-delete-cancel').focus();
+    }
+    function clearSource() {
+      rememberedImage = null;
+      try { if (global.sessionStorage) global.sessionStorage.removeItem('decklab-flash-image'); } catch (_) {}
+      sourceInspection = null; sourceCatalogue = null; sourceAnalysedId = ''; payloadCandidates = [];
+      inspection = task && task.flash && task.flash.inspection || null;
+      $('fl-package-contents').textContent = '';
+      artifactOptions($('fl-artifact')); renderFirmwareOptions('');
+      renderPartitions(); invalidatePlan();
     }
     async function confirmDelete() {
       if (!pendingDelete || busy || uploading || submissionUnknown || !same(pendingDelete.selected, pendingDelete.sequence)
@@ -1315,19 +1355,16 @@
       var chosen = pendingDelete, selected = chosen.selected, seq = chosen.sequence;
       invalidatePlan(); busy = true; updateControls(); status('正在删除镜像…');
       try {
-        var result = await client.request('/api/artifact-delete', Object.assign(scope(selected), { id: chosen.artifact.id }));
+        var payload = Object.assign(scope(selected), {id:chosen.artifact.id});
+        if (typeof chosen.artifact.serial === 'string') payload.serial = chosen.artifact.serial;
+        var result = await client.request('/api/artifact-delete', payload);
         if (!same(selected, seq)) return;
         if (!result.artifact || result.artifact.id !== chosen.artifact.id || result.artifact.state !== 'deleted')
           throw new Error('删除结果未确认，请重新检测镜像列表。');
-        if (rememberedImage && rememberedImage.id === chosen.artifact.id) {
-          rememberedImage = null;
-          try { if (global.sessionStorage) global.sessionStorage.removeItem('decklab-flash-image'); } catch (_) {}
-        }
         delete imagePreparations[chosen.artifact.id];
         artifacts = artifacts.filter(function (item) { return item.id !== chosen.artifact.id; });
-        payloadCandidates = payloadCandidates.filter(function (item) { return (item.artifact_id || item.id) !== chosen.artifact.id; });
         if (capabilities) capabilities.artifacts = artifacts.slice();
-        artifactOptions($('fl-artifact')); renderPartitions();
+        clearSource();
         status('镜像已删除：' + chosen.artifact.name);
       } catch (error) {
         if (same(selected, seq)) status(!error.result ? '删除结果未确认，请重新检测镜像列表。'
@@ -2051,7 +2088,7 @@
           artifact_id: $('fl-artifact').value, mode: $('fl-mode').value, selections: chosen,
           binding_revision: capabilities.binding_revision, verify: $('fl-verify').value,
           reset_after: !!(capabilities && capabilities.reset_after_supported && $('fl-reset-after').checked) });
-        if (payload.mode === 'full' && $('fl-target-storage').value) payload.target_storage = $('fl-target-storage').value;
+        if (payload.mode === 'full' && !currentNOROnly() && $('fl-target-storage').value) payload.target_storage = $('fl-target-storage').value;
         payload.request_id = previewRequestId;
         setCompanionIntent(payload);
         if (!$('fl-loader-field').hidden && $('fl-loader-source').value) payload.loader_source = $('fl-loader-source').value;
@@ -2821,6 +2858,11 @@
       if (!$('fl-firmware-choose').disabled)
         options.openImageStore(firmwareChoice(), {firmwareOnly:true, excludeId:$('fl-artifact').value, serial:board.serial || ''});
     });
+    $('fl-firmware-only').addEventListener('click', function () {
+      if ($('fl-firmware-only').disabled) return;
+      var firmware = artifacts.find(function (item) { return item.id === $('fl-firmware').value; });
+      if (norOnlySource(firmware)) selectFirmwareOnly(firmware);
+    });
     $('fl-firmware-retry').addEventListener('click',function(){var source=artifacts.find(function(item){return item.id===$('fl-firmware').value;});if(source)prepareSource(source,null,true);});
     $('fl-firmware').addEventListener('change', function () {
       if (embeddedTable()) {
@@ -2913,9 +2955,14 @@
       var selected = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
       if (selected) addSource(selected); else { renderPartitions(); invalidatePlan(); }
     });
+    $('fl-source-clear').addEventListener('click', function () {
+      if (!$('fl-source-clear').disabled) clearSource();
+    });
     $('fl-delete').addEventListener('click', beginDelete);
     $('fl-delete-confirm').addEventListener('click', confirmDelete);
-    $('fl-delete-cancel').addEventListener('click', dismissDelete);
+    $('fl-delete-cancel').addEventListener('click', function () {
+      dismissDelete(); $('fl-delete').focus();
+    });
     function changeWriteOption(verify) {
       if (verify) writeOptions.verify = $('fl-verify').value;
       else writeOptions.reset_after = $('fl-reset-after').checked;
@@ -2941,7 +2988,7 @@
       if (!workspaceSelection() || busy || uploading || !packageFile(artifact) || !imageReady()) return;
       sourceAnalysedId = sourceIdentity();
       var selected = board, seq = sequence, current = task, artifactId = artifact.id;
-      var targetStorage = sourceInspection && !sourceInspection.storages.some(function (item) { return item.physical_device; })
+      var targetStorage = currentNOROnly() || sourceInspection && !sourceInspection.storages.some(function (item) { return item.physical_device; })
         ? '' : $('fl-target-storage').value;
       // Keep the last observed storage kind while refreshing verification.
       // A NOR package must not inherit the system inventory's default disk.
@@ -3035,11 +3082,15 @@
       options.openImageStore(function (item) {
         if (!same(selected, seq) || flow !== 'fast' || $('fl-fast-store').disabled)
           throw new Error(translate('当前设备或任务状态已变化，请重新选择。'));
+        if (item.norFirmware === true && item.id) {
+          selectFirmwareOnly(item);
+          return;
+        }
         if (!validStreamURL(item.url || '')) throw new Error(translate('请选择支持 URL 极速刷机的系统包。'));
         fastImage = item;
         $('fl-fast-url').value = item.url;
         updateControls();
-      }, {streamURL:validStreamURL, chip:capabilities && capabilities.chip || board.chip});
+      }, {streamURL:validStreamURL, streamFirmware:true, chip:capabilities && capabilities.chip || board.chip});
     });
     $('fl-fast-normal').addEventListener('click', function () {
       if (!board || flow !== 'fast' || $('fl-fast-normal').disabled) return;

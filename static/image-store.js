@@ -65,10 +65,13 @@
       return ranked.length && (ranked.length === 1 || ranked[0].gap < ranked[1].gap) ? ranked[0].row : null;
     }
     function supported(item) { return !/\.(?:img|raw)(?:\.|$)/i.test(item.name || '') && item.kind !== 'disk-image'; }
+    function firmwareItem(item) {
+      return item.kind === 'package' && /(?:^|[-_])firmware(?:[-_.]|$)/i.test(item.name || '');
+    }
     function catalogItem(item) {
       if (item.kind === 'directory') return true;
-      return supported(item) && (!picker.streamURL || item.kind === 'package'
-        && !/[-_]firmware[-_.]/i.test(item.name) && picker.streamURL(item.url || ''));
+      return supported(item) && (!picker.streamURL || item.kind === 'package' &&
+        (firmwareItem(item) ? picker.streamFirmware && packageFile(item) : picker.streamURL(item.url || '')));
     }
     function newest(a, b) {
       // Natural numeric order, with final releases ahead of the same rc/beta/alpha.
@@ -318,6 +321,11 @@
               }).catch(function (error) { status(error.message); remove.disabled = false; });
             });
             remove.disabled = item.state === 'claimed';
+          } else if (picker.streamURL && firmwareItem(item)) {
+            text('small', '通过普通刷机预览并确认 NOR 写入范围。', main);
+            var useFirmware = button(downloadState(item) === 'cached' ? '选用已缓存固件' : '下载并选用固件',
+              row, function () { startDownload(item, useFirmware, null, true); });
+            useFirmware.disabled = unknown || !!active[item.url];
           } else if (picker.streamURL) {
             var companionImage = companion(item);
             if (companionImage) {
@@ -415,7 +423,7 @@
         .finally(function () { delete followed[task.id]; if (complete) box.remove(); else cancel.remove(); });
       return followed[task.id];
     }
-    async function startDownload(item, button, firmware) {
+    async function startDownload(item, button, firmware, norFirmware) {
       if (unknown || active[item.url]) return;
       button.disabled = true;
       var target = choose ? {choose:choose,session:++selectionSession} : null;
@@ -441,6 +449,7 @@
         if (!results[0] || firmware && !results[1]) return;
         if(target && target.session===selectionSession && choose===target.choose && $('image-store-dialog').open){
           var artifact=Object.assign({},results[0].artifact,{preparation_task:results[0].preparation_task});
+          if (norFirmware) artifact.norFirmware = true;
           if(firmware)artifact.firmware=Object.assign({},results[1].artifact,{preparation_task:results[1].preparation_task});
           selected(artifact);
         } else if ($('image-store-dialog').open) status('镜像已缓存在控制机。');
@@ -471,7 +480,8 @@
       Array.from($('is-source').children).forEach(function (option) {
         if (option.value === 'local') option.hidden = option.disabled = !!picker.streamURL;
       });
-      $('is-downloads').hidden = $('is-download-note').hidden = !!picker.streamURL;
+      $('is-downloads').hidden = !!picker.streamURL && !picker.streamFirmware;
+      $('is-download-note').hidden = !!picker.streamURL;
       $('is-search').value = saved.search || '';
       restoreScroll = saved.scroll || {};
       $('is-title').textContent = picker.firmwareOnly ? '选择配套固件' : picker.fileOnly ? '选择分区文件' + (picker.partition ? ' · ' + picker.partition : '') : '镜像商店';

@@ -787,6 +787,8 @@ test('mirror deletion confirms the exact artifact, preserves cancelled previews 
   h.take('/api/flash-plan').resolve({plan:{id:'before-delete',writes:[{storage:'disk-a',partition:'rootfs',size:32}]}}); await drain();
   h.get('fl-delete').click();
   assert.equal(h.get('fl-delete-field').hidden, false);
+  assert.equal(h.get('fl-delete-cancel').focused,true);
+  assert.equal(h.get('fl-delete').attributes['aria-expanded'],'true');
   assert.match(h.get('fl-delete-name').textContent, /image.bin.*32 B.*SHA-256/);
   assert.ok(h.get('fl-delete-name').textContent.includes(artifact.sha256));
   assert.equal(h.requests.some(r=>r.url==='/api/artifact-delete'), false);
@@ -805,6 +807,40 @@ test('mirror deletion confirms the exact artifact, preserves cancelled previews 
   assert.equal(h.get('fl-artifact').children.some(option=>option.value===artifact.id),false);
   assert.equal(h.get('fl-artifact').children.some(option=>option.value==='same-name-other-image'),true);
   assert.equal(h.get('fl-delete').disabled,true);
+});
+
+test('clearing the image draft leaves both cached packages available', async () => {
+  const h = harness(new Map()); await open(h);
+  const fw = {id:'firmware',name:'Debian-13-Firmware-K3-202611161333.tar.gz',size:200};
+  const os = {id:'system',name:'Debian-13-GNOME-K3-202611161345.tar.gz',size:2048,firmware:fw};
+  h.get('fl-store').click(); h.chooseImage(os);
+  h.get('fl-source-clear').click();
+  assert.equal(h.get('fl-artifact').value,'');
+  assert.equal(h.get('fl-firmware').value,'');
+  assert.equal(h.get('fl-artifact').children.some(option => option.value === os.id),true);
+  assert.equal(h.get('fl-artifact').children.some(option => option.value === fw.id),true);
+  assert.equal(h.requests.some(request => request.url === '/api/artifact-delete'),false);
+});
+
+test('ordinary flash can promote the companion to the only NOR image', async () => {
+  const h = harness(); await open(h);
+  const fw = {id:'firmware',name:'Debian-13-Firmware-K3-202611161333.tar.gz',size:200};
+  const os = {id:'system',name:'Debian-13-GNOME-K3-202611161345.tar.gz',size:2048,firmware:fw};
+  h.get('fl-store').click(); h.chooseImage(os);
+  h.get('fl-target-storage').value = 'scsi:0';
+  assert.equal(h.get('fl-firmware-only').disabled,false);
+  h.get('fl-firmware-only').click();
+  assert.equal(h.get('fl-artifact').value,fw.id);
+  assert.equal(h.get('fl-firmware').value,'');
+  assert.equal(h.get('fl-firmware-only-note').hidden,false);
+  assert.equal(h.get('fl-target-storage-field').hidden,true);
+  h.get('fl-plan').click();
+  const review = h.take('/api/flash-plan');
+  assert.equal(review.payload.artifact_id,fw.id);
+  assert.equal(review.payload.mode,'full');
+  assert.equal('target_storage' in review.payload,false);
+  assert.equal('firmware_artifact_id' in review.payload,false);
+  assert.equal(h.requests.some(request => request.url === '/api/task-start'),false);
 });
 
 test('artifact deletion handles active-task races and lost responses without retrying', async () => {
@@ -1729,6 +1765,19 @@ test('normal URL download, fast flash and RAM boot have separate submission path
   h.get('fl-url-toggle').click();
   assert.equal(h.get('fl-url-panel').hidden, false);
   assert.equal(h.requests.some(request => request.payload), false);
+});
+
+test('URL store firmware selection moves to the standard NOR review without starting a stream', async () => {
+  const h = harness(); h.api.open(null,null,false,'fast'); await drain();
+  h.get('fl-fast-store').click();
+  assert.equal(h.imagePicker().streamFirmware,true);
+  const fw = {id:'standalone-firmware',name:'Debian-13-Firmware-K1-202611161333.tar.gz',size:200,norFirmware:true};
+  h.chooseImage(fw);
+  assert.equal(h.get('flash-dialog').dataset.flow,'normal');
+  assert.equal(h.get('fl-artifact').value,fw.id);
+  assert.equal(h.get('fl-target-storage-field').hidden,true);
+  assert.deepEqual(h.take('/api/image-prepare').payload, {id:fw.id});
+  assert.equal(h.requests.some(entry => entry.payload),false);
 });
 
 const controlledBoard = {...board, connection_id:'uart-generation-1'};

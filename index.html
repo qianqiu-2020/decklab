@@ -391,7 +391,13 @@ PasswordAuthentication yes</code></pre>
         <details class="fl-details"><summary>校验 SHA-256（可选，请先填写）</summary><label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label></details>
         <button id="fl-download" type="button" hidden>重试下载</button>
       </div>
-      <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-delete" type="button" disabled>删除所选镜像</button></div>
+      <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-source-clear" type="button" hidden>清除选择</button><button id="fl-delete" type="button" aria-controls="fl-delete-field" aria-expanded="false" disabled>删除镜像缓存</button></div>
+      <fieldset id="fl-delete-field" class="fl-alert" hidden><legend>确认删除镜像</legend>
+        <p id="fl-delete-name" data-i18n-ignore style="overflow-wrap:anywhere"></p>
+        <p>仅删除服务端保存的这份镜像，不影响开发板内容；任务占用中的镜像不能删除。</p>
+        <button id="fl-delete-confirm" type="button">确认删除</button><button id="fl-delete-cancel" type="button">保留镜像</button>
+      </fieldset>
+      <p id="fl-firmware-only-note" class="fl-hint" hidden>本次只预览和写入 NOR 固件。</p>
       <select id="fl-artifact" hidden aria-label="当前镜像来源"></select>
       <div id="fl-firmware-field" class="ft-field" hidden>
         <label for="fl-firmware">配套 Firmware（可选）</label>
@@ -400,6 +406,7 @@ PasswordAuthentication yes</code></pre>
           <button id="fl-firmware-local" type="button">上传配套固件包</button>
           <input id="fl-firmware-file" type="file" accept=".tar.gz,.tgz,.tar,.zip" hidden aria-label="上传配套固件包">
           <button id="fl-firmware-choose" type="button">从镜像库选择</button>
+          <button id="fl-firmware-only" type="button" hidden>仅刷配套固件</button>
         </div>
         <small id="fl-firmware-status" role="status"></small><button id="fl-firmware-retry" type="button" hidden>重试准备配套固件</button>
       </div>
@@ -417,11 +424,6 @@ PasswordAuthentication yes</code></pre>
       </section>
       <div id="fl-package-contents" aria-live="polite"></div>
     </div>
-    <fieldset id="fl-delete-field" class="fl-alert" hidden><legend>确认删除镜像</legend>
-      <p id="fl-delete-name" data-i18n-ignore style="overflow-wrap:anywhere"></p>
-      <p>仅删除服务端保存的这份镜像，不影响开发板内容；任务占用中的镜像不能删除。</p>
-      <button id="fl-delete-confirm" type="button">确认删除</button><button id="fl-delete-cancel" type="button">保留镜像</button>
-    </fieldset>
   </section>
   <section id="fl-connect" class="fl-section" aria-labelledby="fl-connect-title">
     <h3 id="fl-connect-title">目标开发板</h3>

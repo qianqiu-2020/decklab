@@ -6,10 +6,11 @@
 
 ## [Unreleased]
 
-## [1.17.69] - 2026-11-24
+## [1.17.70] - 2026-11-24
 
 ### Added
 
+- 极速刷机商店可选用独立 Firmware 包，下载后进入普通刷机的 NOR 确认流程。已配对的固件也可以单独选用。
 - 普通刷机、URL 极速刷机和内存启动记录实际发出的 Fastboot 命令、设备应答和加载文件。可以复制记录，也可以重开任务查看。
 - URL 极速刷机的镜像商店显示配套 Firmware。同一芯片与 Debian 发行版只有一份匹配固件时，可跨构建日期配对。极速刷机覆盖系统盘，发现包内 NOR 分区表时会提示已跳过。需要更新 NOR 时，可从同一镜像位置进入普通刷机。
 - URL 极速刷机可直接检测手动进入下载模式的设备、绑定控制槽位，以及读取并选择目标系统盘。
@@ -26,6 +27,7 @@
 
 ### Fixed
 
+- 单刷 NOR 固件时隐藏系统盘选择，固件预览不再继承上次的目标系统盘。清除待刷选择和删除镜像缓存有独立按钮，删除确认紧跟在镜像旁。
 - 修复临时加载器从 USB 2 切到 USB 3 后，目标口存在历史任务导致刷机无法继续的问题。
 - K3 读取存储时单独标记 MMC 初始化失败，保留已识别的 UFS 和 NVMe。
 - 修复网页串口和 SSH 在 Vim 粘贴多行文本时出现的额外空行和缩进。
@@ -324,8 +326,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.69...HEAD
-[1.17.69]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.69
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.70...HEAD
+[1.17.70]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.70
 [1.17.54]: https://github.com/qianqiu-2020/decklab/compare/v1.17.53...v1.17.54
 [1.17.53]: https://github.com/qianqiu-2020/decklab/compare/v1.17.52...v1.17.53
 [1.17.52]: https://github.com/qianqiu-2020/decklab/compare/v1.17.51...v1.17.52

@@ -93,6 +93,21 @@ function setup(request, storage=new Map()){
   streamVersion.buttons()[0].fire();
   assert.equal(streamedPair.url, pairedOS.url);
   assert.equal(streamedPair.companionFirmware, olderFirmware.name);
+  let firmwareChoice;
+  const firmwareCalls = [];
+  const firmwareFromStream = setup((url,payload) => {
+    firmwareCalls.push({url,payload});
+    return Promise.resolve(url.startsWith('/api/image-catalog')
+      ? {entries:[pairedOS,pairedFW]}
+      : {task:{id:'firmware-download',state:'completed',result:{artifact:{id:'nor-fw',name:pairedFW.name}}}});
+  });
+  firmwareFromStream.store.open(item => { firmwareChoice = item; },
+    {streamURL:url => url.endsWith('.tar.gz'),streamFirmware:true});
+  await flush();
+  firmwareFromStream.buttons().find(node => node.textContent === '下载并选用固件').fire();await flush();
+  assert.equal(firmwareChoice.id, 'nor-fw');
+  assert.equal(firmwareChoice.norFirmware, true);
+  assert.deepEqual(firmwareCalls.filter(call => call.payload).map(call => call.payload.url), [pairedFW.url]);
   let cachedPair;
   const savedPair=setup((url,payload)=>Promise.resolve(url.startsWith('/api/image-catalog')
     ? {entries:[{...pairedOS,download_state:'cached'},{...pairedFW,download_state:'cached'}]}
