@@ -192,7 +192,7 @@ class ControlSlots:
             return {'ok': True, 'revision': revision}
 
     def identify_slot(self, payload, snapshot, document, connections):
-        """Use an explicitly picked empty HA slot; USB/UART proof precedes binding."""
+        """Use a picked empty or suspended HA slot; USB/UART proof precedes binding."""
         from .flash_tasks import FlashActions, _discovery
         from .flash_store import FlashStore
 
@@ -212,8 +212,9 @@ class ControlSlots:
             _, _, origin, token, inventory, old = scan
             live = inventory.get(slot, {})
             entity = live.get('entities', {}).get('enter-download')
-            if not entity or slot in old or slot in connections.get(origin, {}).get('slots', {}):
-                raise TaskError('请选择支持下载模式的未绑定槽位', 409)
+            binding = connections.get(origin, {}).get('slots', {}).get(slot)
+            if not entity or slot in old or binding and not binding.get('suspended_on'):
+                raise TaskError('请选择支持下载模式的空槽位或等待确认换板的槽位', 409)
         device = self.manager.resolve(payload.get('key'))
         if not device or not device.present or device.serial or device.connection_id != connection_id:
             raise TaskError('待识别串口已变化，请重新打开', 409)

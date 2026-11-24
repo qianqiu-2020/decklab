@@ -52,7 +52,16 @@ class ControlSlotsTests(unittest.TestCase):
                                        changes={k:{'serial':sn, 'allow_agent':True} for k,sn in changes.items()}))
 
     def test_first_use_pulses_only_selected_empty_slot_and_requires_the_current_uart(self):
+        self.check_slot_identification()
+
+    def test_suspended_slot_can_identify_replacement_but_active_slot_is_protected(self):
+        self.save(self.scan(), {TWO: 'A', ONE: 'B'})
+        self.slots.suspend('A', 'fixture-port')
+        self.check_slot_identification(active_slot=ONE)
+
+    def check_slot_identification(self, active_slot=None):
         scan = self.scan()
+        before = self.slots.execute({})['bindings']
         with tempfile.TemporaryDirectory() as folder:
             store = Store(Path(folder) / 'tasks.sqlite3')
             self.addCleanup(store.close)
@@ -63,6 +72,9 @@ class ControlSlotsTests(unittest.TestCase):
             self.manager.resolve = lambda key: device if key == device.key else None
             action = dict(action='identify-slot', revision=scan['revision'], scan=scan['scan'], slot=TWO,
                           request_id='fixture-onboarding-1', key=device.key, connection_id=device.connection_id)
+            if active_slot:
+                with self.assertRaisesRegex(TaskError, '空槽位或等待确认换板'):
+                    self.slots.execute(dict(action, slot=active_slot))
             def target(name):
                 return {'target_id': name, 'target_generation': name + '-generation', 'present': True}
 
@@ -102,7 +114,7 @@ class ControlSlotsTests(unittest.TestCase):
                 actuator.assert_called_once_with(URL, TOKEN, TWO, 'enter-download', slot('controllerB')['entities']['enter-download'], False)
                 actuator.return_value.run.assert_called_once()
                 self.assertEqual([call.args[0] for call in discovery.probe.call_args_list], ['other', 'attached'])
-                self.assertEqual(self.slots.execute({})['bindings'], [])
+                self.assertEqual(self.slots.execute({})['bindings'], before)
 
     def test_bulk_assign_same_slot_numbers_swap_and_restart(self):
         first = self.scan()

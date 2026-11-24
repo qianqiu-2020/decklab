@@ -146,8 +146,11 @@
           board.onchange = change; agent.onchange = change; agent.disabled = !selected || !!serial && selected!==serial;
           if (unrecognized && !serial) {
             board.disabled = true; agent.disabled = true;
-            const identify = button(item, '进入下载模式并识别', () => identifyBoard(row));
-            identify.disabled = busy || !!row.serial || !row.present || !row.entities['enter-download'];
+            if (row.serial && !row.suspended) element('small', '使用中，换板请先在原设备页操作', caption);
+            else if (row.present && row.entities['enter-download']) {
+              const identify = button(item, '进入下载模式并识别', () => identifyBoard(row));
+              identify.disabled = busy;
+            }
           } else if (serial) {
             board.disabled = true;
             if (selected === serial && !delta && !row.suspended) {
@@ -180,7 +183,7 @@
       } catch (e) { if(current===dialog && gen===sequence) status.textContent=e.message; }
     }
     async function identifyBoard(row) {
-      if (busy || !unrecognized || serial || !scanId || row.serial || !row.entities['enter-download']) return;
+      if (busy || !unrecognized || serial || !scanId || row.serial && !row.suspended || !row.entities['enter-download']) return;
       if (!global.confirm('确认让 '+row.name+' · 槽位 '+row.key.split('/')[1]+' 进入下载模式？板卡会复位。')) return;
       const client = global.SerialdTasks.createClient(global.SerialdUI.fetch);
       const ids = global.crypto.getRandomValues(new Uint8Array(16));
