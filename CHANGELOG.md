@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-## [1.17.73] - 2026-11-24
+## [1.17.74] - 2026-11-24
 
 ### Added
 
@@ -19,6 +19,7 @@
 
 ### Changed
 
+- 从设备页打开刷机工作区时，顶部显示当前开发板和准备操作，普通刷机可直接进入下载模式并读取存储。首页入口仍优先显示镜像选择。
 - 镜像工作目录改为文件列表与预览并排，JSON、YAML 等文本使用随包提供的 Ace 编辑器。
 - 刷机详情先显示当前任务身份、阶段和最近的关键操作，完整命令与应答可展开或复制。
 - 组织镜像仓库可填写 Nexus 根地址，由 DeckLab 探测浏览与下载入口。配置的组织仓库支持自签名证书。
@@ -332,8 +333,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.73...HEAD
-[1.17.73]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.73
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...HEAD
+[1.17.74]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.74
 [1.17.54]: https://github.com/qianqiu-2020/decklab/compare/v1.17.53...v1.17.54
 [1.17.53]: https://github.com/qianqiu-2020/decklab/compare/v1.17.52...v1.17.53
 [1.17.52]: https://github.com/qianqiu-2020/decklab/compare/v1.17.51...v1.17.52

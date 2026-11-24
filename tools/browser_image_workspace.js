@@ -10,7 +10,7 @@ const osImage={id:'os-fixture',name:'Debian-13-GNOME-K3-v1.0rc1-202611180100.tar
 const firmware={id:'fw-fixture',name:'Debian-13-Firmware-K3-v1.0rc1-202611180055.tar.gz',kind:'package',url:'https://images.example/fw.tar.gz',size:3000000,sha256:'b'.repeat(64),state:'ready'};
 const directory={id:'directory-fixture',name:'Debian-custom.directory',size:2000,directory_bytes:12000000000,sha256:'c'.repeat(64),state:'ready'};
 const controllerArchive={id:'archive-fixture',name:'Debian-local.tar.gz',size:3000,sha256:'e'.repeat(64),state:'ready'};
-const requests=[],downloads=[],edits=[],previews=[],errors=[];let staged=Buffer.alloc(0);
+const requests=[],downloads=[],edits=[],previews=[],errors=[];let staged=Buffer.alloc(0), scopedTargetOffline=false;
 const prepared=artifact=>({id:'prepare-'+artifact.id,kind:'image-prepare',state:'completed',result:{artifact,preparation:{payload_metadata:[{partition:'rootfs',content:{size:12000000000,filesystem:{type:'ext4'},version:'Debian GNU/Linux 13（模拟）',version_state:'identified'}}]}}});
 const server=http.createServer((req,res)=>{requests.push(req.method+' '+req.url);const url=new URL(req.url,'http://localhost');res.setHeader('Cache-Control','no-store');const json=value=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));};
  if(req.method==='POST'){let body='';req.on('data',c=>body+=c);req.on('end',()=>{try{const p=JSON.parse(body||'{}');
@@ -51,7 +51,9 @@ const server=http.createServer((req,res)=>{requests.push(req.method+' '+req.url)
  throw new Error('unexpected mutation '+url.pathname);
  }catch(e){errors.push(e.stack);res.statusCode=500;json({error:e.message});}});return;}
  if(url.pathname==='/'){res.setHeader('Content-Type','text/html');return res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/static/app.css"><body><p>SIMULATED · 模拟目录、镜像与板卡，无硬件操作</p>'+dialogs+['tasks','image-store','image-workspaces','flashing'].map(n=>'<script src="/static/'+n+'.js"></script>').join('')+'<script>var $=id=>document.getElementById(id),fmt=n=>n>=1e9?(n/1e9).toFixed(1)+" GB":n>=1e6?(n/1e6).toFixed(1)+" MB":n>=1e3?(n/1e3).toFixed(1)+" KB":n+" B";var store=SerialdImageStore.create({byId:$,fetch:fetch,formatBytes:fmt}),workspace=SerialdImageWorkspaces.create({byId:$,fetch:fetch,formatBytes:fmt,copyText:p=>window.copiedPath=p});window.ui=SerialdFlashing.create({byId:$,fetch:fetch,formatBytes:fmt,openImageStore:(choose,picker)=>store.open(choose,picker),openImageWorkspace:(artifact,choose,settings)=>workspace.open(artifact,choose,settings)});ui.open();</script></body></html>');}
- if(url.pathname==='/api/flash-discover')return json({targets:[target]});
+ if(url.pathname==='/api/flash-discover')return json({targets:scopedTargetOffline?[]:[target]});
+ if(url.pathname==='/api/flash-capabilities')return json({supported:false});
+ if(url.pathname==='/api/hardware')return json({actions:['enter-download'],wiring:{revision:'simulated-wiring'}});
  if(url.pathname==='/api/tasks')return json({tasks:[]});
  if(url.pathname==='/api/image-catalog')return json({entries:[osImage,firmware],sources:[{id:'public'}]});
  if(/^\/(?:static|vendor\/ace)\/[a-z_-]+\.(js|css)$/.test(url.pathname)){res.setHeader('Content-Type',url.pathname.endsWith('.css')?'text/css':'application/javascript');return res.end(fs.readFileSync(path.join(root,url.pathname)));}
@@ -124,6 +126,8 @@ let chrome,ws;const delay=ms=>new Promise(r=>setTimeout(r,ms));
  await evaluate('document.querySelector("#iw-directory").value="/data/simulated/Debian-local.tar.gz";document.querySelector("#iw-import").click()');
  await wait('!document.querySelector("#image-workspace-dialog").open&&document.querySelector("#fl-artifact").value==="archive-fixture"');
  await evaluate('document.querySelector("#fl-close").click();ui.open(null,null,false,"fast")');
+ assert.equal(await evaluate('$("fl-fast").getBoundingClientRect().top < $("fl-connect").getBoundingClientRect().top'),true);
+ assert.equal(await evaluate('$("fl-fast-disk").parentElement.id'), 'fl-connect');
  await evaluate('document.querySelector("#fl-fast-store").click()');
  await wait('[...document.querySelectorAll("#is-list button")].some(b=>b.textContent==="填入 URL")');
  assert.equal(await evaluate('document.querySelector("#is-list").textContent.includes("Firmware")'),true);
@@ -132,5 +136,20 @@ let chrome,ws;const delay=ms=>new Promise(r=>setTimeout(r,ms));
  await wait('!document.querySelector("#image-store-dialog").open&&document.querySelector("#fl-fast-url").value==="https://images.example/os.tar.gz"');
  assert.equal(downloads.length,2);
  assert.ok(!requests.includes('POST /api/flash-stream'));
- assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,automatic_optional_firmware_association:true,paired_downloads:downloads.length,copy_host_path:true,edit_partition_table:true,replace_partition_file:true,control_host_directory_selection:true,control_host_archive_selection:true,combined_preview:true,fast_flash_store_url:true,no_write_submitted:true,mobile_fits:true},null,2));console.log('Controller image import, firmware pairing and fast flash URL selection passed');
+ scopedTargetOffline=true;
+ await evaluate('$("fl-close").click(); ui.open({key:"fixture-console",serial:"SIMULATED",label:"模拟开发板",chip:"k3",connection_id:"fixture-uart"},null,false,"normal");');
+ await wait('!$("fl-prepare-board").disabled && $("fl-prepare-board").textContent.startsWith("进入下载模式")');
+ assert.equal(await evaluate('$("fl-board-name").textContent'), '模拟开发板');
+ assert.equal(await evaluate('$("fl-board-identity").textContent'), 'K3 · SN SIMULATED');
+ assert.equal(await evaluate('$("fl-target-picker").hidden'),true);
+ assert.equal(await evaluate('$("fl-connect").getBoundingClientRect().top < $("fl-image-section").getBoundingClientRect().top'),true);
+ assert.equal(await evaluate('$("fl-prepare-board").getBoundingClientRect().bottom < document.querySelector(".fl-actions").getBoundingClientRect().top'),true);
+ await shot('device-first-mobile-simulated');
+ await rpc('Emulation.setDeviceMetricsOverride',{width:1500,height:1100,deviceScaleFactor:1,mobile:false});
+ await shot('device-first-simulated');
+ await evaluate('$("fl-close").click(); ui.open()');
+ await wait('$("flash-dialog").dataset.entry === "home" && !$("fl-target-picker").hidden');
+ assert.equal(await evaluate('$("fl-image-section").getBoundingClientRect().top < $("fl-connect").getBoundingClientRect().top'),true);
+ assert.ok(!requests.some(request => request.startsWith('POST /api/task-start')));
+ assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,automatic_optional_firmware_association:true,paired_downloads:downloads.length,copy_host_path:true,edit_partition_table:true,replace_partition_file:true,control_host_directory_selection:true,control_host_archive_selection:true,combined_preview:true,fast_flash_store_url:true,device_first_layout:true,home_image_first_layout:true,no_write_submitted:true,mobile_fits:true},null,2));console.log('Controller image workspaces, firmware pairing and entry-specific flash layout passed');
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{if(ws)ws.close();await stopBrowser(chrome);server.close();await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});});

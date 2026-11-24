@@ -11,6 +11,10 @@ class Element {
   set textContent(value) { this.content = value; this.children = []; }
   get textContent() { return String(this.content || '') + this.children.map(item => item.textContent).join(''); }
   appendChild(child) { this.children.push(child); return child; }
+  insertBefore(child, sibling) {
+    this.children = this.children.filter(item => item !== child);
+    this.children.splice(this.children.indexOf(sibling), 0, child);
+  }
   setAttribute(name, value) { (this.attributes ||= {})[name] = value; }
   removeAttribute(name) { if (this.attributes) delete this.attributes[name]; }
   addEventListener(type, fn) { (this.events[type] ||= []).push(fn); }
@@ -24,6 +28,7 @@ class Element {
 function harness(storage, controls = {}) {
   const elements = new Map(), requests = [], timers = new Map(); let timer = 0, imageChoice, imagePicker;
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
+  get('fl-setup').children = ['fl-preview-overall', 'fl-image-section', 'fl-connect', 'fl-fast', 'fl-tuning'].map(get);
   get('fl-mode').value = 'full'; get('fl-verify').value = 'none';
   const sandbox = {document: {createElement: () => new Element()}, Uint8Array, Date, Math, URL,
     btoa: value => Buffer.from(value, 'binary').toString('base64'),
@@ -1865,7 +1870,13 @@ test('device RAM boot keeps the chosen image through download mode and starts on
 
 test('ordinary flash enters download and reads storage without a write plan', async () => {
   const h = harness(); await openWithoutUSB(h,'normal');
+  assert.equal(h.get('fl-setup').children[1], h.get('fl-connect'));
+  assert.equal(h.get('fl-board-name').textContent, board.label || board.key);
+  assert.match(h.get('fl-board-identity').textContent, new RegExp(board.serial));
+  assert.equal(h.get('fl-prepare-board').hidden, false);
+  assert.equal(h.get('fl-prepare-board').disabled, false);
   assert.equal(h.get('fl-prepare-board').textContent,'进入下载模式并读取设备存储');
+  assert.doesNotMatch(h.get('fl-status').textContent, /可由 DeckLab/);
   await confirmDownload(h,'fl-prepare-board');
   const read = h.take('/api/task-start');
   assert.equal(read.payload.kind,'nor-backup');

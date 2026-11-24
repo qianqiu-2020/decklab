@@ -428,13 +428,22 @@ PasswordAuthentication yes</code></pre>
   </section>
   <section id="fl-connect" class="fl-section" aria-labelledby="fl-connect-title">
     <h3 id="fl-connect-title">目标开发板</h3>
+    <div id="fl-board-context" class="fl-board-context" hidden>
+      <div><strong id="fl-board-name" data-i18n-ignore></strong><small id="fl-board-identity" data-i18n-ignore></small>
+        <span id="fl-board-link" role="status"></span></div>
+      <button id="fl-prepare-board" class="pri" type="button" hidden>进入下载模式并读取设备存储</button>
+    </div>
     <div id="fl-target-picker" class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label><button id="fl-discover" type="button">刷新 USB 列表</button></div>
     <div id="fl-fast-connect" class="ft-actions" hidden>
       <button id="fl-fast-detect" type="button">检测 USB 下载设备</button>
       <button id="fl-fast-bind" type="button" hidden>绑定控制槽位</button>
     </div>
     <p id="fl-fast-attach-hint" class="fl-hint" hidden>请按物理 USB 位置确认本次目标。选择 USB 设备用于本次刷机。</p>
-    <button id="fl-prepare-board" type="button" hidden>进入下载模式并读取设备存储</button>
+    <div id="fl-fast-disk" class="fl-discovery" hidden>
+      <label class="ft-field">目标系统盘<select id="fl-fast-storage"><option value="auto">自动选择（仅在只有一块盘时）</option></select></label>
+      <button id="fl-fast-read-disks" type="button">读取磁盘列表</button>
+    </div>
+    <p id="fl-fast-disk-status" class="fl-hint" role="status" hidden></p>
     <details id="fl-storage-details" class="fl-details"><summary>板上已有内容与备份</summary>
       <div class="fl-read-action"><button id="fl-read-nor" type="button" disabled>读取设备存储</button></div>
       <span id="fl-read-status" role="status" hidden></span>
@@ -465,11 +474,6 @@ PasswordAuthentication yes</code></pre>
           <p id="fl-fast-firmware" class="fl-hint" data-i18n-ignore hidden></p>
           <button id="fl-fast-normal" type="button">改用普通刷机更新固件</button>
         </div>
-        <div id="fl-fast-disk" class="fl-discovery">
-          <label class="ft-field">目标系统盘<select id="fl-fast-storage"><option value="auto">自动选择（仅在只有一块盘时）</option></select></label>
-          <button id="fl-fast-read-disks" type="button">读取磁盘列表</button>
-        </div>
-        <p id="fl-fast-disk-status" class="fl-hint" role="status"></p>
       </section>
       <details id="fl-tuning" class="fl-details" hidden>
         <summary>刷写配置 <span id="fl-tuning-state"></span></summary>
