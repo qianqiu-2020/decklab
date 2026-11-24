@@ -1,5 +1,6 @@
 """Extract the checked-out version's release notes from CHANGELOG.md."""
 import argparse
+from datetime import date
 from pathlib import Path
 import re
 import sys
@@ -9,14 +10,23 @@ sys.path.insert(0, str(ROOT))
 from seriald_core.version import __version__
 
 
+RELEASE_HEADING = re.compile(r'^\[([^\]\r\n]+)\] - (\d{4}-\d{2}-\d{2})$')
+REFERENCE_LINK = re.compile(r'^\[[^\]\n]+\]:[ \t]+https?://\S+[ \t]*$', re.MULTILINE)
+
+
 def extract(text, version):
     matches = list(re.finditer(r'^## (.+)$', text, re.MULTILINE))
-    selected = [index for index, match in enumerate(matches) if match[1] == version]
+    selected = []
+    for index, heading in enumerate(matches):
+        release = RELEASE_HEADING.fullmatch(heading[1])
+        if release and release[1] == version:
+            date.fromisoformat(release[2])
+            selected.append(index)
     if len(selected) != 1:
         raise ValueError('changelog must contain exactly one section for ' + version)
     index = selected[0]
     end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-    body = text[matches[index].end():end].strip()
+    body = REFERENCE_LINK.split(text[matches[index].end():end], maxsplit=1)[0].strip()
     if not body:
         raise ValueError('release notes are empty for ' + version)
     return body + '\n'

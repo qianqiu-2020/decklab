@@ -5,8 +5,10 @@
 版本号以 `seriald_core/version.py` 为准，标签必须是对应的 `v版本号`。
 例如发布 1.14.0：
 
-1. 更新 `__version__` 为 `1.14.0`；将 CHANGELOG.md 的待发布内容整理为
-   `## 1.14.0`，保留新的 `## Unreleased`。同步安装示例中的版本号。
+1. 在 [CHANGELOG.md](../CHANGELOG.md) 的 `## [Unreleased]` 下记录用户可见的变化，
+   按需使用 `Added`、`Changed`、`Deprecated`、`Removed`、`Fixed`、`Security`。
+   发布时更新 `__version__`，将待发布内容移到 `## [版本] - YYYY-MM-DD`，保留空的
+   `## [Unreleased]` 并更新末尾的版本比较链接。日期使用实际发布日，同步安装示例中的版本号。
 2. 按 [贡献指南](../CONTRIBUTING.md) 运行检查并提交改动。确认 main 的
    Linux、原生 amd64 包验收和 Windows 流水线通过，再给该提交打标签。
 3. 推送标签至 GitHub。当前开发仓库的 GitHub remote 名为 `github`；
