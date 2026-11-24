@@ -110,7 +110,9 @@ def main(case, uart, tag, serial, boot_id):
     if status:
         done('failed', 'systemctl suspend 未成功退出')
         return
-    deadline = time.clock_gettime(time.CLOCK_BOOTTIME) + 25
+    # systemctl may return before entering suspend. Allow the journal to catch
+    # up after wake without charging the time spent suspended to this window.
+    deadline = time.monotonic() + 25
     while True:
         code, trace = step(['journalctl', '-k', '-b', '--after-cursor=' + cursor[1], '-o', 'cat', '--no-pager'])
         after = rtc_count()
@@ -126,7 +128,7 @@ def main(case, uart, tag, serial, boot_id):
                 and 'ExecMainStatus=0' in result and alarm.strip() in ('', '0')):
             done('passed', f'同一次启动恢复，RTC 中断 {before} → {after}')
             return
-        if time.clock_gettime(time.CLOCK_BOOTTIME) >= deadline:
+        if time.monotonic() >= deadline:
             break
         time.sleep(2)
     done('uncertain', 'RTC 唤醒或同一次启动的证据不足')

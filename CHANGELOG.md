@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-## [1.17.72] - 2026-11-24
+## [1.17.73] - 2026-11-24
 
 ### Added
 
@@ -31,6 +31,7 @@
 
 - 串口终端尺寸同步提示浮于终端上方，显示和清除时不再改变终端高度。
 - Debian 13 的板卡用例可正常创建临时服务。收到服务拒绝时显示原错误并释放板卡；触发结果未知时继续观察。
+- RTC 唤醒用例只按板卡醒着的时间计算取证窗口，给唤醒后的内核日志留出写入时间。
 - 读取设备存储时接收执行器的命令与应答记录，避免将这类记录误判为无效事件并中止读取。
 - 单刷 NOR 固件时隐藏系统盘选择，固件预览不再继承上次的目标系统盘。清除待刷选择和删除镜像缓存有独立按钮，删除确认紧跟在镜像旁。
 - 修复临时加载器从 USB 2 切到 USB 3 后，目标口存在历史任务导致刷机无法继续的问题。
@@ -331,8 +332,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.72...HEAD
-[1.17.72]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.72
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.73...HEAD
+[1.17.73]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.73
 [1.17.54]: https://github.com/qianqiu-2020/decklab/compare/v1.17.53...v1.17.54
 [1.17.53]: https://github.com/qianqiu-2020/decklab/compare/v1.17.52...v1.17.53
 [1.17.52]: https://github.com/qianqiu-2020/decklab/compare/v1.17.51...v1.17.52

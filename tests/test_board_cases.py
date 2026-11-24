@@ -5,9 +5,10 @@ import tempfile
 from types import SimpleNamespace
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, mock_open, patch
 
 from seriald_core.board_cases import BoardCase, SerialEvidence, config, select_transport, verify_boot
+from seriald_core import board_case_target
 from seriald_core.board_case_target import run_command
 from seriald_core.board_maintenance import maintenance_for
 from seriald_core.device import Device
@@ -24,6 +25,39 @@ SERIAL = 'FIXTURE-BOARD'
 
 
 class BoardCasesTests(unittest.TestCase):
+    def test_rtc_wake_waits_for_journal_after_time_spent_suspended(self):
+        entry = 'PM: suspend entry (deep)\n'
+        journal = iter(('', entry, entry + 'PM: suspend exit\n'))
+        interrupts = iter((0, 0, 1, 1))
+
+        def run(argv, _timeout, _emit):
+            if argv[:2] == ['journalctl', '-k']:
+                if '--show-cursor' in argv:
+                    return 0, '-- cursor: s=abcd;i=123\n'
+                return 0, next(journal)
+            if argv == ['cat', '/proc/interrupts']:
+                return 0, f'33: {next(interrupts)} 0 rtc@pmic\n'
+            if argv[:2] == ['systemctl', 'show']:
+                return 0, 'Result=success\nExecMainStatus=0\n'
+            return 0, {
+                '/sys/power/mem_sleep': 's2idle [deep]\n',
+                '/sys/power/pm_test': '[none]\n',
+                '/sys/module/printk/parameters/console_suspend': 'Y\n',
+            }.get(argv[-1], '')
+
+        uart = mock_open()
+        with patch('builtins.open', uart), \
+                patch.object(board_case_target, 'run_command', side_effect=run), \
+                patch.object(board_case_target, 'identity', return_value={'serial': SERIAL, 'boot_id': BOOT1}), \
+                patch.object(board_case_target.time, 'sleep'), \
+                patch.object(board_case_target.time, 'monotonic', side_effect=[100, 101, 104]), \
+                patch.object(board_case_target.time, 'clock_gettime', side_effect=[100, 101, 140]):
+            board_case_target.main('rtc-wake', '/dev/ttyS0', 'CASE', SERIAL, BOOT1)
+        output = b''.join(call.args[0] for call in uart().write.call_args_list).decode()
+        result = next(line.removeprefix('CASE RESULT ') for line in output.splitlines()
+                      if line.startswith('CASE RESULT '))
+        self.assertEqual(json.loads(result)['status'], 'passed')
+
     def test_subprocess_output_is_emitted_before_command_completion(self):
         with tempfile.TemporaryDirectory() as directory:
             released = Path(directory) / 'released'
