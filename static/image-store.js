@@ -38,24 +38,28 @@
     function companion(item) {
       if (picker.fileOnly || picker.firmwareOnly || picker.ramBoot || osId(item.name) !== 'debian' || /[-_]firmware[-_.]/i.test(item.name)) return null;
       function identity(value) {
-        var info=details(value), chip=value.name.match(/(?:^|[-_])(k[13])(?=[-_.]|$)/i), major=value.name.match(/debian[-_](\d+)/i);
-        return chip && major ? [info.os,major[1],chip[1].toLowerCase(),info.release.toLowerCase(),info.date].join('|') : '';
+        var info = details(value), chip = value.name.match(/(?:^|[-_])(k[13])(?=[-_.]|$)/i);
+        var major = value.name.match(/debian[-_](\d+)/i);
+        return chip && major ? [info.os, major[1], chip[1].toLowerCase(), info.release.toLowerCase()].join('|') : '';
       }
-      var info=details(item), key=identity(item);
+      var info = details(item), key = identity(item);
       if (!key || !info.date && !info.release) return null;
-      var candidates=entries.concat(pairingRows).filter(function(value){
-        return value.url && /[-_]firmware[-_.]/i.test(value.name||'') && supported(value) && identity(value)===key;
+      var candidates = entries.concat(pairingRows).filter(function (value) {
+        return value.url && value.kind === 'package' && /[-_]firmware[-_.]/i.test(value.name || '')
+          && supported(value) && identity(value) === key && (info.release || details(value).date === info.date);
       });
-      candidates=candidates.filter(function(value,index,all){return all.findIndex(function(other){return other.url===value.url;})===index;});
-      // Published version directories can contain several builds on the same day.
-      // Choose the uniquely closest earlier firmware, within one hour of the OS build.
-      if (!info.release || !info.date) return candidates.length === 1 ? candidates[0] : null;
+      candidates = Array.from(new Map(candidates.map(function (value) { return [value.url, value]; })).values());
+      if (candidates.length < 2) return candidates[0] || null;
+      if (!info.release || !info.date) return null;
+      // Prefer the closest preceding build in the same batch when a release
+      // contains multiple firmware builds. A cross-date fallback needs a unique match.
       function seconds(value) {
         var time = value.name.match(/(?:^|[-_])20\d{6}([01]\d|2[0-3])([0-5]\d)([0-5]\d)?(?=[-_.]|$)/);
         return time ? Number(time[1])*3600 + Number(time[2])*60 + Number(time[3] || 0) : NaN;
       }
       var builtAt = seconds(item);
-      var ranked = candidates.map(function (row) { return {row:row, gap:builtAt-seconds(row)}; })
+      var ranked = candidates.filter(function (value) { return details(value).date === info.date; })
+        .map(function (row) { return {row:row, gap:builtAt-seconds(row)}; })
         .filter(function (match) { return match.gap >= 0 && match.gap <= 3600; })
         .sort(function (a,b) { return a.gap-b.gap; });
       return ranked.length && (ranked.length === 1 || ranked[0].gap < ranked[1].gap) ? ranked[0].row : null;
@@ -232,8 +236,7 @@
         if (hasFiles) choices.unshift({id:'',name:'当前目录'});
         selectOptions(chooser, choices, selectedPath, false);
         (function (node, key) { node.addEventListener('change', function () { folderChoices[key] = node.value; load(); }); })(chooser, base);
-        if (!selectedPath) break;
-        if (picker.streamURL && operatingSystem === 'debian') {
+        if (!picker.firmwareOnly && !picker.fileOnly && !picker.ramBoot && operatingSystem === 'debian') {
           var firmwarePages = await Promise.all(children.filter(function (row) {
             return /^firmware$/i.test(row.name) && row.path !== selectedPath;
           }).map(function (row) {
@@ -244,6 +247,7 @@
             branchFiles = branchFiles.concat(page.entries.filter(function (row) { return row.kind !== 'directory'; }));
           });
         }
+        if (!selectedPath) break;
         rows = (await directory(current, selectedPath, force)).entries;
         if (!valid()) return;
         branchFiles = branchFiles.concat(rows.filter(function (row) { return row.kind !== 'directory'; }));
