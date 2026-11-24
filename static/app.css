@@ -794,8 +794,9 @@
     .workspace.selected .dev>.device-activity,.workspace.selected .dev .meta,.workspace.selected .dev .last,
     .workspace.selected .dev .stat,.workspace.selected .dev .identity-error,.workspace.selected .dev .quiet-note{display:none}
     .detail .hd{flex-wrap:wrap;overflow:visible;white-space:normal;padding:7px 9px;row-gap:5px}
-    .detail .hd .sp{flex:1 1 100%;min-width:0;flex-wrap:nowrap;margin-left:0;overflow-x:auto;scrollbar-width:thin}
-    .detail .hd .sp>button,.detail .hd .board-operations{flex:none;white-space:nowrap}
+    .detail .hd .sp{flex-wrap:wrap;margin-left:0}
+    .detail:has(.console-layout.records-open) .hd .sp{flex:1 1 100%;min-width:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
+    .detail:has(.console-layout.records-open) .hd .sp>:is(button,.board-operations){flex:none;white-space:nowrap}
     .detail .tabs{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;padding:6px 9px}
     .detail .tabs button{flex:none}
     .detail>.info{max-height:58px;overflow:auto}
