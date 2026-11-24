@@ -54,9 +54,9 @@ class ControlSlotsTests(unittest.TestCase):
     def test_first_use_pulses_only_selected_empty_slot_and_requires_the_current_uart(self):
         self.check_slot_identification()
 
-    def test_suspended_slot_can_identify_replacement_but_active_slot_is_protected(self):
+    def test_offline_slot_can_identify_replacement_but_online_slot_is_protected(self):
         self.save(self.scan(), {TWO: 'A', ONE: 'B'})
-        self.slots.suspend('A', 'fixture-port')
+        self.manager.boards['B'].connection = SimpleNamespace(dev='COM2', present=True)
         self.check_slot_identification(active_slot=ONE)
 
     def check_slot_identification(self, active_slot=None):
@@ -73,7 +73,7 @@ class ControlSlotsTests(unittest.TestCase):
             action = dict(action='identify-slot', revision=scan['revision'], scan=scan['scan'], slot=TWO,
                           request_id='fixture-onboarding-1', key=device.key, connection_id=device.connection_id)
             if active_slot:
-                with self.assertRaisesRegex(TaskError, '空槽位或等待确认换板'):
+                with self.assertRaisesRegex(TaskError, '原板卡仍在线'):
                     self.slots.execute(dict(action, slot=active_slot))
             def target(name):
                 return {'target_id': name, 'target_generation': name + '-generation', 'present': True}
@@ -132,19 +132,19 @@ class ControlSlotsTests(unittest.TestCase):
         restored = HardwareBook(self.settings.effective()['documents']['hardware'])
         self.assertEqual(restored.command('A','reset','agent').key,TWO)
 
-    def test_suspended_and_moved_board_cannot_use_old_command(self):
+    def test_unbound_board_cannot_use_old_command(self):
         self.save(self.scan(), {ONE:'A'})
         cmd = self.manager.hardware.command('A','reset','web')
         with self.slots.using('A','reset',cmd):
             with self.assertRaisesRegex(TaskError,'占用'):
                 self.save(self.scan(), {ONE:'B'})
             with self.assertRaisesRegex(TaskError,'执行'):
-                self.slots.suspend('A','port')
-        self.slots.suspend('A','port')
+                self.slots.unbind('A')
+        self.slots.unbind('A')
         self.manager.boards['B'].connection = SimpleNamespace(by_path='port', dev='COM2', present=True)
         self.manager._flash_presence['B'] = {'connected':True,'endpoint':'3.7'}
         handoff = self.slots.execute({'action':'list', 'serial':'B'})
-        self.assertEqual(handoff['handoff'], {'origin':URL, 'key':ONE})
+        self.assertEqual(handoff['bindings'], [])
         self.assertEqual(handoff['boards'][0]['uart'], 'COM2')
         self.assertEqual(handoff['boards'][0]['flash_usb'], '3.7')
         self.assertEqual(self.manager.hardware.available('A','web')['actions'],[])

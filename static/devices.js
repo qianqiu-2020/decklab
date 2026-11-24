@@ -491,11 +491,12 @@
       }
     }
 
-    function adoptKey(ctx, key, serial) {
+    function adoptKey(ctx, key, serial, connectionId) {
       if (!options.isCurrent(ctx) || !key || key === ctx.key) return;
       lastDevices.forEach(function (d) {
         if (d.key !== ctx.key) return;
         d.key = key; d.label = key; d.serial = serial;
+        if (connectionId) d.connection_id = connectionId;
         if (!serial) {
           // /api/switch-mode detaches the old board immediately.  Clear the
           // optimistic local copy too; otherwise the old board's candidate
@@ -505,6 +506,9 @@
           d.reported_serial = '';
           d.identity_error = '';
           d.needs_provisioning = true;
+          d.flash_connected = false;
+          d.flash_mode = '';
+          d.flash_last_seen = 0;
           d.state = 'pending';
         }
       });

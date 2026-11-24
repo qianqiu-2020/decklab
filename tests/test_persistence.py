@@ -474,15 +474,38 @@ class PersistenceTests(unittest.TestCase):
         self.assertTrue(replacement.auto_identify)
 
     def test_prepare_switch_detaches_old_board_and_arms_one_probe(self):
+        from seriald_core.flash_tasks import _discovery
+        from seriald_core.hardware import HardwareBook
+        from seriald_core.web_settings import WebSettings
+
         d = self.connection('usb-1')
         self.identify(d)
         old_connection = d.connection_id
+        discovery = _discovery(self.manager)
+        self.store.bind({'serial':'KEEP-USB'}, '', '')
+        for sid, serial, port in [('a' * 24, d.serial, 1), ('b' * 24, 'KEEP-USB', 2)]:
+            discovery._save(dict(id=sid, generation='c' * 24, serial=serial, present=True, seen=999,
+                document={'device':{'port_path':[1,port]}, 'endpoint':f'1.{port}', 'supported':True,
+                          'uart_link':{'connection_id':old_connection, 'serial':serial, 'state':'linked'} if port == 1 else {}}))
+        settings = self.manager.control_slots.settings = WebSettings(self.root / 'switch-settings.json', {})
+        hardware = {'home_assistant': {'https://ha.example.test': {'secret_token':'fixture-token', 'slots':{
+            'controller/1': {'serial':d.serial,'name':'Fixture','area':'','allow_agent':False,
+                             'entities':{'enter-download':'button.fixture_board_1_fastboot_mode'}}}}}}
+        settings.save({'version':1,'documents':{'hardware':hardware}}, settings.snapshot()['revision'])
+        self.manager.hardware = HardwareBook(hardware)
         old_dir = Path(d.stable_dir())
         d.append(b'old board\n')
         key = self.manager.prepare_switch(d, 'operator')
         self.assertTrue(key.startswith('unprovisioned-'))
         self.assertEqual(d.serial, '')
         self.assertNotEqual(d.connection_id, old_connection)
+        stale_usb = discovery.get('a' * 24)
+        self.assertNotEqual(stale_usb['generation'], 'c' * 24)
+        self.assertIsNone(stale_usb['serial'])
+        self.assertNotIn('uart_link', stale_usb['document'])
+        self.assertEqual(discovery.get('b' * 24)['serial'], 'KEEP-USB')
+        self.assertEqual(self.manager.control_slots.execute({})['bindings'], [])
+        self.assertNotIn('SN001', self.manager._flash_presence)
         self.assertEqual(self.manager.resolve('riscv-118').snapshot()['state'], 'offline')
         self.assertTrue(d.auto_identify)
         d.append(b'new board booting\n')

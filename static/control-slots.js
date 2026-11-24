@@ -146,7 +146,7 @@
           board.onchange = change; agent.onchange = change; agent.disabled = !selected || !!serial && selected!==serial;
           if (unrecognized && !serial) {
             board.disabled = true; agent.disabled = true;
-            if (row.serial && !row.suspended) element('small', '使用中，换板请先在原设备页操作', caption);
+            if (row.occupied_online) element('small', '原板卡在线，换板请先在原设备页操作', caption);
             else if (row.present && row.entities['enter-download']) {
               const identify = button(item, '进入下载模式并识别', () => identifyBoard(row));
               identify.disabled = busy;
@@ -161,7 +161,7 @@
             } else {
               const bind = button(item, row.suspended ? '选为换板接线' : row.serial ? '改绑到此槽' : '绑定到空槽',
                 () => { stageBoard(row); draw(); });
-              bind.disabled = !row.present;
+              bind.disabled = !row.present || !!row.occupied_online;
             }
           } else if (row.suspended || row.legacy) {
             button(item,row.suspended?'确认当前板':'接管旧接线', () => { pending(row,board.value,agent.checked); });
@@ -183,7 +183,7 @@
       } catch (e) { if(current===dialog && gen===sequence) status.textContent=e.message; }
     }
     async function identifyBoard(row) {
-      if (busy || !unrecognized || serial || !scanId || row.serial && !row.suspended || !row.entities['enter-download']) return;
+      if (busy || !unrecognized || serial || !scanId || row.occupied_online || !row.entities['enter-download']) return;
       if (!global.confirm('确认让 '+row.name+' · 槽位 '+row.key.split('/')[1]+' 进入下载模式？板卡会复位。')) return;
       const client = global.SerialdTasks.createClient(global.SerialdUI.fetch);
       const ids = global.crypto.getRandomValues(new Uint8Array(16));

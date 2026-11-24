@@ -68,8 +68,8 @@ class ControlSlots:
             self.active_revision = saved['revision']
         return saved['revision']
 
-    def suspend(self, serial, port):
-        """An explicit board change disarms its slot until an operator confirms wiring."""
+    def unbind(self, serial):
+        """An explicit board change empties the old board's control slot."""
         with self.lock:
             book = self.manager.hardware
             if not any(s['serial'] == serial for c in book.document.get('home_assistant', {}).values()
@@ -77,15 +77,22 @@ class ControlSlots:
                 return
             if serial in self.in_use:
                 raise TaskError('控制器动作正在执行，请稍后换板', 423)
+            if self.settings is None:
+                raise TaskError('控制机未启用配置管理', 503)
             snapshot = self.settings.snapshot(secrets=True)
             edited = deepcopy(snapshot['configuration']['documents'].get('hardware', {}))
             if edited != book.document:
                 raise TaskError('硬件配置另有待应用的更改，请先应用', 409)
             for c in edited['home_assistant'].values():
-                for s in c['slots'].values():
-                    if s['serial'] == serial:
-                        s['suspended_on'] = port
+                for key in [key for key, slot in c['slots'].items() if slot['serial'] == serial]:
+                    del c['slots'][key]
             self._apply(edited, snapshot['revision'])
+
+    def _online(self, serial):
+        board = self.manager.boards.get(serial)
+        connection = getattr(board, 'connection', None)
+        flash = self.manager._flash_presence.get(serial, {})
+        return bool(connection and connection.present or flash.get('connected') and time.time() - flash.get('seen', 0) <= 15)
 
     def execute(self, payload):
         if self.settings is None:
@@ -133,6 +140,7 @@ class ControlSlots:
                 binding = config.get('slots', {}).get(key) or old.get(key, {})
                 rows.append({'key': key, 'name': s['name'], 'area': s['area'], 'entities': s['entities'],
                              'present': key in inventory, 'serial': binding.get('serial', ''),
+                             'occupied_online': self._online(binding.get('serial', '')),
                              'suspended': bool(binding.get('suspended_on')), 'legacy': key in old, 'allow_agent': binding.get('allow_agent', False)})
             scan = secrets.token_hex(16)
             with self.lock:
@@ -170,6 +178,8 @@ class ControlSlots:
                 serial = change['serial']
                 current = slots.pop(key, None) or old.get(key)
                 if current:
+                    if serial and serial != current['serial'] and self._online(current['serial']):
+                        raise TaskError('该槽位的原板卡仍在线，请先从原设备页换板', 423)
                     affected.add(current['serial'])
                 if key in old:
                     previous = edited['boards'][old[key]['serial']]
@@ -192,7 +202,7 @@ class ControlSlots:
             return {'ok': True, 'revision': revision}
 
     def identify_slot(self, payload, snapshot, document, connections):
-        """Use a picked empty or suspended HA slot; USB/UART proof precedes binding."""
+        """Use an explicitly selected slot whose current occupant is offline."""
         from .flash_tasks import FlashActions, _discovery
         from .flash_store import FlashStore
 
@@ -212,9 +222,14 @@ class ControlSlots:
             _, _, origin, token, inventory, old = scan
             live = inventory.get(slot, {})
             entity = live.get('entities', {}).get('enter-download')
-            binding = connections.get(origin, {}).get('slots', {}).get(slot)
-            if not entity or slot in old or binding and not binding.get('suspended_on'):
-                raise TaskError('请选择支持下载模式的空槽位或等待确认换板的槽位', 409)
+            binding = connections.get(origin, {}).get('slots', {}).get(slot) or old.get(slot, {})
+            prior_serial = binding.get('serial', '')
+            if not entity:
+                raise TaskError('请选择支持下载模式的槽位', 409)
+            if prior_serial and self._online(prior_serial):
+                raise TaskError('该槽位的原板卡仍在线，请先从原设备页换板', 423)
+            if prior_serial and (prior_serial in self.in_use or maintenance_for(self.manager).holds(prior_serial)):
+                raise TaskError('该槽位的原板卡仍被任务占用', 423)
         device = self.manager.resolve(payload.get('key'))
         if not device or not device.present or device.serial or device.connection_id != connection_id:
             raise TaskError('待识别串口已变化，请重新打开', 409)
@@ -241,7 +256,11 @@ class ControlSlots:
                 with transactions.actor_scope('web', client_id), transactions.begin('hardware-enter-download', 31, require_open=False):
                     check()
                     before = {target['target_generation'] for target in discovery.refresh()['targets'] if target['present']}
-                    command.run(check, outcome=lambda value: context.issued() if value == 'issued' else context.mark_outcome(value))
+                    def check_before_control():
+                        check()
+                        if prior_serial and self._online(prior_serial):
+                            raise TaskError('该槽位的原板卡已上线，未触发下载模式', 423)
+                    command.run(check_before_control, outcome=lambda value: context.issued() if value == 'issued' else context.mark_outcome(value))
                 context.store.update(context.id, result={'control_result': 'acknowledged'})
                 context.progress(0, 0, 'checking-usb-identity')
                 seen, deadline = set(), time.monotonic() + 15

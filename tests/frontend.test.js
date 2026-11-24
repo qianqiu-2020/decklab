@@ -654,13 +654,13 @@ test('preparing a board swap moves the live UART to an unprovisioned view', asyn
   assert.equal(h.get('b-switch').hidden, false);
   h.get('b-switch').click();
   const request = h.take('/api/switch-mode');
-  assert.deepEqual(request.body, { key: 'milkv', serial: 'SN001', actor: 'web', client_id: h.clientId });
-  request.resolve({ ok: true, device_key: 'unprovisioned-path', serial: '', old_serial: 'SN001' });
+  assert.deepEqual(request.body, { key: 'milkv', serial: 'SN001', connection_id:'connection-1', actor: 'web', client_id: h.clientId });
+  request.resolve({ ok: true, device_key: 'unprovisioned-path', serial: '', old_serial: 'SN001', connection_id:'replacement-1' });
   await drain();
   assert.equal(h.get('d-key').textContent, 'unprovisioned-path');
   assert.equal(h.get('d-info').hidden, true);
   assert.equal(h.get('d-name').textContent, 'unprovisioned-path');
-  assert.ok(h.get('d-status').textContent.includes('换板识别模式'));
+  assert.ok(h.get('d-status').textContent.includes('串口和刷机关联已解除'));
 });
 
 test('late SSH connect response cannot switch the newly selected device', async () => {

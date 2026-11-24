@@ -134,7 +134,7 @@ class FlashDiscovery:
     def __init__(self, manager, executor, argv=None):
         self.manager, self.store, self.executor = manager, manager.store, executor
         self.argv = tuple(argv) if argv is not None else executor_command()
-        self.lock = threading.RLock()
+        self.lock = manager.flash_discovery_lock if hasattr(manager, 'flash_discovery_lock') else threading.RLock()
 
     def _rows(self):
         with self.store.lock:
@@ -183,6 +183,32 @@ class FlashDiscovery:
                 result[key] = link[key]
                 result[key.replace('serial', 'label')] = (self.store.get(link[key]) or {}).get('label', '')
         return result
+
+    def switch_bindings(self, serial, connection_id):
+        """Snapshot inactive associations before detaching a UART identity."""
+        rows = []
+        maintenance = maintenance_for(self.manager)
+        if maintenance.holds(serial):
+            raise IdentityError('板卡仍被刷机或恢复任务占用，请先结束原任务')
+        for row in self._rows():
+            row['document'] = json.loads(row['document'])
+            link = row['document'].get('uart_link') or {}
+            if row.get('serial') != serial and link.get('connection_id') != connection_id and link.get('serial') != serial:
+                continue
+            if maintenance.target_holds(row['id']):
+                raise IdentityError('刷机 USB 仍被任务占用，请先结束原任务')
+            rows.append(row)
+        return rows
+
+    def clear_switch_bindings(self, serial, rows):
+        for row in rows:
+            data = row['document']
+            data.pop('uart_link', None)
+            if row['serial'] in (None, '', serial):
+                row['serial'], row['generation'] = None, secrets.token_hex(12)
+                row['document'] = {name: data[name] for name in ('endpoint', 'fingerprint', 'device', 'mode') if name in data}
+                row['document'].update(supported=False, reason='select this USB device to read its flashing capabilities')
+            self._save(row)
 
     def refresh(self):
         with self.lock:

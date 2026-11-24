@@ -943,15 +943,15 @@
   $('b-switch').addEventListener('click', function () {
     var ctx = terminalView.current;
     if (!isCurrent(ctx) || !ctx.serial) return;
-    $('d-status').textContent = ' 正在将当前串口转为待识别…';
+    $('d-status').textContent = ' 正在解除串口和刷机关联…';
     fetch('/api/switch-mode', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: ctx.key, serial: ctx.serial, actor: 'web' }) })
+      body: JSON.stringify({ key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId, actor: 'web' }) })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!isCurrent(ctx)) return;
         if (!d.ok) { $('d-status').textContent = ' 进入换板模式失败：' + (d.error || ''); return; }
-        adoptKey(ctx, d.device_key, '');
-        if (terminalView.current) $('d-status').textContent = ' 已进入换板识别模式；现在可切换开发板，启动到登录提示后将自动识别一次';
+        adoptKey(ctx, d.device_key, '', d.connection_id);
+        if (terminalView.current) $('d-status').textContent = ' 串口和刷机关联已解除。接好新板后可绑定控制槽位，或启动到登录提示后自动识别';
         pollDevices();
       }).catch(function (e) {
         if (isCurrent(ctx)) $('d-status').textContent = ' 进入换板模式失败：' + e.message;

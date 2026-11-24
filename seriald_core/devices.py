@@ -51,6 +51,7 @@ class Manager:
         self.devices = {}                 # physical by-path -> current connection
         self.boards = {}                  # immutable serial -> persistent Board
         self.lock = threading.RLock()
+        self.flash_discovery_lock = threading.RLock()
         self.scan_lock = threading.Lock()
         self.stopping = threading.Event()
         self.handoff = {}
@@ -378,19 +379,23 @@ class Manager:
             return device.key
 
     def prepare_switch(self, device, actor='web'):
-        """Detach a board from a still-live UART and arm one automatic identification."""
+        """Detach the board's UART, flash USB and control slot for replacement."""
         if device.file_transfer.active:
             raise IdentityError('串口文件传输中，请完成或取消后再换板')
         if not device.operation_lock.acquire(blocking=False):
             raise IdentityError('已有控制台操作在进行中，稍后再进入换板模式')
         try:
-            with self.lock:
+            from .flash_discovery import FlashDiscovery
+            discovery = getattr(self, 'flash_discovery', None) or FlashDiscovery(self, None, ())
+            with discovery.lock, self.lock, self.store.lock:
                 if not device.serial or not device.present:
                     raise IdentityError('只有已识别且在线的设备可以进入换板识别模式')
                 old_serial, old_record = device.serial, device.record
                 try:
-                    self.control_slots.suspend(old_serial, device.by_path)
-                except ValueError as error:
+                    targets = discovery.switch_bindings(old_serial, device.connection_id)
+                    self.control_slots.unbind(old_serial)
+                    discovery.clear_switch_bindings(old_serial, targets)
+                except (ValueError, TaskError) as error:
                     raise IdentityError(str(error)) from None
                 for sid in list(device.ssh_sessions):
                     device.close_session(sid)
@@ -401,6 +406,7 @@ class Manager:
                     self.boards[old_serial].history = None
                     self.store.event(old_serial, actor, 'switch-armed', device.by_path)
                     device.detach_identity()
+                self.refresh_flash_presence()
                 deadline = time.monotonic() + 15 * 60
                 self.armed_paths[device.by_path] = deadline
                 device.auto_identify = True

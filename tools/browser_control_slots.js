@@ -14,7 +14,6 @@ const boards = [{serial:'A', label:'Alpha', uart:'COM7'}, {serial:'B', label:'Be
 const bindings = new Map();
 const saved = [];
 const activated = [];
-const suspended = new Set();
 let handoff;
 const server = http.createServer(async (req, res) => {
   if (req.url === '/static/tasks.js') {
@@ -36,7 +35,8 @@ const server = http.createServer(async (req, res) => {
   const slots = groups.flatMap(name => (name === 'North' ? [0,1,2,3] : [1,2,3,4]).map(number => ({
     key:name+'/'+number, name, area:'Lab', entities:{reset:'reset','enter-download':'download'}, present:true,
     serial:bindings.get(name+'/'+number)?.serial || '', allow_agent:false,
-    suspended:handoff?.key===name+'/'+number || suspended.has(name+'/'+number)
+    occupied_online:name==='South' && number===1 && !!bindings.get('South/1'),
+    suspended:handoff?.key===name+'/'+number
   })));
   const data = op.action==='list' ? {revision:'v1',connections:[origin],boards,bindings:[],handoff:op.serial ? handoff : undefined} :
     op.action==='discover' ? {slots,scan:'scan'} : op.action==='identify-slot'
@@ -121,12 +121,11 @@ async function test() {
     assert.equal(await evaluate('window.confirmCalls'),confirmations);
     handoff = undefined;
     bindings.set('North/1',{serial:'A'});
-    suspended.add('North/1');
     await evaluate('SerialdControlSlots.open(null,{key:"pending-uart",connection_id:"fixture-connection"})');
     await wait(rows+'.length===4');
     assert.equal(await evaluate('document.querySelector(".wiring-footer button").disabled'),true);
     await choose('[aria-label="控制器"]','South');
-    assert.match(await evaluate(rows+'[0].textContent'),/使用中/);
+    assert.match(await evaluate(rows+'[0].textContent'),/原板卡在线/);
     assert.equal(await evaluate('Boolean('+rows+'[0].querySelector("button"))'),false);
     await choose('[aria-label="控制器"]','North');
     assert.equal(await evaluate(rows+'[1].querySelector("button").disabled'),false);

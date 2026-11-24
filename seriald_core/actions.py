@@ -165,7 +165,7 @@ class DeviceActions:
                 old_serial = d.serial
                 key = self.manager.prepare_switch(d, actor)
                 return response(200, {'ok': True, 'device_key': key, 'serial': '',
-                                        'old_serial': old_serial})
+                                        'old_serial': old_serial, 'connection_id': d.connection_id})
             except IdentityError as error:
                 return response(409, {'ok': False, 'error': str(error)})
 
