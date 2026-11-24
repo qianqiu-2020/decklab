@@ -82,7 +82,7 @@
         if (r.serial === serial) pending(r,'',false);
         else if (changes.get(r.key)?.serial === serial) changes.delete(r.key);
       });
-      pending(row, serial, row.serial === serial && row.allow_agent);
+      pending(row, serial, row.serial === serial ? row.allow_agent : true);
     }
     function show() {
       pane.replaceChildren();
@@ -139,7 +139,7 @@
           const lab = element('label','',item), agent = element('input','',lab); agent.type='checkbox';
           lab.append(' 允许 AI'); agent.checked = delta?delta.allow_agent:row.allow_agent;
           function change() {
-            if (!board.value || board.value!==selected && this===board) agent.checked = false;
+            if (this === board) agent.checked = !!board.value && (board.value === row.serial ? row.allow_agent : true);
             pending(row,board.value,agent.checked);
             agent.disabled = !board.value;
           }

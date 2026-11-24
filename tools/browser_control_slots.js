@@ -91,6 +91,7 @@ async function test() {
       await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.value=${JSON.stringify(value)};e.dispatchEvent(new Event("change"));})()`);
     }
     await choose('[aria-label="槽位 0 的板卡"]','A');
+    assert.equal(await evaluate(rows+'[0].querySelector("input[type=checkbox]").checked'),true);
     await choose('[aria-label="控制器"]','South');
     assert.deepEqual(await evaluate('Array.from('+rows+', row => row.querySelector("strong").textContent)'),
                      ['槽位 1','槽位 2','槽位 3','槽位 4']);
@@ -99,14 +100,14 @@ async function test() {
     await choose('[aria-label="槽位 1 的板卡"]','B');
     await evaluate('document.querySelector(".wiring-footer button").click()');
     await wait('!document.querySelector(".wiring-dialog")');
-    assert.deepEqual(saved[0],{'North/0':{serial:'A',allow_agent:false},'South/1':{serial:'B',allow_agent:false}});
+    assert.deepEqual(saved[0],{'North/0':{serial:'A',allow_agent:true},'South/1':{serial:'B',allow_agent:true}});
     await evaluate('SerialdControlSlots.open("A")');
     await wait(rows+'.length===4');
     await choose('[aria-label="控制器"]','South');
     await evaluate(rows+'[1].querySelector("button").click()');
     await evaluate('document.querySelector(".wiring-footer button").click()');
     await wait('!document.querySelector(".wiring-dialog")');
-    assert.deepEqual(saved[1],{'North/0':{serial:'',allow_agent:false},'South/2':{serial:'A',allow_agent:false}});
+    assert.deepEqual(saved[1],{'North/0':{serial:'',allow_agent:false},'South/2':{serial:'A',allow_agent:true}});
     handoff = {key:'South/2', origin};
     const confirmations = await evaluate('window.confirmCalls');
     await evaluate('SerialdControlSlots.open("C")');
@@ -117,7 +118,7 @@ async function test() {
     assert.equal(saved.length,2);
     await evaluate('document.querySelector(".wiring-footer button").click()');
     await wait('!document.querySelector(".wiring-dialog")');
-    assert.deepEqual(saved[2],{'South/2':{serial:'C',allow_agent:false}});
+    assert.deepEqual(saved[2],{'South/2':{serial:'C',allow_agent:true}});
     assert.equal(await evaluate('window.confirmCalls'),confirmations);
     handoff = undefined;
     bindings.set('North/1',{serial:'A'});
@@ -135,6 +136,9 @@ async function test() {
     assert.equal(activated[0].slot,'North/1');
     assert.equal(activated[0].connection_id,'fixture-connection');
     assert.equal(saved.length,3);
+    const allowAgent = rows+'[1].querySelector("input[type=checkbox]")';
+    assert.equal(await evaluate(allowAgent+'.checked'),true);
+    await evaluate(allowAgent+'.click()');
     await evaluate('document.querySelector(".wiring-footer button").click()');
     await wait('!document.querySelector(".wiring-dialog")');
     assert.deepEqual(saved[3],{'North/1':{serial:'NEW-BOARD',allow_agent:false}});
