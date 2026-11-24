@@ -148,6 +148,22 @@ class FlashRunnerTests(unittest.TestCase):
             with self.assertRaises((TaskError, OSError)):
                 self.runner.snapshot(binding, path, task_id='task-fixed', attempt_id='attempt-fixed')
 
+    def test_snapshot_accepts_flash_audit_events_from_executor_process(self):
+        audit = [
+            {'event': 'loader-material', 'partition': 'factory/FSBL.bin'},
+            {'event': 'command', 'command': 'getvar:mtd-size', 'status': 'issuing'},
+            {'event': 'command', 'command': 'getvar:mtd-size', 'status': 'OKAY'},
+            {'event': 'command-limit'},
+            {'event': 'firmware-skipped', 'partition': 'partition_nor.json'},
+        ]
+        binding = self.binding('for event in %r:\n    print(json.dumps(event))\n' % audit
+                               + "print(json.dumps({'event':'result','result':{'ok':True,'write_result':'not-started'}}))")
+        workspace = self.runner._directory(self.runner.root / 'cache' / 'plan-audit-snapshot')
+        observed = []
+        result = self.runner.snapshot(binding, workspace, on_event=observed.append)
+        self.assertEqual(observed, audit)
+        self.assertEqual(result['write_result'], 'not-started')
+
     def test_execute_passes_snapshot_reference_without_changing_the_fixed_plan(self):
         workspace = self.runner._directory(self.runner.root / 'cache' / 'plan-nor-execute')
         source = workspace / 'nor-before.bin'
@@ -552,6 +568,7 @@ class FlashRunnerTests(unittest.TestCase):
             "print(json.dumps({'event':'result','result':{'write_result':'failed'}}))",
             "print(json.dumps({'event':'result','result':{'write_result':'completed','verify_result':'unavailable'}}))",
             "print('not-json host-secret')",
+            "print(json.dumps({'event':'arbitrary-event','message':'host-secret'}))",
             "print(json.dumps({'event':'progress','done':8,'total':4}))",
             "print(json.dumps({'event':'result','result':{'write_result':'completed'}}));print(json.dumps({'event':'progress','done':1}))",
             "pass",

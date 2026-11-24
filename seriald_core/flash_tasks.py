@@ -635,6 +635,8 @@ class FlashActions:
                     timing = PreviewProgress(self.store, context.id, source, binding.endpoint,
                         source['name'].lower().endswith(('.gz', '.tgz', '.zip')))
                     def progress(value):
+                        if value.get('event') in AUDIT_EVENTS:
+                            return
                         timing.event(value)
                         context.progress(value.get('done', 0), value.get('total', 0), value.get('phase', 'checking-image'))
                     success = False
@@ -1413,7 +1415,10 @@ class FlashActions:
                             source['name'].lower().endswith(('.gz', '.tgz', '.zip')))
                         preview_succeeded = False
                         def preview_progress(value):
-                            timing.event(value)
+                            if value.get('event') in AUDIT_EVENTS:
+                                self.store.append_event(task_id, value)
+                            else:
+                                timing.event(value)
                         if not cached and source_record['executor_plan'].get('base_profile') is not None:
                             binding = replace(binding, profile_data=source_record['executor_plan']['base_profile'])
                         selected = self._make_plan(binding, executor, intent, actor, device.serial,

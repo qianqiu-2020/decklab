@@ -74,14 +74,19 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   await checkVimPaste(a, 'ssh-paste.txt', false);
   await wait(()=>b.evaluate('Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+i)?.translateToString()||"").some(s=>s.includes("PASTE汉字"))'),'UTF-8 multiline paste');
   await input(a, '\x1b');
-  await wait(async()=>JSON.stringify(await a.evaluate(screen))===JSON.stringify(await b.evaluate(screen)), 'live screens converge after escape');
-  assert.deepEqual(await b.evaluate(screen),await a.evaluate(screen),'incremental output has the same cursor and modes');
+  let consecutiveMatches = 0;
+  await wait(async () => {
+    const [controller, observer] = await Promise.all([a.evaluate(screen), b.evaluate(screen)]);
+    consecutiveMatches = JSON.stringify(controller) === JSON.stringify(observer) ? consecutiveMatches + 1 : 0;
+    return consecutiveMatches >= 2;
+  }, 'live screens converge with identical cursor and modes after escape');
   await b.evaluate('new Promise(resolve=>testTerm.write(new Uint8Array([27,80,43,113,65]),resolve))');
   await b.evaluate('document.querySelector("#b-redraw").click()');
   await wait(()=>b.evaluate('testTerm.buffer.active.type==="alternate"'),'observer redraw restores Vim');
   await wait(async()=>JSON.stringify(await a.evaluate(screen))===JSON.stringify(await b.evaluate(screen)), 'snapshot screen converges');
   assert.deepEqual(await b.evaluate(screen),await a.evaluate(screen),'redraw restores the same alternate screen without writing to the source');
   const previousCols=await b.evaluate('testTerm.cols');
+  await wait(()=>b.evaluate('!document.querySelector("#b-takeover").disabled'),'observer can request control after redraw');
   await b.evaluate('document.querySelector("#b-takeover").click()');
   await wait(()=>a.evaluate('document.querySelector("#d-in").disabled'),'old controller becomes read-only');
   await wait(()=>b.evaluate('!document.querySelector("#d-in").disabled'),'new controller input');

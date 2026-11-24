@@ -22,6 +22,7 @@ import threading
 import time
 from types import SimpleNamespace
 
+from .flash_store import AUDIT_EVENTS
 from .hardware import PosixProcess
 from .profiles import _unique_object
 from .tasks import TaskError, _check_result_fields
@@ -1247,7 +1248,8 @@ class LocalFlashExecutor:
                     event = _json(line.decode('utf-8'))
                 except (ValueError, UnicodeError):
                     raise FlashRunnerError('flashing executor returned invalid JSON') from None
-                if not isinstance(event, dict) or event.get('event') not in ('progress', 'phase', 'result', 'error', 'ddr-training'):
+                if (not isinstance(event, dict)
+                        or event.get('event') not in ('progress', 'phase', 'result', 'error', 'ddr-training') + AUDIT_EVENTS):
                     raise FlashRunnerError('flashing executor returned an invalid event')
                 if event['event'] == 'ddr-training':
                     # Kept per board; never forwarded to the task event log.

@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-## [1.17.70] - 2026-11-24
+## [1.17.71] - 2026-11-24
 
 ### Added
 
@@ -27,6 +27,7 @@
 
 ### Fixed
 
+- 读取设备存储时接收执行器的命令与应答记录，避免将这类记录误判为无效事件并中止读取。
 - 单刷 NOR 固件时隐藏系统盘选择，固件预览不再继承上次的目标系统盘。清除待刷选择和删除镜像缓存有独立按钮，删除确认紧跟在镜像旁。
 - 修复临时加载器从 USB 2 切到 USB 3 后，目标口存在历史任务导致刷机无法继续的问题。
 - K3 读取存储时单独标记 MMC 初始化失败，保留已识别的 UFS 和 NVMe。
@@ -326,8 +327,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.70...HEAD
-[1.17.70]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.70
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.71...HEAD
+[1.17.71]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.71
 [1.17.54]: https://github.com/qianqiu-2020/decklab/compare/v1.17.53...v1.17.54
 [1.17.53]: https://github.com/qianqiu-2020/decklab/compare/v1.17.52...v1.17.53
 [1.17.52]: https://github.com/qianqiu-2020/decklab/compare/v1.17.51...v1.17.52
