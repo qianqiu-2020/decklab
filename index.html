@@ -311,11 +311,29 @@ PasswordAuthentication yes</code></pre>
       <p id="board-tests-description"></p>
     </section>
     <div class="board-tests-actions">
+      <button id="board-tests-view-case" type="button" disabled>查看用例</button>
+      <button id="board-tests-new-case" type="button" disabled>新建 Shell 用例</button>
       <button id="board-tests-cancel" type="button" hidden>停止后续轮次</button>
       <button id="board-tests-lookup" type="button" hidden>查询原任务</button>
       <button id="board-tests-release" type="button" hidden>确认结束并释放板卡</button>
       <p id="board-tests-status" role="status"></p>
     </div>
+    <section id="board-tests-definition" class="board-tests-definition" hidden aria-labelledby="board-tests-definition-title">
+      <div class="board-tests-log-head"><strong id="board-tests-definition-title"></strong>
+        <div class="board-tests-log-actions"><button id="board-tests-edit-case" type="button" hidden>编辑用例</button><button id="board-tests-hide-case" type="button">关闭内容</button></div>
+      </div>
+      <div id="board-tests-definition-view"><ol id="board-tests-case-steps"></ol><pre id="board-tests-case-script" data-i18n-ignore></pre></div>
+      <form id="board-tests-case-form" hidden>
+        <div class="board-tests-editor-fields">
+          <label class="ft-field">名称<input id="board-tests-case-name" maxlength="80" required></label>
+          <label class="ft-field">每轮超时（秒）<input id="board-tests-case-timeout" type="number" min="1" max="180" value="60" required></label>
+        </div>
+        <label class="ft-field">Shell 脚本<textarea id="board-tests-case-input" rows="8" cols="64" spellcheck="false" required></textarea></label>
+        <p class="log-note">运行时，脚本在所选板卡上以 root 执行。退出码 0 表示通过。</p>
+        <button id="board-tests-save-case" class="pri" type="submit">保存用例</button>
+        <span id="board-tests-edit-status" role="status"></span>
+      </form>
+    </section>
     <section id="board-tests-runs" class="board-tests-runs" hidden aria-label="运行记录">
       <label class="ft-field">运行记录<select id="board-tests-history"></select></label>
       <div id="board-tests-result"></div>

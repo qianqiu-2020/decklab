@@ -4,15 +4,12 @@
   const names = {'reboot-aging':'软件重启老化（NOR → UFS → Debian）','rtc-wake':'深度挂起与 RTC 唤醒'};
   const states = {queued:'排队',running:'运行中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
   const roundStates = {passed:'通过',failed:'失败',uncertain:'无结果'};
-  const descriptions = {
-    'reboot-aging':'每轮软件重启一次，检查新启动编号和 NOR → UFS → Debian 启动路径。',
-    'rtc-wake':'每轮设置 35 秒 RTC 闹钟，进入深度挂起后通过串口核对唤醒。'
-  };
   function create({byId:$,fetch,getView,copyText}) {
     const client = global.SerialdTasks.createClient(fetch);
     const dialog = $('board-tests-dialog');
     let selected, task, timer, sequence = 0, followSequence = 0, pending = false, requestId, runningId;
     let round, inspected = '', roundSignature = '', logRequest, rawSerial = '';
+    let cases = [], allowedBuiltins = [], canCreate = false, draft = null, savingCase = false, formSequence = 0;
     const active = () => task && ['queued','running'].includes(task.state);
     function text(tag, value, parent) {
       const node = document.createElement(tag);
@@ -28,6 +25,54 @@
     }
     function current(gen) { return dialog.open && gen === sequence; }
     function message(value) { $('board-tests-status').textContent = value; }
+    function chosen() { return cases.find(item=>item.id === $('board-tests-case').value); }
+    function usable(item) { return item && (item.kind === 'shell' ? allowedBuiltins.length : allowedBuiltins.includes(item.id)); }
+    function populateCases(selectedId) {
+      const select = $('board-tests-case');
+      select.replaceChildren();
+      for (const item of cases) text('option',item.name,select).value = item.id;
+      const first = cases.find(usable);
+      if (cases.some(item=>item.id===selectedId)) select.value = selectedId;
+      else if (first) select.value = first.id;
+      render();
+    }
+    function showDefinition(item) {
+      if (!item) return;
+      formSequence++;
+      draft = null; savingCase = false;
+      $('board-tests-definition').hidden = $('board-tests-definition-view').hidden = false;
+      $('board-tests-case-form').hidden = true;
+      $('board-tests-edit-case').hidden = item.kind !== 'shell';
+      $('board-tests-definition-title').textContent = item.name;
+      const steps = $('board-tests-case-steps');
+      steps.replaceChildren();
+      if (item.kind === 'shell') {
+        text('li','在所选板卡以 root 执行，每轮超时 '+item.timeout+' 秒。退出码 0 为通过。',steps);
+      } else for (const step of item.steps) text('li',step,steps);
+      $('board-tests-case-script').textContent = item.script;
+      render();
+    }
+    function editDefinition(item = {}) {
+      formSequence++;
+      draft = item; savingCase = false;
+      $('board-tests-definition').hidden = $('board-tests-case-form').hidden = false;
+      $('board-tests-definition-view').hidden = $('board-tests-edit-case').hidden = true;
+      $('board-tests-definition-title').textContent = item.id ? '编辑 Shell 用例' : '新建 Shell 用例';
+      $('board-tests-case-name').value = item.name || '';
+      $('board-tests-case-timeout').value = item.timeout || 60;
+      $('board-tests-case-input').value = item.script || '';
+      $('board-tests-edit-status').textContent = '';
+      $('board-tests-save-case').disabled = false;
+      $('board-tests-case-name').focus();
+      render();
+    }
+    function hideDefinition() {
+      formSequence++;
+      draft = null; savingCase = false;
+      $('board-tests-definition').hidden = true;
+      $('board-tests-case-input').value = '';
+      render();
+    }
     function trackRequest(id) {
       requestId=id;
       try {
@@ -50,7 +95,7 @@
       const option = Array.from(picker.options).find(entry => entry.value === run.id) || text('option','',picker);
       option.value = run.id;
       const time = run.created ? new Date(run.created*1000).toLocaleString(document.documentElement.lang || undefined)+' · ' : '';
-      option.textContent = time+(names[run.result?.case] || '板卡用例')+' · '+states[run.state];
+      option.textContent = time+(run.result?.case_name || names[run.result?.case] || '板卡用例')+' · '+states[run.state];
     }
     function resetInspector() {
       logRequest?.abort();
@@ -138,9 +183,13 @@
     function render() {
       const box = $('board-tests-result');
       box.replaceChildren();
+      const item = chosen();
       $('board-tests-run').disabled = !selected || pending || !!requestId || !!runningId
-        || !$('board-tests-case').value || !!task?.flash?.recovery_required;
-      $('board-tests-description').textContent = descriptions[$('board-tests-case').value] || '';
+        || !usable(item) || !!draft || !!task?.flash?.recovery_required;
+      $('board-tests-view-case').disabled = !item;
+      $('board-tests-new-case').disabled = !canCreate;
+      $('board-tests-description').textContent = item ? (item.description || '在当前板卡运行 Shell 脚本，按退出码判定。')
+        + (usable(item) ? '' : ' 当前板卡尚未配置此用例。') : '';
       $('board-tests-cancel').hidden = !active();
       $('board-tests-cancel').disabled = pending || !!task?.cancel_requested;
       $('board-tests-lookup').hidden = !requestId;
@@ -151,7 +200,7 @@
       const total = task.progress?.total;
       const summary = text('div','',box);
       summary.className = 'board-tests-summary';
-      text('strong', names[result.case] || '板卡用例', summary);
+      text('strong', result.case_name || names[result.case] || '板卡用例', summary);
       text('span',states[task.state] || task.state,summary).dataset.state = task.state;
       text('p','通过 '+(result.completed_rounds || 0)+' 轮'+(total?' / '+total:'')
         +(result.in_flight?' · 正在观察第 '+result.in_flight+' 轮':''),box);
@@ -219,6 +268,8 @@
       const gen=++sequence;
       clearTimeout(timer);
       task=null; pending=false; requestId=null; runningId=null; round=null; roundSignature='';
+      cases=[];allowedBuiltins=[];canCreate=false;
+      hideDefinition();
       resetInspector();
       try { requestId=global.sessionStorage.getItem('decklab-board-test:'+selected.serial); } catch (_) {}
       const name = selected.label || selected.key;
@@ -230,21 +281,23 @@
       message('正在读取用例…');
       render();
       try {
-        const [hardware, history]=await Promise.all([
+        const [hardware, history, definitions]=await Promise.all([
           client.request('/api/hardware?'+query().slice(1)+'&connection_id='+encodeURIComponent(selected.connectionId || '')),
-          client.request('/api/tasks?limit=100&target_serial='+encodeURIComponent(selected.serial))
+          client.request('/api/tasks?limit=100&target_serial='+encodeURIComponent(selected.serial)),
+          client.request('/api/board-test-cases')
         ]);
         if (!current(gen)) return;
-        for (const value of hardware.test_cases || []) {
-          if (names[value]) text('option',names[value],$('board-tests-case')).value=value;
-        }
+        allowedBuiltins = hardware.test_cases || [];
+        cases = definitions.cases;
+        canCreate = true;
+        populateCases();
         const runs=history.tasks.filter(t=>t.kind==='board-test');
         const running = runs.find(run=>['queued','running'].includes(run.state));
         runningId = running?.id;
         for(const run of runs) rememberRun(run);
         if (requestId) await follow(requestId,true);
         else if (existing || runs.length) await follow((existing || running || runs[0]).id);
-        if (current(gen) && !$('board-tests-case').value) message(hardware.test_cases_configured
+        if (current(gen) && !allowedBuiltins.length) message(hardware.test_cases_configured
           ? '控制机缺少 adb。' : '请先在控制机的硬件配置中登记此板的 USB 路径和串口。');
         else if (current(gen) && !task && !requestId) message('');
         if (current(gen)) render();
@@ -256,7 +309,39 @@
       if (!dialog.open) {sequence++;clearTimeout(timer);resetInspector();}
     });
     $('board-tests-history').addEventListener('change',()=>follow($('board-tests-history').value));
-    $('board-tests-case').addEventListener('change',render);
+    $('board-tests-case').addEventListener('change',()=>{
+      if (!$('board-tests-definition').hidden && !draft) showDefinition(chosen());
+      else render();
+    });
+    $('board-tests-view-case').addEventListener('click',()=>showDefinition(chosen()));
+    $('board-tests-new-case').addEventListener('click',()=>editDefinition());
+    $('board-tests-edit-case').addEventListener('click',()=>editDefinition(chosen()));
+    $('board-tests-hide-case').addEventListener('click',hideDefinition);
+    $('board-tests-case-form').addEventListener('submit',async event=>{
+      event.preventDefault();
+      if (!draft || savingCase) return;
+      const gen=sequence, edit=formSequence;
+      const payload={name:$('board-tests-case-name').value,script:$('board-tests-case-input').value,
+        timeout:Number($('board-tests-case-timeout').value)};
+      if (draft.id) Object.assign(payload,{id:draft.id,revision:draft.revision});
+      savingCase=true;
+      $('board-tests-save-case').disabled=true;
+      $('board-tests-edit-status').textContent='正在保存用例…';
+      try {
+        const result=await client.request('/api/board-test-cases',payload);
+        if (!current(gen)) return;
+        cases=cases.filter(item=>item.id!==result.case.id).concat(result.case);
+        populateCases(edit===formSequence ? result.case.id : $('board-tests-case').value);
+        if (edit===formSequence) showDefinition(result.case);
+      } catch(error) {
+        if (current(gen) && edit===formSequence) $('board-tests-edit-status').textContent=error.message;
+      } finally {
+        if (current(gen) && edit===formSequence) {
+          savingCase=false;
+          $('board-tests-save-case').disabled=false;
+        }
+      }
+    });
     $('board-tests-copy').addEventListener('click',()=>{
       if (copyText && copyText(rawSerial, true)) message('已复制串口日志');
     });
@@ -284,15 +369,17 @@
       const amount=Number($('board-tests-count').value);
       const minutes=$('board-tests-unit').value==='minutes';
       if (!Number.isInteger(amount) || amount<1 || amount>10000) { message('请填写 1 到 10000 的整数。'); return; }
-      const caseId=$('board-tests-case').value;
-      if (!global.confirm('开始 '+names[caseId]+'？板卡将'+(caseId==='rtc-wake'?'挂起。':'重启。'))) return;
+      const item=chosen();
+      const action=item.kind==='shell'?'以 root 执行 Shell 脚本。':item.id==='rtc-wake'?'挂起。':'重启。';
+      if (!global.confirm('开始 '+item.name+'？板卡将'+action)) return;
       const gen=sequence, id=global.crypto.randomUUID?.() || Array.from(global.crypto.getRandomValues(new Uint8Array(16)),
         n=>n.toString(16).padStart(2,'0')).join('');
       trackRequest(id);
       pending=true;
       render();
       try {
-        const response=await client.request('/api/task-start',{...scope(),kind:'board-test',case:caseId,request_id:id,
+        const response=await client.request('/api/task-start',{...scope(),kind:'board-test',case:item.id,request_id:id,
+          ...(item.kind==='shell'?{case_revision:item.revision}:{}),
           ...(minutes?{seconds:amount*60}:{rounds:amount})});
         if (!current(gen)) return;
         rememberRun(response.task);

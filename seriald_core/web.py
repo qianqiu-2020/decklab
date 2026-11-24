@@ -235,6 +235,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except (TaskError, OSError, ValueError) as error:
                 return self._json(getattr(error, 'status', 503), {'error': str(error) if isinstance(error, TaskError) else '镜像商店暂不可用'})
 
+        if route == '/api/board-test-cases':
+            from .board_cases import library
+            if self.headers.get('X-Seriald-Actor', 'web') != 'web':
+                return self._json(403, {'error': '用例库仅限主访问身份'})
+            try:
+                return self._json(200, library(self.manager.store))
+            except sqlite3.Error:
+                return self._json(503, {'error': '读取用例库失败'})
+
         if route == '/api/device-preferences':
             try:
                 from .device_preferences import snapshot
@@ -566,6 +575,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(200, {'ok': True, 'task': task})
             except TaskError as error:
                 return self._json(error.status, {'ok': False, 'error': str(error)})
+        if route == '/api/board-test-cases':
+            from .board_cases import save_case
+            if self.headers.get('X-Seriald-Actor', 'web') != 'web':
+                return self._json(403, {'error': '用例库仅限主访问身份'})
+            try:
+                return self._json(200, {'case': save_case(self.manager.store, payload)})
+            except (TaskError, UnicodeError) as error:
+                return self._json(getattr(error, 'status', 400), {'error': str(error)})
+            except sqlite3.Error:
+                return self._json(503, {'error': '保存用例失败'})
         if route == '/api/device-preferences':
             try:
                 from .device_preferences import apply

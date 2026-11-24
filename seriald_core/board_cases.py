@@ -1,8 +1,10 @@
-"""Built-in, one-round-at-a-time board tests."""
+"""One-round-at-a-time board tests supervised by the collector."""
+import base64
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -13,7 +15,28 @@ from .board_maintenance import maintenance_for
 from .flash_store import FlashStore, validate_request
 from .tasks import TaskCancelled, TaskError
 
-CASES = ('reboot-aging', 'rtc-wake')
+BUILTIN_CASES = (
+    {'id': 'reboot-aging', 'name': '软件重启老化（NOR → UFS → Debian）', 'kind': 'builtin',
+     'description': '每轮软件重启一次，检查新启动编号和 NOR → UFS → Debian 启动路径。',
+     'steps': [
+         '执行前核对板卡序列号、启动编号、固件版本、EFI 启动项、ESP 和 Kingston TY7B-128 UFS 根盘。',
+         '在板上执行 systemctl --no-block reboot，通过串口观察 NOR 启动记录。',
+         '重新连接后确认 Linux 启动编号改变、multi-user.target 已启动，且固件、EFI 启动项、ESP 与实际根盘仍匹配起始记录。',
+     ]},
+    {'id': 'rtc-wake', 'name': '深度挂起与 RTC 唤醒', 'kind': 'builtin',
+     'description': '每轮设置 35 秒 RTC 闹钟，进入深度挂起后通过串口核对唤醒。',
+     'steps': [
+         '检查 /sys/power/mem_sleep 选中 deep、pm_test 为 none、console_suspend 为 Y、RTC 没有旧闹钟，记录 rtc@pmic 中断计数和内核日志游标。',
+         '执行 rtcwake -m no -s 35 设置闹钟，向串口写入布防标记，再执行 systemctl suspend。',
+         '同一次启动内必须出现一次 deep 进入和一次退出，RTC 中断增加，systemd-suspend 成功，闹钟清除。',
+     ]},
+)
+CASES = tuple(case['id'] for case in BUILTIN_CASES)
+BUILTIN_COMMANDS = {
+    'reboot-aging': 'systemctl --no-block reboot',
+    'rtc-wake': 'rtcwake -m no -s 35\nsystemctl suspend',
+}
+CUSTOM_CASE = re.compile(r'shell-[0-9a-f]{24}')
 MAX_SERIAL = 8 * 1024 * 1024
 BOOT_ID = re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}')
 START_REJECTED = re.compile(
@@ -41,6 +64,42 @@ efi=$(efibootmgr -v)
 current=$(printf '%s\n' "$efi" | sed -n 's/^BootCurrent: //p')
 printf '%s\n' "$efi" | sed -n "s/^Boot${current}[* ]/entry=/p"
 """
+
+
+def library(store):
+    with store.lock:
+        custom = [dict(row, kind='shell') for row in store.db.execute(
+            'SELECT * FROM board_test_cases ORDER BY name, id')]
+    return {'cases': [dict(case, script=BUILTIN_COMMANDS[case['id']]) for case in BUILTIN_CASES] + custom}
+
+
+def save_case(store, payload):
+    if set(payload) - {'id', 'name', 'script', 'timeout', 'revision'}:
+        raise TaskError('无法识别用例字段')
+    name, script = payload.get('name'), payload.get('script')
+    timeout, revision = payload.get('timeout'), payload.get('revision')
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80 or not name.isprintable():
+        raise TaskError('请填写最多 80 字符的用例名称')
+    if (not isinstance(script, str) or not script.strip() or len(script.encode()) > 8192
+            or any(ord(char) < 32 and char not in '\n\r\t' for char in script)):
+        raise TaskError('请填写不超过 8 KiB 的 Shell 脚本')
+    if type(timeout) is not int or not 1 <= timeout <= 180:
+        raise TaskError('每轮超时须为 1 到 180 秒')
+    name, script = name.strip(), script.replace('\r\n', '\n').replace('\r', '\n')
+    case_id = payload.get('id')
+    with store.lock, store.db:
+        if case_id is None and revision is None:
+            case_id, revision = 'shell-' + secrets.token_hex(12), 1
+            store.db.execute('INSERT INTO board_test_cases VALUES (?,?,?,?,?)', (case_id, name, script, timeout, revision))
+        else:
+            if not isinstance(case_id, str) or not CUSTOM_CASE.fullmatch(case_id) or type(revision) is not int or revision < 1:
+                raise TaskError('请选择要编辑的 Shell 用例')
+            changed = store.db.execute('UPDATE board_test_cases SET name=?, script=?, timeout=?, revision=revision+1 '
+                                       'WHERE id=? AND revision=?', (name, script, timeout, case_id, revision))
+            if changed.rowcount != 1:
+                raise TaskError('用例已更新，请重新打开后编辑', 409)
+            revision += 1
+    return {'id': case_id, 'name': name, 'script': script, 'timeout': timeout, 'revision': revision, 'kind': 'shell'}
 
 
 def config(document):
@@ -115,13 +174,14 @@ class SerialEvidence:
 
 
 class BoardCase:
-    def __init__(self, manager, device, row, case, rounds, seconds, executable):
+    def __init__(self, manager, device, row, case, rounds, seconds, executable, custom=None):
         self.manager, self.device, self.serial = manager, device, device.serial
         self.row, self.case, self.rounds, self.seconds = row, case, rounds, seconds
         self.adb = executable
         self.maintenance = maintenance_for(manager)
         self.connection = device.connection_id
         self.board = device.board
+        self.custom = custom
 
     def command(self, *args):
         return subprocess.run([self.adb, *args], capture_output=True, text=True, errors='replace', timeout=10,
@@ -176,7 +236,10 @@ class BoardCase:
                     context.check()
 
     def observe(self, tag, before, baseline, evidence, row):
-        deadline = time.monotonic() + (235 if self.case == 'rtc-wake' else 180)
+        timeout = 235 if self.case == 'rtc-wake' else 180
+        if self.case not in CASES:
+            timeout = self.custom['timeout'] + 25
+        deadline = time.monotonic() + timeout
         result_line = re.compile(re.escape(tag.encode()) + rb' RESULT (\{[^\n]*\})\r*\n')
         while time.monotonic() < deadline:
             evidence.read(getattr(self.board, 'connection', None))
@@ -190,7 +253,8 @@ class BoardCase:
                     if (result['serial'] != self.serial or result['boot_id'] != before['boot_id']
                             or result['status'] not in ('passed', 'failed', 'uncertain')):
                         return 'uncertain', '串口结果的身份无法核对'
-                    if result['status'] != 'passed' or (self.case == 'rtc-wake' and row['armed']):
+                    if (result['status'] != 'passed' or (self.case == 'rtc-wake' and row['armed'])
+                            or (self.case not in CASES and row['issued_on_board'])):
                         row['boot_after'] = result['boot_id']
                         row['round_finished'] = True
                         return result['status'], result['reason'][:256]
@@ -214,12 +278,14 @@ class BoardCase:
                     if readback:
                         row['last_readback'] = readback
             time.sleep(1)
-        row['timeout_seconds'] = 235 if self.case == 'rtc-wake' else 180
+        row['timeout_seconds'] = timeout
         return 'uncertain', '观察超时，本轮证据不足'
 
     def run(self, context):
         recent, completed = [], 0
         result = {'case': self.case, 'completed_rounds': 0, 'recent_rounds': recent}
+        if self.case not in CASES:
+            result.update(case_name=self.custom['name'], case_revision=self.custom['revision'])
         first_issue = None
         report = serial_log = None
         in_flight = False
@@ -257,9 +323,14 @@ class BoardCase:
                     evidence = SerialEvidence(device)
                     tag = f'DECKLAB-CASE {context.id} {number}'
                     unit = f'decklab-case-{context.id}-{number}'
+                    target_case, arguments = self.case, []
+                    if self.case not in CASES:
+                        target_case = 'shell'
+                        arguments = [base64.b64encode(self.custom['script'].encode()).decode(), str(self.custom['timeout'])]
                     payload = 'LC_ALL=C ' + shlex.join(['systemd-run', '--no-block', '--collect', '--unit=' + unit,
                                                        '--property=RuntimeMaxSec=230s', '/usr/bin/python3', '-c', script,
-                                                       self.case, self.row['uart'], tag, self.serial, before['boot_id']])
+                                                       target_case, self.row['uart'], tag, self.serial, before['boot_id'],
+                                                       *arguments])
                     context.check()
                     context.issued()
                     row.update(trigger='unknown', service=unit)
@@ -347,8 +418,8 @@ def start(manager, device, payload, actor):
     if actor != 'web':
         raise TaskError('板卡用例仅限主访问身份', 403)
     if set(payload) - {'kind', 'key', 'serial', 'actor', 'client_id', 'connection_id', 'request_id',
-                       'case', 'rounds', 'seconds'}:
-        raise TaskError('用例仅接受固定用例和轮数或时长')
+                       'case', 'case_revision', 'rounds', 'seconds'}:
+        raise TaskError('用例仅接受已保存的用例和轮数或时长')
     case, rounds, seconds = payload.get('case'), payload.get('rounds'), payload.get('seconds')
     if ((rounds is None) == (seconds is None) or
             (rounds is not None and (type(rounds) is not int or not 1 <= rounds <= 10000)) or
@@ -356,12 +427,32 @@ def start(manager, device, payload, actor):
         raise TaskError('请填写轮数或时长')
     row = manager.hardware.board_tests.get(device.serial, {})
     executable = shutil.which('adb')
-    if not executable or case not in row.get('cases', []):
-        raise TaskError('用例尚未配置固定 USB 接线或控制机缺少 adb', 409)
+    revision = payload.get('case_revision')
+    custom_case = isinstance(case, str) and CUSTOM_CASE.fullmatch(case) is not None
+    if ((custom_case and (type(revision) is not int or revision < 1))
+            or (not custom_case and 'case_revision' in payload)):
+        raise TaskError('请重新选择所保存的用例版本')
+    if case not in CASES and not custom_case:
+        raise TaskError('未知板卡用例')
     request_id = payload.get('request_id')
-    digest = manager.tasks.store.request_digest({'serial': device.serial, 'case': case, 'rounds': rounds, 'seconds': seconds})
+    inputs = {'serial': device.serial, 'case': case, 'rounds': rounds, 'seconds': seconds}
+    if custom_case:
+        inputs['case_revision'] = revision
+    digest = manager.tasks.store.request_digest(inputs)
     validate_request(request_id, digest)
-    operation = BoardCase(manager, device, row, case, rounds, seconds, executable)
+    previous = FlashStore(manager.store).find_request(actor, request_id, digest)
+    if previous is not None:
+        return manager.tasks.store.get(previous)
+    if not executable or not row or (not custom_case and case not in row.get('cases', [])):
+        raise TaskError('用例尚未配置固定 USB 接线或控制机缺少 adb', 409)
+    custom = None
+    if custom_case:
+        with manager.store.lock:
+            saved = manager.store.db.execute('SELECT * FROM board_test_cases WHERE id=? AND revision=?', (case, revision)).fetchone()
+        if saved is None:
+            raise TaskError('用例已更新，重新选择后再运行', 409)
+        custom = dict(saved)
+    operation = BoardCase(manager, device, row, case, rounds, seconds, executable, custom=custom)
     return manager.tasks.start_board('board-test', actor, payload.get('client_id', ''), device.serial, operation.run,
         request_id=request_id, input_digest=digest, details={'attempt_id': request_id}, resources=['board-test-usb:' + row['usb_port']],
         maintenance=operation.maintenance, connection_id=device.connection_id, tracks_outcome=True)

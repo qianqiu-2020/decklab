@@ -1,3 +1,4 @@
+import base64
 import json
 from pathlib import Path
 import sys
@@ -7,7 +8,7 @@ import threading
 import unittest
 from unittest.mock import Mock, mock_open, patch
 
-from seriald_core.board_cases import BoardCase, SerialEvidence, config, select_transport, verify_boot
+from seriald_core.board_cases import BoardCase, SerialEvidence, config, library, save_case, select_transport, verify_boot
 from seriald_core import board_case_target
 from seriald_core.board_case_target import run_command
 from seriald_core.board_maintenance import maintenance_for
@@ -25,6 +26,56 @@ SERIAL = 'FIXTURE-BOARD'
 
 
 class BoardCasesTests(unittest.TestCase):
+    def test_library_shows_builtin_commands_and_only_edits_saved_shell_cases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'registry.sqlite3')
+            self.addCleanup(store.close)
+            cases = {item['id']: item for item in library(store)['cases']}
+            self.assertIn('systemctl --no-block reboot', cases['reboot-aging']['script'])
+            self.assertIn('rtcwake -m no -s 35', cases['rtc-wake']['script'])
+            self.assertTrue(cases['rtc-wake']['steps'])
+            fields = {'name': ' 检查测试 ', 'script': 'printf "中文"\r\nexit 0', 'timeout': 10}
+            case = save_case(store, fields)
+            self.assertEqual((case['kind'], case['name'], case['revision']), ('shell', '检查测试', 1))
+            self.assertEqual(case['script'], 'printf "中文"\nexit 0')
+            self.assertIn(case, library(store)['cases'])
+            edit = dict(fields, id=case['id'], revision=1, script='exit 3')
+            self.assertEqual(save_case(store, edit)['revision'], 2)
+            with self.assertRaises(TaskError) as caught:
+                save_case(store, edit)
+            self.assertEqual(caught.exception.status, 409)
+            with self.assertRaises(TaskError):
+                save_case(store, dict(edit, id='rtc-wake'))
+            for invalid in ({'timeout': True}, {'timeout': 181},
+                            {'script': '\x00exit'}, {'script': '中' * 8192}):
+                with self.assertRaises(TaskError):
+                    save_case(store, dict(fields, **invalid))
+
+    def test_shell_runs_with_real_sh_and_logs_output_and_exit_code(self):
+        for script, timeout, expected in [
+                ("printf '中文输出\\n'; printf 'stderr here\\n' >&2; exit 0", 2, 0),
+                ('exit 7', 2, 7),
+                ('sleep 30 & wait', 1, 124)]:
+            with self.subTest(expected=expected):
+                uart = mock_open()
+                with tempfile.TemporaryDirectory() as directory:
+                    serial_path, boot_path = Path(directory) / 'serial', Path(directory) / 'boot'
+                    serial_path.write_text(SERIAL + '\n')
+                    boot_path.write_text(BOOT1 + '\n')
+                    with patch('builtins.open', uart), patch.object(board_case_target, 'SERIAL', str(serial_path)), \
+                            patch.object(board_case_target, 'BOOT', str(boot_path)):
+                        board_case_target.main('shell', '/dev/ttyS0', 'CASE', SERIAL, BOOT1,
+                                               base64.b64encode(script.encode()).decode(), str(timeout))
+                output = b''.join(call.args[0] for call in uart().write.call_args_list).decode()
+                self.assertIn('CASE CMD /bin/sh -c ', output)
+                self.assertIn(f'CASE EXIT {expected}', output)
+                result = next(line.removeprefix('CASE RESULT ') for line in output.splitlines()
+                              if line.startswith('CASE RESULT '))
+                self.assertEqual(json.loads(result)['status'], 'failed' if expected else 'passed')
+                if expected == 0:
+                    self.assertIn('CASE stdout\n中文输出', output)
+                    self.assertIn('CASE stderr\nstderr here', output)
+
     def test_rtc_wake_waits_for_journal_after_time_spent_suspended(self):
         entry = 'PM: suspend entry (deep)\n'
         journal = iter(('', entry, entry + 'PM: suspend exit\n'))
@@ -252,8 +303,10 @@ class BoardCasesTests(unittest.TestCase):
             manager.hardware = HardwareBook({'board_tests':{
                 SERIAL:{'usb_port':'2-1.2','uart':'/dev/ttyS0','cases':['rtc-wake']}}})
             started, release = threading.Event(), threading.Event()
+            cases_executed = []
 
             def run(operation, context):
+                cases_executed.append(operation.custom)
                 started.set()
                 try:
                     release.wait(2)
@@ -261,8 +314,10 @@ class BoardCasesTests(unittest.TestCase):
                 finally:
                     operation.maintenance.release(context.id, confirmed=True)
 
+            fields = {'name': 'Read version', 'script': 'test -r /etc/os-release', 'timeout': 20}
+            custom = save_case(store, fields)
             payload = {'kind':'board-test','serial':SERIAL,'connection_id':device.connection_id,
-                       'case':'rtc-wake','rounds':1,'request_id':'test-request-1'}
+                       'case':custom['id'],'case_revision':1,'rounds':1,'request_id':'test-request-1'}
             actions = TaskActions(manager)
             with patch('seriald_core.board_cases.BoardCase.run', run), patch('seriald_core.board_cases.shutil.which', return_value='/fixture/adb'):
                 first = actions.start(payload, device, 'web')
@@ -270,9 +325,12 @@ class BoardCasesTests(unittest.TestCase):
                 self.assertTrue(started.wait(2))
                 self.assertEqual(manager.tasks.store.get(first.payload['task']['id'])['outcome'], 'not-issued')
                 self.assertTrue(maintenance_for(manager).holds(SERIAL))
+                self.assertEqual(cases_executed[0]['script'], fields['script'])
+                save_case(store, dict(fields, id=custom['id'], revision=1, script='exit 1'))
                 duplicate = actions.start(payload, device, 'web')
                 self.assertEqual(first.payload['task']['id'], duplicate.payload['task']['id'])
-                self.assertEqual(actions.start(dict(payload, request_id='test-request-2'), device, 'web').status, 423)
+                self.assertEqual(actions.start(dict(payload, request_id='test-request-2'), device, 'web').status, 409)
+                self.assertEqual(actions.start(dict(payload, case_revision=2, request_id='test-request-3'), device, 'web').status, 423)
                 self.assertEqual(actions.start(payload, device, 'agent').status, 403)
                 release.set()
                 self.assertTrue(manager.tasks.close())

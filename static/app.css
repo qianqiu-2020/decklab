@@ -943,7 +943,16 @@
 .board-tests-head h2{margin:0;font-size:19px}
 .board-tests-head small{display:block;margin-top:4px;color:var(--ink-2);overflow-wrap:anywhere}
 .board-tests-body{padding:16px 20px 20px;overflow:auto;min-height:0}
-.board-tests-form,.board-tests-runs{border:1px solid var(--line);border-radius:9px;background:var(--surface);padding:14px}
+.board-tests-form,.board-tests-runs,.board-tests-definition{border:1px solid var(--line);border-radius:9px;background:var(--surface);padding:14px}
+.board-tests-definition{margin-bottom:12px}
+.board-tests-definition ol{margin:8px 0;padding-inline-start:22px;color:var(--ink-2);font-size:13px}
+.board-tests-definition li+li{margin-top:6px}
+.board-tests-definition pre,.board-tests-definition textarea{font:13px/1.5 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.board-tests-definition pre{margin:10px 0 0;padding:10px 12px;border-radius:6px;background:var(--surface-2)}
+.board-tests-definition textarea{width:100%;resize:vertical;padding:8px 10px;border:1px solid var(--line-strong);
+  border-radius:6px;background:var(--surface);color:var(--ink)}
+.board-tests-editor-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(7rem,10rem);gap:10px}
+#board-tests-edit-status{color:var(--ink-2);font-size:13px;margin-inline-start:8px}
 .board-tests-form{display:grid;grid-template-columns:minmax(0,1fr) 6rem 6rem auto;align-items:end;gap:8px 12px}
 .board-tests-form p,#board-tests-status,#board-tests-result p,#board-tests-log-note{margin:0;color:var(--ink-2);font-size:13px;overflow-wrap:anywhere}
 .board-tests-form .ft-field,.board-tests-runs .ft-field{margin:0;min-width:0}

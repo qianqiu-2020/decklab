@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [1.17.77] - 2026-11-24
+
+### Added
+
+- 用例库支持创建、编辑和运行 Shell 用例，可设每轮超时，并在串口归档查看实际命令、输出和退出码。
+- 内置用例可查看执行命令、前置检查和通过条件。
+
 ## [1.17.76] - 2026-11-24
 
 ### Added
@@ -354,7 +361,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.76...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.77...HEAD
+[1.17.77]: https://github.com/qianqiu-2020/decklab/compare/v1.17.76...v1.17.77
 [1.17.76]: https://github.com/qianqiu-2020/decklab/compare/v1.17.75...v1.17.76
 [1.17.75]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.17.75
 [1.17.74]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.74

@@ -109,6 +109,14 @@ commands, binding identities or migrating logs. Host and device sections are
 saved independently and have independent revisions. Control denies Agent and
 web-share credentials before proxying this API.
 
+`GET /api/board-test-cases` lists the built-in cases with their commands and
+criteria, plus saved Shell cases with their current revisions. `POST /api/board-test-cases`
+accepts `{name, script, timeout}` to create a Shell case. Include its `id` and
+`revision` to edit it. The script is limited to 8 KiB, with a per-round timeout
+of 1–180 seconds. A stale revision returns 409. Both routes require owner access.
+Start a saved case through `/api/task-start` using `kind:"board-test"`, the
+case ID in `case`, and its revision in `case_revision`.
+
 ## Requests, identity and errors
 
 GET parameters go in the query string. POST bodies are UTF-8 JSON objects with

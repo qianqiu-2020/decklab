@@ -700,7 +700,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                        'Content-Length': str(length)} if length else {}
             if route == '/api/artifact-download' and self.headers.get('Range') is not None:
                 headers['Range'] = self.headers['Range']
-            if agent_actor or route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware',
+            if agent_actor or route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware', '/api/board-test-cases',
                                        '/api/flash-capabilities', '/api/flash-events', '/api/image-catalog', '/api/image-library'):
                 headers['X-Seriald-Actor'] = agent_actor or 'web'
             if grant and grant['scope'] == 'connection':
@@ -805,7 +805,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return proxy(self)
         if route == '/api/settings':
             return self._settings_request()
-        if route in ('/api/device-preferences', '/api/control-slots'):
+        if route in ('/api/device-preferences', '/api/control-slots', '/api/board-test-cases'):
             if not self._owner_authorized():
                 return self._json(403, {'error': '只有主访问凭证可以管理此配置'})
             return self._proxy()
@@ -847,7 +847,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         route = urlparse(self.path).path
         if route == '/api/settings':
             return self._settings_request(write=True)
-        if route in ('/api/device-preferences', '/api/control-slots'):
+        if route in ('/api/device-preferences', '/api/control-slots', '/api/board-test-cases'):
             if not self._owner_authorized():
                 return self._json(403, {'error': '只有主访问凭证可以管理此配置'})
             if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':

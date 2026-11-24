@@ -1,10 +1,12 @@
-"""Fixed commands used by a single transient test service on the target."""
+"""Commands used by a single transient test service on the target."""
+import base64
 import json
 import os
 from pathlib import Path
 import re
 from selectors import DefaultSelector, EVENT_READ
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -13,31 +15,40 @@ BOOT = '/proc/sys/kernel/random/boot_id'
 SERIAL = '/sys/class/dmi/id/product_serial'
 
 
-def run_command(argv, timeout, emit):
+def run_command(argv, timeout, emit, *, capture_stdout=True):
     stdout = bytearray()
     deadline = time.monotonic() + timeout
     timed_out = False
-    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process, DefaultSelector() as pipes:
+    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          start_new_session=not capture_stdout) as process, DefaultSelector() as pipes:
+        def stop():
+            if capture_stdout:
+                process.kill()
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
         for name in ('stdout', 'stderr'):
             pipes.register(getattr(process, name), EVENT_READ, name)
         while pipes.get_map():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 timed_out = True
-                process.kill()
+                stop()
                 break
             for key, _ in pipes.select(remaining):
                 chunk = os.read(key.fileobj.fileno(), 4096)
                 if not chunk:
                     pipes.unregister(key.fileobj)
                     continue
-                if key.data == 'stdout':
+                if capture_stdout and key.data == 'stdout':
                     stdout.extend(chunk)
                 emit(key.data, chunk)
         try:
             code = process.wait(timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            process.kill()
+            stop()
             process.wait()
             timed_out, code = True, 124
     return (124 if timed_out else code), stdout.decode(errors='replace')
@@ -51,15 +62,16 @@ def identity():
     return {'serial': value, 'boot_id': Path(BOOT).read_text().strip()}
 
 
-def main(case, uart, tag, serial, boot_id):
+def main(case, uart, tag, serial, boot_id, encoded_script='', shell_timeout='60'):
     def emit(text, raw=b''):
         with open(uart, 'wb') as output:
             output.write(('\n' + text + '\n').encode('utf-8', 'replace') + raw)
 
-    def step(argv, timeout=12):
+    def step(argv, timeout=12, capture=True):
         emit(f'{tag} CMD {shlex.join(argv)}')
         try:
-            code, stdout = run_command(argv, timeout, lambda channel, raw: emit(f'{tag} {channel}', raw))
+            options = {} if capture else {'capture_stdout': False}
+            code, stdout = run_command(argv, timeout, lambda channel, raw: emit(f'{tag} {channel}', raw), **options)
         except OSError as error:
             code, stdout = 127, ''
             emit(f'{tag} stderr\n{error}')
@@ -88,6 +100,12 @@ def main(case, uart, tag, serial, boot_id):
         code, _ = step(['systemctl', '--no-block', 'reboot'])
         if code:
             done('failed', '软件重启命令失败')
+        return
+    if case == 'shell':
+        script = base64.b64decode(encoded_script, validate=True).decode()
+        emit(tag + ' ISSUED')
+        status, _ = step(['/bin/sh', '-c', script], timeout=int(shell_timeout), capture=False)
+        done('passed' if status == 0 else 'failed', f'Shell 脚本退出码 {status}')
         return
 
     modes = step(['cat', '/sys/power/mem_sleep'])[1]
