@@ -252,6 +252,53 @@ def automatic_flashing(known=None):
 
 
 class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
+    def test_loader_relocation_takes_over_endpoint_without_removing_historical_tasks(self):
+        from seriald_core.flash_tasks import _discovery
+        with automatic_flashing() as fixture:
+            executor = fixture.executor
+            executor.candidates = [usb_candidate(port=(2, 3, 3))]
+            discovery = _discovery(fixture.manager)
+            maintenance = maintenance_for(fixture.manager)
+            old_target = discovery.refresh()['targets'][0]
+            old = discovery.probe(old_target['target_id'], old_target['target_generation'])
+            old_binding = discovery.binding(old['target_id'], old['target_generation'])
+
+            def finished(context):
+                maintenance.release(context.id, confirmed=True)
+                return {'ok': True}
+
+            first = fixture.manager.tasks.start_board('ram-boot', 'web', 'client', '', finished,
+                request_id='historical-superspeed', input_digest='1' * 64, details={}, resources=old_binding.resources,
+                maintenance=maintenance, target_id=old['target_id'], target_generation=old['target_generation'])
+            self.assertEqual(self.terminal(fixture, first['id'])['state'], 'completed')
+            executor.candidates = [usb_candidate(port=(3, 4, 3))]
+            initial = discovery.refresh()['targets'][0]
+            initial = discovery.probe(initial['target_id'], initial['target_generation'])
+            binding = discovery.binding(initial['target_id'], initial['target_generation'])
+            final = dict(old_binding.device, usb_address=31)
+
+            def relocate(context):
+                try:
+                    executor.candidates[0]['device'] = final
+                    generation = discovery.accept_prepared_target(binding.target_id, binding.target_generation,
+                        final, context.id, 'fixture', board_serial='FIXTURE-SUPERSPEED-SERIAL')
+                    return {'generation': generation}
+                finally:
+                    maintenance.release(context.id, confirmed=True)
+
+            second = fixture.manager.tasks.start_board('ram-boot', 'web', 'client', '', relocate,
+                request_id='current-superspeed', input_digest='2' * 64, details={'attempt_id': 'fixture'},
+                resources=binding.resources, maintenance=maintenance,
+                target_id=initial['target_id'], target_generation=initial['target_generation'])
+            completed = self.terminal(fixture, second['id'])
+            self.assertEqual(completed['state'], 'completed', completed)
+            target = discovery.refresh()['targets'][0]
+            self.assertEqual(target['target_id'], initial['target_id'])
+            self.assertEqual(target['target_generation'], completed['result']['generation'])
+            self.assertEqual(target['usb'], final)
+            self.assertFalse(discovery.get(old['target_id'], require_present=False)['present'])
+            self.assertEqual(fixture.manager.tasks.store.get(first['id'])['flash_targets'][0]['target_id'], old['target_id'])
+
     def test_first_usb_only_board_can_be_registered_after_a_verified_loader_transition(self):
         from seriald_core.flash_tasks import _discovery
         with automatic_flashing() as fixture:

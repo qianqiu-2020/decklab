@@ -206,7 +206,8 @@ class FlashDiscovery:
             data.pop('uart_link', None)
             if row['serial'] in (None, '', serial):
                 row['serial'], row['generation'] = None, secrets.token_hex(12)
-                row['document'] = {name: data[name] for name in ('endpoint', 'fingerprint', 'device', 'mode') if name in data}
+                keys = ('endpoint', 'fingerprint', 'device', 'mode', 'superseded_by')
+                row['document'] = {name: data[name] for name in keys if name in data}
                 row['document'].update(supported=False, reason='select this USB device to read its flashing capabilities')
             self._save(row)
 
@@ -260,10 +261,15 @@ class FlashDiscovery:
             raise TaskError('multiple flashing devices occupy the same physical selector', 409)
         with self.lock:
             existing = self._rows()
+            by_endpoint = {}
+            for row in existing:
+                document = json.loads(row['document'])
+                if not document.get('superseded_by'):
+                    by_endpoint.setdefault(document.get('endpoint'), row)
             seen = set()
             for selector, candidate in candidates:
                 endpoint = '.'.join(map(str, selector['port_path']))
-                old = next((row for row in existing if json.loads(row['document']).get('endpoint') == endpoint), None)
+                old = by_endpoint.get(endpoint)
                 fingerprint = hashlib.sha256(_encoded(selector).encode()).hexdigest()
                 unchanged = old and old['present'] and json.loads(old['document']).get('fingerprint') == fingerprint
                 document = json.loads(old['document']) if unchanged else {
@@ -502,8 +508,18 @@ class FlashDiscovery:
                     used = {value['target_id'] for value in
                             self.store.db.execute('SELECT target_id FROM task_flash_targets').fetchall()}
                     for other in self._rows():
-                        if (other['id'] != target_id and other['id'] not in used
-                                and json.loads(other['document']).get('endpoint') == endpoint):
+                        data = json.loads(other['document'])
+                        if other['id'] == target_id or data.get('endpoint') != endpoint or data.get('superseded_by'):
+                            continue
+                        if maintenance_for(self.manager).target_holds(other['id']):
+                            raise TaskError('the previous USB target is reserved by another task', 423)
+                        if other['id'] in used:
+                            # Keep historical task references, but remove the old
+                            # target from future discovery at this physical path.
+                            data['superseded_by'] = target_id
+                            self.store.db.execute('UPDATE flash_targets SET present=0,document=? WHERE id=?',
+                                                  (_encoded(data), other['id']))
+                        else:
                             self.store.db.execute('DELETE FROM flash_targets WHERE id=?', (other['id'],))
                 row['document'].update(endpoint=endpoint, device=selector,
                                        fingerprint=hashlib.sha256(_encoded(selector).encode()).hexdigest())
