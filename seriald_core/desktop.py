@@ -20,6 +20,7 @@ from .transactions import TransactionError, transactions_for
 
 MAX_IMAGE = 8 * 1024 ** 2
 INPUT_FIELDS = {'click': {'x', 'y', 'button'}, 'scroll': {'x', 'y', 'steps'},
+                'drag': {'x', 'y', 'end_x', 'end_y', 'button'},
                 'key': {'keys'}, 'text': {'text'}}
 
 
@@ -182,6 +183,10 @@ class DesktopSessions:
         if self.manager.store.has_conflict(device.serial):
             raise TaskError('请先处理板卡身份冲突', 409)
         config = self.book.boards.get(device.serial)
+        if config is None and actor == 'web':
+            with self.lock:
+                config = next((s['config'] for s in self.sessions.values() if s.get('login_stage')
+                               and s['serial'] == device.serial and not s['closed']), None)
         if not config or actor != 'web' and not config.get('allow_agent', False):
             raise TaskError('此设备未配置可用的图形接入', 404)
         return config
@@ -196,8 +201,8 @@ class DesktopSessions:
         return session
 
     def public(self, session):
-        return {key: session[key] for key in ('id', 'serial', 'actor', 'client_id', 'display',
-            'display_kind', 'scale', 'created', 'needs_observation')}
+        return {key: session[key] for key in ('id', 'serial', 'actor', 'client_id', 'display', 'login_stage',
+            'display_kind', 'scale', 'created', 'needs_observation') if key in session}
 
     def list(self, device, actor):
         try:
@@ -219,11 +224,34 @@ class DesktopSessions:
             result['setup'] = self.setup.public(device)
         return result
 
-    def open(self, device, actor, client_id):
-        config = self.config(device, actor)
-        check_reservation(config)
+    def open(self, device, actor, client_id, quick=False):
+        stage = ''
+        if actor != 'web':
+            from .desktop_setup import connection_fields
+            approved = self.config(device, actor)
+            quick = (approved.get('certificate_policy') == 'accept'
+                     and self.setup.quick_eligible(device, connection_fields(approved)))
+        if quick:
+            self.setup.identified(device)
+            previous = self.book.boards.get(device.serial)
+            connection_id = device.connection_id
+            check_reservation(previous or {})
+            config, stage = self.setup.quick_config(device, previous)
+            if config is None:
+                if previous is None or stage in ('no-user', 'initial', 'finishing', 'lxqt-unavailable'):
+                    if actor != 'web':
+                        raise TaskError('请先在设备页确认桌面服务已就绪', 409)
+                    return {'manual': True, 'login_stage': stage}
+                config = previous
+        else:
+            config = self.config(device, actor)
+            previous = config
+            check_reservation(config)
         with self.lock:
-            if config != self.config(device, actor):
+            if quick and (not device.present or device.connection_id != connection_id or device.board.connection is not device):
+                raise TaskError('板卡接线已变化，请重新打开桌面', 409)
+            current = self.book.boards.get(device.serial) if quick else self.config(device, actor)
+            if previous != current:
                 raise TaskError('桌面连接设置已改变，请重新连接', 409)
             if len(self.sessions) >= 32:
                 raise TaskError('桌面会话数已达上限，请关闭不用的连接', 429)
@@ -235,7 +263,7 @@ class DesktopSessions:
             # Reserve before connecting; another request cannot create a competing session.
             session = dict(id='desktop-' + secrets.token_hex(12), serial=device.serial, actor=actor,
                 client_id=client_id, display=config['display'], display_kind=config['display_kind'],
-                scale=config.get('scale', 1), config=config, created=time.time(), needs_observation=True,
+                scale=config.get('scale', 1), config=config, login_stage=stage, created=time.time(), needs_observation=True,
                 closed=False, lock=threading.RLock(), provider=None, frames={}, mode=None, ownership=None)
             self.sessions[session['id']] = session
         try:
@@ -303,10 +331,13 @@ class DesktopSessions:
         fields = INPUT_FIELDS.get(action)
         if fields is None or set(payload) - (fields | {'action', 'sid', 'frame_id', 'request_id', 'key', 'serial', 'actor', 'client_id'}):
             raise TaskError('invalid desktop input')
-        if action in ('click', 'scroll'):
-            if any(type(payload.get(k)) is not int for k in ('x', 'y')):
+        points = [('x', 'y')] if action in ('click', 'scroll', 'drag') else []
+        if action == 'drag':
+            points.append(('end_x', 'end_y'))
+        if points:
+            if any(type(payload.get(k)) is not int for point in points for k in point):
                 raise TaskError('desktop coordinates must be integers')
-            if action == 'click' and payload.get('button') not in ('left', 'middle', 'right'):
+            if action != 'scroll' and payload.get('button') not in ('left', 'middle', 'right'):
                 raise TaskError('invalid desktop button')
             if action == 'scroll' and (type(payload.get('steps')) is not int or not -20 <= payload['steps'] <= 20):
                 raise TaskError('invalid desktop scroll steps')
@@ -337,7 +368,7 @@ class DesktopSessions:
                     session['frames'].clear()
                     session['needs_observation'] = True
                     raise TaskError('显示模式已变化，请重新截图', 409)
-                if action in ('click', 'scroll') and not (0 <= payload['x'] < width and 0 <= payload['y'] < height):
+                if any(not (0 <= payload[x] < width and 0 <= payload[y] < height) for x, y in points):
                     raise TaskError('输入坐标超出已观察画面', 409)
                 transactions = transactions_for(device)
                 with transactions.actor_scope(actor, client_id):
@@ -422,6 +453,10 @@ class DesktopSessions:
                 if actor != 'web':
                     raise TaskError('只有网页操作者可以配置桌面连接', 403)
                 result = self.setup.configure(device, payload)
+            elif route == 'quick-open':
+                if actor != 'web':
+                    raise TaskError('自动连接仅限网页主操作者', 403)
+                result = self.open(device, actor, client_id, quick=True)
             elif route == 'open':
                 result = self.open(device, actor, client_id)
             elif route == 'frame':

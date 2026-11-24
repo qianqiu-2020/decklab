@@ -272,8 +272,8 @@
                 updateHint();
               }
               agentStatus.textContent = result.sessions_closed
-                ? '授权已撤销，相关 SSH 会话已关闭'
-                : '授权已撤销；若 collector 暂不可用，请稍后关闭遗留 SSH 会话';
+                ? '授权已撤销，相关终端会话已关闭'
+                : '授权已撤销；若 collector 暂不可用，请稍后关闭遗留终端会话';
               await loadGrants();
             } catch (error) { agentStatus.textContent = error.message; revoke.disabled = false; }
           });

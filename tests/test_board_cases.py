@@ -158,6 +158,16 @@ class BoardCasesTests(unittest.TestCase):
             with self.assertRaises(ConnectionError):
                 select_transport(value, '2-1.3')
 
+    def test_registered_usb_diagnostics_distinguish_visible_interface_and_duplicate(self):
+        with patch('seriald_core.board_cases.usb_adb_interface', return_value=True):
+            with self.assertRaisesRegex(ConnectionError, '已枚举 ADB 接口'):
+                select_transport('', '2-1.3')
+        with patch('seriald_core.board_cases.usb_adb_interface', return_value=False):
+            with self.assertRaisesRegex(ConnectionError, '已登记的 USB 路径'):
+                select_transport('', '2-1.3')
+        with self.assertRaisesRegex(ConnectionError, '多个在线'):
+            select_transport('A device usb:2-1.3 transport_id:1\nB device usb:2-1.3 transport_id:2', '2-1.3')
+
     def test_auto_discovery_matches_the_board_identity_not_the_adb_serial(self):
         listing = ('cloned device usb:2-1.2 transport_id:81\n'
                    'cloned device usb:2-1.3 transport_id:82\n'

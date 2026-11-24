@@ -274,6 +274,10 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(ctl.main(['--device', 'board', 'task-start', 'identify',
                                        '--request-id', 'platform-attempt-one']), 0)
             client.submit_task.assert_called_with('identify', 'platform-attempt-one', connection_id='connection')
+            self.assertEqual(ctl.main(['--device', 'board', 'adb-command', 'uname -a', '--timeout', '12',
+                                       '--request-id', 'adb-attempt-001']), 0)
+            client.submit_task.assert_called_with('adb-command', 'adb-attempt-001', connection_id='connection',
+                                                  command='uname -a', timeout=12)
             client.task_by_request.return_value = {'task': {'id': 'task-id'}}
             self.assertEqual(ctl.main(['task-request', 'platform-attempt-one']), 0)
             client.task_by_request.assert_called_with('platform-attempt-one')

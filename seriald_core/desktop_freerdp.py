@@ -10,7 +10,7 @@ import threading
 import time
 from urllib.parse import unquote, urlsplit
 
-from .desktop_providers import LiveFrames, MAX_CLIPBOARD_BYTES, RDPDesktop, validate_live_input
+from .desktop_providers import LiveFrames, MAX_CLIPBOARD_BYTES, RDPDesktop, drag_points, validate_live_input
 from .desktop_errors import connection_error, redact
 
 
@@ -317,10 +317,21 @@ class FreeRDPDesktop:
         with self.lock:
             self._check()
             action = request.get('action')
-            if action in ('click', 'scroll'):
+            if action in ('click', 'scroll', 'drag'):
                 x, y = request.get('x'), request.get('y')
                 self._coordinates(x, y)
-                if action == 'click':
+                if action == 'drag':
+                    self._coordinates(request['end_x'], request['end_y'])
+                    button = {'left': 1, 'middle': 2, 'right': 4}[request['button']]
+                    self._call('dl_rdp_pointer', x, y, 0, 0)
+                    try:
+                        self._call('dl_rdp_pointer', x, y, button, 0)
+                        for x, y in drag_points(request):
+                            self._call('dl_rdp_pointer', x, y, button, 0)
+                            time.sleep(.016)
+                    finally:
+                        self._call('dl_rdp_pointer', x, y, 0, 0)
+                elif action == 'click':
                     button = {'left': 1, 'middle': 2, 'right': 4}.get(request.get('button'))
                     if button is None:
                         raise ValueError('invalid native RDP button')

@@ -19,7 +19,7 @@ from .api_contract import OUTCOMES
 
 
 _OUTCOME_FIELD = '_task_outcome'
-DISCRETE_TASK_KINDS = ('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload',
+DISCRETE_TASK_KINDS = ('identify', 'ssh-enable', 'ssh-connect', 'adb-connect', 'file-copy', 'file-upload',
                        'file-download', 'hardware-reset', 'hardware-power-on',
                        'hardware-power-off', 'hardware-enter-download', 'hardware-flash')
 
@@ -178,7 +178,7 @@ class TaskStore:
         """Atomically bind one execution, idempotency key and durable resource holds."""
         from .flash_store import encode_document, validate_request
         validate_request(request_id, input_digest)
-        if kind not in ('flash', 'flash-inspect', 'ram-boot', 'board-test') or not isinstance(actor, str) or not actor or len(actor) > 80:
+        if kind not in ('flash', 'flash-inspect', 'ram-boot', 'board-test', 'adb-command') or not isinstance(actor, str) or not actor or len(actor) > 80:
             raise TaskError('invalid board task kind or actor')
         if not isinstance(client_id, str) or len(client_id) > 80:
             raise TaskError('invalid board task client')
@@ -423,16 +423,20 @@ class TaskStore:
 
     def recover(self):
         with self.store.lock, self.store.db:
-            for row in self.store.db.execute("SELECT id,result FROM tasks WHERE state IN ('queued','running')").fetchall():
+            for row in self.store.db.execute("SELECT id,kind,result FROM tasks WHERE state IN ('queued','running')").fetchall():
                 result = json.loads(row['result']) if row['result'] else {}
                 if not isinstance(result, dict):
                     result = {}
-                if result.get(_OUTCOME_FIELD) != 'not-issued':
+                known_adb_exit = row['kind'] == 'adb-command' and result.get('cleanup_confirmed') is True
+                if result.get(_OUTCOME_FIELD) != 'not-issued' and not known_adb_exit:
                     result[_OUTCOME_FIELD] = 'unknown'
                 self.store.db.execute('UPDATE tasks SET result=? WHERE id=?', (json.dumps(result), row['id']))
             count = self.store.db.execute(
                 "UPDATE tasks SET state='interrupted',updated=?,error=? WHERE state IN ('queued','running')",
                 (time.time(), 'collector restarted; execution outcome may be partial; not automatically replayed')).rowcount
+            self.store.db.execute("DELETE FROM flash_resource_holds WHERE task_id IN "
+                "(SELECT id FROM tasks WHERE kind='adb-command' AND state='interrupted' AND "
+                "(json_extract(result,'$.cleanup_confirmed')=1 OR json_extract(result,'$._task_outcome')='not-issued'))")
             self.store.db.execute("UPDATE flash_resource_holds SET state='recovery',updated=? "
                                   "WHERE task_id IN (SELECT id FROM tasks WHERE state='interrupted')", (time.time(),))
             return count
@@ -557,7 +561,7 @@ class TaskManager:
                     details if details is not None else {}, selected, connection_id,
                     target_id=target_id, target_generation=target_generation)
             context = TaskContext(task_id, self.store, lambda: self._check_actor(actor), tracks_outcome)
-            worker = threading.Thread(target=self._run_board, args=(context, run, maintenance), daemon=True)
+            worker = threading.Thread(target=self._run_board, args=(context, run, maintenance, kind), daemon=True)
             self._active[task_id] = (context, worker)
             try:
                 worker.start()
@@ -568,7 +572,7 @@ class TaskManager:
                 raise
         return self.store.get(task_id)
 
-    def _run_board(self, context, run, maintenance):
+    def _run_board(self, context, run, maintenance, kind):
         entered = False
         context.defer_active_release = True
         def invoke(current):
@@ -581,7 +585,7 @@ class TaskManager:
             # Cancellation before the worker enters the adapter has no external
             # side effects. Once entered, only the adapter can confirm cleanup.
             try:
-                if not entered:
+                if not entered or kind == 'adb-command' and self.store.get(context.id)['outcome'] == 'not-issued':
                     maintenance.release(context.id, confirmed=True)
             finally:
                 with self._lock:

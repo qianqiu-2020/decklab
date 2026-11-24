@@ -53,11 +53,14 @@ UART = re.compile(r'ttyS\d{1,3}')
 START_REJECTED = re.compile(
     r'^Failed to start transient service unit: (?:Cannot set property\b.*|Unknown property\b.*|'
     r'Access denied\.?|Permission denied\.?|Invalid argument\.?)$', re.MULTILINE | re.IGNORECASE)
-IDENTITY = r"""
+READ_IDENTITY = r"""
 serial=$(cat /sys/class/dmi/id/product_serial 2>/dev/null)
 case "$(printf '%s' "$serial" | tr '[:upper:]' '[:lower:]')" in
-    ''|'to be filled by o.e.m.'|'unknown'|'none') serial=$(tr -d '\000' </proc/device-tree/serial-number);;
+    ''|'to be filled by o.e.m.'|'unknown'|'none') serial=$(tr -d '\000' 2>/dev/null </proc/device-tree/serial-number) ;;
 esac
+""" + 'if [ -z "$serial" ]; then serial=$(python3 -I -c ' + shlex.quote(
+    Path(__file__).with_name('onie_target.py').read_text(encoding='utf-8')) + ' 2>/dev/null); fi\n'
+IDENTITY = READ_IDENTITY + r"""
 printf 'serial=%s\n' "$serial"
 printf 'boot_id='; cat /proc/sys/kernel/random/boot_id
 """
@@ -161,6 +164,20 @@ def config(document):
     return document
 
 
+def usb_adb_interface(port):
+    # An enumerated USB function can survive loss of its adbd transport.
+    if not USB_PORT.fullmatch(port):
+        return False
+    for interface in Path('/sys/bus/usb/devices').glob(port + ':*'):
+        try:
+            if tuple((interface / field).read_text().strip().lower() for field in
+                     ('bInterfaceClass', 'bInterfaceSubClass', 'bInterfaceProtocol')) == ('ff', '42', '01'):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def select_transport(output, port):
     matches = []
     for line in output.splitlines():
@@ -170,8 +187,14 @@ def select_transport(output, port):
             if len(ids) != 1:
                 raise ConnectionError('USB 调试连接缺少唯一的 transport_id')
             matches.append(ids[0])
-    if len(matches) != 1:
-        raise ConnectionError('板卡 USB 调试连接未就绪或身份不唯一')
+    if not matches:
+        if usb_adb_interface(port):
+            raise ConnectionError(f'USB {port} 已枚举 ADB 接口，但控制机没有在线调试连接。请在板端串口'
+                                  '检查 systemctl status adbd；在 Debian 上可执行 systemctl restart adbd 后重试。')
+        raise ConnectionError(f'ADB 未在已登记的 USB 路径 {port} 发现在线设备。请检查调试线和板端 adbd；'
+                              '如果换过 USB 口，请核对登记的路径。')
+    if len(matches) > 1:
+        raise ConnectionError(f'USB {port} 报告了多个在线 ADB 连接，请核对控制机的 adb devices -l。')
     return matches[0]
 
 def adb_command(executable, *args, timeout=10):
@@ -179,29 +202,56 @@ def adb_command(executable, *args, timeout=10):
                           env={**os.environ, 'ADB_SERVER_SOCKET': 'tcp:127.0.0.1:5037'})
 
 
-def resolve_connection(executable, serial, registered):
+def find_transport(executable, serial, registered, *, usb_endpoints=None):
     listing = adb_command(executable, 'devices', '-l', timeout=3)
     if listing.returncode:
         raise ConnectionError('无法读取控制机的 USB 调试连接')
     ports = {registered['usb_port']} if registered else {
-        field[4:] for line in listing.stdout.splitlines() for field in line.split()
+        field[4:] for fields in map(str.split, listing.stdout.splitlines()) if len(fields) >= 2 and fields[1] == 'device'
+        for field in fields[2:]
         if field.startswith('usb:') and USB_PORT.fullmatch(field[4:])}
+    rows = [fields for fields in map(str.split, listing.stdout.splitlines()) if len(fields) >= 2
+            and (fields[1] in ('device', 'offline', 'unauthorized') or fields[1:3] == ['no', 'permissions'])]
+    relevant = [row for row in rows if len(row) >= 2 and
+                (not registered or 'usb:' + registered['usb_port'] in row[2:])]
+    if not registered and not rows:
+        raise ConnectionError('控制机 ADB 列表为空。请检查 USB 调试线，并在板端串口确认 adbd 正在运行。')
+    if relevant and all(row[1] == 'no' for row in relevant):
+        raise ConnectionError('控制机没有访问 ADB USB 设备的权限，请检查 USB 设备权限。')
+    if relevant and all(row[1] == 'unauthorized' for row in relevant):
+        raise ConnectionError('USB 调试未授权，请在板端授权控制机的 ADB 密钥')
+    if relevant and all(row[1] == 'offline' for row in relevant):
+        raise ConnectionError('USB 调试连接离线，请等待板端 ADB 服务就绪')
+    candidates = [(port, select_transport(listing.stdout, port)) for port in sorted(ports)]
+    if usb_endpoints and not registered and any(row[1] == 'device' and not any(
+            field.startswith('usb:') and USB_PORT.fullmatch(field[4:]) for field in row[2:]) for row in relevant):
+        extra = usb_endpoints()
+        known = {endpoint for _, endpoint in candidates}
+        candidates.extend((port, endpoint) for port, endpoint in extra if endpoint not in known)
     matches = []
-    for port in sorted(ports):
+    deadline = time.monotonic() + 8
+    for port, endpoint in candidates:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ConnectionError('USB 调试连接探测超时，请检查接线或登记板卡 USB 路径')
         try:
-            endpoint = select_transport(listing.stdout, port)
             response = adb_command(executable, '-t', endpoint, 'shell',
-                IDENTITY + "printf 'uid='; id -u; printf 'consoles='; cat /sys/class/tty/console/active", timeout=3)
+                IDENTITY + "printf 'uid='; id -u; printf 'consoles='; cat /sys/class/tty/console/active",
+                timeout=min(3, remaining))
         except (OSError, subprocess.TimeoutExpired):
             continue
         facts = dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
         if not response.returncode and facts.get('serial') == serial and BOOT_ID.fullmatch(facts.get('boot_id', '')):
-            matches.append((port, facts))
+            matches.append((port, endpoint, facts))
     if len(matches) > 1:
         raise ConnectionError('多个 USB 调试连接报告同一板卡身份，请核对接线')
     if not matches:
         raise ConnectionError('未找到与当前板卡匹配的在线 USB 调试连接，请检查数据线和板端 ADB 服务')
-    port, facts = matches[0]
+    return matches[0]
+
+
+def resolve_connection(executable, serial, registered):
+    port, _, facts = find_transport(executable, serial, registered)
     if facts.get('uid') != '0':
         raise ConnectionError('当前板卡的 USB 调试连接缺少 root 权限')
     if registered:
@@ -210,6 +260,26 @@ def resolve_connection(executable, serial, registered):
     if len(consoles) != 1:
         raise ConnectionError('无法唯一确认板端串口控制台，请在硬件配置中登记接线')
     return {'usb_port':port, 'uart':'/dev/' + consoles[0], 'cases':['rtc-wake']}
+
+
+def adb_binding(manager, device):
+    """Return a fresh co-located USB observation for a registered board."""
+    serial, generation = device.serial, device.connection_id
+    if not serial or not device.present or manager.store.has_conflict(serial):
+        raise TaskError('板卡尚未在线或身份有冲突', 409)
+    executable = shutil.which('adb')
+    if not executable:
+        raise TaskError('控制机缺少 adb', 503)
+    try:
+        port, _, facts = find_transport(executable, serial, manager.hardware.board_tests.get(serial))
+    except ConnectionError as error:
+        raise TaskError(str(error), 409) from error
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise TaskError('控制机暂时无法读取 USB 调试连接', 503) from error
+    if (not USB_PORT.fullmatch(port) or device.serial != serial or device.connection_id != generation
+            or not device.present or manager.store.has_conflict(serial)):
+        raise TaskError('USB 连接已变化，请重新检测', 409)
+    return {'serial': serial, 'connection_id': generation, 'usb_port': port, 'boot_id': facts['boot_id']}
 
 
 def case_availability(manager, device):
@@ -460,21 +530,44 @@ class BoardCase:
                             result.update(current_command=index, total_commands=len(steps))
                         current.update(trigger='unknown', service=unit)
                         result.update(in_flight=number, service=unit)
+                        receipt = {'command': payload, 'started_at': time.time(), 'state': 'running',
+                                   'usb_port': self.row['usb_port'], 'transport_id': endpoint,
+                                   'round': number, 'exit_code': None,
+                                   'serial_window': {'connection_id': evidence.connection, 'start_off': evidence.offset}}
+                        result['adb_receipt'] = receipt
                         context.store.update(context.id, result=result)
                         in_flight = True
                         try:
                             submitted = self.command('-t', endpoint, 'shell', payload)
                             current['submit'] = {'exit_code': submitted.returncode, 'stdout': submitted.stdout[:2048],
                                                  'stderr': submitted.stderr[:2048]}
+                            receipt.update(adb_exit_code=submitted.returncode, finished_at=time.time())
+                            for name in ('stdout', 'stderr'):
+                                data = getattr(submitted, name).encode()
+                                receipt[name] = data[:1024].decode(errors='replace')
+                                receipt[name + '_truncated_bytes'] = max(0, len(data) - 1024)
                             if submitted.returncode == 0:
                                 current['trigger'] = 'acknowledged'
+                                receipt.update(state='exited', exit_code=0)
                             elif rejected := START_REJECTED.search(submitted.stderr[:2048]):
                                 current.update(trigger='not-issued', status='failed',
                                                reason='临时服务启动失败：' + rejected[0][:220])
                                 in_flight = False
+                                receipt.update(state='rejected', exit_code=submitted.returncode)
                                 context.mark_outcome('not-issued' if index == 1 else 'observed')
-                        except (OSError, subprocess.TimeoutExpired):
+                            else:
+                                receipt['state'] = 'unconfirmed'
+                        except (OSError, subprocess.TimeoutExpired) as error:
                             current['submit'] = {'error': '触发回执未收到，继续观察原轮次'}
+                            receipt.update(state='unconfirmed', finished_at=time.time())
+                            if isinstance(error, subprocess.TimeoutExpired):
+                                for name in ('stdout', 'stderr'):
+                                    data = getattr(error, name) or b''
+                                    if isinstance(data, str):
+                                        data = data.encode()
+                                    receipt[name] = data[:1024].decode(errors='replace')
+                                    receipt[name + '_truncated_bytes'] = max(0, len(data) - 1024)
+                        context.store.update(context.id, result=result)
                         if in_flight:
                             current['status'], current['reason'] = self.observe(tag, before, baseline, evidence, current, **observation)
                             in_flight = not current.get('round_finished', False)

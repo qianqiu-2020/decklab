@@ -157,6 +157,14 @@ class LiveFrames:
                 self.close('native desktop frame failed')
 
 
+def drag_points(request):
+    x, y = request['x'], request['y']
+    dx, dy = request['end_x'] - x, request['end_y'] - y
+    steps = max(1, min(24, (max(abs(dx), abs(dy)) + 7) // 8))
+    for i in range(1, steps + 1):
+        yield x + round(dx * i / steps), y + round(dy * i / steps)
+
+
 def validate_live_input(request):
     """Defence in depth at the native-process boundary (no secrets in errors)."""
     kind = request.get('type')
@@ -346,11 +354,40 @@ class VNCDesktop:
                 return self
         class Factory(VNCDoToolFactory):
             protocol = UnicodeClient
-        url = urlsplit(config['secret_url'])
-        if url.scheme != 'vnc+plain' or not url.hostname:
-            raise ValueError('unsupported VNC connection')
-        self.client = api.connect(url.hostname + '::' + str(url.port or 5900),
-            factory_class=Factory, password=unquote(url.password or url.username or ''), timeout=15)
+        if 'usb_vnc_argv' in config:
+            from twisted.internet import reactor
+            from twisted.internet.endpoints import ProcessEndpoint, StandardErrorBehavior
+            argv = config['usb_vnc_argv']
+
+            class USBProxy(api.ThreadedVNCClientProxy):
+                def connect(self, host, port, family):
+                    def launch():
+                        from twisted.internet.defer import maybeDeferred
+                        env = os.environ.copy()
+                        if getattr(sys, 'frozen', False):
+                            original = env.pop('LD_LIBRARY_PATH_ORIG', '')
+                            if original:
+                                env['LD_LIBRARY_PATH'] = original
+                            else:
+                                env.pop('LD_LIBRARY_PATH', None)
+                        def attach():
+                            endpoint = ProcessEndpoint(reactor, argv[0], args=argv, env=env,
+                                                       errFlag=StandardErrorBehavior.DROP)
+                            return endpoint.connect(self.factory)
+                        def failed(reason):
+                            if not self.factory.deferred.called:
+                                self.factory.deferred.errback(reason)
+                        maybeDeferred(attach).addErrback(failed)
+                    reactor.callFromThread(launch)
+
+            # vncdotool requires a display name; USBProxy opens only the selected adb process.
+            self.client = api.connect('localhost', factory_class=Factory, proxy=USBProxy, timeout=15)
+        else:
+            url = urlsplit(config['secret_url'])
+            if url.scheme != 'vnc+plain' or not url.hostname:
+                raise ValueError('unsupported VNC connection')
+            self.client = api.connect(url.hostname + '::' + str(url.port or 5900),
+                factory_class=Factory, password=unquote(url.password or url.username or ''), timeout=15)
         try:
             self.screenshot()  # Do not report a connected session before authentication/framebuffer setup.
         except Exception:
@@ -376,9 +413,18 @@ class VNCDesktop:
 
     def input(self, request):
         action = request['action']
-        if action in ('click', 'scroll'):
+        if action in ('click', 'scroll', 'drag'):
             self.client.mouseMove(request['x'], request['y'])
-            if action == 'click':
+            if action == 'drag':
+                button = {'left': 1, 'middle': 2, 'right': 3}[request['button']]
+                try:
+                    self.client.mouseDown(button)
+                    for x, y in drag_points(request):
+                        self.client.mouseMove(x, y)
+                        time.sleep(.016)
+                finally:
+                    self.client.mouseUp(button)
+            elif action == 'click':
                 self.client.mousePress({'left': 1, 'middle': 2, 'right': 3}[request['button']])
             else:
                 for _ in range(abs(request['steps'])):
@@ -614,9 +660,18 @@ class RDPDesktop:
             if error:
                 raise RuntimeError('RDP input failed')
         action = request['action']
-        if action in ('click', 'scroll'):
+        if action in ('click', 'scroll', 'drag'):
             x, y = request['x'], request['y']
-            if action == 'click':
+            if action == 'drag':
+                button = getattr(MOUSEBUTTON, 'MOUSEBUTTON_' + request['button'].upper())
+                try:
+                    await checked(self.connection.send_mouse(button, x, y, True))
+                    for x, y in drag_points(request):
+                        await checked(self.connection.send_mouse(MOUSEBUTTON.MOUSEBUTTON_HOVER, x, y, False))
+                        await asyncio.sleep(.016)
+                finally:
+                    await checked(self.connection.send_mouse(button, x, y, False))
+            elif action == 'click':
                 button = getattr(MOUSEBUTTON, 'MOUSEBUTTON_' + request['button'].upper())
                 for pressed in (True, False):
                     await checked(self.connection.send_mouse(button, x, y, pressed))

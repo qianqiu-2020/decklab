@@ -114,7 +114,7 @@
     }
     function combination(codes, clipboard) {
       var keysyms = {ControlLeft: 0xffe3, AltLeft: 0xffe9, ShiftLeft: 0xffe1,
-        MetaLeft: 0xffeb, Delete: 0xffff, Tab: 0xff09, Escape: 0xff1b, KeyC: 0x63, KeyV: 0x76};
+        MetaLeft: 0xffeb, ArrowRight: 0xff53, Delete: 0xffff, Tab: 0xff09, Escape: 0xff1b, KeyC: 0x63, KeyV: 0x76};
       if (!writable || codes.some(function (code) { return !keysyms[code]; })) return false;
       if (clipboard) ['MetaLeft','MetaRight'].forEach(function (code) {
         if (keys.has(code)) emitKey(keys.get(code), code, false);
@@ -219,6 +219,7 @@
     var capabilities = {}, needFullFrame = true, hasObserved = false;
     var releaseBarrier = '', pendingIntent = null;
     var availability = null, setupValue = null, candidates = [], candidateId = '', detecting = false, savingSetup = false;
+    var settingsRead = null, opening = null, sessionStage = '', seatRetry = null, seatRetried = false, reconnecting = false;
     var suggestedGdmUser = false;
     var statusValue = '点击画面后控制桌面', overlayValue = '连接后显示远程桌面';
     var ackTimeout = options.ackTimeout || 8000;
@@ -228,15 +229,30 @@
     function translate(text) { return global.SerialdI18n ? global.SerialdI18n.translate(text) : text; }
     function status(text) { statusValue = text; $('desktop-status').textContent = translate(text); }
     function overlay(text) { overlayValue = text || ''; $('desktop-overlay').textContent = translate(overlayValue); $('desktop-overlay').hidden = !text; }
+    function loginGuide(stage) {
+      var text = {'lxqt-initial':'Bianbu 首次设置。请在画面中选择语言并创建用户，进入桌面后可重新连接。',
+        'lxqt-finishing':'Bianbu 用户已创建。请在向导中点击「重启系统」，重启后可再次打开桌面。',
+        'lxqt-greeter':'Bianbu 登录界面。请使用板上的账号登录。',
+        'lxqt-unavailable':'未找到可共享的 Bianbu Wayland 桌面。请核对板上的图形登录服务和 wayvnc。',
+        initial:'首次设置：按画面提示创建普通用户，完成后用新账号登录 Debian。',
+        finishing:'普通用户已创建。请在首次设置向导中完成最后一步，再重新打开桌面。',
+        'no-user':'板上尚无普通用户，未检测到活动的首次设置向导。请在板上显示器完成初始化，或检查 GDM 服务。'}[stage];
+      $('desktop-login-stage').textContent = text ? translate(text) : '';
+      $('desktop-move-wizard').hidden = stage !== 'initial' && stage !== 'finishing';
+      $('desktop-login-guide').hidden = !text;
+      return text || '';
+    }
     function connectionError(error) {
       var result = error.result || {};
       $('desktop-error').hidden = false;
-      $('desktop-error').open = true;
+      $('desktop-error').open = false;
       $('desktop-error-details').textContent = result.details ? JSON.stringify(result.details, null, 2) : error.message;
       var saved = setupValue && setupValue.connection;
       $('desktop-connect-without-pin').hidden = !(result.code === 'desktop-certificate-rejected'
         && saved && saved.provider === 'rdp' && saved.host && saved.password_saved && saved.certificate_policy !== 'accept');
-      overlay(error.message); status(error.message);
+      var summary = {'desktop-certificate-rejected':'远程桌面证书与连接设置不符。请核对板卡，或在连接设置中更新指纹。',
+        'desktop-authentication-failed':'远程桌面拒绝了入口凭据，请在连接设置中更新账号和密码。'}[result.code];
+      overlay(summary || error.message); status('');
     }
     function fullscreenLabel() {
       $('desktop-fullscreen').textContent = translate(global.document && global.document.fullscreenElement === $('desktop-panel') ? '退出全屏' : '全屏');
@@ -379,6 +395,8 @@
       $('detail').classList.add('desktop-active'); $('b-desktop').setAttribute('aria-selected', 'true');
     }
     function hidePanel() {
+      clearTimeout(seatRetry); seatRetry = null;
+      if (settingsRead) { settingsRead.abort(); settingsRead = null; }
       var wasVisible = visible;
       visible = false; pendingIntent = null;
       if (clipboardTimer) clearTimeout(clipboardTimer); clipboardTimer = null;
@@ -407,7 +425,7 @@
       $('b-desktop').title = scope(ctx) ? '' : '请先识别设备，再连接远程桌面';
       if (scope(ctx) === selected) return;
       $('desktop-error').hidden = true; $('desktop-error-details').textContent = '';
-      selected = scope(ctx); closePanel(); target = null; sid = ''; previousSession = null;
+      selected = scope(ctx); sessionStage = ''; seatRetried = false; reconnecting = false; loginGuide(''); closePanel(); target = null; sid = ''; previousSession = null;
       availability = null; setupValue = null; candidates = []; candidateId = '';
       detecting = false; savingSetup = false; $('desktop-detect').disabled = false; $('desktop-save-connect').disabled = false;
       $('b-desktop').hidden = !ctx;
@@ -417,14 +435,7 @@
       $('desktop-connection').hidden = true;
       $('desktop-services').textContent = ''; $('desktop-services-field').hidden = true;
       $('desktop-detect-status').textContent = ''; connectionMessage('');
-      if (!selected) return;
-      var generation = version, serial = selected;
-      client.request(query(ctx, 'sessions')).then(function (data) {
-        if (version !== generation || selected !== serial) return;
-        availability = data; setupValue = data.setup || null;
-        $('desktop-settings').hidden = !setupValue;
-        if (setupValue && $('desktop-connection').hidden) fillSetup();
-      }).catch(function () { if (version === generation) selected = ''; });
+      $('desktop-host').value = '';
     }
     function bytes(encoded) {
       if (typeof encoded !== 'string' || encoded.length > 32 * 1024 * 1024) throw new Error('桌面画面数据过大或无效');
@@ -519,7 +530,10 @@
         $('desktop-text').value = message.text;
         if (inflight.copyLocal && message.text) copyToBrowser(message.text, ctx, generation, connection);
         else status('已读取远端剪贴板');
-      } else if (message.type === 'error') stop(message.error || '桌面操作结果未确认，请重新连接后观察。');
+      } else if (message.type === 'error') {
+        if (message.code === 'desktop-stream-stopped') streamEnded(message.error);
+        else stop(message.error || '桌面操作结果未确认，请重新连接后观察。');
+      }
       else throw new Error('桌面连接返回了未知消息');
     }
     function connect(ctx, generation) {
@@ -562,8 +576,8 @@
             receive(JSON.parse(event.data), ctx, generation, connection);
           } catch (error) { if (current(ctx, generation) && socket === connection) stop(error.message); }
         };
-        connection.onerror = function () { if (current(ctx, generation) && socket === connection) stop('桌面连接失败，请检查服务后重新连接。'); };
-        connection.onclose = function () { if (current(ctx, generation) && socket === connection) stop('桌面连接已断开，请手动重新连接画面。'); };
+        connection.onerror = function () { if (current(ctx, generation) && socket === connection) stop('远程桌面已建立，但网页未连上画面通道。请点击「重新连接画面」重试。'); };
+        connection.onclose = function () { if (current(ctx, generation) && socket === connection) streamEnded('桌面连接已断开，请手动重新连接画面。'); };
       }).catch(function (error) { if (current(ctx, generation)) stop('桌面连接失败：' + error.message); });
     }
     function connectionMessage(message) { $('desktop-connection-status').textContent = translate(message); }
@@ -596,7 +610,7 @@
       $('desktop-trust-field').hidden = !pinned || !$('desktop-certificate').value.trim();
       $('desktop-rdp-help').hidden = !rdp || !!family && family !== 'debian';
       var stockHelp = {buildroot:'Buildroot 默认不提供远程桌面；自行启用后可手动连接。',
-        bianbu:'Bianbu 默认未开启远程桌面，请先在系统中启用 VNC 或 RDP。'}[family];
+        bianbu:'已连接 USB 调试线的 Bianbu LXQt 可直接打开桌面。手动使用网络连接时，请先在板上启用 VNC 或 RDP。'}[family];
       $('desktop-stock-help').hidden = !stockHelp || !!(setupValue.connection || {}).provider;
       $('desktop-stock-help').textContent = stockHelp ? translate(stockHelp) : '';
     }
@@ -609,7 +623,9 @@
       $('desktop-input-tools').hidden = true; $('desktop-session-actions').hidden = true;
       $('desktop-clipboard').hidden = true; $('desktop-settings').hidden = false;
       $('desktop-title').textContent = translate('远程桌面');
-      connectionMessage(sid ? '请先断开现有连接，再修改设置。' : '');
+      $('desktop-save-connect').textContent = translate(sid ? '保存并重新连接' : '保存并连接');
+      $('desktop-save-connect').disabled = opening === version || !!detecting || !!savingSetup;
+      connectionMessage('');
       if (automatic && setupValue.os_family !== 'buildroot') detectServices();
     }
     function chooseService() {
@@ -649,7 +665,7 @@
     }
     function saveConnection(event) {
       if (event) event.preventDefault();
-      var ctx = options.getView(); if (!scope(ctx) || !setupValue || savingSetup || detecting) return;
+      var ctx = options.getView(); if (!scope(ctx) || !setupValue || savingSetup || detecting || opening === version) return;
       var generation = version, marker = {}, saved = setupValue.connection || {};
       var provider = $('desktop-protocol').value, host = $('desktop-host').value.trim(), port = Number($('desktop-port').value);
       var username = provider === 'rdp' ? $('desktop-user').value : '';
@@ -670,30 +686,51 @@
       else if (same && saved.password_saved) payload.reuse_password = true;
       if (candidateId) payload.candidate_id = candidateId;
       savingSetup = marker; $('desktop-save-connect').disabled = true; $('desktop-detect').disabled = true; connectionMessage('正在保存连接设置…');
-      client.request('/api/desktop/configure', payload).then(function (data) {
+      var closing = sid;
+      var release = closing ? client.request('/api/desktop/close', {key:ctx.key, serial:ctx.serial,
+        sid:closing, client_id:options.clientId || ''}).catch(function (error) {
+        if (error.status !== 404) throw error;
+      }) : Promise.resolve();
+      release.then(function () {
+        if (!current(ctx, generation)) return;
+        if (closing && sid === closing) { sid = ''; detach(); }
+        return client.request('/api/desktop/configure', payload);
+      }).then(function (data) {
         if (!current(ctx, generation)) return;
         setupValue = data.setup; availability = {supported:true, setup:setupValue}; fillSetup();
-        $('desktop-password').value = ''; connectionMessage('连接设置已保存'); open(true);
+        $('desktop-password').value = ''; connectionMessage('连接设置已保存'); open(true, true);
       }).catch(function (error) { if (current(ctx, generation)) connectionMessage(error.message); })
         .finally(function () { if (savingSetup === marker) { savingSetup = false; $('desktop-save-connect').disabled = false; $('desktop-detect').disabled = !!detecting; } });
     }
-    function open(force) {
+    function open(force, manual) {
       var ctx = options.getView(); if (!scope(ctx)) return;
       if (!availability) {
         showPanel(); overlay('正在读取桌面连接设置…');
-        var waiting = version;
-        client.request(query(ctx, 'sessions')).then(function (data) {
-          if (!current(ctx, waiting)) return;
+        if (settingsRead) return;
+        var waiting = version, controller = new AbortController();
+        settingsRead = controller;
+        var timer = setTimeout(function () { controller.abort(); }, options.settingsTimeout || 10000);
+        client.request(query(ctx, 'sessions'), undefined, {signal:controller.signal}).then(function (data) {
+          if (settingsRead !== controller || !current(ctx, waiting)) return;
           availability = data; setupValue = data.setup || null;
           if (setupValue) fillSetup();
-          open(force);
-        }).catch(function (error) { if (current(ctx, waiting)) { overlay(error.message); status(error.message); } });
+          open(force, manual);
+        }).catch(function (error) {
+          if (settingsRead !== controller || !current(ctx, waiting)) return;
+          var message = controller.signal.aborted ? '读取桌面设置超时，请点击「重新连接画面」重试。' : error.message;
+          overlay(message); status(message);
+        }).finally(function () {
+          clearTimeout(timer);
+          if (settingsRead === controller) settingsRead = null;
+        });
         return;
       }
-      if (!availability.supported && setupValue) { showSetup(true); return; }
+      var quick = !manual && setupValue && setupValue.quick_connect && options.canQuickConnect && options.canQuickConnect();
+      if (!quick && !availability.supported && setupValue) { showSetup(true); return; }
       $('desktop-connection').hidden = true; $('desktop-screen').hidden = false; $('desktop-input-tools').hidden = false;
       $('desktop-session-actions').hidden = false; $('desktop-settings').hidden = !setupValue;
-      if (force !== true && visible && target && target.serial === ctx.serial) { if (surface) surface.focus(); return; }
+      if (opening === version) return;
+      if (force !== true && visible && ready && surface && target && target.serial === ctx.serial) { surface.focus(); return; }
       if (force !== true && target && target.serial === ctx.serial && socket && socket.readyState < 2) {
         showPanel(); resumePanel(target, version, socket); return;
       }
@@ -702,9 +739,22 @@
       if (sid && force !== true) { connect(target, generation); return; }
       overlay('正在连接远程桌面…'); status('正在连接…');
       $('desktop-error').hidden = true; $('desktop-error-details').textContent = '';
-      client.request('/api/desktop/open', {key: ctx.key, serial: ctx.serial, client_id: options.clientId || ''}).then(function (data) {
+      loginGuide('');
+      opening = generation;
+      client.request(quick ? '/api/desktop/quick-open' : '/api/desktop/open',
+        {key: ctx.key, serial: ctx.serial, client_id: options.clientId || ''}).then(function (data) {
         if (!current(ctx, generation)) return;
-        sid = data.session.id; return connect(target, generation);
+        if (data.manual) {
+          showSetup(true);
+          connectionMessage(loginGuide(data.login_stage) || '暂未能自动取得桌面入口，请选择服务并填写入口凭据。');
+          return;
+        }
+        sessionStage = data.session.login_stage || ''; loginGuide(sessionStage);
+        sid = data.session.id;
+        if (!$('desktop-connection').hidden) {
+          $('desktop-save-connect').textContent = translate('保存并重新连接'); return;
+        }
+        return connect(target, generation);
       }).catch(function (error) {
         if (!current(ctx, generation)) return;
         connectionError(error);
@@ -712,14 +762,21 @@
           if (!current(ctx, generation)) return;
           previousSession = data.sessions && data.sessions[0]; $('desktop-replace').hidden = !previousSession;
         }).catch(function () {});
+      }).finally(function () {
+        if (opening !== generation) return;
+        opening = null; $('desktop-save-connect').disabled = !!detecting || !!savingSetup;
       });
     }
-    function dismissSetup() {
+    function dismissSetup(resume) {
       if ($('desktop-connection').hidden) return;
+      if (resume === true && sid && !savingSetup) {
+        hideSettings(); $('desktop-screen').hidden = false;
+        open(); return;
+      }
       closePanel(); availability = null; detecting = false; savingSetup = false;
       $('desktop-detect').disabled = false; $('desktop-save-connect').disabled = false;
     }
-    $('desktop-setup-close').addEventListener('click', dismissSetup);
+    $('desktop-setup-close').addEventListener('click', function () { dismissSetup(true); });
     $('desktop-credentials-stage').addEventListener('click', function () {
       if (options.stageSerialCommand) $('desktop-command-status').textContent = translate(options.stageSerialCommand($('desktop-credentials-command').textContent));
     });
@@ -728,7 +785,7 @@
     });
     $('b-desktop').addEventListener('click', function () { if (!$('desktop-connection').hidden) { $('desktop-host').focus(); return; } if (!visible && !sid) availability = null; open(); });
     $('desktop-settings').addEventListener('click', function () {
-      if (sid) { status('请先断开现有连接，再修改设置。'); return; }
+      if (setupValue) { fillSetup(); showSetup(false); return; }
       var ctx = options.getView(), generation = version;
       client.request(query(ctx, 'sessions')).then(function (data) {
         if (!current(ctx, generation)) return;
@@ -763,8 +820,34 @@
       if (event.target && event.target.dataset && event.target.dataset.kind && event.target.dataset.kind !== 'serial') dismissSetup();
     }, true);
     $('desktop-close').addEventListener('click', hidePanel);
+    function reconnect() {
+      clearTimeout(seatRetry); seatRetry = null;
+      if (reconnecting || opening === version) return;
+      if (!sid || !target) { open(true); return; }
+      var ctx = target, generation = version, closing = sid;
+      reconnecting = true;
+      detach();
+      client.request('/api/desktop/close', {key:ctx.key, serial:ctx.serial, sid:closing, client_id:options.clientId || ''})
+        .catch(function (error) { if (error.status !== 404) throw error; })
+        .then(function () {
+          if (!current(ctx, generation) || sid !== closing) return;
+          sid = ''; if (panelVisible()) open(true);
+        }).catch(function (error) { if (current(ctx, generation)) stop(error.message); })
+        .finally(function () { if (selected === ctx.serial) reconnecting = false; });
+    }
+    function streamEnded(message) {
+      var handover = sessionStage === 'lxqt-greeter' && hasObserved && panelVisible() && !inflight && !seatRetried;
+      var ctx = target, generation = version;
+      stop(handover ? '正在从登录界面切换到桌面…' : message);
+      if (handover) {
+        seatRetried = true;
+        seatRetry = setTimeout(function () {
+          if (current(ctx, generation) && panelVisible() && !socket) reconnect();
+        }, options.seatRetryDelay || 1800);
+      }
+    }
     $('desktop-refresh').addEventListener('click', function () {
-      open(true);
+      seatRetried = false; reconnect();
     });
     $('desktop-disconnect').addEventListener('click', function () {
       if (!target || !sid) return;
@@ -791,6 +874,9 @@
         }).catch(function (error) { if (current(ctx, generation)) status(error.message); });
     });
     $('desktop-release').addEventListener('click', function () { if (surface) surface.release('manual'); });
+    $('desktop-move-wizard').addEventListener('click', function () {
+      toolbarIntent({codes: ['MetaLeft', 'ShiftLeft', 'ArrowRight']});
+    });
     $('desktop-super').addEventListener('click', function () { toolbarIntent({codes: ['MetaLeft']}); });
     $('desktop-key').addEventListener('click', function () { toolbarIntent({codes: $('desktop-keys').value.split(' ')}); });
     $('desktop-scale').addEventListener('change', function () { if (surface) surface.scale($('desktop-scale').value); });

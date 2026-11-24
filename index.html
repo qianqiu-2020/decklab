@@ -17,14 +17,14 @@
   <div class="top">
     <h1><img class="brand-logo" src="/static/decklab.svg" width="32" height="32" alt="">DeckLab</h1>
     <span id="decklab-version" class="mono" aria-label="DeckLab Web 版本">版本未知</span>
-    <button id="b-image-store" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-transfer"/></svg>镜像商店</button>
+    <button id="b-image-store" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-building-store"/></svg>镜像商店</button>
     <button type="button" class="menu-trigger" popovertarget="platform-menu" aria-controls="platform-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>全站分享</button>
     <div id="platform-menu" class="action-menu" popover aria-label="全站分享">
-      <button id="b-share" type="button" hidden title="创建可访问全部设备的网页链接">网页链接（全部设备）</button>
-      <button id="b-agent-share-all" type="button" disabled title="默认授权全部设备，可在授权范围中更改">AI 授权（全部设备）</button>
+      <button id="b-share" type="button" hidden title="创建可访问全部设备的网页链接"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-link"/></svg>网页链接（全部设备）</button>
+      <button id="b-agent-share-all" type="button" disabled title="默认授权全部设备，可在授权范围中更改"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-robot"/></svg>AI 授权（全部设备）</button>
     </div>
-    <button id="b-shortcuts" type="button" aria-haspopup="dialog" aria-controls="device-shortcuts"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>快捷键</button>
-    <button id="b-settings" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>系统配置</button>
+    <button id="b-shortcuts" type="button" aria-haspopup="dialog" aria-controls="device-shortcuts"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-keyboard"/></svg>快捷键</button>
+    <button id="b-settings" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>系统配置</button>
     <select id="language-select" aria-label="Language / 语言" title="Language / 语言" data-language-select data-i18n-ignore><option value="zh-CN">中文</option><option value="en">English</option></select>
     <span id="share-status" role="status"></span>
     <span class="conn"><span class="dot" id="conn-dot"></span><span id="conn-txt">连接中…</span></span>
@@ -45,11 +45,11 @@
     <select id="device-filter" aria-label="设备状态"><option value="all">全部设备</option><option value="active">待识别＋在线</option><option value="pending">待识别</option><option value="online">在线</option><option value="offline">历史 / 离线</option></select>
     <select id="device-sort" aria-label="设备排序"><option value="status">状态优先</option><option value="manual">手动排序</option></select>
     <button id="device-clear-filters" type="button" hidden>清除筛选</button>
-    <button id="b-home-flash-menu" type="button" class="menu-trigger" popovertarget="home-flash-menu" aria-controls="home-flash-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-transfer"/></svg>刷机与启动</button>
+    <button id="b-home-flash-menu" type="button" class="menu-trigger" popovertarget="home-flash-menu" aria-controls="home-flash-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-tools"/></svg>刷机与启动</button>
     <div id="home-flash-menu" class="action-menu" popover aria-label="刷机与启动">
-      <button id="b-flash-discover" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-transfer"/></svg>刷机工作区</button>
+      <button id="b-flash-discover" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-database-import"/></svg>刷机工作区</button>
       <button id="b-fast-flash" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>URL 极速刷机</button>
-      <button id="b-ram-boot" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-terminal"/></svg>内存启动</button>
+      <button id="b-ram-boot" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-cpu-2"/></svg>内存启动</button>
     </div>
   </div>
   <details class="serial-warning" id="serial-warning" hidden>
@@ -68,39 +68,39 @@
   <div class="detail" id="detail" hidden>
     <div class="hd">
       <div class="board-heading">
-      <button id="b-device-pane" class="icon-button" type="button" aria-controls="device-pane" aria-expanded="true" aria-label="收起设备列表" title="收起设备列表"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-compare"/></svg></button>
+      <button id="b-device-pane" class="icon-button" type="button" aria-controls="device-pane" aria-expanded="true" aria-label="收起设备列表" title="收起设备列表"><svg class="icon" aria-hidden="true"><use id="device-pane-icon" href="/static/icons.svg#i-layout-sidebar-left-collapse"/></svg></button>
       <button class="nm" id="d-name" type="button" title="点击修改设备名称">—</button>
       <span class="k" id="d-dev">—</span>
       <span class="k" id="d-key">—</span>
       </div>
       <div class="sp">
-        <button type="button" class="menu-trigger" popovertarget="device-menu" aria-controls="device-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>设备</button>
+        <button type="button" class="menu-trigger" popovertarget="device-menu" aria-controls="device-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-devices"/></svg>设备</button>
         <div id="device-menu" class="action-menu" popover aria-label="设备">
           <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-info"/></svg>设备信息</button>
-          <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>识别设备</button>
-          <button id="b-probe-settings" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>探测设置</button>
-          <button id="b-device-share" type="button" hidden title="链接默认打开此设备；网页授权仍可访问全部设备"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>此设备链接（全站权限）</button>
+          <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-scan"/></svg>识别设备</button>
+          <button id="b-probe-settings" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-radar"/></svg>探测设置</button>
+          <button id="b-device-share" type="button" hidden title="链接默认打开此设备；网页授权仍可访问全部设备"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-link"/></svg>此设备链接（全站权限）</button>
           <hr>
-          <button id="b-rescue" type="button" title="执行 USB 软解绑与重新绑定，会暂时中断该设备连接"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>重新连接串口</button>
+          <button id="b-rescue" type="button" title="执行 USB 软解绑与重新绑定，会暂时中断该设备连接"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-plug-connected"/></svg>重新连接串口</button>
         </div>
         <button id="b-switch" type="button" title="在同一串口位置更换开发板前点击；旧身份立即离线，新日志先进入待识别目录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-switch"/></svg>换板</button>
         <div class="board-operations">
-          <button type="button" class="menu-trigger" popovertarget="flash-menu" aria-controls="flash-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-transfer"/></svg>刷机与启动</button>
+          <button type="button" class="menu-trigger" popovertarget="flash-menu" aria-controls="flash-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-tools"/></svg>刷机与启动</button>
           <div id="flash-menu" class="action-menu" popover aria-label="刷机与启动">
-            <button id="b-flash" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-transfer"/></svg>普通刷机</button>
+            <button id="b-flash" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-database-import"/></svg>普通刷机</button>
             <button id="b-device-fast-flash" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>URL 极速刷机</button>
-            <button id="b-device-ram-boot" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-terminal"/></svg>内存启动</button>
+            <button id="b-device-ram-boot" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-cpu-2"/></svg>内存启动</button>
           </div>
-          <button id="b-board-control" type="button" hidden title="电源与启动" aria-label="电源与启动"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>电源与启动</button>
+          <button id="b-board-control" type="button" hidden title="电源与启动" aria-label="电源与启动"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-power"/></svg>电源与启动</button>
         </div>
-        <button id="b-board-tests" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>用例库</button>
-        <button id="b-board-slot-bind" type="button" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>绑定控制槽位</button>
-        <button id="b-agent-share" type="button" disabled title="默认仅授权此设备，可在授权范围中更改"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>AI 接入</button>
+        <button id="b-board-tests" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-test-pipe"/></svg>用例库</button>
+        <button id="b-board-slot-bind" type="button" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-device-usb"/></svg>绑定控制槽位</button>
+        <button id="b-agent-share" type="button" disabled title="默认仅授权此设备，可在授权范围中更改"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-robot"/></svg>AI 接入</button>
         <button id="b-close" class="icon-button" type="button" aria-label="返回设备列表" title="返回设备列表"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button>
       </div>
     </div>
     <div id="device-share-status" class="terminal-status" role="status"></div>
-    <div class="session-bar"><div class="tabs" id="d-tabs"></div><button id="b-desktop" type="button" role="tab" aria-controls="desktop-panel" aria-selected="false" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-expand"/></svg>桌面</button></div>
+    <div class="session-bar"><div class="tabs" id="d-tabs"></div><button id="b-desktop" type="button" role="tab" aria-controls="desktop-panel" aria-selected="false" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-device-desktop"/></svg>桌面</button></div>
     <div class="info" id="d-info" hidden></div>
     <section id="desktop-panel" class="desktop-panel" role="tabpanel" aria-labelledby="b-desktop" hidden>
       <div class="desktop-toolbar">
@@ -117,6 +117,10 @@
           <button id="desktop-close" type="button">返回终端</button>
         </div>
       </div>
+      <div id="desktop-login-guide" class="log-note" hidden>
+        <span id="desktop-login-stage" role="status"></span>
+        <button id="desktop-move-wizard" type="button" hidden>只看到壁纸？将向导移到远程屏</button>
+      </div>
       <details id="desktop-error" class="desktop-error" hidden>
         <summary>连接错误详情</summary>
         <pre id="desktop-error-details" data-i18n-ignore></pre>
@@ -129,11 +133,13 @@
       </div>
       <div id="desktop-input-tools" class="desktop-input-tools">
         <span id="desktop-status" role="status" aria-live="polite">点击画面后控制桌面</span>
+        <details class="desktop-key-tools"><summary>键盘操作</summary><div>
         <button id="desktop-release" type="button">释放按键</button>
         <span id="desktop-system-key-hint" hidden>本机系统键未锁定，可点 Win / Super。</span>
         <button id="desktop-super" type="button" title="向远端发送 Windows 或 Super 键">Win / Super</button>
         <select id="desktop-keys" aria-label="远程组合键"><option value="ControlLeft AltLeft Delete">Ctrl+Alt+Del</option><option value="AltLeft Tab">Alt+Tab</option><option value="ControlLeft Escape">Ctrl+Esc</option><option value="Escape">Esc</option></select>
         <button id="desktop-key" type="button">发送组合键</button>
+        </div></details>
         <button id="desktop-clipboard-toggle" type="button" aria-expanded="false" aria-controls="desktop-clipboard">剪贴板</button>
       </div>
       <div id="desktop-clipboard" class="desktop-clipboard" hidden>
@@ -151,27 +157,37 @@
       </div>
       <span id="terminal-search-status"></span>
       <div class="terminal-nav-tools" aria-label="侧栏导航">
-        <button id="b-records" type="button" aria-expanded="false" aria-pressed="false" aria-controls="d-records" title="查看串口日志、SSH 会话和操作记录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-log"/></svg>历史日志</button>
-        <button id="b-boot-compare" type="button" title="比较同一块或不同开发板的两次启动日志"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-compare"/></svg>启动对比</button>
-        <button id="b-tasks" type="button" aria-controls="d-records" aria-expanded="false" title="查看后台任务进度与结果"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bolt"/></svg>任务</button>
+        <button id="b-records" type="button" aria-expanded="false" aria-pressed="false" aria-controls="d-records" title="查看串口日志、终端会话和操作记录"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-log"/></svg>历史日志</button>
+        <button id="b-boot-compare" type="button" title="比较同一块或不同开发板的两次启动日志"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-file-diff"/></svg>启动对比</button>
+        <button id="b-tasks" type="button" aria-controls="d-records" aria-expanded="false" title="查看后台任务进度与结果"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-list-check"/></svg>任务</button>
+        <button id="b-adb-command" type="button" title="通过 USB 调试连接执行板端命令"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-usb"/></svg>ADB 命令</button>
       </div>
       <div class="terminal-extra-tools" aria-label="终端工具">
         <button id="b-file-transfer" type="button" title="通过串口上传、下载或在开发板之间复制文件"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-transfer"/></svg>文件传输</button>
-        <button type="button" id="terminal-tools-trigger" class="menu-trigger" popovertarget="terminal-view-menu" aria-controls="terminal-view-menu">终端工具</button>
+        <button type="button" id="terminal-tools-trigger" class="menu-trigger" popovertarget="terminal-view-menu" aria-controls="terminal-view-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-adjustments-horizontal"/></svg>终端工具</button>
         <div id="terminal-view-menu" class="action-menu" popover aria-label="终端工具">
           <button id="b-command-nav" type="button" aria-controls="d-records" aria-expanded="false" aria-pressed="false" title="在当前终端缓冲中按 shell 命令跳转"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg>输入导航</button>
-          <button id="b-commands" type="button" aria-controls="d-records" aria-expanded="false">常用命令</button>
+          <button id="b-commands" type="button" aria-controls="d-records" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bookmark"/></svg>常用命令</button>
           <hr>
-          <button id="b-serial-size" type="button" title="在空闲 Linux shell 同步板端尺寸，启用宽屏串口">同步尺寸</button>
+          <label class="terminal-font-option" for="terminal-font-size">终端字号
+            <select id="terminal-font-size" aria-label="终端字号">
+              <option value="10">10 px</option><option value="12">12 px</option>
+              <option value="14.5" selected>14.5 px</option><option value="16">16 px</option>
+              <option value="18">18 px</option><option value="20">20 px</option>
+              <option value="22">22 px</option><option value="24">24 px</option>
+            </select>
+          </label>
+          <button id="b-serial-size" type="button" title="在空闲 Linux shell 同步板端尺寸，启用宽屏串口"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-arrow-autofit-width"/></svg>同步尺寸</button>
           <button id="b-redraw" type="button" title="从采集缓冲重绘全屏终端"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>重绘</button>
         </div>
-        <button id="b-expand" type="button" aria-pressed="false" title="放大终端"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-expand"/></svg><span id="b-expand-label">放大</span></button>
+        <button id="b-expand" type="button" aria-pressed="false" title="放大终端"><svg class="icon" aria-hidden="true"><use id="terminal-expand-icon" href="/static/icons.svg#i-expand"/></svg><span id="b-expand-label">放大</span></button>
       </div>
     </div>
     <div id="d-status" class="terminal-status" role="status"></div>
     <div class="console-layout" id="console-layout">
     <div class="console-main">
       <div id="d-size-status" class="terminal-size-status" role="status"></div>
+      <div id="d-clipboard-status" class="terminal-size-status terminal-clipboard-status" role="status"></div>
       <div class="termhost" id="d-term"></div>
       <div class="sendrow">
         <label class="chk"><input type="checkbox" id="d-kbd" checked> 键盘直通</label>
@@ -179,13 +195,14 @@
         <button class="pri" id="b-send" type="button">发送</button>
         <button id="b-cr" type="button" title="只发一个回车（唤醒板子 / 看是否还活着）">↵</button>
         <button id="b-ctrlc" type="button" title="发送 Ctrl-C">Ctrl-C</button>
-        <button id="b-paste" type="button" title="粘贴剪贴板内容到会话">粘贴</button>
-        <button id="b-input-owner" type="button" title="可选占用串口输入，其他人仍可查看输出"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-command"/></svg><span id="input-owner-label">占用输入</span></button>
+        <button id="b-paste" type="button" title="粘贴剪贴板内容到会话"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-clipboard-text"/></svg>粘贴</button>
+        <button id="b-input-owner" type="button" title="可选占用串口输入，其他人仍可查看输出"><svg class="icon" aria-hidden="true"><use id="input-owner-icon" href="/static/icons.svg#i-lock"/></svg><span id="input-owner-label">占用输入</span></button>
         <button type="button" id="input-options-trigger" class="menu-trigger" popovertarget="input-options-menu" aria-controls="input-options-menu">输入选项</button>
         <div id="input-options-menu" class="action-menu" popover aria-label="输入选项">
+          <label class="chk"><input type="checkbox" id="d-right-paste" checked> 右键粘贴</label>
           <label class="chk" id="slow-paste-option" title="GRUB/固件接管串口输入后若批量粘贴丢字，可逐字符发送"><input type="checkbox" id="d-slow-paste"> 固件慢速粘贴</label>
         </div>
-        <button id="b-takeover" type="button" hidden title="获得此共享 SSH 会话的输入与尺寸控制权，并记录介入事件">介入此会话</button>
+        <button id="b-takeover" type="button" hidden title="获得此共享终端会话的输入与尺寸控制权，并记录介入事件">介入此会话</button>
       </div>
       <div class="hint" id="d-hint" hidden></div>
     </div>
@@ -252,7 +269,7 @@ PasswordAuthentication yes</code></pre>
       <div class="records-title">
         <div class="records-tabs" id="history-tabs" role="tablist" aria-label="历史日志">
           <button id="record-tab-logs" type="button" role="tab" aria-controls="record-panel-logs">串口日志</button>
-          <button id="record-tab-sessions" type="button" role="tab" aria-controls="record-panel-sessions">SSH 会话</button>
+          <button id="record-tab-sessions" type="button" role="tab" aria-controls="record-panel-sessions">终端会话</button>
           <button id="record-tab-events" type="button" role="tab" aria-controls="record-panel-events">操作记录</button>
         </div>
         <strong id="records-heading" hidden></strong>
@@ -270,6 +287,7 @@ PasswordAuthentication yes</code></pre>
         <div class="command-nav-list" id="d-command-nav"></div>
       </div>
       <div class="records-panel" id="record-panel-sessions" role="tabpanel" aria-labelledby="record-tab-sessions" hidden>
+        <label>连接方式 <select id="activity-kind"><option value="">全部</option><option value="adb">USB ADB</option><option value="ssh">SSH</option></select></label>
         <div id="d-activity" class="activity"></div>
         <div id="activity-pager" class="pager" hidden><button id="activity-prev" type="button">较新</button><span id="activity-page"></span><button id="activity-next" type="button">更早</button></div>
       </div>
@@ -291,6 +309,34 @@ PasswordAuthentication yes</code></pre>
   </div>
   </div>
 </div>
+<dialog id="adb-command-dialog" class="identity-association-dialog adb-command-dialog" aria-labelledby="adb-command-title">
+  <div class="agent-share-head"><strong id="adb-command-title">ADB 命令</strong><form method="dialog"><button type="submit">关闭</button></form></div>
+  <p id="adb-command-board" class="log-note"></p>
+  <form id="adb-command-form">
+    <label for="adb-command-input">板端命令</label>
+    <textarea id="adb-command-input" rows="4" spellcheck="false" required maxlength="2048" placeholder="例如 uname -a"></textarea>
+    <p class="log-note">命令和输出会进入任务记录。请勿填入密码或密钥。</p>
+    <div class="adb-command-actions">
+      <label>等待回执 <input id="adb-command-timeout" type="number" min="1" max="3600" value="60" required> 秒</label>
+      <button class="pri" id="adb-command-run" type="submit">执行命令</button>
+    </div>
+  </form>
+  <p id="adb-command-status" class="log-note" role="status"></p>
+  <section id="adb-command-receipt" hidden>
+    <details id="adb-command-original" open><summary>原命令</summary><pre id="adb-command-text" data-i18n-ignore></pre></details>
+    <div><strong>标准输出</strong><pre id="adb-command-stdout" data-i18n-ignore></pre></div>
+    <div><strong>标准错误</strong><pre id="adb-command-stderr" data-i18n-ignore></pre></div>
+    <div class="adb-command-actions">
+      <button id="adb-command-read-serial" type="button">查看本次串口</button>
+      <button id="adb-command-open-logs" type="button">打开串口归档</button>
+      <button id="adb-command-recover" type="button" hidden>确认停止并释放板卡</button>
+    </div>
+    <section id="adb-command-serial" hidden>
+      <p id="adb-command-serial-status" class="log-note" role="status"></p>
+      <pre id="adb-command-serial-output" data-i18n-ignore></pre>
+    </section>
+  </section>
+</dialog>
 <dialog id="device-shortcuts" class="identity-association-dialog" aria-labelledby="shortcuts-title">
   <div class="agent-share-head"><strong id="shortcuts-title">设备快捷键</strong><button id="shortcuts-close" type="button">关闭</button></div>
   <p>按当前设备列表的顺序切换。点击组合键可重新录入，Delete 清除，Esc 取消。设置保存在当前浏览器。</p>
@@ -305,6 +351,22 @@ PasswordAuthentication yes</code></pre>
 <dialog id="board-tests-dialog" class="board-tests-dialog" aria-labelledby="board-tests-title">
   <header class="board-tests-head"><div><h2 id="board-tests-title">用例库</h2><small id="board-tests-board" data-i18n-ignore></small></div><button id="board-tests-close" type="button">关闭</button></header>
   <div class="board-tests-body">
+    <div class="board-tests-sources" role="group" aria-label="用例来源">
+      <button type="button" id="board-tests-local-tab" aria-pressed="true">本地用例</button>
+      <button type="button" id="board-tests-team-tab" aria-pressed="false">TitanX 团队用例</button>
+    </div>
+    <section id="board-tests-team" hidden>
+      <form id="board-tests-team-search" class="board-tests-actions">
+        <label class="ft-field">用例组<select id="board-tests-team-group"><option value="">全部用例</option></select></label>
+        <label class="ft-field">用例名称<input id="board-tests-team-name" type="search" maxlength="200"></label>
+        <button type="submit">搜索</button>
+      </form>
+      <p id="board-tests-team-status" role="status"></p>
+      <section id="board-tests-team-detail" hidden></section>
+      <ul id="board-tests-team-list" class="board-tests-team-list"></ul>
+      <div class="board-tests-actions"><button id="board-tests-team-prev" type="button">上一页</button><button id="board-tests-team-next" type="button">下一页</button></div>
+    </section>
+    <div id="board-tests-local">
     <section class="board-tests-form" aria-label="运行用例">
       <label class="ft-field">用例<select id="board-tests-case"></select></label>
       <label class="ft-field">测试量<input id="board-tests-count" type="number" min="1" max="10000" value="1"></label>
@@ -359,6 +421,7 @@ PasswordAuthentication yes</code></pre>
         </section>
       </div>
     </section>
+    </div>
   </div>
 </dialog>
 <dialog id="board-control-dialog" class="identity-association-dialog" aria-labelledby="board-control-title">
@@ -417,7 +480,10 @@ PasswordAuthentication yes</code></pre>
   <p id="is-download-note" class="log-note">镜像下载到控制机；刷写前仍需核对板型、预览范围并确认。</p>
 </dialog>
 <dialog id="flash-dialog" class="flash-dialog" aria-labelledby="fl-title">
-  <div class="fl-head"><div><strong id="fl-title">刷机工作区</strong><small id="fl-board" data-i18n-ignore></small></div><button id="fl-close" type="button">关闭</button></div>
+  <div class="fl-head"><div><strong id="fl-title">刷机工作区</strong><small id="fl-board" data-i18n-ignore></small>
+    <div class="fl-usb-link" id="fl-usb-link" hidden aria-live="polite">
+      <span id="fl-usb-speed"></span><span class="fl-usb-fast" id="fl-usb-fast" hidden>极速</span><span id="fl-usb-hint"></span>
+    </div></div><button id="fl-close" type="button">关闭</button></div>
   <ol class="fl-stage-list" aria-label="刷机阶段"><li id="fl-step-setup" aria-current="step">准备镜像与设备</li><li id="fl-step-review">核对写入范围</li><li id="fl-step-run">执行与结果</li></ol>
   <div id="fl-stage-body" tabindex="-1">
   <div id="fl-setup">
@@ -483,7 +549,7 @@ PasswordAuthentication yes</code></pre>
     <div id="fl-target-picker" class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label><button id="fl-discover" type="button">刷新 USB 列表</button></div>
     <div id="fl-fast-connect" class="ft-actions" hidden>
       <button id="fl-fast-detect" type="button">检测 USB 下载设备</button>
-      <button id="fl-fast-bind" type="button" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-board"/></svg>绑定控制槽位</button>
+      <button id="fl-fast-bind" type="button" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-device-usb"/></svg>绑定控制槽位</button>
     </div>
     <p id="fl-fast-attach-hint" class="fl-hint" hidden>请按物理 USB 位置确认本次目标。选择 USB 设备用于本次刷机。</p>
     <div id="fl-fast-disk" class="fl-discovery" hidden>

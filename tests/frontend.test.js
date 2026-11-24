@@ -46,6 +46,7 @@ class Element {
     this.events[name] = (this.events[name] || []).filter(listener => listener !== fn);
   }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  getAttribute(name) { return this.attributes[name] ?? null; }
   emit(name, event = {}) {
     for (const fn of this.events[name] || []) fn(event);
   }
@@ -155,7 +156,11 @@ function harness(options = {}) {
       proposeDimensions() { return { cols: 140, rows: 42 }; }
     } },
     performance: { now: () => Date.now() },
-    Uint8Array, AbortController, console, location: { hash: options.hash || '' },
+    Uint8Array, AbortController, TextDecoder, crypto: require('node:crypto').webcrypto,
+    navigator: options.clipboard ? {clipboard: options.clipboard} : undefined,
+    localStorage: options.storage ? {getItem:key=>options.storage.get(key) ?? null,
+      setItem:(key,value)=>options.storage.set(key,String(value))} : undefined,
+    console, location: { hash: options.hash || '' },
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     btoa: value => Buffer.from(value, 'binary').toString('base64'),
     setTimeout: (fn, delay) => { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
@@ -297,6 +302,7 @@ test('serial ownership keeps spectators read-only and human takeover restores in
   terminal.data('blocked');
   assert.equal(h.sends().length, 0);
   assert.equal(h.get('input-owner-label').textContent, '接管输入');
+  assert.equal(h.get('input-owner-icon').getAttribute('href'), '/static/icons.svg#i-lock');
   h.get('b-input-owner').click();
   const request = h.take('/api/input-claim');
   assert.equal(request.body.takeover, true);
@@ -304,12 +310,14 @@ test('serial ownership keeps spectators read-only and human takeover restores in
   await drain();
   assert.equal(h.get('d-in').disabled, false);
   assert.equal(h.get('input-owner-label').textContent, '释放输入');
+  assert.equal(h.get('input-owner-icon').getAttribute('href'), '/static/icons.svg#i-lock-open');
   h.get('b-input-owner').click();
   const release = h.take('/api/input-release');
   assert.equal(release.body.id, 'human-claim');
   release.resolve({ok: true, input_owner: null});
   await drain();
   assert.equal(h.get('input-owner-label').textContent, '占用输入');
+  assert.equal(h.get('input-owner-icon').getAttribute('href'), '/static/icons.svg#i-lock');
 });
 
 test('independent human pages cannot mistake another browser reservation for their own', async () => {
@@ -562,7 +570,7 @@ test('late session, log and identify responses stay with their original device',
   sessions.resolve({ key: 'A', sessions: [{ sid: 'ssh-old', kind: 'ssh' }] });
   logs.resolve({ key: 'A', label: 'A logs', files: [{ name: 'old.log', path: 'old', size: 1 }] });
   identify.resolve({ ok: true, task: { id: 'identify-old', state: 'completed', result: { ok: true, serial: 'A serial' } } }); await drain();
-  assert.deepEqual(h.get('d-tabs').children.map(x => x.textContent), ['串口', '+ SSH 会话SSH 设置']);
+  assert.deepEqual(h.get('d-tabs').children.map(x => x.textContent), ['串口', 'ADB', '+ SSH 会话SSH 设置']);
   assert.equal(h.get('d-logs').children.length, 0);
   assert.equal(h.get('d-info').hidden, true);
   assert.equal(h.get('d-status').textContent, '');
@@ -708,6 +716,31 @@ function sshAuthFailure(request, user = 'root') {
   request.resolve({ok: true, task: {id: 'ssh-auth-failure', state: 'failed', error: 'SSH 认证失败',
     result: {code: 'ssh-authentication-failed', ssh_user: user}}});
 }
+
+test('ADB tabs open independent terminals on the selected USB board', async () => {
+  const h = await sshCredentialFixture();
+  const tabs = () => h.get('d-tabs').children;
+  for (const [label, sid] of [['ADB', 'adb000001'], ['+ ADB 会话', 'adb000002']]) {
+    tabs().find(button => button.textContent === label).click();
+    const request = h.take('/api/task-start');
+    assert.equal(request.body.kind, 'adb-connect');
+    assert.equal(request.body.serial, 'SN-A');
+    assert.equal(request.body.connection_id, 'connection-A');
+    request.resolve({task: {id: sid, kind: 'adb-connect', state: 'completed', result: {ok: true, sid}}});
+    await drain();
+    h.terminals.at(-1).data('pwd\r'); await drain();
+    assert.equal(h.sends().at(-1).body.sid, sid);
+  }
+  assert.equal(tabs().filter(button => button.dataset.kind === 'adb').length, 2);
+  tabs().find(button => button.textContent === '+ ADB 会话').click();
+  const pending = h.take('/api/task-start');
+  h.select('B');
+  const terminal = h.terminals.at(-1);
+  pending.resolve({task: {id: 'late', state: 'completed', result: {ok: true, sid: 'adb000003'}}});
+  await drain();
+  assert.equal(h.terminals.at(-1), terminal);
+  assert.equal(tabs().filter(button => button.dataset.kind === 'adb').length, 0);
+});
 function submitSshCredentials(h, user = 'ubuntu', password = 'private-ssh-password') {
   h.get('ssh-credentials-user').value = user;
   h.get('ssh-credentials-password').value = password;
@@ -1084,7 +1117,7 @@ test('Ctrl+V is handed back to the browser so native paste can reach the termina
     preventDefault() {}, stopPropagation() {} });
   await drain();
   assert.deepEqual(h.sends().map(r => r.body.data), ['ls\r']);
-  assert.ok(h.get('d-status').textContent.includes('已粘贴'));
+  assert.ok(h.get('d-clipboard-status').textContent.includes('已粘贴'));
 });
 
 test('both paste entry points preserve Vim indentation with keyboard passthrough disabled', async () => {
@@ -1157,7 +1190,51 @@ test('an empty clipboard says so instead of looking dead', async () => {
     preventDefault() {}, stopPropagation() {} });
   await drain();
   assert.equal(h.sends().length, 0);
-  assert.ok(h.get('d-status').textContent.includes('剪贴板'));
+  assert.ok(h.get('d-clipboard-status').textContent.includes('剪贴板'));
+});
+
+test('right-click paste reuses bracketed paste and never changes the layout status strip', async () => {
+  const h = await setup({clipboard:{readText:() => Promise.resolve('a\n  b')}});
+  const term = h.select('A');
+  term.bracketedPaste = true;
+  h.get('d-status').textContent = 'existing status';
+  const gesture = {button:2, preventDefault(){this.prevented=true;}, stopImmediatePropagation(){this.stopped=true;}};
+  h.get('d-term').emit('mousedown', gesture);
+  assert.ok(gesture.prevented && gesture.stopped);
+  h.get('d-term').emit('contextmenu', gesture); await drain();
+  assert.deepEqual(h.sends().map(r=>r.body.data), ['\x1b[200~a\r  b\x1b[201~']);
+  assert.equal(h.get('d-status').textContent, 'existing status');
+  assert.equal(h.requests.some(r=>r.url==='/api/session-resize'),false);
+  const ordinary = {...gesture, shiftKey:true, prevented:false, stopped:false};
+  h.get('d-term').emit('contextmenu', ordinary); await drain();
+  assert.equal(ordinary.prevented,false);
+  h.get('d-right-paste').checked = false;
+  const optedOut = {...ordinary, shiftKey:false};
+  h.get('d-term').emit('contextmenu', optedOut);
+  assert.equal(optedOut.prevented,false);
+});
+
+test('right-click clipboard fallback accepts native paste and never sends the old board after a switch', async () => {
+  const h = await setup();
+  h.select('A');
+  h.get('d-term').emit('contextmenu', {button:2, preventDefault(){}, stopImmediatePropagation(){}});
+  const field = h.document.body.children.at(-1);
+  assert.equal(field.className,'terminal-paste-field');
+  h.select('B');
+  field.emit('paste',{clipboardData:{getData:()=> 'stale'}, preventDefault(){}});
+  assert.equal(h.sends().length,0);
+});
+
+test('terminal font size persists across board changes and reload', async () => {
+  const storage = new Map();
+  const h = await setup({storage});
+  const term = h.select('A'), font = h.get('terminal-font-size');
+  font.value = '20'; font.emit('change');
+  assert.equal(term.options.fontSize,20);
+  assert.equal(h.select('B').options.fontSize,20);
+  const next = await setup({storage});
+  assert.equal(next.get('terminal-font-size').value,'20');
+  assert.equal(next.select('A').options.fontSize,20);
 });
 
 test('selecting and replaying the third board never writes cursor position replies', async () => {
@@ -1610,6 +1687,20 @@ test('SSH sessions and key events have independent bounded pages', async () => {
   assert.equal(h.get('d-events').children.length, 2);
 });
 
+test('ADB history selects USB sessions from the first page', async () => {
+  const h = await setup(); h.select('A');
+  h.take('/api/activity').resolve({sessions:[],events:[]}); await drain();
+  const filter = h.get('activity-kind');
+  filter.value = 'adb'; filter.emit('change');
+  const request = h.take('/api/activity');
+  assert.ok(request.url.includes('session_kind=adb'));
+  assert.ok(request.url.includes('session_offset=0'));
+  request.resolve({sessions:[{sid:'adb-1',title:'USB ADB',ip:'USB',status:'closed'}],events:[]});
+  await drain();
+  assert.ok(h.get('d-activity').textContent.includes('ADB · USB'));
+  assert.ok(!h.get('d-activity').textContent.includes('SSH'));
+});
+
 test('completed SSH transcript opens in a read-only terminal tab', async () => {
   const h = await setup(); h.select('A');
   h.take('/api/logs').resolve({ key: 'A', serial: 'SN-A', files: [] });
@@ -1844,9 +1935,11 @@ test('live serial learns an EDK2 80x50 screen before parsing its cursor position
   assert.equal(terminal.cols, 80);
   assert.equal(terminal.rows, 50, 'EDK2 row 50 must not be clamped into the visible browser height');
   h.get('b-expand').click();
+  assert.equal(h.get('terminal-expand-icon').getAttribute('href'), '/static/icons.svg#i-arrows-minimize');
   const expanded = h.timer(0); assert.ok(expanded); h.fire(expanded[0]);
   assert.ok(terminal.options.fontSize <= 10, 'maximized firmware screen should fit more rows');
   h.get('b-expand').click();
+  assert.equal(h.get('terminal-expand-icon').getAttribute('href'), '/static/icons.svg#i-expand');
   const restored = h.timer(0); assert.ok(restored); h.fire(restored[0]);
   assert.ok(terminal.options.fontSize <= 14.5);
   terminal.flush(); await drain();
@@ -2309,6 +2402,41 @@ test('task history recovers progress on a fresh page and cancels only the select
   row.children[1].click();
   assert.equal(h.take('/api/task-cancel').body.id, 'existing');
   assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 0);
+});
+
+test('ADB submission only posts once and receipt opens the original UART cursor', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: [
+    {key:'A', label:'Board A', alive:true, serial:'SN-A', connection_id:'uart-A'}
+  ]});
+  await drain(); h.select('A');
+  h.get('b-adb-command').click();
+  assert.equal(h.get('adb-command-dialog').open, true);
+  h.get('adb-command-input').value = "printf 'hello'";
+  h.get('adb-command-timeout').value = '60';
+  h.get('adb-command-form').emit('submit', {preventDefault() {}});
+  const start = h.take('/api/task-start');
+  assert.equal(start.body.kind, 'adb-command');
+  assert.equal(start.body.connection_id, 'uart-A');
+  start.reject(new Error('lost response'));
+  await drain();
+  const lookup = h.take('/api/task');
+  assert.equal(new URL(lookup.url, 'http://fixture').searchParams.get('request_id'), start.body.request_id);
+  lookup.resolve({task:{id:'original', kind:'adb-command', state:'failed', outcome:'unknown',
+    result:{adb_receipt:{command:start.body.command, state:'disconnected', exit_code:null, stdout:'partial',
+      serial_window:{connection_id:'uart-A', start_off:123}}}}});
+  await drain();
+  assert.ok(h.get('adb-command-status').textContent.includes('板端结果未知'));
+  assert.equal(h.get('adb-command-stdout').textContent, 'partial');
+  assert.equal(h.requests.filter(r => r.url === '/api/task-start').length, 1);
+  h.get('adb-command-read-serial').click();
+  const serial = h.take('/api/serial', r => r.url.includes('off=123'));
+  const q = new URL(serial.url, 'http://fixture').searchParams;
+  assert.equal(q.get('connection_id'), 'uart-A');
+  assert.equal(q.get('serial'), 'SN-A');
+  serial.resolve({off:128, alive:true, data_b64:Buffer.from('hello').toString('base64')});
+  await drain();
+  assert.equal(h.get('adb-command-serial-output').textContent, 'hello');
 });
 
 test('task-panel USB flash action opens its own original target without a selected UART board', async () => {

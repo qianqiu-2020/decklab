@@ -217,6 +217,7 @@
     white-space:normal;padding:7px 10px}
   .action-menu hr{width:100%;margin:4px 0;border:0;border-top:1px solid var(--line)}
   .action-menu label{padding:8px 10px;white-space:normal}
+  .action-menu .terminal-font-option{display:flex;align-items:center;justify-content:space-between;gap:12px}
   .action-menu #b-identify{background:transparent;border-color:transparent}
   input[type=text]{font-family:inherit;font-size:13px;color:var(--ink);background:var(--surface);
     border:1px solid var(--line-strong);border-radius:6px;padding:8px 10px}
@@ -249,6 +250,10 @@
     max-width:calc(100% - 36px);pointer-events:none;padding:5px 9px;border:1px solid var(--line);
     border-radius:6px;background:var(--surface);color:var(--ink);font-size:12px;box-shadow:var(--shadow)}
   .terminal-size-status:empty{display:none}
+  .terminal-clipboard-status{inset-block-start:auto;inset-block-end:52px}
+  .terminal-paste-field{position:fixed;inset-block-start:22%;left:50%;transform:translateX(-50%);z-index:99;
+    width:min(520px,calc(100vw - 24px));height:74px;padding:10px;border-radius:8px;
+    border:1px solid var(--accent);background:var(--surface);color:var(--ink);font-size:14px}
   .termhost{min-height:0;flex:1;background:var(--term);border:solid var(--term);border-width:10px 0 16px 10px;
     overflow:hidden;overscroll-behavior:contain}
   .tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);min-height:39px;
@@ -354,6 +359,9 @@
   .fl-head>div{min-width:0;overflow-wrap:anywhere}
   .fl-head strong{display:block;font-size:18px;line-height:1.3}.fl-head small{display:block;margin-top:3px;color:var(--ink-2);font-size:12px;overflow-wrap:anywhere}
   .fl-head>button{flex:none}
+  .fl-usb-link:not([hidden]){display:flex;align-items:center;flex-wrap:wrap;gap:5px 9px;margin-top:5px;font-size:12px;color:var(--ink-2)}
+  #fl-usb-speed{color:var(--ink);font-weight:600}
+  .fl-usb-fast{padding:1px 6px;border-radius:4px;background:var(--live-soft);color:var(--live);font-weight:650}
   .flash-dialog[data-entry="device"][data-stage="setup"] #fl-board{display:none}
   .fl-section,#fl-stage-body>.fl-alert,#fl-stage-body>.fl-details{margin:14px 0;padding:16px 18px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
   .fl-section h3{display:flex;align-items:center;gap:8px;font-size:14px;line-height:1.4;margin:0 0 14px;font-weight:650}
@@ -895,6 +903,9 @@
 .desktop-clipboard{display:grid;gap:6px;padding:10px 12px;border-top:1px solid var(--line);flex:none}
 .desktop-clipboard>label{font-size:12px;color:var(--ink-2)}
 .desktop-clipboard textarea{width:100%;min-width:0;resize:vertical;max-height:160px;padding:8px;background:var(--ground);color:var(--ink);border:1px solid var(--line-strong);border-radius:6px;font:12px/1.5 var(--font-mono)}
+.desktop-key-tools{position:relative}
+.desktop-key-tools summary{cursor:pointer;padding:6px 10px}
+.desktop-key-tools>div{position:absolute;z-index:5;bottom:100%;right:0;width:max-content;max-width:min(85vw,24rem);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .desktop-panel:fullscreen{width:100vw;height:100vh;height:100dvh;max-width:none;background:var(--surface);padding:0}
 .desktop-panel:fullscreen .desktop-screen{min-height:0}
 @media(max-width:760px){.desktop-toolbar{gap:8px}.desktop-actions{gap:4px}.desktop-actions button,.desktop-input-tools button{font-size:11px}#desktop-status{flex-basis:100%}}
@@ -944,6 +955,10 @@
   border-bottom:1px solid var(--line);background:var(--surface);flex:none}
 .board-tests-head h2{margin:0;font-size:19px}
 .board-tests-head small{display:block;margin-top:4px;color:var(--ink-2);overflow-wrap:anywhere}
+.board-tests-sources{display:flex;gap:.5rem;border-bottom:1px solid var(--border);margin-bottom:1rem}
+.board-tests-sources button[aria-pressed="true"]{font-weight:700;border-bottom:3px solid currentColor}
+.board-tests-team-list{padding:0;list-style:none}
+.board-tests-team-list li{display:grid;gap:.25rem;padding:.55rem 0;border-bottom:1px solid var(--line)}
 .board-tests-body{padding:16px 20px 20px;overflow:auto;min-height:0}
 .board-tests-form,.board-tests-runs,.board-tests-definition{border:1px solid var(--line);border-radius:9px;background:var(--surface);padding:14px}
 .board-tests-definition{margin-bottom:12px}
@@ -1088,3 +1103,8 @@ dialog :is(button,input,textarea,select){max-width:100%}
 .wiring-row .wiring-remove { color: var(--dead); }
 .wiring-footer span { margin-right: auto; }
 @media (max-width: 600px) { .wiring-row { grid-template-columns: 1fr 2fr; } }
+.adb-command-dialog { width: min(760px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); }
+.adb-command-dialog textarea { display: block; width: 100%; margin-top: .4rem; font-family: var(--font-mono); }
+.adb-command-dialog pre { margin: .35rem 0 .75rem; padding: .65rem .8rem; max-height: 15rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; }
+.adb-command-actions { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
+.adb-command-actions input { width: 6rem; }

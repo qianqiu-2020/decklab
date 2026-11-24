@@ -31,19 +31,37 @@ async function tab(port, url, width, height) {
 }
 function input(t, text) { return t.evaluate('testTerm.input(' + JSON.stringify(text) + ')'); }
 const pasteSample = '#!/bin/sh\r\nif true; then\r\n\t  printf "PASTE汉字"\n\n\tprintf "second line"\r\nfi';
-async function checkVimPaste(t, name, toolbar) {
+async function checkVimPaste(t, name, method) {
   const file = path.join(path.dirname(geometryFile), name);
   await input(t, '\x1b:%delete _\r:set autoindent expandtab shiftwidth=4 tabstop=4\ri');
   await wait(()=>t.evaluate('testTerm.modes.bracketedPasteMode'),'Vim enabled bracketed paste');
-  await t.evaluate(`(() => {
+  const dimensions = await t.evaluate(`(async () => {
     const clipboard = new DataTransfer();
     clipboard.setData('text/plain', ${JSON.stringify(pasteSample)});
+    const host = document.querySelector('#d-term');
+    const measure = () => [testTerm.cols,testTerm.rows,testTerm.options.fontSize,host.clientHeight].join(':');
+    const before = measure(), method = ${JSON.stringify(method)};
     document.querySelector('#d-kbd').checked = false;
-    if (${toolbar}) document.querySelector('#b-paste').click();
-    const target = ${toolbar} ? document.activeElement : testTerm.textarea;
-    target.dispatchEvent(new ClipboardEvent('paste', {clipboardData:clipboard,bubbles:true,cancelable:true}));
+    if (method === 'right-click') {
+      navigator.clipboard.readText = () => Promise.resolve(clipboard.getData('text/plain'));
+      host.querySelector('.xterm-screen').dispatchEvent(new MouseEvent('contextmenu',
+        {button:2,bubbles:true,cancelable:true}));
+      await new Promise(resolve=>setTimeout(resolve,150));
+      delete navigator.clipboard.readText;
+    } else {
+      if (method === true) {
+        navigator.clipboard.readText = () => Promise.reject(new Error('permission denied by fixture'));
+        document.querySelector('#b-paste').click();
+        await new Promise(resolve=>setTimeout(resolve,0));
+        delete navigator.clipboard.readText;
+      }
+      const target = method === true ? document.querySelector('.terminal-paste-field') : testTerm.textarea;
+      target.dispatchEvent(new ClipboardEvent('paste', {clipboardData:clipboard,bubbles:true,cancelable:true}));
+    }
     document.querySelector('#d-kbd').checked = true;
+    return [before,measure()];
   })()`);
+  assert.equal(dimensions[0],dimensions[1],name+' keeps viewport and terminal grid stable');
   await input(t, '\x1b:w! ' + name + '\r');
   await wait(()=>fs.existsSync(file),'Vim saved ' + name);
   assert.equal(fs.readFileSync(file,'utf8'),pasteSample.replace(/\r\n/g,'\n')+'\n',name+' bytes');
@@ -142,6 +160,7 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   await delay(200);
   assert.deepEqual(await b.evaluate(screen),await a.evaluate(screen),'serial Vim has the same grid and screen for both viewers');
   await checkVimPaste(a, 'serial-paste.txt', true);
+  await checkVimPaste(a, 'serial-right-paste.txt', 'right-click');
   await input(a, '\x1b:q!\r');
   await wait(()=>a.evaluate('testTerm.buffer.active.type==="normal"'),'serial Vim exit');
   const idlePrompt = 'testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+testTerm.buffer.active.cursorY)?.translateToString().trim()==="root@fixture:~#"';
@@ -161,7 +180,7 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   await wait(()=>a.evaluate('Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+i)?.translateToString().trim()).includes("QUIET-PTY")'),'silent console fixture');
   const silentGeometry = await a.evaluate(geometryAfterReturn);
   assert.deepEqual(silentGeometry,[silentGeometry[0]],'Return with no output keeps the grid and font stable');
-  console.log('Shared terminal smoke passed: real Vim over serial/SSH PTYs, exact native and toolbar paste bytes, late join, live edits, takeover, resize, quiet tab restoration and exit.');
+  console.log('Shared terminal smoke passed: real Vim over serial/SSH PTYs, exact native, toolbar and right-click paste bytes, stable paste geometry, late join, live edits, takeover, resize and quiet tab restoration.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   for(const socket of sockets)socket.close();
   await stopBrowser(chrome);if(fixture){fixture.kill('SIGTERM');await delay(700);}

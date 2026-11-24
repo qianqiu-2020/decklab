@@ -11,7 +11,7 @@ from .flash_tasks import FlashActions
 
 
 class TaskActions:
-    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'file-copy', 'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test')) | frozenset(
+    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'adb-connect', 'file-copy', 'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test', 'adb-command')) | frozenset(
         'hardware-' + action for action in ACTIONS)
 
     def __init__(self, manager):
@@ -33,8 +33,15 @@ class TaskActions:
                 raise TaskError('unsupported task kind')
             if not isinstance(actor, str) or not actor or len(actor) > 80:
                 raise TaskError('invalid task actor')
+            if kind == 'adb-command':
+                from .adb_tasks import start
+                self.tasks._check_actor(actor)
+                return response(202, {'ok': True, 'task': start(self.manager, device, payload, actor)})
             if kind == 'board-test':
-                from .board_cases import start
+                if payload.get('source') == 'titanx':
+                    from .team_run import start
+                else:
+                    from .board_cases import start
                 if device is None or not device.serial or payload.get('serial') != device.serial:
                     raise TaskError('板卡用例需要已识别的设备', 404)
                 if not device.present or payload.get('connection_id') != device.connection_id:
@@ -159,11 +166,11 @@ class TaskActions:
                             'code': 'ssh-authentication-failed',
                             'ssh_user': user if isinstance(user, str) and len(user) <= 128 else ''})
                     raise TaskError(result.payload.get('error', 'operation failed'), result.status)
-                if kind == 'ssh-connect' and context.cancelled.is_set():
+                if kind in ('ssh-connect', 'adb-connect') and context.cancelled.is_set():
                     sid = result.payload.get('sid', '')
                     if sid not in existing_sessions:
                         device.close_session(sid)
-                        raise TaskCancelled('SSH connection cancelled')
+                        raise TaskCancelled('terminal connection cancelled')
                 # Only operation metadata; no raw probe dumps, credentials or file contents.
                 output = {key: value for key, value in result.payload.items() if key in (
                     'ok', 'device_key', 'serial', 'hostname', 'ips', 'sshd', 'identity_status',
@@ -171,7 +178,7 @@ class TaskActions:
                     'ssh_credentials_saved', 'ssh_credentials_note')}
                 # Preserve a completed result if cancellation races the final response.
                 self.tasks.store.update(context.id, progress={'done': 1, 'total': 1, 'phase': kind})
-                context.mark_outcome('observed' if kind in ('identify', 'ssh-connect') else 'acknowledged')
+                context.mark_outcome('observed' if kind in ('identify', 'ssh-connect', 'adb-connect') else 'acknowledged')
                 return output
             task = self.tasks.start(kind, actor, client, [
                 {'serial': source_serial, 'connection_id': connection}], run, **submission)

@@ -614,6 +614,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 return self._json(403, {'error': '发现 USB 设备需要全部设备范围的授权'})
             if agent_actor and route == '/api/control-slots':
                 return self._json(403, {'error': '只有管理员可以管理工位接线'})
+            if route == '/api/desktop/quick-open' and not self._owner_authorized():
+                return self._json(403, {'error': '自动连接仅限网页主操作者'})
             if agent_actor and route == '/api/desktop/configure':
                 return self._json(403, {'error': '只有网页操作者可以配置桌面连接'})
             if agent_actor and route == '/api/probe-settings':
@@ -635,10 +637,20 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 return self._json(400, {'error': 'incomplete body'})
             if self.command == 'POST' and route == '/api/task-start' and not self._owner_authorized():
                 try:
-                    if load_object(body or b'').get('kind') == 'board-test':
+                    kind = load_object(body or b'').get('kind')
+                    if kind == 'board-test':
                         return self._json(403, {'error': '板卡用例仅限主访问身份'})
+                    if kind in ('adb-command', 'adb-connect') and not grant:
+                        return self._json(403, {'error': 'ADB 命令需要主访问身份或 Agent 授权'})
                 except (ValueError, AttributeError):
                     return self._json(400, {'error': 'bad json'})
+            if self.command == 'POST' and route == '/api/task-recovery' and not self._owner_authorized():
+                return self._json(403, {'error': '只有主访问身份可以确认任务恢复'})
+            if self.command == 'POST' and route in (
+                    '/api/session-send', '/api/session-resize', '/api/session-close', '/api/session-takeover'):
+                if (not grant and not self._owner_authorized()) or (grant and grant['scope'] == 'connection'):
+                    if str(load_object(body or b'').get('sid', '')).startswith('adb'):
+                        return self._json(403, {'error': 'ADB 终端需要主访问身份或板卡授权'})
             target_path = target_override or self.path
             if self.command == 'POST' and agent_actor:
                 try:
@@ -655,6 +667,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                         return self._json(403, {'error': '此令牌需要指定设备 key 或已核实的 USB 目标'})
                     payload['serial'] = grant['serial']
                 if grant and grant['scope'] == 'connection':
+                    if route == '/api/task-start' and payload.get('kind') in ('adb-command', 'adb-connect'):
+                        return self._json(403, {'error': 'ADB 命令需要已登记板卡范围的授权'})
                     if (route in ('/api/flash-plan', '/api/flash-selection', '/api/flash-stream')
                             or route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup', 'ram-boot')):
                         return self._json(403, {'error': '刷机需要已登记板卡范围的授权'})
@@ -690,7 +704,13 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                                               '/api/image-catalog', '/api/image-library')
                                      or grant['scope'] == 'device' and any(name == 'target_id' and value for name, value in query))):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
-                    query = [(name, value) for name, value in query if name not in ('serial', 'connection_id')]
+                    binding = route == '/api/hardware' and ('adb_binding', '1') in query
+                    if binding and grant['scope'] != 'device':
+                        return self._json(403, {'error': '查询 ADB 接线需要已登记板卡范围的授权'})
+                    if binding and [v for k, v in query if k == 'serial'] != [grant['serial']]:
+                        return self._json(403, {'error': '板号与授权范围不符'})
+                    strip = ('serial',) if binding else ('serial', 'connection_id')
+                    query = [(name, value) for name, value in query if name not in strip]
                     if grant['scope'] == 'device':
                         query.append(('serial', grant['serial']))
                     else:
@@ -700,7 +720,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                        'Content-Length': str(length)} if length else {}
             if route == '/api/artifact-download' and self.headers.get('Range') is not None:
                 headers['Range'] = self.headers['Range']
-            if agent_actor or route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware', '/api/board-test-cases',
+            if agent_actor or route in ('/api/tasks', '/api/task', '/api/artifact', '/api/artifact-download', '/api/hardware', '/api/board-test-cases', '/api/team-test-cases',
                                        '/api/flash-capabilities', '/api/flash-events', '/api/image-catalog', '/api/image-library'):
                 headers['X-Seriald-Actor'] = agent_actor or 'web'
             if grant and grant['scope'] == 'connection':
@@ -805,7 +825,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return proxy(self)
         if route == '/api/settings':
             return self._settings_request()
-        if route in ('/api/device-preferences', '/api/control-slots', '/api/board-test-cases'):
+        if route in ('/api/device-preferences', '/api/control-slots', '/api/board-test-cases', '/api/team-test-cases'):
             if not self._owner_authorized():
                 return self._json(403, {'error': '只有主访问凭证可以管理此配置'})
             return self._proxy()

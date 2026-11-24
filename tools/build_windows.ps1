@@ -180,6 +180,9 @@ try {
         --recursive-copy-metadata mcp `
         --icon packaging/decklab.ico `
         --add-data 'index.html;.' `
+        --add-data 'seriald_core/desktop_gnome_target.py;seriald_core' `
+        --add-data 'seriald_core/onie_target.py;seriald_core' `
+        --add-data 'seriald_core/desktop_lxqt_target.py;seriald_core' `
         --add-data 'static;static' `
         --add-data 'vendor;vendor' `
         --add-data 'seriald_core/terminal_worker.js;seriald_core' `

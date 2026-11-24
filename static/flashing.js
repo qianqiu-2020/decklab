@@ -10,6 +10,9 @@
     var fastUSBChoices = false, fastImage = null;
     var fastFirmwareTables = new Set(), pendingCommand = null;
     var streamProgress = {};
+    var loaderLinkSpeed = null;
+    var usbSpeeds = {1:'USB Low Speed · 1.5 Mb/s', 2:'USB Full Speed · 12 Mb/s', 3:'USB 2.0 · 480 Mb/s',
+      4:'USB 3.0 · 5 Gb/s', 5:'USB 3.x · 10 Gb/s', 6:'USB 3.x · 20 Gb/s'};
     var commandTotals = {}, keyCommands = [], commandCount = 0;
     var traceStages = {loader:'加载临时环境', read:'读取与核对', write:'写入分区', verify:'回读校验', boot:'复位与启动'};
     var reenterOffer = null, reenterCheckedTask = '';
@@ -717,6 +720,7 @@
       $('fl-fast').hidden = flow !== 'fast';
       $('fl-target-picker').hidden = !!pageBoard && !(flow === 'fast' && fastUSBChoices);
       $('fl-board-context').hidden = !pageBoard;
+      renderUsbLink();
       if (pageBoard) {
         var linked = !!(board && board.target_id && board.present !== false && capabilities);
         var boardChip = (capabilities && capabilities.chip) || board?.chip || pageBoard.chip;
@@ -1513,7 +1517,19 @@
         : '选择镜像并预览写入范围；预览不会复位或写入存储。');
       updateControls();
     }
-    function targetName(target) {
+    function renderUsbLink() {
+      var visible = loaderLinkSpeed != null || !!(board && board.target_id && board.present !== false);
+      var speed = loaderLinkSpeed ?? board?.usb_link_speed;
+      var k3 = String(board?.chip || capabilities?.chip || pageBoard?.chip || '').toLowerCase() === 'k3';
+      var initial = loaderLinkSpeed == null && board?.mode === 'bootrom';
+      $('fl-usb-link').hidden = !visible;
+      setMessage('fl-usb-speed', usbSpeeds[speed] || 'USB 速率待确认');
+      $('fl-usb-fast').hidden = !visible || !k3 || !(speed >= 4 && speed <= 6);
+      setMessage('fl-usb-hint', !visible || !k3 ? '' : initial && speed && speed <= 3
+        ? 'BootROM 初始连接。加载刷机环境后会更新速率。'
+        : speed && speed <= 3 ? '使用 USB 3.0 数据线和 USB 3 端口可提高刷写速度。' : '');
+    }
+    function targetName(target, showSpeed) {
       var ports = target.usb && target.usb.port_path || target.device && target.device.port_path;
       var attachment = target.usb_location || (Array.isArray(ports) ? 'USB ' + ports.join('.') : '');
       var link = target.console_link || {};
@@ -1521,18 +1537,19 @@
         : link.state === 'linked' && link.serial ? 'SN ' + link.serial + ' · ' + translate('串口已配对') : translate('序列号待识别');
       return [target.label || target.product || translate('下载模式设备'), /^(k1|k3)$/i.test(target.chip) && target.chip.toUpperCase(), serial,
         target.mode === 'unknown' ? translate('模式待确认') : target.mode,
-        attachment, target.present === false ? translate('设备未连接，原任务待处理') : ''].filter(Boolean).join(' · ');
+        attachment, showSpeed && target.present !== false && usbSpeeds[target.usb_link_speed],
+        target.present === false ? translate('设备未连接，原任务待处理') : ''].filter(Boolean).join(' · ');
     }
     function renderDiscovered() {
       var select = $('fl-device'); select.textContent = '';
       text('option', '选择下载模式设备', select).value = '';
       discovered.forEach(function (target) {
         if (pageBoard && flow === 'fast' && !manualFlashTarget(target)) return;
-        var option = text('option', targetName(target), select);
+        var option = text('option', targetName(target, true), select);
         option.value = target.target_id || target.id; option.dataset.i18nIgnore = '';
       });
       if (board && board.target_id && !discovered.some(function (target) { return (target.target_id || target.id) === board.target_id; })) {
-        var current = text('option', targetName(board), select); current.value = board.target_id; current.dataset.i18nIgnore = '';
+        var current = text('option', targetName(board, true), select); current.value = board.target_id; current.dataset.i18nIgnore = '';
       }
       select.value = board && board.target_id || '';
     }
@@ -1602,7 +1619,7 @@
       if (!target || busy || uploading || task && ['queued', 'running'].indexOf(task.state) >= 0) return;
       var selected = { target_id: target.target_id || target.id, serialIdentity: pageBoard && pageBoard.serial,
         target_generation: target.target_generation || target.generation, label: target.label, serial: target.serial || '',
-        present: target.present, chip: target.chip };
+        present: target.present, chip: target.chip, mode: target.mode, usb_link_speed: target.usb_link_speed };
       rememberImage(); board = selected; var seq = ++sequence; clearTimeout(pollTimer); ++eventSequence;
       sourceInspection = null; sourceCatalogue = null; sourceAnalysedId=''; $('fl-package-contents').textContent='';
       busy = true; capabilities = null; task = null; inspection = null; payloadCandidates = [];
@@ -1636,8 +1653,10 @@
         selected.label = resolved.label || selected.label;
         capabilities = result.capabilities || result; renderCapabilities();
         selected.chip = capabilities.chip || resolved.chip;
-        Object.assign(selected, {mode:resolved.mode, usb_location:resolved.usb_location, usb:resolved.usb});
-        discovered = discovered.map(function (item) { return (item.target_id || item.id) === selected.target_id ? Object.assign({}, item, {chip:selected.chip}) : item; });
+        Object.assign(selected, {mode:resolved.mode, usb_location:resolved.usb_location, usb:resolved.usb,
+          usb_link_speed:resolved.usb_link_speed});
+        discovered = discovered.map(function (item) { return (item.target_id || item.id) === selected.target_id
+          ? Object.assign({}, item, {chip:selected.chip, mode:selected.mode, usb_link_speed:selected.usb_link_speed}) : item; });
         renderDiscovered();
         $('fl-board').textContent = targetName(Object.assign({}, resolved, {chip:selected.chip}));
         linkStatus(resolved.console_link);
@@ -2355,6 +2374,7 @@
     }
     function resetEventLog() {
       cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear();
+      loaderLinkSpeed = null;
       streamProgress = {};
       commandTotals = {}; commandCount = 0; keyCommands = [];
       $('fl-event-raw').open = false; $('fl-events').textContent = '';
@@ -2403,6 +2423,11 @@
             if (event.event === 'firmware-skipped') {
               fastFirmwareTables.add(event.partition);
               eventLines.push([number, translate('包内 NOR 固件已跳过'), event.partition].join(' · '));
+              return;
+            }
+            if (event.event === 'usb-link' && Number.isInteger(event.usb_link_speed) && usbSpeeds[event.usb_link_speed]) {
+              loaderLinkSpeed = event.usb_link_speed;
+              eventLines.push([number, translate('刷机环境 USB 连接'), usbSpeeds[loaderLinkSpeed]].join(' · '));
               return;
             }
             eventLines.push([number, event.phase || event.event || event.type, event.message,

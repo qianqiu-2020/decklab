@@ -318,10 +318,12 @@ class BoardMaintenance:
             if (task['updated'] != expected_updated or task['state'] in ('queued', 'running')
                     or task_id in self.manager.tasks._active):
                 raise TaskError('operation changed or its worker has not stopped', 409)
-            if not task['kind'].startswith('hardware-') or document.get('cleanup_confirmed') is not False:
-                raise TaskError('task has no configured-helper cleanup recovery', 409)
+            adb = task['kind'] == 'adb-command'
+            if not (adb or task['kind'].startswith('hardware-')) or document.get('cleanup_confirmed') is not False:
+                raise TaskError('task has no operation cleanup recovery', 409)
             holds = self.store.db.execute('SELECT * FROM flash_resource_holds WHERE task_id=?', (task_id,)).fetchall()
-            if not holds or any(value['state'] != 'recovery' or not value['resource'].startswith('board:') for value in holds):
+            allowed = ('board:', 'board-test-usb:') if adb else ('board:',)
+            if not holds or any(value['state'] != 'recovery' or not value['resource'].startswith(allowed) for value in holds):
                 raise TaskError('operation recovery resources changed', 409)
             now = time.time()
             document['recovery_confirmation'] = {'confirmed_stopped': True, 'actor': actor,
@@ -330,6 +332,8 @@ class BoardMaintenance:
                                   (json.dumps(document, ensure_ascii=False, allow_nan=False), now, task_id))
             self.store.db.execute('DELETE FROM flash_resource_holds WHERE task_id=?', (task_id,))
             for hold in holds:
+                if not hold['resource'].startswith('board:'):
+                    continue
                 self.store.db.execute('INSERT INTO events(serial,ts,actor,action,detail) VALUES(?,?,?,?,?)',
                     (hold['resource'][6:], now, actor, 'operation-recovery-confirmed', task_id + ': ' + reason.strip()))
             return tasks.get(task_id)

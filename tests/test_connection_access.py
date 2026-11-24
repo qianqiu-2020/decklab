@@ -15,6 +15,7 @@ from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
 from seriald_core.devices import Manager
 from seriald_core.httpd import BoundedThreadingTCPServer
 from seriald_core.profiles import ProfileBook
+from seriald_core.models import Board
 from seriald_core.storage import Store
 
 
@@ -82,6 +83,27 @@ def protected_connection():
 
 
 class ConnectionAccessTests(unittest.TestCase):
+    def test_device_grant_binding_keeps_the_requested_generation(self):
+        with protected_connection() as fixture:
+            device = fixture.device
+            record = fixture.manager.store.bind({'serial':'SAMPLE-BOARD', 'hostname':'board-one',
+                'identity_status':'confirmed', 'serial_source':'device-tree'}, device.by_path, device.dev)
+            board = Board(record)
+            fixture.manager.boards[board.serial] = board
+            board.attach(device)
+            token, _ = fixture.grant_store.issue('device', device.serial)
+            query = {'key': device.key, 'serial': device.serial,
+                     'connection_id': device.connection_id, 'adb_binding': '1'}
+            with mock.patch('seriald_core.board_cases.adb_binding', return_value={'serial': device.serial}) as read:
+                status, data = api_request(fixture.url, '/api/hardware', token, query=query)
+                self.assertEqual(status, 200, data)
+                self.assertEqual(data['adb_binding']['serial'], device.serial)
+                query['connection_id'] = 'earlier'
+                self.assertEqual(api_request(fixture.url, '/api/hardware', token, query=query)[0], 404)
+                self.assertEqual(api_request(fixture.url, '/api/hardware', fixture.token, query=query)[0], 403)
+                read.assert_called_once()
+
+
     def test_unidentified_raw_access_and_grant_revocation_use_real_protected_api(self):
         with protected_connection() as fixture:
             device, token = fixture.device, fixture.token

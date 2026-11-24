@@ -155,6 +155,7 @@ class FlashRunnerTests(unittest.TestCase):
             {'event': 'command', 'command': 'getvar:mtd-size', 'status': 'OKAY'},
             {'event': 'command-limit'},
             {'event': 'firmware-skipped', 'partition': 'partition_nor.json'},
+            {'event': 'usb-link', 'usb_link_speed': 4},
         ]
         binding = self.binding('for event in %r:\n    print(json.dumps(event))\n' % audit
                                + "print(json.dumps({'event':'result','result':{'ok':True,'write_result':'not-started'}}))")

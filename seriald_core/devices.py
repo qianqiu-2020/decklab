@@ -297,7 +297,7 @@ class Manager:
                 target_registry = previous_board.sessions if previous_board else device._sessions
                 if (sources or device._sessions is not target_registry) and any(
                         registry.pending for registry in registries):
-                    raise IdentityError('SSH 会话正在建立，稍后再迁移身份档案')
+                    raise IdentityError('终端会话正在建立，稍后再迁移身份档案')
                 ids = []
                 for registry in registries:
                     ids.extend(registry.sessions)

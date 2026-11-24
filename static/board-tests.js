@@ -17,6 +17,126 @@
       parent.appendChild(node);
       return node;
     }
+    let teamPage = 1, teamQuery = '', teamRequest = 0, detailRequest = 0;
+    const groupSelect = $('board-tests-team-group');
+    const teamDetail = $('board-tests-team-detail');
+    async function showTeamCase(id) {
+      const gen = sequence, request = ++detailRequest;
+      teamDetail.hidden = false;
+      teamDetail.textContent = '正在读取用例…';
+      try {
+        const data = await client.request('/api/team-test-cases?' + new URLSearchParams({...scope(),view:'detail',id}));
+        if (!current(gen) || request !== detailRequest) return;
+        teamDetail.replaceChildren();
+        text('h3', data.case.name, teamDetail);
+        if (data.case.prerequisite) text('p', data.case.prerequisite, teamDetail);
+        const steps = text('ol', '', teamDetail);
+        for (const step of data.case.steps) {
+          const row = text('li', step.command || '', steps);
+          if (step.expected) text('p', '预期结果 · ' + step.expected, row);
+        }
+        if (!data.case.steps.length) text('p', '该用例尚未填写步骤。', teamDetail);
+        if (!data.mapped) {
+          text('p', '此板尚未关联 TitanX 工位，可查看用例。', teamDetail);
+        } else if (data.case.automated && data.case.reviewed) {
+          const label = text('label', '轮数 ', teamDetail);
+          const count = text('input', '', label);
+          count.type = 'number'; count.value = count.min = '1'; count.max = '100';
+          const run = text('button', '在当前板上执行', teamDetail);
+          run.type = 'button';
+          run.disabled = active() || pending || !!requestId;
+          run.addEventListener('click', async () => {
+            if (!count.reportValidity() || !Number.isInteger(count.valueAsNumber)) return;
+            const rounds = count.valueAsNumber;
+            if (!global.confirm('在 '+selected.key+' 上执行 '+data.case.name+'，共 '+rounds+' 轮？')) return;
+            run.disabled = true;
+            const rid = global.crypto.randomUUID?.() || Array.from(global.crypto.getRandomValues(new Uint8Array(16)),
+              n=>n.toString(16).padStart(2,'0')).join('');
+            pending = true;
+            trackRequest(rid);
+            selectSource(false);
+            try {
+              const receipt = await client.request('/api/task-start', {...scope(),kind:'board-test',source:'titanx',
+                case:id,rounds,request_id:rid});
+              if (current(gen)) { rememberRun(receipt.task); await follow(receipt.task.id); }
+            } catch (error) {
+              if (!current(gen)) return;
+              if (error.result && error.status < 500) trackRequest(null);
+              message(requestId ? '未收到提交回执，请查询原任务。' : error.message);
+            } finally {
+              if (current(gen)) {pending = false; render();}
+            }
+          });
+        }
+      } catch (error) {
+        if (current(gen) && request === detailRequest) teamDetail.textContent = error.message;
+      }
+    }
+    function selectSource(team) {
+      $('board-tests-team').hidden = !team;
+      $('board-tests-local').hidden = team;
+      $('board-tests-team-tab').setAttribute('aria-pressed', String(team));
+      $('board-tests-local-tab').setAttribute('aria-pressed', String(!team));
+      detailRequest++;
+      teamDetail.hidden = true;
+      if (team) loadTeam(teamPage);
+      else teamRequest++;
+    }
+    async function loadTeam(page) {
+      const gen = sequence, request = ++teamRequest;
+      const status = $('board-tests-team-status'), list = $('board-tests-team-list');
+      const prev = $('board-tests-team-prev'), next = $('board-tests-team-next');
+      prev.disabled = next.disabled = true;
+      detailRequest++;
+      teamDetail.hidden = true;
+      list.replaceChildren();
+      status.textContent = '正在读取团队用例…';
+      try {
+        const params = new URLSearchParams({page: String(page), name: teamQuery});
+        const group = groupSelect.value;
+        if (groupSelect.options.length === 1) {
+          const groups = await client.request('/api/team-test-cases?view=groups');
+          if (!current(gen) || request !== teamRequest) return;
+          for (const item of groups.groups || []) text('option', item.name, groupSelect).value = item.id;
+        }
+        const data = await client.request('/api/team-test-cases?' +
+          (group ? new URLSearchParams({view:'members', id:group}) : params));
+        if (!current(gen) || request !== teamRequest) return;
+        if (!data.configured) {
+          status.textContent = '控制机尚未配置团队测试平台。';
+          return;
+        }
+        if (group) {
+          const members = data.members.filter(item => item.name.toLowerCase().includes(teamQuery.toLowerCase()));
+          Object.assign(data, {page, page_size:20, total:members.length, cases:members.slice((page-1)*20, page*20)});
+        }
+        teamPage = data.page;
+        const pages = Math.ceil(data.total / data.page_size);
+        status.textContent = data.total ? '第 ' + teamPage + ' / ' + pages + ' 页 · ' + data.total + ' 项用例' : '没有匹配的团队用例';
+        for (const item of data.cases) {
+          const row = text('li', '', list);
+          const link = text('button', item.name, row);
+          link.type = 'button';
+          link.addEventListener('click', () => showTeamCase(item.id));
+          if (group) text('small', item.code + ' · 顺序 ' + item.order + ' · ' + item.times + ' 次', row);
+          else text('small', [item.code, item.automated ? '已自动化' : '待自动化', item.reviewed ? '已评审' : '待评审'].filter(Boolean).join(' · '), row);
+        }
+        prev.disabled = page <= 1;
+        next.disabled = page >= pages;
+      } catch (error) {
+        if (current(gen) && request === teamRequest) status.textContent = error.message;
+      }
+    }
+    $('board-tests-team-tab').addEventListener('click', () => selectSource(true));
+    $('board-tests-local-tab').addEventListener('click', () => selectSource(false));
+    groupSelect.addEventListener('change', () => loadTeam(1));
+    $('board-tests-team-search').addEventListener('submit', event => {
+      event.preventDefault();
+      teamQuery = $('board-tests-team-name').value.trim();
+      loadTeam(1);
+    });
+    $('board-tests-team-prev').addEventListener('click', () => loadTeam(teamPage - 1));
+    $('board-tests-team-next').addEventListener('click', () => loadTeam(teamPage + 1));
     function scope() {
       return {key:selected.key,serial:selected.serial,connection_id:selected.connectionId};
     }
@@ -257,6 +377,8 @@
       summary.className = 'board-tests-summary';
       text('strong', result.case_name || names[result.case] || '板卡用例', summary);
       text('span',states[task.state] || task.state,summary).dataset.state = task.state;
+      if (result.source === 'titanx') text('p','TitanX · ' + result.platform_device + ' · ' +
+        (result.platform_task_id ? '任务 '+result.platform_task_id : result.platform_plan),box);
       text('p','通过 '+(result.completed_rounds || 0)+' 轮'+(total?' / '+total:'')
         +(result.in_flight?' · 正在观察第 '+result.in_flight+' 轮':'')
         +(result.current_command?' · 命令 '+result.current_command+' / '+result.total_commands:''),box);
@@ -323,6 +445,7 @@
       selected=getView();
       if (!selected?.serial) return;
       const gen=++sequence;
+      selectSource(false);
       clearTimeout(timer);
       task=null; pending=false; requestId=null; runningId=null; round=null; roundSignature='';
       cases=[];allowedBuiltins=[];canCreate=false;

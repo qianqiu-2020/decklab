@@ -127,6 +127,14 @@ class QueryTests(unittest.TestCase):
         self.assertEqual(stream.execute('session', {'off': -1}, self.device).status, 400)
         self.assertEqual(self.device.read.call_count, 2)
 
+    def test_bounded_serial_window_starts_at_the_cursor_without_waiting(self):
+        stream = SessionQueries()
+        self.device.read.return_value = (19, b'abcdefghi', True)
+        data = stream.execute('serial', {'off': 10, 'wait': 0, 'max_bytes': 4}, self.device).payload
+        self.device.read.assert_called_once_with(10, wait=0)
+        self.assertEqual((data['data'], data['off'], data['more']), ('abcd', 14, True))
+        self.assertEqual(stream.execute('serial', {'off': 10, 'max_bytes': 65537}, self.device).status, 400)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -41,7 +41,9 @@ class SessionQueries:
         try:
             offset = int(params.get('off', '0') or 0)
             revision = int(params.get('terminal_rev', '0'))
-            if offset < 0 or revision < 0:
+            limit = int(params['max_bytes']) if action == 'serial' and 'max_bytes' in params else None
+            if (offset < 0 or revision < 0 or
+                    limit is not None and (not 1 <= limit <= 65536 or params.get('screen') == '1')):
                 raise ValueError
         except ValueError:
             return response(400, {'error': 'bad offset'})
@@ -49,10 +51,19 @@ class SessionQueries:
         stream = device if sid == 'serial' else device.get_session(sid)
         if not stream:
             return response(404, {'error': 'no such session'})
-        offset, data, alive = stream.read(offset, wait=1) if params.get('screen') == '1' else stream.read(offset)
+        if action == 'serial' and params.get('wait') == '0':
+            offset, data, alive = stream.read(offset, wait=0)
+        else:
+            offset, data, alive = stream.read(offset, wait=1) if params.get('screen') == '1' else stream.read(offset)
+        more = limit is not None and len(data) > limit
+        if more:
+            offset -= len(data) - limit
+            data = data[:limit]
         result = {'off': offset, 'alive': alive,
                   'data_b64': base64.b64encode(data).decode('ascii'),
                   'data': data.decode('utf-8', 'replace')}
+        if limit is not None:
+            result['more'] = more
         if sid == 'serial':
             result['dev'] = device.dev
             terminal = getattr(device, 'terminal', None)
@@ -99,11 +110,14 @@ class ArchiveQueries:
                     raise ValueError
             except ValueError:
                 return response(400, {'error': 'bad offset'})
-            history = self.manager.store.sessions(d.serial, session_offset, limit) if d.serial else []
+            kind = params.get('session_kind') or None
+            if kind not in (None, 'adb', 'ssh'):
+                return response(400, {'error': 'invalid session kind'})
+            history = self.manager.store.sessions(d.serial, session_offset, limit, kind) if d.serial else []
             events = self.manager.store.visible_events(d.serial, event_offset, limit) if d.serial else []
             return response(200, {
                 'sessions': history, 'session_offset': session_offset,
-                'session_total': self.manager.store.session_count(d.serial) if d.serial else 0,
+                'session_total': self.manager.store.session_count(d.serial, kind) if d.serial else 0,
                 'events': events, 'event_offset': event_offset,
                 'event_total': self.manager.store.visible_event_count(d.serial) if d.serial else 0,
                 # Keep old clients useful while they migrate to independent pagers.

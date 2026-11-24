@@ -4,6 +4,7 @@ Only the collector interprets desktop messages. This tunnel never receives
 target credentials or opens a VNC/RDP connection.
 """
 import http.client
+import ipaddress
 import socket
 import threading
 import time
@@ -19,12 +20,18 @@ def public_origin(handler):
     origin = handler.headers.get('Origin', '')
     try:
         parsed = urlparse(origin)
-        if (not public_mcp_host_allowed(handler.server, host)
-                or parsed.scheme not in ('http', 'https') or parsed.username is not None
+        if (parsed.scheme not in ('http', 'https') or parsed.username is not None
                 or parsed.password is not None or parsed.netloc.lower() != host.lower()
                 or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
             raise ValueError()
-    except (ValueError, AttributeError):
+        if not public_mcp_host_allowed(handler.server, host):
+            # A directly connected browser can use a secondary NIC or VPN IP.
+            # Match the accepted socket's local address, independent of DNS and proxy headers.
+            local_ip, local_port = handler.connection.getsockname()[:2]
+            port = parsed.port if parsed.port is not None else (443 if parsed.scheme == 'https' else 80)
+            if ipaddress.ip_address(parsed.hostname) != ipaddress.ip_address(local_ip) or port != local_port:
+                raise ValueError()
+    except (ValueError, AttributeError, OSError, TypeError):
         raise ValueError('desktop Origin or Host does not match this service') from None
     return parsed.scheme + '://' + parsed.netloc
 

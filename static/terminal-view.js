@@ -6,6 +6,13 @@
     var $ = options.byId, fetch = options.fetch;
     var view = null, term = null, loopGen = 0;
     var DEFAULT_TERMINAL_FONT_SIZE = 14.5;
+    var fontSizes = [10, 12, 14.5, 16, 18, 20, 22, 24];
+    var preferredFontSize = DEFAULT_TERMINAL_FONT_SIZE;
+    var fontPreferenceKey = 'decklab-terminal-font-size';
+    try {
+      var storedFont = Number(global.localStorage.getItem(fontPreferenceKey));
+      if (fontSizes.includes(storedFont)) preferredFontSize = storedFont;
+    } catch (_) {}
     function isCurrent(ctx) {
       return !!ctx && view === ctx && ctx.gen === loopGen;
     }
@@ -123,7 +130,7 @@
       $('b-rescue').disabled = false;
       var board = options.board(key) || {};
       var selectedSession = options.session(sid) || {};
-      var isAgentSession = selectedSession.kind === 'ssh' && !!selectedSession.actor
+      var isAgentSession = ['ssh', 'adb'].includes(selectedSession.kind) && !!selectedSession.actor
         && selectedSession.actor !== 'web' && !options.takenOver(sid);
       var ctx = { key: key, serial: board.serial, connectionId: board.connection_id,
                   byPath: board.by_path || board.last_path,
@@ -151,7 +158,7 @@
         allowProposedApi: true,
         windowOptions: {setWinSizeChars: sid === 'serial'},
         fontFamily: 'ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace',
-        fontSize: DEFAULT_TERMINAL_FONT_SIZE,
+        fontSize: preferredFontSize,
         theme: { background: '#0F151D', foreground: '#DCE5F0', cursor: '#82C5FF',
                  selectionBackground: '#E6B45D', selectionForeground: '#0F151D' }
       });
@@ -412,6 +419,14 @@
       scheduleSerialSize(ctx);
       options.scheduleCommandNav(ctx);
     }
+    function setFontSize(value) {
+      value = Number(value);
+      if (!fontSizes.includes(value) || value === preferredFontSize) return;
+      preferredFontSize = value;
+      try { global.localStorage.setItem(fontPreferenceKey, String(value)); } catch (_) {}
+      resizeTerm();
+      if (view) syncSerialPresentation(view);
+    }
     function visibleTerminalRows(ctx, dimensions) {
       var proposed = dimensions && dimensions.rows ? dimensions.rows : ctx.term.rows;
       var element = ctx.term.element;
@@ -449,7 +464,7 @@
       }
       if (!host || !host.clientWidth || !host.clientHeight) return '';
       return [host.clientWidth, host.clientHeight, font.fontFamily, font.lineHeight, font.letterSpacing,
-        window.devicePixelRatio || 1].join(':');
+        preferredFontSize, window.devicePixelRatio || 1].join(':');
     }
     function preferredGrid(ctx) {
       var viewSize = viewSizeKey(ctx);
@@ -457,7 +472,7 @@
       var proposed = ctx.fit.proposeDimensions();
       if (!proposed) return null;
       var capacity = serialCapacity(ctx, proposed);
-      var ratio = ctx.term.options.fontSize / DEFAULT_TERMINAL_FONT_SIZE;
+      var ratio = ctx.term.options.fontSize / preferredFontSize;
       // A shared grid can change the renderer font and scrollbar measurements.
       // Keep the requested grid stable until the browser container changes.
       var grid = {cols: Math.max(20, Math.min(500, Math.floor(capacity.cols * ratio))),
@@ -475,7 +490,7 @@
       if (ctx.screenManaged || ctx.sid === 'serial' && ctx.serialMode !== 'text') {
         var required = ctx.screenManaged ? ctx.screenGeometry.rows : ctx.serialRows || 24;
         var cap = !ctx.linuxConsole && required >= 40 && document.body.classList.contains('terminal-max')
-          ? 10 : DEFAULT_TERMINAL_FONT_SIZE;
+          ? Math.min(preferredFontSize, 10) : preferredFontSize;
         var requiredCols = ctx.screenManaged ? ctx.screenGeometry.cols : ctx.serialCols || 80;
         var viewSize = viewSizeKey(ctx);
         var signature = viewSize ? [viewSize, requiredCols, required, cap].join(':') : '';
@@ -507,8 +522,8 @@
         return;
       }
       ctx.fixedFitSignature = '';
-      if (ctx.term.options.fontSize !== DEFAULT_TERMINAL_FONT_SIZE)
-        ctx.term.options.fontSize = DEFAULT_TERMINAL_FONT_SIZE;
+      if (ctx.term.options.fontSize !== preferredFontSize)
+        ctx.term.options.fontSize = preferredFontSize;
       // FitAddon calculates width from the host and subtracts a scrollbar even
       // when Chromium uses overlay scrollbars. Measure the actual viewport so
       // the PTY column count matches the pixels xterm can paint.
@@ -595,6 +610,20 @@
         ctx.renderBusy = false; drainRenderQueue(ctx);
       });
     }
+    function syncSerialPresentation(ctx) {
+      if (!terminalVisible(ctx) || !ctx.screenManaged || ctx.sid !== 'serial' || ctx.screenPhase !== 'text'
+          || ctx.readonly || ctx.internalOutput || ctx.inputQueue.length || ctx.inputSending) return;
+      var grid = preferredGrid(ctx);
+      // A firmware or boot reset can replace the shared grid in an unchanged viewport.
+      var size = grid && grid.cols + ':' + grid.rows + ':' + ctx.terminalRevision;
+      if (grid && (ctx.screenGeometry.cols !== grid.cols || ctx.screenGeometry.rows !== grid.rows)
+          && ctx.presentationAttempt !== size) {
+        ctx.presentationAttempt = size;
+        fetch('/api/session-resize', {method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({key: ctx.key, serial: ctx.serial, sid: 'serial', cols: grid.cols, rows: grid.rows,
+            observed_off: ctx.off, automatic: true, presentation: true})}).catch(function () {});
+      }
+    }
     function renderTerminalPayload(ctx, payload, done) {
       var epoch = ctx.renderEpoch;
       if (!isCurrent(ctx)) return;
@@ -614,20 +643,7 @@
           ctx.initialRendered = true;
           if (snapshot) scheduleFullRefresh(ctx);
           scheduleSerialSize(ctx); pushSize(ctx);
-          if (terminalVisible(ctx) && ctx.sid === 'serial' && ctx.screenPhase === 'text' && !ctx.readonly && !ctx.internalOutput
-              && !ctx.inputQueue.length && !ctx.inputSending) {
-            var grid = preferredGrid(ctx);
-            // A firmware/boot reset can replace the shared grid while this
-            // viewport stays unchanged. Retry once for that screen revision.
-            var size = grid && grid.cols + ':' + grid.rows + ':' + ctx.terminalRevision;
-            if (grid && (ctx.screenGeometry.cols !== grid.cols || ctx.screenGeometry.rows !== grid.rows)
-                && ctx.presentationAttempt !== size) {
-              ctx.presentationAttempt = size;
-              fetch('/api/session-resize', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({key: ctx.key, serial: ctx.serial, sid: 'serial', cols: grid.cols, rows: grid.rows,
-                  observed_off: ctx.off, automatic: true, presentation: true})}).catch(function () {});
-            }
-          }
+          syncSerialPresentation(ctx);
           options.scheduleCommandNav(ctx); done();
         };
         if (raw) ctx.term.write(Uint8Array.from(raw, function (c) { return c.charCodeAt(0); }), written);
@@ -883,14 +899,14 @@
         });
     }
 
-    function send(text, ctx, slow) {
+    function send(text, ctx, slow, paste) {
       ctx = ctx || view;
       if (!isCurrent(ctx)) return;
       if (ctx.readonly) {
         $('d-status').textContent = ctx.kind === 'log' ? ' 当前是只读归档日志' : ' 当前会话由另一客户端控制，可介入后输入';
         return;
       }
-      if (ctx.screenManaged && ctx.sid === 'serial' && !ctx.serialConfigured
+      if (!paste && ctx.screenManaged && ctx.sid === 'serial' && !ctx.serialConfigured
           && /[^\r\n]/.test(text) && idleSerialPrompt(ctx)) {
         ctx.serialStartupPending = true;
         requestSerialSize(ctx, false);
@@ -906,10 +922,11 @@
 
     var controller = {
       isCurrent: isCurrent, create: createView, dispose: disposeView,
-      resize: resizeTerm, redraw: redrawTerminal, syncSerialSize: syncSerialSize,
+      resize: resizeTerm, redraw: redrawTerminal, syncSerialSize: syncSerialSize, setFontSize: setFontSize,
       write: writeTerminalPayload, start: startStream, send: send, updateState: updateTerminalState
     };
     Object.defineProperty(controller, 'current', { get: function () { return view; } });
+    Object.defineProperty(controller, 'fontSize', { get: function () { return preferredFontSize; } });
     return controller;
   }
   global.SerialdTerminalView = { create: create };

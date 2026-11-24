@@ -758,9 +758,13 @@ def parser():
     fetch_file.add_argument('--local', required=True)
     fetch_file.add_argument('--overwrite', action='store_true')
     task_start = commands.add_parser('task-start', help='start a background device operation')
-    task_start.add_argument('kind', choices=('identify', 'ssh-enable', 'ssh-connect',
+    task_start.add_argument('kind', choices=('identify', 'ssh-enable', 'ssh-connect', 'adb-connect',
         'hardware-power-on', 'hardware-power-off', 'hardware-reset', 'hardware-enter-download', 'hardware-flash'))
     task_start.add_argument('--request-id', help='stable platform attempt ID; generated once if omitted')
+    adb = commands.add_parser('adb-command', help='start an audited ADB shell task on an identified USB board')
+    adb.add_argument('command', help='board shell text, saved with its output in the task record')
+    adb.add_argument('--timeout', type=int, default=60, help='seconds to wait for the ADB receipt')
+    adb.add_argument('--request-id', help='stable attempt ID; generated once if omitted')
     commands.add_parser('operation', help='show the active serial operation and cancellation ID')
     cancel = commands.add_parser('operation-cancel', help='cancel your active serial operation by ID')
     cancel.add_argument('id', help='operation ID returned by operation')
@@ -784,7 +788,10 @@ def parser():
     identify = commands.add_parser('identify', help='actively identify board; may log in on the serial console')
     identify.add_argument('--init-boot-marker', action='store_true',
                           help='explicitly create /boot/seriald-id once as a software identity fallback')
-    commands.add_parser('sessions', help='list serial and SSH sessions')
+    commands.add_parser('sessions', help='list serial, USB ADB and SSH sessions')
+    commands.add_parser('adb-open', help='open an interactive USB ADB shell')
+    adb_close = commands.add_parser('adb-close', help='close an interactive USB ADB shell')
+    adb_close.add_argument('--sid', required=True)
     commands.add_parser('ssh-open', help='open or reuse your persistent interactive SSH session')
     close = commands.add_parser('ssh-close', help='close only your own SSH session')
     close.add_argument('--sid', required=True)
@@ -801,7 +808,7 @@ def parser():
     compare.add_argument('--baseline-id', required=True, help='boot ID from logs on baseline device')
     compare.add_argument('--target-id', required=True, help='boot ID from logs on --device')
     compare.add_argument('--baseline-device', help='different baseline board; defaults to --device')
-    commands.add_parser('activity', help='show persisted SSH sessions and agent activity')
+    commands.add_parser('activity', help='show USB ADB and SSH session history and agent activity')
     log = commands.add_parser('log', help='read a stored log online')
     log.add_argument('--file', required=True)
     log.add_argument('--off', type=nonnegative)
@@ -863,6 +870,9 @@ def main(argv=None):
             client.select(args.device)
             if args.action == 'task-start':
                 result = client.submit_task(args.kind, args.request_id, connection_id=client.connection_id)
+            elif args.action == 'adb-command':
+                result = client.submit_task('adb-command', args.request_id, connection_id=client.connection_id,
+                                            command=args.command, timeout=args.timeout)
             elif args.action == 'flash-capabilities':
                 result = client.get('/api/flash-capabilities')
             elif args.action == 'flash-upload':
@@ -954,6 +964,12 @@ def main(argv=None):
                     'right_serial': client.serial, 'right_id': args.target_id})
             elif args.action == 'exec':
                 result = execute(client, args.command, args.timeout)
+            elif args.action == 'adb-open':
+                result = wait_task(client, client.submit_task('adb-connect', connection_id=client.connection_id))
+            elif args.action == 'adb-close':
+                if not re.fullmatch(r'adb[0-9a-f]+', args.sid):
+                    raise ClientError('--sid must identify an ADB session')
+                result = client.post('/api/session-close', sid=args.sid)
             elif args.action == 'ssh-close':
                 if not re.fullmatch(r'ssh[0-9a-f]+', args.sid):
                     raise ClientError('--sid must be an SSH session ID returned by ssh-open')

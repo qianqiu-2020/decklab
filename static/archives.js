@@ -217,7 +217,7 @@
           ctx.archiveConnections = d.connections || [];
           archiveState.connection = ctx.archiveConnection;
           ctx.archiveFiles = (d.files || []).filter(function (file) {
-            return (file.kind || (file.name.indexOf('ssh-') === 0 ? 'ssh' : 'serial')) === 'serial';
+            return file.kind ? file.kind === 'serial' : !/^(ssh|adb)-/.test(file.name);
           });
           ctx.archiveBoots = d.boots || [];
           $('log-location').textContent = d.archive

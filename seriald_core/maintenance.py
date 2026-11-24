@@ -72,7 +72,7 @@ def disk_status(root, policy):
             'reason': 'low-space' if warning else ''}
 
 
-_DAILY_LOG = re.compile(r'^(?:serial(?:-[^/]*)?|ssh-[^/]+)-(\d{8})\.log$')
+_DAILY_LOG = re.compile(r'^(?:serial(?:-[^/]*)?|(?:ssh|adb)-[^/]+)-(\d{8})\.log$')
 
 
 class LogMaintenance:
@@ -185,6 +185,8 @@ def diagnostic_summary(manager, root, started):
         identity = device.serial or device.key
         with device.sessions_lock:
             sessions = list(device.ssh_sessions.values())
+        ssh = [s for s in sessions if getattr(s, 'kind', 'ssh') == 'ssh']
+        adb = [s for s in sessions if getattr(s, 'kind', 'ssh') == 'adb']
         info = device.probe_info if isinstance(device.probe_info, dict) else {}
         status = info.get('identity_status')
         boards.append({
@@ -192,7 +194,8 @@ def diagnostic_summary(manager, root, started):
             'online': bool(device.present), 'identified': bool(device.serial),
             'identity_status': status if status in ('confirmed', 'provisional') else 'unidentified',
             'serial_logging_ok': not bool(device.log_error),
-            'ssh_sessions': len(sessions), 'ssh_log_errors': sum(bool(s.log_error) for s in sessions),
+            'ssh_sessions': len(ssh), 'ssh_log_errors': sum(bool(s.log_error) for s in ssh),
+            'adb_sessions': len(adb), 'adb_log_errors': sum(bool(s.log_error) for s in adb),
         })
     maintenance = manager.maintenance
     return {'format_version': 1, 'version': __version__, 'platform': sys.platform,

@@ -1127,7 +1127,7 @@ test('automatic discovery probes one USB target and flashes without a UART or in
   h.api.discover();
   assert.equal(h.get('flash-dialog').open, true);
   const target = {target_id: 'usb-target-a', target_generation: 'generation-a', serial: '',
-    label: 'SpacemiT loader', mode: 'loader', usb: {port_path: [1, 4]}};
+    label: 'SpacemiT loader', mode: 'bootrom', chip: 'k3', usb_link_speed: 3, usb: {port_path: [1, 4]}};
   h.take('/api/flash-discover').resolve({available: true, targets: [target]}); await drain();
   const history = h.take('/api/tasks');
   assert.match(history.url, /target_id=usb-target-a/);
@@ -1137,6 +1137,9 @@ test('automatic discovery probes one USB target and flashes without a UART or in
   assert.deepEqual(probe.payload, {actor: 'web', target_id: 'usb-target-a', target_generation: 'generation-a'});
   assert.equal(h.requests.some(entry => entry.url === '/api/task-start'), false);
   probe.resolve({target, capabilities}); await drain();
+  assert.match(h.get('fl-usb-speed').textContent, /USB 2\.0/);
+  assert.equal(h.get('fl-usb-fast').hidden, true);
+  assert.match(h.get('fl-usb-hint').textContent, /BootROM/);
   h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change'); h.get('fl-plan').click();
   const preview = h.take('/api/flash-plan');
   assert.equal(preview.payload.target_id, target.target_id);
@@ -1149,6 +1152,14 @@ test('automatic discovery probes one USB target and flashes without a UART or in
   assert.equal(start.payload.target_id, target.target_id);
   assert.equal(start.payload.target_generation, target.target_generation);
   assert.equal('connection_id' in start.payload, false);
+  start.resolve({task:{id:'usb-speed-run', kind:'flash', state:'running',
+    flash_targets:[{target_id:target.target_id, generation:target.target_generation}], progress:{phase:'writing'}}});
+  await drain();
+  h.take('/api/flash-events').resolve({events:[{event:'usb-link', usb_link_speed:4}], next_after:1});
+  await drain();
+  assert.match(h.get('fl-usb-speed').textContent, /USB 3\.0.*5 Gb\/s/);
+  assert.equal(h.get('fl-usb-fast').hidden, false);
+  assert.equal(h.get('fl-usb-hint').textContent, '');
 });
 
 test('multiple USB candidates require an explicit target and pin its generation', async () => {

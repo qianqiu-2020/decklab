@@ -1,7 +1,7 @@
 """Shell identification protocol and response parsing."""
-import binascii
 import re
 
+from .onie_target import parse_onie_serial
 from .boot_marker import read_command
 
 # 每次命令由 _run_cmd 加独立 nonce 帧;命令回显不含完整 marker,迟到结果不会串单。
@@ -81,44 +81,6 @@ def stock_os_id(value):
 def console_os_id(text):
     matches = list(_OS_CONSOLE_BANNER.finditer(text))
     return stock_os_id(next(value for value in matches[-1].groups() if value)) if matches else ''
-
-
-def parse_onie_serial(value):
-    """Return the ONIE 0x23 serial only after validating framing and CRC."""
-    if not value or len(value) > 4096 or not re.fullmatch(r'[0-9a-fA-F]+', value) or len(value) % 2:
-        return '', False
-    try:
-        data = bytes.fromhex(value)
-    except ValueError:
-        return '', False
-    if len(data) < 17 or data[:8] != b'TlvInfo\0' or data[8] != 1:
-        return '', False
-    end = 11 + int.from_bytes(data[9:11], 'big')
-    if end > len(data) or end > 2048 or data[end - 6:end - 4] != b'\xfe\x04':
-        return '', False
-    if int.from_bytes(data[end - 4:end], 'big') != binascii.crc32(data[:end - 4]):
-        return '', False
-    serials = []
-    offset = 11
-    while offset < end:
-        if offset + 2 > end:
-            return '', False
-        code, length = data[offset], data[offset + 1]
-        value = data[offset + 2:offset + 2 + length]
-        if len(value) != length:
-            return '', False
-        if code == 0x23:
-            try:
-                serials.append(value.decode('ascii'))
-            except UnicodeDecodeError:
-                return '', True
-        offset += 2 + length
-    if offset != end or len(serials) > 1:
-        return '', True
-    serial = serials[0].strip() if serials else ''
-    if not serial or len(serial.encode()) > 32 or any(ord(char) < 33 or ord(char) > 126 for char in serial):
-        return '', True
-    return serial, True
 
 
 def parse_probe(raw, strict=True):

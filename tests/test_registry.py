@@ -82,6 +82,14 @@ class SessionRegistryTests(unittest.TestCase):
             self.device.ssh_connect()
         seriald.check_password_login.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
 
+    def test_buildroot_ssh_uses_observed_service_on_this_connection(self):
+        self.device.probe_info.update(os_id='buildroot', sshd='active', ts=self.device.started - 1)
+        self.assertTrue(self.device.ssh_settings()['needs_credentials'])
+        self.device.probe_info['ts'] = time.time()
+        self.assertFalse(self.device.ssh_settings().get('needs_credentials'))
+        self.assertIsNotNone(self.device.ssh_connect()[0])
+        seriald.check_password_login.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
+
     def test_pending_reservations_enforce_cap_and_ids_remain_unique(self):
         device = self.device
         release = threading.Event()

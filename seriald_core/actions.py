@@ -80,7 +80,7 @@ class DeviceActions:
         if not isinstance(client_id, str) or client_id and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client_id):
             return response(400, {'error': 'invalid client_id'})
         with transactions_for(device).actor_scope(actor, client_id):
-            if action in ('session-send', 'session-resize', 'ssh-connect', 'switch-mode', 'session-takeover'):
+            if action in ('session-send', 'session-resize', 'ssh-connect', 'adb-connect', 'switch-mode', 'session-takeover'):
                 try:
                     from .board_maintenance import maintenance_for
                     maintenance = maintenance_for(self.manager)
@@ -254,6 +254,16 @@ class DeviceActions:
             return response(200, {'ok': ok, 'recovered': recovered, 'requires_setup': requires_setup,
                                     'note': note, 'hint': hint, 'mode': mode})
 
+        if action == 'adb-connect':
+            import subprocess
+            from .adb_session import connect
+            try:
+                session = connect(self.manager, d, payload, actor)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                return response(409, {'ok': False, 'error': str(error)})
+            return response(200, {'ok': True, 'sid': session.sid, 'ip': session.ip,
+                                  'device_key': d.key, 'serial': d.serial})
+
         if action == 'ssh-connect':
             # 一键 SSH:起一条与串口并存的独立会话,输出单独落盘
             ssh_user = payload.get('ssh_user')
@@ -294,7 +304,7 @@ class DeviceActions:
                 if not s:
                     return response(404, {'error': 'no such session'})
                 if actor != s.actor and actor not in s.takeovers:
-                    return response(403, {'ok': False, 'error': '先介入该 SSH 会话才能输入'})
+                    return response(403, {'ok': False, 'error': '先介入该终端会话才能输入'})
                 if not control_session(s, actor, transactions_for(d).client_id):
                     return response(409, {'ok': False, 'error': '另一客户端正在控制 SSH；请先介入此会话', 'code': 'session-controlled'})
                 ok = (s.write(text, actor=actor, client_id=transactions_for(d).client_id)
@@ -349,7 +359,7 @@ class DeviceActions:
             if not s:
                 return response(404, {'error': 'no such session'})
             if actor != s.actor and actor not in s.takeovers:
-                return response(403, {'ok': False, 'error': '先介入该 SSH 会话才能调整终端大小'})
+                return response(403, {'ok': False, 'error': '先介入该终端会话才能调整终端大小'})
             if not control_session(s, actor, transactions_for(d).client_id):
                 return response(200, {'ok': True, 'skipped': True, 'cols': s.cols, 'rows': s.rows,
                                       'terminal_state': screen_for(s).metadata()})
@@ -363,7 +373,7 @@ class DeviceActions:
             if not s:
                 return response(404, {'error': 'no such session'})
             if actor != s.actor and actor not in s.takeovers:
-                return response(403, {'ok': False, 'error': '先介入该 SSH 会话才能关闭'})
+                return response(403, {'ok': False, 'error': '先介入该终端会话才能关闭'})
             if not control_session(s, actor, transactions_for(d).client_id):
                 return response(409, {'ok': False, 'error': '另一客户端正在控制 SSH；请先介入此会话', 'code': 'session-controlled'})
             if not d.close_session(sid):

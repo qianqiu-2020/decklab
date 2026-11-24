@@ -311,7 +311,7 @@ class Adapter:
             return execute(client, command, timeout)
 
     def start_task(self, device, kind, connection_id='', token=None, request_id=''):
-        if kind not in ('identify', 'ssh-connect', 'ssh-enable', 'hardware-reset',
+        if kind not in ('identify', 'ssh-connect', 'adb-connect', 'ssh-enable', 'hardware-reset',
                         'hardware-power-on', 'hardware-power-off', 'hardware-enter-download'):
             raise ClientError('Unsupported task kind; hardware control must be explicitly enabled by the administrator')
         client = self.client(token, device, connection_id, writing=True)
@@ -320,6 +320,13 @@ class Adapter:
                 return client.submit_task(kind, request_id, connection_id=client.connection_id)
             parameters = {'kind': kind, 'connection_id': client.connection_id}
             return client.post('/api/task-start', **parameters)
+
+    def adb_command(self, device, command, request_id, timeout=60, connection_id='', token=None):
+        bounded(timeout, 1, 3600, 'timeout')
+        client = self.client(token, device, connection_id, writing=True)
+        with self.writing(client):
+            return client.submit_task('adb-command', request_id, connection_id=client.connection_id,
+                                      command=command, timeout=timeout)
 
     def hardware(self, device, token=None):
         return self.client(token, device).get('/api/hardware')
@@ -512,8 +519,8 @@ class Adapter:
                                                event_offset=event_offset, limit=limit)
 
     def session_close(self, device, sid, connection_id='', token=None):
-        if not re.fullmatch(r'ssh[0-9a-f]+', sid):
-            raise ClientError('sid must be an SSH session ID; the collector serial stream cannot be closed')
+        if not re.fullmatch(r'(?:adb|ssh)[0-9a-f]+', sid):
+            raise ClientError('sid must be an SSH or ADB session ID; the collector serial stream cannot be closed')
         client = self.client(token, device, connection_id, writing=True)
         with self.writing(client):
             return client.post('/api/session-close', sid=sid, connection_id=client.connection_id)
@@ -622,12 +629,14 @@ def create_server(settings, adapter=None):
 
     @server.tool(annotations=write, structured_output=False)
     def desktop_input(device: str, sid: str, frame_id: str, request_id: str,
-                      action: Literal['click', 'scroll', 'key', 'text'], ctx: Context,
+                      action: Literal['click', 'drag', 'scroll', 'key', 'text'], ctx: Context,
                       x: int = 0, y: int = 0, button: Literal['left', 'middle', 'right'] = 'left',
                       steps: int = 0, keys: list[str] | None = None, text: str = '',
-                      screenshot: bool = True, execution_lease: dict[str, Any] | None = None) -> list:
-        """Click, scroll (positive steps down), press named keys together, or type text into the observed desktop. Requires authorization and frame_id from capture_desktop; shares existing board input ownership. Reuse request_id after a lost response, poll the original task, never replay uncertain input. Optionally returns the new screen as MCP image content; sent does not prove the intended application effect."""
+                      screenshot: bool = True, execution_lease: dict[str, Any] | None = None,
+                      end_x: int | None = None, end_y: int | None = None) -> list:
+        """Use screenshot pixel coordinates. Click a point, drag from (x,y) to (end_x,end_y), scroll (positive steps down), press named keys together, or type text. For GNOME applications use keys ["Super_L","a"]. Requires authorization and a frame_id from capture_desktop. Reuse request_id after a lost response and poll the original task. The returned screenshot lets you check the effect."""
         parameters = ({'x': x, 'y': y, 'button': button} if action == 'click' else
+            {'x': x, 'y': y, 'end_x': end_x, 'end_y': end_y, 'button': button} if action == 'drag' else
             {'x': x, 'y': y, 'steps': steps} if action == 'scroll' else
             {'keys': keys or []} if action == 'key' else {'text': text})
         return image_result(call(ctx, adapter.desktop_input, device=device, sid=sid,
@@ -661,7 +670,14 @@ def create_server(settings, adapter=None):
                     connection_id=connection_id, execution_lease=execution_lease)
 
     @server.tool(annotations=write, structured_output=True)
-    def start_task(device: str, kind: Literal['identify', 'ssh-connect', 'ssh-enable', 'hardware-reset',
+    def execute_adb_command(device: str, command: str, request_id: str, ctx: Context, timeout: int = 60,
+                            connection_id: str = '', execution_lease: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Start one USB ADB shell command on a verified board. Check get_task for the saved command, output, confirmed exit and serial cursor. Command and output enter history. A lost receipt requires observing the original task."""
+        return call(ctx, adapter.adb_command, device=device, command=command, request_id=request_id,
+                    timeout=timeout, connection_id=connection_id, execution_lease=execution_lease)
+
+    @server.tool(annotations=write, structured_output=True)
+    def start_task(device: str, kind: Literal['identify', 'ssh-connect', 'adb-connect', 'ssh-enable', 'hardware-reset',
                    'hardware-power-on', 'hardware-power-off', 'hardware-enter-download'], ctx: Context,
                    connection_id: str = '', request_id: str = '',
                    execution_lease: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -715,7 +731,16 @@ def create_server(settings, adapter=None):
     @server.tool(annotations=write, structured_output=True)
     def close_ssh(device: str, sid: str, ctx: Context, connection_id: str = '',
                   execution_lease: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Close this grant's SSH session; never closes the collector's serial port."""
+        """Close this grant's SSH or USB ADB session; never closes the collector's serial port."""
+        return call(ctx, adapter.session_close, device=device, sid=sid, connection_id=connection_id,
+                    execution_lease=execution_lease)
+
+    @server.tool(annotations=write, structured_output=True)
+    def close_adb(device: str, sid: str, ctx: Context, connection_id: str = '',
+                  execution_lease: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Close an interactive USB shell opened by start_task(adb-connect)."""
+        if not re.fullmatch(r'adb[0-9a-f]+', sid):
+            raise ClientError('sid must identify an ADB session')
         return call(ctx, adapter.session_close, device=device, sid=sid, connection_id=connection_id,
                     execution_lease=execution_lease)
 

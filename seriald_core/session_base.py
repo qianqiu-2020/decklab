@@ -29,6 +29,7 @@ def valid_ssh_password(value):
 
 
 class SessionBase:
+    kind = 'ssh'
     transport_errors = (OSError, RuntimeError)
     join_timeout = None
 
@@ -49,7 +50,7 @@ class SessionBase:
         self.fd = None
         self.started, self.last_touch = time.time(), time.monotonic()
         self.cols, self.rows = 120, 32
-        self.terminal = SharedTerminal('ssh', self.cols, self.rows)
+        self.terminal = SharedTerminal(self.kind, self.cols, self.rows)
         self.takeovers = set()
         self.transport_error = ''
         self._logdir, self._logday = logdir, time.strftime(DATE_FMT)
@@ -69,7 +70,7 @@ class SessionBase:
         try:
             os.makedirs(logdir, exist_ok=True)
             day = time.strftime(DATE_FMT)
-            path = os.path.join(logdir, 'ssh-%s-%s.log' % (self.sid, day))
+            path = os.path.join(logdir, '%s-%s-%s.log' % (self.kind, self.sid, day))
             self.logf = open(path, 'a', encoding='utf-8', buffering=1)
             self.logpath, self._logday, self.log_error = path, day, ''
         except OSError as error:
@@ -160,14 +161,14 @@ class SessionBase:
                 if not self._actor_allowed():
                     self._finish()
                     return False
-                self._append('\r\n*** 已建立 SSH 会话 %s@%s (%dx%d) ***\r\n'
-                             % (self.user, self.ip, self.cols, self.rows), live=False)
+                self._append('\r\n*** 已建立 %s 会话 %s@%s (%dx%d) ***\r\n'
+                             % (self.kind.upper(), self.user, self.ip, self.cols, self.rows), live=False)
                 self._thread = threading.Thread(target=self._reader, args=(fd,), daemon=True)
                 self._thread.start()
                 return True
             except self.transport_errors as error:
                 self.transport_error = self._diagnostic(error)
-                self._append('\r\n*** 建立 SSH 会话失败: %s ***\r\n' % self.transport_error, live=False)
+                self._append('\r\n*** 建立 %s 会话失败: %s ***\r\n' % (self.kind.upper(), self.transport_error), live=False)
                 self._thread = None
                 self._finish()
                 return False
@@ -189,7 +190,7 @@ class SessionBase:
                 self._append(data)
         finally:
             try:
-                self._append('\r\n*** SSH 会话已结束 ***\r\n', live=False)
+                self._append('\r\n*** %s 会话已结束 ***\r\n' % self.kind.upper(), live=False)
             except self.transport_errors as error:
                 self.transport_error = self._diagnostic(error)
             finally:
@@ -299,7 +300,7 @@ class SessionBase:
 
     def snapshot(self):
         with self.cv:
-            return {'sid': self.sid, 'kind': 'ssh', 'ip': self.ip,
+            return {'sid': self.sid, 'kind': self.kind, 'ip': self.ip,
                     'actor': self.actor, 'title': self.title, 'persistent': self.persistent,
                     'log_error': self.log_error, 'transport_error': self.transport_error,
                     'alive': self.fd is not None and not self.closed,

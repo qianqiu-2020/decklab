@@ -38,7 +38,7 @@
     });
     ctx.term.onData(function (data) {
       if (!options.isCurrent(ctx) || (!pasting && !options.keyboardEnabled())) return;
-      options.send(data, ctx);
+      options.send(data, ctx, false, pasting);
     });
     ctx.term.onSelectionChange(function () {
       if (!options.isCurrent(ctx)) return;

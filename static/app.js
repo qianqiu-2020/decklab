@@ -82,7 +82,7 @@
     openSession: function (task) {
       var result = task.result;
       if (!sessions.some(function (session) { return session.sid === result.sid; })) {
-        sessions.push({ sid: result.sid, kind: 'ssh', ip: result.ip, actor: task.actor });
+        sessions.push({ sid: result.sid, kind: task.kind === 'adb-connect' ? 'adb' : 'ssh', ip: result.ip, actor: task.actor });
       }
       switchSession(result.sid);
     },
@@ -90,6 +90,7 @@
       openSshCredentials(terminalView.current, task.result.ssh_user);
     },
     openBoardTest: function (task) { if (boardTests) boardTests.open(task); },
+    openAdbReceipt: function (task) { if (adbUI) adbUI.open(task); },
     openFlash: function (task) {
       var target = task.flash_targets && task.flash_targets[0];
       if (target && flashing) {
@@ -100,6 +101,15 @@
       var selected = deviceDirectory.find(deviceDirectory.selected);
       if (selected) flashing.open(selected, task);
     }
+  });
+  var adbUI = window.SerialdTasks.createAdb({
+    byId: $, fetch: fetch, clientId: UI.clientId,
+    getView: function () { return terminalView.current; },
+    boardLabel: function (ctx) { return deviceDirectory.find(ctx.key)?.label || ctx.key; },
+    notice: function (message) { $('d-status').textContent = message; },
+    refresh: function () { taskUI.refresh(); },
+    openLogs: function () { recordsTab = 'logs'; setRecordsOpen(true); },
+    canRecover: function () { return boardRecoveryAuthorized; }
   });
   var boardTests = window.SerialdBoardTests && window.SerialdBoardTests.create({
     byId:$, fetch:fetch, copyText:copyText, getView:function () {
@@ -130,6 +140,7 @@
     onTask: function () { taskUI.refresh(); }
   });
   var desktop = window.SerialdDesktop && window.SerialdDesktop.create({byId:$,fetch:fetch,
+    canQuickConnect:function () { return boardRecoveryAuthorized; },
     clientId:UI.clientId,copyText:copyText,stageSerialCommand:stageSerialCommand,
     prepareSetup:function () { closeSshCredentials(); selectSetupSerial(); },getView:function () { return terminalView.current; }});
   window.SerialdShareSelection = function () {
@@ -148,6 +159,7 @@
     var boardOwner = owner && owner.scope === 'board';
     $('b-input-owner').disabled = !!ctx.ownerPending || !!boardOwner && !boardRecoveryAuthorized;
     $('input-owner-label').textContent = boardOwner ? '恢复执行占用' : !owner ? '占用输入' : ownsInput(owner) ? '释放输入' : '接管输入';
+    $('input-owner-icon').setAttribute('href', '/static/icons.svg#i-' + (boardOwner || ownsInput(owner) ? 'lock-open' : 'lock'));
     var ownerName = owner && owner.actor === 'web' ? ownsInput(owner) ? '当前页面' : '另一网页客户端' : owner && owner.actor;
     $('b-input-owner').title = boardOwner ? boardRecoveryAuthorized
       ? '板级执行占用；核实原操作已停止后才能人工恢复'
@@ -196,17 +208,24 @@
   function pasteInto(text, ctx) {
     if (!isCurrent(ctx)) return;
     if (ctx.readonly) {
-      $('d-status').textContent = ctx.kind === 'log' ? ' 当前是只读归档日志' : ' 当前正在只读查看 agent 会话';
+      clipboardNotice(ctx.kind === 'log' ? '当前是只读归档日志' : '当前会话只读');
       return;
     }
-    if (!text) { $('d-status').textContent = ' 剪贴板里没有文本（终端里 Ctrl+C 是中断信号，复制请用 Ctrl+Shift+C 或拖选）'; return; }
+    if (!text) { clipboardNotice('剪贴板里没有文本'); return; }
     if (ctx.sid === 'serial' && $('d-slow-paste').checked) {
-      Array.from(text).forEach(function (char) { send(char, ctx, true); });
-      $('d-status').textContent = ' 正在逐字符粘贴 ' + Array.from(text).length + ' 字符（固件模式）';
+      var chars = Array.from(text);
+      chars.forEach(function (char) { send(char, ctx, true, true); });
+      clipboardNotice('正在逐字符粘贴 ' + chars.length + ' 字符');
     } else {
       ctx.paste(text);
-      $('d-status').textContent = ' 已粘贴 ' + text.length + ' 字符';
+      clipboardNotice('已粘贴 ' + text.length + ' 字符');
     }
+  }
+  var clipboardTimer, clipboardGeneration = 0, pasteField = null;
+  function clipboardNotice(message) {
+    clearTimeout(clipboardTimer);
+    $('d-clipboard-status').textContent = message;
+    if (message) clipboardTimer = setTimeout(function () { $('d-clipboard-status').textContent = ''; }, 2600);
   }
   // 原生粘贴(Ctrl+V / 中键)在终端里也要能送到板子 —— 不受"键盘直通"开关影响。
   // 挂在 document 上而不是 d-term 上：焦点不在终端里时(例如从别处复制完切回浏览器、
@@ -223,28 +242,79 @@
     e.preventDefault(); e.stopPropagation();
     pasteInto(t, terminalView.current);
   }, true);
-  // 「粘贴」按钮:借一个临时输入框接住 Ctrl+V —— 非安全上下文下拿剪贴板的可靠办法
-  $('b-paste').addEventListener('click', function () {
-    var ctx = terminalView.current;
-    if (!isCurrent(ctx)) return;
+  function pasteWithKeyboard(ctx) {
     var ta = document.createElement('textarea');
-    ta.placeholder = '在此按 Ctrl+V,内容会直接送到串口';
-    ta.style.cssText = 'position:fixed;left:50%;top:22%;transform:translateX(-50%);'
-      + 'z-index:99;width:min(520px,80vw);height:74px;padding:9px;font-size:14px';
+    pasteField = ta;
+    ta.placeholder = '在这里按 Ctrl+V 或 ⌘V，将文本粘贴到终端';
+    ta.setAttribute('aria-label', ta.placeholder);
+    ta.className = 'terminal-paste-field';
     document.body.appendChild(ta);
     ta.focus();
+    function dismiss() {
+      ta.remove();
+      if (pasteField === ta) pasteField = null;
+    }
     ta.addEventListener('paste', function (ev) {
       var t = (ev.clipboardData || {}).getData ? ev.clipboardData.getData('text') : '';
-      ev.preventDefault(); ta.remove(); pasteInto(t, ctx);
+      ev.preventDefault();
+      if (pasteField !== ta) return;
+      dismiss();
+      pasteInto(t, ctx);
+      if (isCurrent(ctx)) ctx.term.focus();
     });
-    ta.addEventListener('blur', function () { setTimeout(function () { ta.remove(); }, 200); });
+    ta.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault(); ev.stopPropagation(); dismiss();
+      if (isCurrent(ctx)) ctx.term.focus();
+    });
+    ta.addEventListener('blur', dismiss);
+  }
+  function requestPaste() {
+    var ctx = terminalView.current;
+    if (!isCurrent(ctx) || $('detail').classList.contains('desktop-active')) return;
+    if (ctx.readonly) { pasteInto('', ctx); return; }
+    if (pasteField) { pasteField.remove(); pasteField = null; }
+    var request = ++clipboardGeneration;
+    var clipboard = window.navigator && window.navigator.clipboard;
+    if (!clipboard || typeof clipboard.readText !== 'function') { pasteWithKeyboard(ctx); return; }
+    clipboard.readText().then(function (text) {
+      if (isCurrent(ctx) && request === clipboardGeneration) pasteInto(text, ctx);
+    }).catch(function () {
+      if (isCurrent(ctx) && !ctx.readonly && request === clipboardGeneration) pasteWithKeyboard(ctx);
+    });
+  }
+  $('b-paste').addEventListener('click', requestPaste);
+  var rightPaste = $('d-right-paste'), fontSize = $('terminal-font-size');
+  rightPaste.checked = true;
+  try { rightPaste.checked = localStorage.getItem('decklab-terminal-right-paste') !== '0'; } catch (_) {}
+  rightPaste.addEventListener('change', function () {
+    try { localStorage.setItem('decklab-terminal-right-paste', rightPaste.checked ? '1' : '0'); } catch (_) {}
   });
+  fontSize.value = String(terminalView.fontSize);
+  fontSize.addEventListener('change', function () { terminalView.setFontSize(fontSize.value); });
+  function capturesRightPaste(event) {
+    var ctx = terminalView.current;
+    return rightPaste.checked && isCurrent(ctx) && !ctx.readonly && event.button === 2 && !event.shiftKey
+      && event.pointerType !== 'touch' && !event.sourceCapabilities?.firesTouchEvents;
+  }
+  $('d-term').addEventListener('mousedown', function (event) {
+    if (capturesRightPaste(event)) {
+      // Firefox handles the xterm context action on mousedown.
+      event.preventDefault(); event.stopImmediatePropagation();
+    }
+  }, true);
+  $('d-term').addEventListener('contextmenu', function (event) {
+    if (!capturesRightPaste(event)) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    requestPaste();
+  }, true);
 
   /* ---------- 设备列表 ---------- */
   function select(key) {
     // Slow paste is a workaround for one firmware input path, not a board-wide
     // default.  Keep it only while staying on the same selected board.
     if (key !== deviceDirectory.selected) { $('d-slow-paste').checked = false; clearBootSearch(); }
+    clipboardNotice('');
     var ctx = createView(key, 'serial');
     // 切设备时立即清掉旧会话标签；迟到的列表/动作响应不能借用新 deviceDirectory.selected。
     sessions = [{ sid: 'serial', kind: 'serial' }];
@@ -313,23 +383,23 @@
       b.type = 'button';
       b.className = (s.sid === curSid ? 'on' : '');
       b.dataset.kind = s.kind;
-      b.textContent = s.kind === 'serial' ? '串口'
+      b.textContent = s.kind === 'adb' ? 'ADB · ' + s.sid.slice(-6) : s.kind === 'serial' ? '串口'
         : (s.kind === 'log' ? s.label : ('SSH ' + (s.actor ? s.actor + ' · ' : '') + (s.ip || s.sid)));
       var readonly = s.kind === 'log' || (s.sid === ctx.sid && ctx.readonly)
         || (s.sid !== ctx.sid && s.actor && s.actor !== 'web' && !takenOver[s.sid]);
       if (readonly) b.textContent += ' · 只读';
       if (s.log_error) b.textContent += ' · 日志写入失败';
-      b.title = s.kind === 'serial' ? '板子控制台（实时输出）'
+      b.title = s.kind === 'adb' ? 'USB ADB · ' + (s.ip || '') : s.kind === 'serial' ? '板子控制台（实时输出）'
         : (s.kind === 'log' ? '归档日志快照，只读显示在终端中'
           : (s.persistent ? 'agent 持久 SSH 会话；同一 agent 后续命令复用此标签，直到手动关闭'
                            : 'SSH 会话，独立记录到 ssh-*.log'));
       b.addEventListener('click', function () { if (isCurrent(ctx)) switchSession(s.sid); });
       bar.appendChild(b);
-      if (s.kind === 'log' || (s.kind === 'ssh' &&
+      if (s.kind === 'log' || (['ssh', 'adb'].includes(s.kind) &&
           (!s.actor || s.actor === 'web' || s.persistent))) {
         var x = document.createElement('button');
         x.type = 'button'; x.className = 'x'; x.textContent = '×';
-        x.title = s.kind === 'log' ? '关闭这个归档标签'
+        x.title = s.kind === 'adb' ? '关闭 ADB 会话' : s.kind === 'log' ? '关闭这个归档标签'
           : (s.persistent ? '关闭这个 agent 持久 SSH 会话' : '关闭这条 SSH 会话');
         x.addEventListener('click', function (e) {
           e.stopPropagation();
@@ -357,6 +427,13 @@
         bar.appendChild(x);
       }
     });
+    var adb = document.createElement('button');
+    adb.type = 'button';
+    adb.textContent = sessions.some(function (s) { return s.kind === 'adb'; }) ? '+ ADB 会话' : 'ADB';
+    adb.disabled = !!ctx.adbConnecting || !ctx.serial || !ctx.connectionId;
+    adb.title = adb.disabled && !ctx.adbConnecting ? '请先连接并识别板卡' : '打开独立的 USB ADB 终端';
+    adb.addEventListener('click', function () { connectAdb(ctx); });
+    bar.appendChild(adb);
     var sp = document.createElement('span'); sp.className = 'sp';
     var add = document.createElement('button');
     add.type = 'button'; add.textContent = '+ SSH 会话';
@@ -374,6 +451,28 @@
     settings.addEventListener('click', function () { openSshCredentials(ctx); });
     sp.appendChild(settings);
     bar.appendChild(sp);
+  }
+
+  async function connectAdb(ctx) {
+    if (ctx.adbConnecting || !isCurrent(ctx)) return;
+    ctx.adbConnecting = true;
+    var connection = ctx.connectionId;
+    renderTabs();
+    $('d-status').textContent = '正在连接 USB ADB…';
+    try {
+      var result = await taskUI.run('adb-connect', ctx);
+      if (!sshConnectionCurrent(ctx, connection)) return;
+      if (!result.ok || !result.sid) throw new Error(result.error || 'ADB 连接失败');
+      if (!sessions.some(function (s) { return s.sid === result.sid; })) {
+        sessions.push({sid: result.sid, kind: 'adb', actor: 'web', ip: result.ip});
+      }
+      switchSession(result.sid);
+    } catch (error) {
+      if (sshConnectionCurrent(ctx, connection)) $('d-status').textContent = error.message;
+    } finally {
+      ctx.adbConnecting = false;
+      if (isCurrent(ctx)) renderTabs();
+    }
   }
 
   var sshCredentials = null;
@@ -441,7 +540,7 @@
     var settings = sshSettings(ctx);
     if (!credentials && settings.manual) {
       openSshCredentials(ctx, '', settings.family === 'buildroot'
-        ? 'Buildroot 默认不提供 SSH；自行启用后可填写连接账号。'
+        ? '尚未确认这块 Buildroot 板已启动 SSH。可先识别设备，或填写已配置的 SSH 账号。'
         : '请填写已在 Debian 上创建并允许 SSH 登录的用户。');
       return;
     }
@@ -599,7 +698,7 @@
             if (!isCurrent(terminalView.current) || terminalView.current.key !== ctx.key
                 || (terminalView.current.serial || '') !== (ctx.serial || '')) return;
             if (terminalView.current.readonly) {
-              $('d-status').textContent = '当前会话只读；请切换可输入的串口 / SSH 会话，或先介入该会话';
+              $('d-status').textContent = '当前会话只读；请切换可输入的终端会话，或先介入该会话';
               return;
             }
             $('d-in').value = entry.command; $('d-in').focus();
@@ -639,6 +738,7 @@
     var sessionOffset = sessionPage * ACTIVITY_PAGE_SIZE;
     var eventOffset = eventPage * ACTIVITY_PAGE_SIZE;
     fetch('/api/activity?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '')
+      + ($('activity-kind').value ? '&session_kind=' + encodeURIComponent($('activity-kind').value) : '')
       + '&session_offset=' + sessionOffset + '&event_offset=' + eventOffset + '&limit=' + ACTIVITY_PAGE_SIZE)
       .then(function (r) { return r.json(); }).then(function (d) {
         if (!isCurrent(ctx) || seq !== ctx.activitySeq) return;
@@ -650,14 +750,16 @@
           var main = document.createElement('div'); main.className = 'activity-main';
           var states = {active: '已连接', closed: '已关闭', completed: '已完成', interrupted: '已中断', unknown: '结果未知'};
           var result = (states[entry.status] || entry.status || '') + (Number.isInteger(entry.exit_code) ? ' · 退出码 ' + entry.exit_code : '');
-          var title = document.createElement('code'); title.textContent = entry.title || entry.ip || entry.sid;
+          var kind = entry.sid.startsWith('adb') ? 'adb' : 'ssh';
+          var title = document.createElement('code');
+          title.textContent = kind.toUpperCase() + ' · ' + (entry.title === 'USB ADB' ? entry.ip || entry.sid : entry.title || entry.ip || entry.sid);
           main.appendChild(title); main.appendChild(activityMeta(entry.started, entry.actor, result)); row.appendChild(main);
           var button = document.createElement('button'); button.type = 'button';
           button.textContent = entry.status === 'active' ? '实时查看' : '查看记录';
           button.addEventListener('click', function () {
             if (!isCurrent(ctx)) return;
             if (entry.status === 'active') {
-              if (!sessions.some(function (s) { return s.sid === entry.sid; })) sessions.push(Object.assign({ kind: 'ssh' }, entry));
+              if (!sessions.some(function (s) { return s.sid === entry.sid; })) sessions.push(Object.assign({ kind: kind }, entry));
               switchSession(entry.sid); return;
             }
             button.disabled = true;
@@ -668,11 +770,11 @@
               .then(function (r) { return r.json(); }).then(function (logs) {
                 if (!isCurrent(ctx) || seq !== ctx.activitySeq) return;
                 if (!Array.isArray(logs.files)) throw new Error(logs.error || '返回数据不完整');
-                var prefix = 'ssh-' + entry.sid + '-';
+                var prefix = kind + '-' + entry.sid + '-';
                 var days = logs.files.map(function (file) { return file.name; }).filter(function (name) {
                   return name.startsWith(prefix) && /^\d{8}\.log$/.test(name.slice(prefix.length));
                 }).sort().reverse();
-                var label = 'SSH 记录 · ' + (entry.actor || entry.sid);
+                var label = (kind === 'adb' ? 'ADB 记录 · ' : 'SSH 记录 · ') + (entry.actor || entry.sid);
                 if (days.length === 1) { openArchivedLog(ctx, days[0], label); return; }
                 if (!days.length) { feedback.textContent = '该会话没有可用日志'; return; }
                 days.forEach(function (file) {
@@ -690,7 +792,7 @@
           });
           row.appendChild(button); box.appendChild(row);
         });
-        if (!box.children.length) box.textContent = '尚无 SSH 会话记录';
+        if (!box.children.length) box.textContent = '尚无终端会话记录';
         var sessionTotal = d.session_total === undefined ? d.sessions.length : d.session_total;
         setPager('activity', sessionPage, sessionTotal, d.sessions.length);
 
@@ -699,7 +801,7 @@
           'identity-promoted': '身份升级', 'identity-corrected': '身份更正',
           'identity-confirmed': '身份确认', 'identity-conflict-resolved': '解除身份冲突',
           'boot-marker-initialized': '初始化 /boot 标记',
-          rescue: '串口自愈', 'ssh-enable': '启用 SSH', 'session-takeover': '人工介入 SSH',
+          rescue: '串口自愈', 'ssh-enable': '启用 SSH', 'session-takeover': '人工介入终端',
           'ssh-auto-config': '自动配置 SSH', 'switch-armed': '准备更换设备' };
         (d.events || []).forEach(function (entry) {
           var row = document.createElement('div'); row.className = 'activity-row';
@@ -721,6 +823,7 @@
         $('activity-pager').hidden = $('event-pager').hidden = true;
       });
   }
+  $('activity-kind').addEventListener('change', function () { sessionPage = 0; loadActivity(); });
   $('activity-prev').addEventListener('click', function () { if (sessionPage) { sessionPage--; loadActivity(); } });
   $('activity-next').addEventListener('click', function () { sessionPage++; loadActivity(); });
   $('event-prev').addEventListener('click', function () { if (eventPage) { eventPage--; loadActivity(); } });
@@ -735,6 +838,7 @@
     toggle.setAttribute('aria-expanded', String(!collapsed));
     toggle.title = collapsed ? '展开设备列表' : '收起设备列表';
     toggle.setAttribute('aria-label', toggle.title);
+    $('device-pane-icon').setAttribute('href', '/static/icons.svg#i-layout-sidebar-left-' + (collapsed ? 'expand' : 'collapse'));
   }
   try { setDevicePaneCollapsed(localStorage.getItem('decklab-pane-collapsed') === '1'); } catch (_) {}
   $('b-device-pane').addEventListener('click', function () {
@@ -748,11 +852,15 @@
     $('b-info').setAttribute('aria-expanded', open ? 'true' : 'false');
     setTimeout(resizeTerm, 0);
   });
-  $('b-expand').addEventListener('click', function () {
-    var expanded = document.body.classList.toggle('terminal-max');
+  function setTerminalExpanded(expanded) {
+    document.body.classList.toggle('terminal-max', expanded);
     $('b-expand-label').textContent = expanded ? '还原' : '放大';
     $('b-expand').title = expanded ? '还原工作台' : '放大终端';
-    $('b-expand').setAttribute('aria-pressed', expanded ? 'true' : 'false');
+    $('b-expand').setAttribute('aria-pressed', String(expanded));
+    $('terminal-expand-icon').setAttribute('href', '/static/icons.svg#i-' + (expanded ? 'arrows-minimize' : 'expand'));
+  }
+  $('b-expand').addEventListener('click', function () {
+    setTerminalExpanded(!document.body.classList.contains('terminal-max'));
     setTimeout(resizeTerm, 0);
   });
   $('terminal-search-scope').addEventListener('change', function () {
@@ -889,6 +997,7 @@
     });
   });
   $('b-tasks').addEventListener('click', function () { toggleRecordsTab('tasks'); });
+  $('b-adb-command').addEventListener('click', function () { adbUI.open(); });
   $('b-records').addEventListener('click', function () { toggleRecordsTab('logs'); });
   $('b-records-close').addEventListener('click', function () {
     var group = recordsGroup();
@@ -922,7 +1031,7 @@
         setInputMode(ctx);
         renderTabs();
         terminalView.resize();
-        $('d-status').textContent = ' 已介入 SSH 会话，输入和输出继续记录';
+        $('d-status').textContent = ' 已介入终端会话，输入和输出继续记录';
       }).catch(function (error) {
         if (isCurrent(ctx)) $('d-status').textContent = ' 介入失败：' + error.message;
       });
@@ -1351,10 +1460,7 @@
     disposeView(); deviceDirectory.selectionChanged(null); $('detail').hidden = true;
     $('workspace').classList.toggle('selected', false);
     document.body.classList.toggle('detail-open', false);
-    document.body.classList.remove('terminal-max');
-    $('b-expand-label').textContent = '放大';
-    $('b-expand').title = '放大终端';
-    $('b-expand').setAttribute('aria-pressed', 'false');
+    setTerminalExpanded(false);
     markSelected(); pollDevices();
     $('device-search').focus();
   });

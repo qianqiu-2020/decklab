@@ -9,7 +9,7 @@ from .tasks import TaskError, _check_result_fields
 
 
 MAX_EVENTS = 256
-AUDIT_EVENTS = ('command', 'command-limit', 'loader-material', 'firmware-skipped')
+AUDIT_EVENTS = ('command', 'command-limit', 'loader-material', 'firmware-skipped', 'usb-link')
 
 
 def encode_document(document, limit=65536):
@@ -156,7 +156,8 @@ class FlashStore:
             if event.get('event') not in AUDIT_EVENTS:
                 self.store.db.execute(
                     "DELETE FROM flash_events WHERE task_id=? AND cursor<=? "
-                    "AND COALESCE(json_extract(document, '$.event'), '') NOT IN (?,?,?,?)",
+                    "AND COALESCE(json_extract(document, '$.event'), '') NOT IN ("
+                    + ','.join('?' for _ in AUDIT_EVENTS) + ")",
                     (task_id, cursor - MAX_EVENTS, *AUDIT_EVENTS))
         return cursor
 

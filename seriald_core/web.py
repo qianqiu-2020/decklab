@@ -235,6 +235,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except (TaskError, OSError, ValueError) as error:
                 return self._json(getattr(error, 'status', 503), {'error': str(error) if isinstance(error, TaskError) else '镜像商店暂不可用'})
 
+        if route == '/api/team-test-cases':
+            if self.headers.get('X-Seriald-Actor', 'web') != 'web':
+                return self._json(403, {'error': '团队用例仅限主访问身份'})
+            from .team_cases import TeamCases
+            try:
+                platform = TeamCases.configured()
+                if not platform:
+                    return self._json(200, {'configured': False})
+                result = platform.browse(q)
+                if q.get('view') == ['detail'] and q.get('key'):
+                    from .team_run import mapping
+                    device = self._dev(q)
+                    if not device or not device.present or not device.serial or q.get('connection_id') != [device.connection_id]:
+                        raise TaskError('当前板卡连接已变化', 409)
+                    result['mapped'] = mapping(device.serial) is not None
+                return self._json(200, result)
+            except TaskError as error:
+                return self._json(error.status, {'error': str(error)})
+
         if route == '/api/board-test-cases':
             from .board_cases import library
             if self.headers.get('X-Seriald-Actor', 'web') != 'web':
@@ -378,6 +397,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(404, {'error': 'no such device'})
             actor = self.headers.get('X-Seriald-Actor') or 'web'
             hardware = self.manager.hardware
+            if q.get('adb_binding') == ['1']:
+                if not q.get('serial', [''])[0] or not q.get('connection_id', [''])[0]:
+                    return self._json(400, {'error': 'USB 接线查询需要确认板号和当前连接'})
+                from .board_cases import adb_binding
+                try:
+                    return self._json(200, {'adb_binding': adb_binding(self.manager, device)})
+                except TaskError as error:
+                    return self._json(error.status, {'error': str(error)})
             result = hardware.available(device.serial or '', actor)
             if actor == 'web':
                 result['wiring'] = hardware.wiring(device.serial)

@@ -200,6 +200,23 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(fresh['task']['state'], 'completed')
             self.assertEqual(len(screen.inputs), 2)
 
+    def test_drag_checks_both_endpoints_before_sending(self):
+        with fixture.automatic_flashing([('GRAPHICS-SN', 'graphics')]) as f:
+            screen, adapter, _ = setup(f)
+            sid = adapter.desktop('GRAPHICS-SN', 'open')['session']['id']
+            frame = adapter.desktop('GRAPHICS-SN', 'frame', sid)['frame']['id']
+            points = dict(x=0, y=0, end_x=19, end_y=11, button='left')
+            for field, value in [('x', -1), ('end_x', 20), ('end_y', 12)]:
+                result = adapter.desktop_input('GRAPHICS-SN', sid, frame, 'bad-drag-' + field.replace('_', '-'),
+                    'drag', dict(points, **{field: value}), screenshot=False)
+                self.assertEqual(result['task']['outcome'], 'not-issued')
+            self.assertFalse(screen.inputs)
+            for _ in range(2):
+                sent = adapter.desktop_input('GRAPHICS-SN', sid, frame, 'drag-end-to-end',
+                    'drag', points, screenshot=False)
+                self.assertEqual(sent['task']['state'], 'completed')
+            self.assertEqual(screen.inputs, [dict(points, action='drag')])
+
     def test_queued_input_rechecks_frame_after_new_capture(self):
         with fixture.automatic_flashing([('GRAPHICS-SN', 'graphics')]) as f:
             screen, adapter, _ = setup(f)

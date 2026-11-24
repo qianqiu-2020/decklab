@@ -137,6 +137,52 @@ seconds without starting another task. Authentication failures, revoked access o
 a missing task stop the watcher. Device switches invalidate displayed callbacks
 without cancelling the collector's work. Cancellation does not promise rollback.
 
+## USB ADB commands
+
+From an identified board's device page, choose **ADB 命令**. The collector uses
+the Android Debug Bridge (ADB) client installed on its host. It resolves the
+current transport ID from the USB topology and checks the board's hardware
+serial and Linux boot ID again in the shell that runs the command. ADB's
+reported device serial alone is insufficient because cloned images can share it.
+
+CLI `adb-command` and the MCP tool `execute_adb_command` submit the same
+`adb-command` task. Use the regular task history or query the original request
+ID after a lost response. The API requires `request_id`, `command` (up to 2048
+UTF-8 bytes) and the current board connection ID. Optional `timeout` is the
+number of seconds to wait for the ADB receipt (1–3600, default 60). Access
+requires owner, all-device, or matching identified-board authorization.
+
+```sh
+python3 serialctl.py --device example-board adb-command 'uname -a' --request-id example-adb-001
+python3 serialctl.py --device example-board task-request example-adb-001
+```
+
+The private task record stores the command, start time, the first 4 KiB of each
+output stream and the confirmed remote exit code. Keep credentials out of
+commands and output. **查看本次串口** uses the saved connection and offset; the
+serial archive remains available after a UART reconnect. Built-in board test
+tasks also show their latest ADB service-launch receipt.
+
+Interactive USB shells are separate from one-command tasks. Choose **ADB** on the
+device tab bar or run `serialctl adb-open` with the device selected. Each open
+creates a shell with its own current directory, terminal size and transcript.
+Use the returned session ID with `read`, `send` and `adb-close`. MCP clients
+use `start_task` with kind `adb-connect`, then `get_task` for the session ID,
+`read_terminal`, `send_input` and `close_adb`. A USB disconnect ends the
+original shell. Open another session when the same board is available again.
+The controller needs Android Platform Tools (`adb` on its service PATH), USB
+access and a board running adbd with shell v2 support. If the board requests
+USB debugging authorization, approve the controller key once. The shell runs
+as the account selected by adbd. On hosts that omit USB paths, the interactive
+terminal queries the local ADB server for USB transport IDs and verifies the
+board identity. Saved port bindings still require an exact port match.
+
+When ADB drops without an exit receipt, the original task retains partial
+output and reports an unknown outcome. Observe the original serial session.
+After confirming the command stopped, the owner can release its recovery hold
+from the receipt. A successful `systemd-run --no-block` exit confirms submission
+to systemd. The service result comes from the board, such as its serial output.
+
 ## Collector-owned board copy
 
 ```sh

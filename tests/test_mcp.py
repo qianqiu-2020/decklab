@@ -164,6 +164,16 @@ class AdapterTests(APICase):
         with self.assertRaises(ClientError):
             self.adapter.task('', task_id='task1', request_id='identify-001')
 
+    def test_adb_command_submits_one_durable_task_for_the_selected_board(self):
+        result = self.adapter.adb_command('board-B', 'uname -a', 'adb-attempt-001', timeout=12, token=TOKEN_B)
+        posts = [(token, payload) for token, route, payload in self.api.calls if route == '/api/task-start']
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0], (TOKEN_B, {'actor': 'decklab-mcp', 'key': 'board-B',
+                                             'serial': 'SNB', 'connection_id': 'connection-B',
+                                             'kind': 'adb-command', 'command': 'uname -a',
+                                             'request_id': 'adb-attempt-001', 'timeout': 12}))
+        self.assertEqual(result['task']['request_id'], 'adb-attempt-001')
+
     def test_unknown_os_read_send_and_exact_connection(self):
         selected = self.adapter.devices()['devices'][0]
         self.assertIsNone(selected['serial'])
@@ -259,10 +269,10 @@ class MCPTransportTests(APICase):
                 tools = await client.list_tools()
                 names = {tool.name for tool in tools.tools}
                 self.assertTrue({'get_capabilities', 'get_input_owner', 'claim_board', 'renew_board', 'release_board',
-                                 'list_devices', 'read_terminal', 'send_input', 'execute_command', 'start_task',
+                                 'list_devices', 'read_terminal', 'send_input', 'execute_command', 'execute_adb_command', 'start_task',
                                  'get_task', 'cancel_task', 'read_boot', 'hardware_actions'}.issubset(names))
                 schemas = {tool.name: tool.input_schema['properties'] for tool in tools.tools}
-                for name in ('send_input', 'execute_command', 'start_task', 'desktop_input',
+                for name in ('send_input', 'execute_command', 'execute_adb_command', 'start_task', 'desktop_input',
                              'start_flash', 'confirm_flash_selection', 'set_boot_priority'):
                     self.assertIn('execution_lease', schemas[name])
                 self.assertIn('discover', schemas['list_desktop_sessions'])

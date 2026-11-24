@@ -9,8 +9,8 @@ CONTRACT_NAME = 'decklab-execution'
 CONTRACT_REVISION = 1
 
 OUTCOMES = ('not-issued', 'issued', 'acknowledged', 'observed', 'verified', 'unknown')
-BASE_TASK_KINDS = ('identify', 'ssh-enable', 'ssh-connect', 'file-copy',
-                   'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test')
+BASE_TASK_KINDS = ('identify', 'ssh-enable', 'ssh-connect', 'adb-connect', 'file-copy',
+                   'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test', 'adb-command')
 
 
 def execution_capabilities(version, hardware_actions, hardware_adapter):
@@ -72,7 +72,7 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
                 'supported': True, 'parameter': 'request_id',
                 'scope': ['actor', 'request_id'], 'persistent': True,
                 'kinds': submitted + ['desktop-input', 'image-download', 'image-prepare'],
-                'required_kinds': ['flash', 'nor-backup', 'desktop-input', 'image-download', 'board-test'],
+                'required_kinds': ['flash', 'nor-backup', 'desktop-input', 'image-download', 'board-test', 'adb-command'],
                 'format': '[A-Za-z0-9_-]{8,100}',
                 'same_input': 'return-existing-task', 'changed_input_http_status': 409,
             },
@@ -119,7 +119,7 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
             'configuration_endpoint': '/api/desktop/configure', 'configuration_owner_only': True,
             'configuration_storage': 'existing-web-settings-desktop-document',
             'providers': ['helper', 'vnc', 'rdp'], 'capture': 'png',
-            'input_actions': ['click', 'scroll', 'key', 'text'],
+            'input_actions': ['click', 'drag', 'scroll', 'key', 'text'],
             'requires_identified_board': True, 'requires_configuration': True,
             'fresh_frame_required': True, 'continuous_browser_stream': True,
             'stream_endpoint': '/api/desktop/stream', 'stream_subprotocol': 'decklab-desktop-v1',

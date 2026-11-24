@@ -126,6 +126,24 @@ class Peer:
 
 
 class DesktopProxyTests(unittest.TestCase):
+    @mock.patch('seriald_core.control_server.public_mcp_host_allowed', return_value=False)
+    def test_secondary_interface_matches_socket_and_browser_origin(self, _allowed):
+        from seriald_core.desktop_proxy import public_origin
+        handler = mock.Mock()
+        handler.connection.getsockname.return_value = ('192.0.2.18', 8898)
+        host = '192.0.2.18:8898'
+        handler.headers = {'Host': host, 'Origin': 'http://' + host}
+        self.assertEqual(public_origin(handler), 'http://' + host)
+        for target, origin in [('192.0.2.19:8898', '192.0.2.19:8898'),
+                               ('192.0.2.18:8897', '192.0.2.18:8897'),
+                               ('desktop.example.test:8898', 'desktop.example.test:8898'),
+                               (host, '192.0.2.19:8898')]:
+            with self.subTest(target=target, origin=origin):
+                handler.headers = {'Host': target, 'Origin': 'http://' + origin,
+                                   'X-Forwarded-Host': host}
+                with self.assertRaises(ValueError):
+                    public_origin(handler)
+
     def owner(self):
         return 'Basic ' + base64.b64encode(('seriald:' + OWNER).encode()).decode()
 

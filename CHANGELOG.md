@@ -6,67 +6,26 @@
 
 ## [Unreleased]
 
-## [1.17.81] - 2026-11-24
+## [1.18.0] - 2026-11-25
 
 ### Added
 
-- 用例库从 USB 调试连接回读板卡真实序列号，自动确认在线板卡及板端串口，并支持重新检测。
+- 板卡用例库可浏览 TitanX 用例组、搜索用例并查阅步骤和预期结果。已关联工位可下发已评审的自动化用例，按原任务和执行设备核对逐轮回执。
+- 控制机可向同机测试执行器返回本次连接已核实的 ADB 物理端口和板卡启动编号。
 
-### Fixed
-
-- 深度挂起用例支持 K1 PMIC RTC 和 K3 RPMI RTC。K3 使用 RTC 自身的唤醒计数，避免受共用中断的电源键干扰。
-
-## [1.17.80] - 2026-11-24
-
-### Fixed
-
-- 手机触屏拖动实时串口和归档日志时，短距离滑动即可滚动，连续输出期间小幅位移也会累计。
-
-## [1.17.79] - 2026-11-24
-
-### Added
-
-- 自定义板卡用例可逐条配置 Shell 命令及预期串口输出，上一条通过后才执行下一条。
-- 内置用例可查看脚本触发命令之外的运行与通过判定。
+- 设备页提供独立的 ADB 终端、受管命令与串口记录。可按板卡同时打开多个会话，通过网页、CLI 或 MCP 读写。
+- 本地用例支持逐条 Shell 命令、预期串口输出、超时和按轮浏览日志。板卡自动匹配 USB 调试接线，内置深度挂起用例支持 K1 与 K3。
+- 远程桌面可通过已确认的 USB 调试连接打开 Debian GNOME 首次设置和 Bianbu LXQt 登录屏，MCP 支持按画面坐标拖动。
 
 ### Changed
 
-- 设备页将刷机和电源入口相邻排列，并补齐近期新增入口的图标。
-
-## [1.17.78] - 2026-11-24
-
-### Changed
-
-- 开发板未进入下载模式时，刷机、读取设备存储和内存启动会先询问是否进入下载模式。确认后核对 USB 身份并继续原操作。
-- 未绑定控制槽位时，设备的刷机和内存启动页面提供绑定入口和 USB 检测。
-
-## [1.17.77] - 2026-11-24
-
-### Added
-
-- 用例库支持创建、编辑和运行 Shell 用例，可设每轮超时，并在串口归档查看实际命令、输出和退出码。
-- 内置用例可查看执行命令、前置检查和通过条件。
-
-## [1.17.76] - 2026-11-24
-
-### Added
-
-- 用例库在线查看通过轮与失败轮的命令、输出和串口日志，支持按轮号查找和下载完整归档。
-
-### Changed
-
-- URL 极速刷机并排保留压缩包读取和当前分区写入两项进度。
-
-## [1.17.75] - 2026-11-24
-
-### Added
-
-- 串口探测优先使用已识别系统的出厂账号，支持从确实写入的系统镜像读取类型。已保存的 SSH 凭据优先使用，Debian 可直接填写自己创建的用户，Bianbu 可使用出厂 SSH 账号。
-- 远程桌面按系统显示连接指引。Debian 的 3389 远程登录预填入口账号，桌面共享使用独立凭据。
+- 开发板尚未进入下载模式时，刷机和内存启动可在当前工作区绑定控制槽位并继续原操作；URL 刷机同时显示下载和写入进度。
+- 识别到 Buildroot 且确认 SSH 服务运行后，可直接使用镜像默认账号连接。重连后重新核对服务状态。
 
 ### Fixed
 
-- 回车不再触发串口尺寸同步。完成初次同步后，普通输出只更新显示；需要改变板端尺寸时，可使用手动同步。
+- K3 NOR 工作区可单独选择 FSBL 文件核对写入范围。
+- 串口回车、粘贴和手机短距离滚动更加稳定；远程桌面通过控制机的其他网卡访问后可直接重连。
 
 ## [1.17.74] - 2026-11-24
 
@@ -395,14 +354,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.81...HEAD
-[1.17.81]: https://github.com/qianqiu-2020/decklab/compare/v1.17.80...v1.17.81
-[1.17.80]: https://github.com/qianqiu-2020/decklab/compare/v1.17.79...v1.17.80
-[1.17.79]: https://github.com/qianqiu-2020/decklab/compare/v1.17.78...v1.17.79
-[1.17.78]: https://github.com/qianqiu-2020/decklab/compare/v1.17.77...v1.17.78
-[1.17.77]: https://github.com/qianqiu-2020/decklab/compare/v1.17.76...v1.17.77
-[1.17.76]: https://github.com/qianqiu-2020/decklab/compare/v1.17.75...v1.17.76
-[1.17.75]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.17.75
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.18.0...HEAD
+[1.18.0]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.18.0
 [1.17.74]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.74
 [1.17.54]: https://github.com/qianqiu-2020/decklab/compare/v1.17.53...v1.17.54
 [1.17.53]: https://github.com/qianqiu-2020/decklab/compare/v1.17.52...v1.17.53

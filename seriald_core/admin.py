@@ -156,7 +156,7 @@ def import_legacy(source, base, mapping, apply=False):
             for path in sorted(root.glob('*.log')):
                 if path.is_symlink() or not path.is_file():
                     continue
-                prefix = 'ssh' if path.name.startswith('ssh') else 'serial'
+                prefix = 'adb' if path.name.startswith('adb-') else 'ssh' if path.name.startswith('ssh') else 'serial'
                 name = prefix + '-legacy-' + hashlib.sha256(str(root).encode()).hexdigest()[:16] + '-' + path.name
                 target = Path(base) / 'logs' / component / name
                 plan.append((path, target))

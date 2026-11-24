@@ -437,16 +437,16 @@ class Store:
         with self.lock, self.db:
             self.db.execute("UPDATE sessions SET status=CASE WHEN completed=1 THEN 'completed' ELSE 'interrupted' END, ended=? WHERE ended IS NULL", (time.time(),))
 
-    def sessions(self, serial, offset=0, limit=50):
+    def sessions(self, serial, offset=0, limit=50, kind=None):
         with self.lock:
             return [dict(r) for r in self.db.execute(
-                'SELECT * FROM sessions WHERE serial=? ORDER BY started DESC, sid LIMIT ? OFFSET ?',
-                (serial, limit, offset))]
+                'SELECT * FROM sessions WHERE serial=? AND sid LIKE ? ORDER BY started DESC, sid LIMIT ? OFFSET ?',
+                (serial, (kind or '') + '%', limit, offset))]
 
-    def session_count(self, serial):
+    def session_count(self, serial, kind=None):
         with self.lock:
             return self.db.execute(
-                'SELECT COUNT(*) FROM sessions WHERE serial=?', (serial,)).fetchone()[0]
+                'SELECT COUNT(*) FROM sessions WHERE serial=? AND sid LIKE ?', (serial, (kind or '') + '%')).fetchone()[0]
 
     def event(self, serial, actor, action, detail=''):
         with self.lock, self.db:

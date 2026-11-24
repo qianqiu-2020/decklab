@@ -63,6 +63,11 @@ def _selector(value):
     return result
 
 
+def _link_speed(candidate):
+    speed = candidate.get('usb_link_speed')
+    return speed if type(speed) is int and 1 <= speed <= 6 else None
+
+
 def _profile(value):
     if not isinstance(value, dict) or len(_encoded(value).encode()) > 512 * 1024:
         raise TaskError('flashing discovery returned an invalid board profile', 502)
@@ -168,6 +173,7 @@ class FlashDiscovery:
                 'target_generation': row['generation'], 'serial': row.get('serial') or '',
                 'label': data.get('label', 'USB ' + '.'.join(map(str, data['device']['port_path']))),
                 'usb': data['device'], 'mode': data.get('mode', 'unknown'),
+                'usb_link_speed': _link_speed(data) if row['present'] else None,
                 'supported': bool(data.get('supported')), 'reason': data.get('reason', ''),
                 'diagnostic': data.get('diagnostic', ''),
                 'present': bool(row['present']), 'identity': data.get('identity', {}),
@@ -276,6 +282,7 @@ class FlashDiscovery:
                     'endpoint': endpoint, 'fingerprint': fingerprint, 'device': selector,
                     'mode': candidate.get('mode', 'unknown'), 'supported': False,
                     'reason': 'select this USB device to read its flashing capabilities'}
+                document['usb_link_speed'] = _link_speed(candidate)
                 row = {'id': old['id'] if old else secrets.token_hex(12),
                        'generation': old['generation'] if unchanged else secrets.token_hex(12),
                        'serial': old['serial'] if unchanged else None, 'document': document,
@@ -373,6 +380,7 @@ class FlashDiscovery:
                     self.manager.boards[serial] = Board(record)
         profile = _profile(candidate['profile']) if candidate.get('profile') is not None else None
         data.update(identity=candidate.get('identity') or {}, mode=candidate.get('mode', 'unknown'),
+                    usb_link_speed=_link_speed(candidate),
                     chip=candidate.get('chip', ''), profile=profile,
                     inspection=candidate.get('inspection'), modes=candidate.get('modes') or [],
                     supported=candidate.get('supported') is True and profile is not None,

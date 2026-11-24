@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import socket
 import ssl
 import struct
@@ -14,7 +15,7 @@ import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from seriald_core.desktop import DesktopBook, DesktopSessions
 from seriald_core.desktop_setup import checked_host, hosts_for, probe, receive
@@ -126,6 +127,30 @@ class SetupTests(unittest.TestCase):
         value = dict(revision=settings.snapshot()['revision'], provider='vnc', host='10.0.0.2',
                      port=5900, username='', password='private-pass', allow_agent=False)
         return dict(value, **changes)
+
+    def test_owner_quick_open_uses_transient_credentials_and_board_stage(self):
+        with self.setup() as (f, device, settings, screen):
+            desktop = f.manager.desktop
+            device.present = True
+            device.board.attach(device)
+            secret = secrets.token_hex(12)
+            ephemeral = dict(provider='rdp', display='desktop', display_kind='unknown',
+                             secret_url=urlunsplit(('rdp+ntlm-password', f'test-user:{secret}@board.example.test:3390', '', '', '')))
+            body = dict(key=device.key, serial=device.serial)
+            with mock.patch.object(desktop.setup, 'quick_config', return_value=(ephemeral, 'initial')):
+                status, data = self.request(f, '/api/desktop/quick-open', body)
+            self.assertEqual(status, 200, data)
+            self.assertEqual(data['session']['login_stage'], 'initial')
+            self.assertNotIn('secret_url', json.dumps(data))
+            self.assertNotIn(secret, json.dumps(data))
+            self.assertNotIn(device.serial, desktop.book.boards)
+            self.assertIs(desktop.get(device, data['session']['id'], 'web')['config'], ephemeral)
+            desktop.close_actor()
+            self.assertFalse(desktop.list(device, 'web')['supported'])
+            with mock.patch.object(desktop.setup, 'quick_config', return_value=(None, 'no-user')):
+                status, data = self.request(f, '/api/desktop/quick-open', body)
+            self.assertTrue(data['manual'])
+            self.assertEqual(data['login_stage'], 'no-user')
 
     def test_web_can_set_up_an_unconfigured_board_without_restart_or_secret_response(self):
         with self.setup() as (f, device, settings, screen):

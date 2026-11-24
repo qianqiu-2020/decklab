@@ -17,7 +17,7 @@ class SessionRegistry:
         first, second = sorted((self, other), key=id)
         with first.lock, second.lock:
             if self.pending:
-                raise IdentityError('SSH 会话正在建立，稍后再绑定设备')
+                raise IdentityError('终端会话正在建立，稍后再绑定设备')
             if set(self.sessions) & set(other.sessions):
                 raise IdentityError('SSH session ID collision; refusing to replace a session')
             other.sessions.update(self.sessions)

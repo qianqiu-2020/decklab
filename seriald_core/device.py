@@ -220,6 +220,16 @@ class Device:
     def _stock_ssh(profile):
         return not profile.ssh_login_override and (profile.ssh_user, profile.ssh_password) == ('root', 'bianbu')
 
+    def _needs_ssh_credentials(self, family, profile):
+        if not self._stock_ssh(profile):
+            return False
+        if family == 'buildroot':
+            info = self.probe_info
+            timestamp = info.get('ts')
+            return not (stock_os_id(info.get('os_id')) == family and info.get('sshd') == 'active'
+                        and isinstance(timestamp, (int, float)) and timestamp >= self.started)
+        return family == 'debian'
+
     def preload(self):
         """启动时把最近一份串口日志的尾部装回内存缓冲。
 
@@ -343,7 +353,7 @@ class Device:
             files.append({'name': name, 'size': stat_result.st_size,
                           'mtime': stat_result.st_mtime,
                           'date': ('%s-%s-%s' % (date[:4], date[4:6], date[6:]) if date else ''),
-                          'kind': 'ssh' if name.startswith('ssh-') else 'serial'})
+                          'kind': name.split('-', 1)[0] if name.startswith(('adb-', 'ssh-')) else 'serial'})
         # Filename prefixes mix serial/SSH logs, so lexicographic order is not time order.
         files.sort(key=lambda item: (item['date'], item['mtime'], item['name']), reverse=True)
         return files
@@ -695,7 +705,7 @@ class Device:
         result = {'saved': False, 'user': profile.ssh_user}
         if family:
             result['os_family'] = family
-        if family in ('debian', 'buildroot') and self._stock_ssh(profile):
+        if self._needs_ssh_credentials(family, profile):
             result.update(user='', needs_credentials=True)
         return result
 
@@ -736,7 +746,7 @@ class Device:
         if persistent:
             with self.sessions_lock:
                 for existing in self.ssh_sessions.values():
-                    if (getattr(existing, 'actor', '') == actor
+                    if (getattr(existing, 'kind', 'ssh') == 'ssh' and getattr(existing, 'actor', '') == actor
                             and not getattr(existing, 'closed', True)
                             and getattr(existing, 'fd', None) is not None):
                         if title:
@@ -746,7 +756,7 @@ class Device:
             if self._sessions is not registry:
                 return None, '设备身份已变化，请重新建立 SSH 会话'
             if len(registry.sessions) + registry.pending >= SSH_LIMIT:
-                return None, 'SSH 会话已达上限(%d),请先关闭闲置会话' % SSH_LIMIT
+                return None, '终端会话已达上限(%d),请先关闭闲置会话' % SSH_LIMIT
             sid = 'ssh' + secrets.token_hex(12)
             registry.pending += 1
         session = None
@@ -787,7 +797,7 @@ class Device:
             password = (ssh_password if ssh_password is not None
                         else stored['ssh_password'] if stored else profile.ssh_password)
             family = self.login_os_family() if not explicit and stored is None else ''
-            if family in ('debian', 'buildroot') and self._stock_ssh(profile):
+            if self._needs_ssh_credentials(family, profile):
                 raise SSHAuthenticationError('', needs_credentials=True)
             if not valid_ssh_user(user) or not valid_ssh_password(password):
                 return None, 'SSH 用户或密码格式无效'

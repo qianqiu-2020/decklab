@@ -3,6 +3,11 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import hashlib
 import ipaddress
+import json
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
 import re
 import secrets
 import socket
@@ -137,9 +142,75 @@ class DesktopSetup:
         ssh = device.ssh_settings()
         family = ssh.get('os_family', '')
         return {'revision': snapshot['revision'], 'connection': fields, 'hosts': hosts_for(device),
-                'os_family': family,
+                'os_family': family, 'quick_connect': self.quick_eligible(device, fields),
                 'suggested_user': ssh.get('user', '') if not family and ssh.get('saved') else '',
                 'protocols': ['vnc', 'rdp']}
+
+    def quick_eligible(self, device, fields):
+        return (bool(device.present and shutil.which('adb'))
+                and (not self.desktop.book.boards.get(device.serial)
+                     or fields.get('provider') == 'rdp' and fields.get('host') in hosts_for(device)
+                     and fields.get('port') == 3389 and fields.get('username') == 'rdp'))
+
+    def quick_config(self, device, previous):
+        from .adb_session import usb_endpoints
+        from .board_cases import READ_IDENTITY, adb_command, find_transport
+        fields = connection_fields(previous)
+        if not self.quick_eligible(device, fields):
+            return None, ''
+        serial, connection = device.serial, device.connection_id
+        executable = shutil.which('adb')
+        registered = self.desktop.manager.hardware.board_tests.get(serial)
+        try:
+            _, endpoint, facts = find_transport(executable, serial, registered, usb_endpoints=usb_endpoints)
+            lxqt = Path(__file__).with_name('desktop_lxqt_target.py').read_text(encoding='utf-8')
+            gnome = Path(__file__).with_name('desktop_gnome_target.py').read_text(encoding='utf-8')
+            guard = (READ_IDENTITY + '[ "$serial" = ' + shlex.quote(serial)
+                       + ' ] && [ "$(cat /proc/sys/kernel/random/boot_id)" = ' + shlex.quote(facts['boot_id'])
+                       + ' ] || exit 1\n')
+            command = (guard + "if grep -qx 'ID=bianbu' /etc/os-release; then\nexec python3 -I - <<'DECKLAB_LXQT'\n"
+                       + lxqt + '\nreport_lxqt()\nDECKLAB_LXQT\nelse\n' + "exec python3 -I - <<'DECKLAB_GNOME'\n"
+                       + gnome + '\nDECKLAB_GNOME\nfi')
+            reply = adb_command(executable, '-t', endpoint, 'shell', '-T', command, timeout=12)
+            data = json.loads(reply.stdout) if not reply.returncode else {}
+        except (ValueError, OSError, subprocess.SubprocessError):
+            return None, ''
+        self.identified(device)
+        if (device.serial != serial or device.connection_id != connection or not device.present
+                or device.board.connection is not device):
+            raise TaskError('板卡接线已变化，请重新打开桌面', 409)
+        if not isinstance(data, dict):
+            return None, ''
+        stage = data.get('stage', '')
+        if stage == 'lxqt-unavailable':
+            return None, stage
+        if stage in ('lxqt-initial', 'lxqt-finishing', 'lxqt-greeter', 'lxqt-desktop'):
+            command = guard + 'exec python3 -I -c ' + shlex.quote(lxqt + '\nserve_lxqt()')
+            config = dict(previous or {}, provider='vnc', display='desktop', display_kind='physical',
+                          usb_vnc_argv=[executable, '-t', endpoint, 'shell', '-T', command])
+            for key in ('engine', 'secret_url', 'text_input', 'certificate_sha256', 'certificate_policy'):
+                config.pop(key, None)
+            return config, stage
+        if stage not in ('initial', 'finishing', 'login', 'no-user'):
+            return None, ''
+        pin, port = data.get('pin'), data.get('port')
+        user, password = data.get('username'), data.get('password')
+        if (not isinstance(pin, str) or not re.fullmatch(r'[a-f0-9]{64}', pin)
+                or type(port) is not int or not 1 <= port <= 65535
+                or any(not isinstance(v, str) or not v or v in ('(hidden)', '(null)')
+                       or len(v) > 4096 or '\0' in v for v in (user, password))):
+            return None, stage
+        hosts = hosts_for(device)
+        if not hosts:
+            return None, stage
+        host = fields.get('host') if fields.get('host') in hosts else hosts[0]
+        authority = '[' + host + ']' if ':' in host else host
+        config = dict(previous or {}, provider='rdp', engine='freerdp', display='desktop',
+                      display_kind='unknown', text_input='clipboard', certificate_sha256=pin,
+                      secret_url='rdp+ntlm-password://' + quote(user, safe='') + ':' + quote(password, safe='')
+                      + '@' + authority + ':' + str(port))
+        config.pop('certificate_policy', None)
+        return config, stage
 
     def discover(self, device, endpoint=None):
         self.identified(device)

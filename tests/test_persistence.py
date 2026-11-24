@@ -689,6 +689,19 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(len(page['events']), 3)
         self.assertNotIn('session-send', {event['action'] for event in page['events']})
 
+    def test_activity_filters_usb_adb_before_pagination(self):
+        d = self.connection()
+        self.identify(d)
+        for sid in ['adb1', 'adb2', 'ssh1', 'ssh2', 'ssh3']:
+            self.store.open_session(sid, d.serial, 'web', '', '')
+        for kind, total in [('adb', 2), ('ssh', 3)]:
+            status, page = self.handler('/api/activity?key=riscv-118&session_kind=' + kind + '&session_offset=1&limit=1')
+            self.assertEqual((status, page['session_total']), (200, total))
+            self.assertEqual(len(page['sessions']), 1)
+            self.assertTrue(page['sessions'][0]['sid'].startswith(kind))
+        status, _ = self.handler('/api/activity?key=riscv-118&session_kind=bad')
+        self.assertEqual(status, 400)
+
     def test_log_files_are_newest_first_across_serial_and_ssh_names(self):
         d = self.connection()
         self.identify(d)

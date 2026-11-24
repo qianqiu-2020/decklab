@@ -311,6 +311,11 @@ def safe_event(event):
             output[field] = value
     if 'done' in output and 'total' in output and output['done'] > output['total']:
         raise FlashRunnerError('invalid flashing progress range')
+    if output.get('event') == 'usb-link':
+        speed = event.get('usb_link_speed')
+        if type(speed) is not int or not 1 <= speed <= 6:
+            raise FlashRunnerError('invalid USB link speed')
+        output['usb_link_speed'] = speed
     if output.get('event') == 'command' and output.get('status') in _COMMAND_STATUSES:
         command = event.get('command')
         if (isinstance(command, str) and len(command) <= 256 and _COMMAND.fullmatch(command)
