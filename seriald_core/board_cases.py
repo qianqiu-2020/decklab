@@ -1,6 +1,7 @@
 """One-round-at-a-time board tests supervised by the collector."""
 import base64
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -22,6 +23,10 @@ BUILTIN_CASES = (
          '执行前核对板卡序列号、启动编号、固件版本、EFI 启动项、ESP 和 Kingston TY7B-128 UFS 根盘。',
          '在板上执行 systemctl --no-block reboot，通过串口观察 NOR 启动记录。',
          '重新连接后确认 Linux 启动编号改变、multi-user.target 已启动，且固件、EFI 启动项、ESP 与实际根盘仍匹配起始记录。',
+     ],
+     'mechanisms': [
+         '控制机按已登记的 USB 路径找到当前 ADB 连接，启动前核对板卡序列号和 Linux 启动编号。',
+         '控制机最多观察 180 秒。通过条件包括新启动编号、从串口捕获的 NOR 启动标记，以及重连后读取的启动项与根盘。退出码 0 只说明重启命令已提交。',
      ]},
     {'id': 'rtc-wake', 'name': '深度挂起与 RTC 唤醒', 'kind': 'builtin',
      'description': '每轮设置 35 秒 RTC 闹钟，进入深度挂起后通过串口核对唤醒。',
@@ -29,6 +34,10 @@ BUILTIN_CASES = (
          '检查 /sys/power/mem_sleep 选中 deep、pm_test 为 none、console_suspend 为 Y、RTC 没有旧闹钟，记录 rtc@pmic 中断计数和内核日志游标。',
          '执行 rtcwake -m no -s 35 设置闹钟，向串口写入布防标记，再执行 systemctl suspend。',
          '同一次启动内必须出现一次 deep 进入和一次退出，RTC 中断增加，systemd-suspend 成功，闹钟清除。',
+     ],
+     'mechanisms': [
+         '板端临时服务在挂起前记录内核日志游标和 RTC 中断。唤醒后从原游标读取内核日志，结合中断、挂起服务状态和闹钟判定。',
+         '控制机通过串口等待同一次启动的布防标记和结果，观察上限为 235 秒。证据不足的轮次记为无结果。',
      ]},
 )
 CASES = tuple(case['id'] for case in BUILTIN_CASES)
@@ -66,40 +75,71 @@ printf '%s\n' "$efi" | sed -n "s/^Boot${current}[* ]/entry=/p"
 """
 
 
+def saved_case(row):
+    return dict(row, kind='shell', commands=json.loads(row['commands']))
+
+
 def library(store):
     with store.lock:
-        custom = [dict(row, kind='shell') for row in store.db.execute(
+        custom = [saved_case(row) for row in store.db.execute(
             'SELECT * FROM board_test_cases ORDER BY name, id')]
     return {'cases': [dict(case, script=BUILTIN_COMMANDS[case['id']]) for case in BUILTIN_CASES] + custom}
 
 
+def shell_text(value):
+    if (not isinstance(value, str) or not value.strip() or len(value.encode()) > 8192
+            or any(ord(char) < 32 and char not in '\n\r\t' for char in value)):
+        raise TaskError('请填写不超过 8 KiB 的 Shell 命令')
+    return value.replace('\r\n', '\n').replace('\r', '\n')
+
+
+def command_steps(value):
+    if not isinstance(value, list) or not 1 <= len(value) <= 16:
+        raise TaskError('请填写 1 到 16 条命令')
+    steps = []
+    for step in value:
+        if not isinstance(step, dict) or set(step) - {'command', 'expected'}:
+            raise TaskError('无法识别命令字段')
+        command = shell_text(step.get('command'))
+        expected = step.get('expected', '')
+        if (not isinstance(expected, str) or len(expected.encode()) > 256
+                or any(ord(char) < 32 and char != '\t' for char in expected)):
+            raise TaskError('每条预期串口输出须为不超过 256 字节的单行文本')
+        steps.append({'command':command, 'expected':expected})
+    if sum(len((step['command'] + step['expected']).encode()) for step in steps) > 8192:
+        raise TaskError('全部命令和预期输出合计不得超过 8 KiB')
+    return steps
+
+
 def save_case(store, payload):
-    if set(payload) - {'id', 'name', 'script', 'timeout', 'revision'}:
+    if set(payload) - {'id', 'name', 'script', 'commands', 'timeout', 'revision'}:
         raise TaskError('无法识别用例字段')
-    name, script = payload.get('name'), payload.get('script')
+    name = payload.get('name')
     timeout, revision = payload.get('timeout'), payload.get('revision')
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80 or not name.isprintable():
         raise TaskError('请填写最多 80 字符的用例名称')
-    if (not isinstance(script, str) or not script.strip() or len(script.encode()) > 8192
-            or any(ord(char) < 32 and char not in '\n\r\t' for char in script)):
-        raise TaskError('请填写不超过 8 KiB 的 Shell 脚本')
+    if ('script' in payload) == ('commands' in payload):
+        raise TaskError('请提供命令列表或一段 Shell 脚本')
+    commands = command_steps(payload['commands']) if 'commands' in payload else []
+    script = '' if commands else shell_text(payload.get('script'))
     if type(timeout) is not int or not 1 <= timeout <= 180:
         raise TaskError('每轮超时须为 1 到 180 秒')
-    name, script = name.strip(), script.replace('\r\n', '\n').replace('\r', '\n')
+    name, document = name.strip(), json.dumps(commands, ensure_ascii=False)
     case_id = payload.get('id')
     with store.lock, store.db:
         if case_id is None and revision is None:
             case_id, revision = 'shell-' + secrets.token_hex(12), 1
-            store.db.execute('INSERT INTO board_test_cases VALUES (?,?,?,?,?)', (case_id, name, script, timeout, revision))
+            store.db.execute('INSERT INTO board_test_cases (id,name,script,timeout,revision,commands) VALUES (?,?,?,?,?,?)',
+                             (case_id, name, script, timeout, revision, document))
         else:
             if not isinstance(case_id, str) or not CUSTOM_CASE.fullmatch(case_id) or type(revision) is not int or revision < 1:
                 raise TaskError('请选择要编辑的 Shell 用例')
-            changed = store.db.execute('UPDATE board_test_cases SET name=?, script=?, timeout=?, revision=revision+1 '
-                                       'WHERE id=? AND revision=?', (name, script, timeout, case_id, revision))
+            changed = store.db.execute('UPDATE board_test_cases SET name=?, script=?, timeout=?, commands=?, revision=revision+1 '
+                                       'WHERE id=? AND revision=?', (name, script, timeout, document, case_id, revision))
             if changed.rowcount != 1:
                 raise TaskError('用例已更新，请重新打开后编辑', 409)
             revision += 1
-    return {'id': case_id, 'name': name, 'script': script, 'timeout': timeout, 'revision': revision, 'kind': 'shell'}
+    return saved_case(dict(id=case_id, name=name, script=script, timeout=timeout, revision=revision, commands=document))
 
 
 def config(document):
@@ -235,10 +275,10 @@ class BoardCase:
                 if context.cancelled.wait(1):
                     context.check()
 
-    def observe(self, tag, before, baseline, evidence, row):
+    def observe(self, tag, before, baseline, evidence, row, *, step_timeout=None, expected=''):
         timeout = 235 if self.case == 'rtc-wake' else 180
         if self.case not in CASES:
-            timeout = self.custom['timeout'] + 25
+            timeout = (step_timeout if step_timeout is not None else self.custom['timeout']) + 25
         deadline = time.monotonic() + timeout
         result_line = re.compile(re.escape(tag.encode()) + rb' RESULT (\{[^\n]*\})\r*\n')
         while time.monotonic() < deadline:
@@ -257,6 +297,15 @@ class BoardCase:
                             or (self.case not in CASES and row['issued_on_board'])):
                         row['boot_after'] = result['boot_id']
                         row['round_finished'] = True
+                        if step_timeout is not None and result['status'] == 'passed' and expected:
+                            marker = re.compile(re.escape(tag.encode()) + rb' OUTPUT\r*\n')
+                            start = marker.search(evidence.data, 0, match.start())
+                            end = evidence.data.rfind(tag.encode() + b' OUTPUT-END', 0, match.start())
+                            if not start or end < start.end() or evidence.incomplete:
+                                return 'uncertain', '本条命令的串口输出记录不完整'
+                            row['expected_matched'] = evidence.data.find(expected.encode(), start.end(), end) >= 0
+                            if not row['expected_matched']:
+                                return 'failed', '未看到预期串口输出'
                         return result['status'], result['reason'][:256]
                 except (ValueError, KeyError, TypeError):
                     pass
@@ -321,44 +370,80 @@ class BoardCase:
                     if self.case == 'reboot-aging':
                         baseline = verify_boot(before, baseline)
                     evidence = SerialEvidence(device)
-                    tag = f'DECKLAB-CASE {context.id} {number}'
-                    unit = f'decklab-case-{context.id}-{number}'
-                    target_case, arguments = self.case, []
-                    if self.case not in CASES:
-                        target_case = 'shell'
-                        arguments = [base64.b64encode(self.custom['script'].encode()).decode(), str(self.custom['timeout'])]
-                    payload = 'LC_ALL=C ' + shlex.join(['systemd-run', '--no-block', '--collect', '--unit=' + unit,
-                                                       '--property=RuntimeMaxSec=230s', '/usr/bin/python3', '-c', script,
-                                                       target_case, self.row['uart'], tag, self.serial, before['boot_id'],
-                                                       *arguments])
-                    context.check()
-                    context.issued()
-                    row.update(trigger='unknown', service=unit)
-                    result.update(in_flight=number, service=unit)
-                    context.store.update(context.id, result=result)
-                    in_flight = True
-                    try:
-                        submitted = self.command('-t', endpoint, 'shell', payload)
-                        row['submit'] = {'exit_code': submitted.returncode, 'stdout': submitted.stdout[:2048],
-                                         'stderr': submitted.stderr[:2048]}
-                        if submitted.returncode == 0:
-                            row['trigger'] = 'acknowledged'
-                        elif rejected := START_REJECTED.search(submitted.stderr[:2048]):
-                            row.update(trigger='not-issued', status='failed',
-                                       reason='临时服务启动失败：' + rejected[0][:220])
-                            in_flight = False
-                            context.mark_outcome('not-issued')
-                    except (OSError, subprocess.TimeoutExpired):
-                        row['submit'] = {'error': '触发回执未收到，继续观察原轮次'}
-                    if in_flight:
-                        row['status'], row['reason'] = self.observe(tag, before, baseline, evidence, row)
-                        in_flight = not row.get('round_finished', False)
-                    if evidence.incomplete and row['status'] == 'passed':
-                        row.update(status='uncertain', reason='原串口证据有缺口')
+                    steps = self.custom.get('commands', []) if self.case not in CASES else []
+                    if steps:
+                        row['commands'] = []
+                        deadline = time.monotonic() + self.custom['timeout']
+                    for index, step in enumerate(steps or [None], 1):
+                        context.check()
+                        tag = f'DECKLAB-CASE {context.id} {number}'
+                        unit = f'decklab-case-{context.id}-{number}'
+                        current = row
+                        target_case, arguments, observation = self.case, [], {}
+                        if step is not None:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                row.update(status='failed', reason=f'第 {index} 条命令开始前已达到本轮超时')
+                                break
+                            tag += f' STEP {index}'
+                            unit += f'-{index}'
+                            current = {'index': index, 'expected': step['expected']}
+                            target_case = 'shell-step'
+                            timeout = math.ceil(remaining)
+                            arguments = [base64.b64encode(step['command'].encode()).decode(), str(timeout)]
+                            observation = {'step_timeout': timeout, 'expected': step['expected']}
+                        elif self.case not in CASES:
+                            target_case = 'shell'
+                            arguments = [base64.b64encode(self.custom['script'].encode()).decode(), str(self.custom['timeout'])]
+                        payload = 'LC_ALL=C ' + shlex.join(['systemd-run', '--no-block', '--collect', '--unit=' + unit,
+                                                           '--property=RuntimeMaxSec=230s', '/usr/bin/python3', '-c', script,
+                                                           target_case, self.row['uart'], tag, self.serial, before['boot_id'],
+                                                           *arguments])
+                        context.issued()
+                        if step is not None:
+                            row['commands'].append(current)
+                            result.update(current_command=index, total_commands=len(steps))
+                        current.update(trigger='unknown', service=unit)
+                        result.update(in_flight=number, service=unit)
+                        context.store.update(context.id, result=result)
+                        in_flight = True
+                        try:
+                            submitted = self.command('-t', endpoint, 'shell', payload)
+                            current['submit'] = {'exit_code': submitted.returncode, 'stdout': submitted.stdout[:2048],
+                                                 'stderr': submitted.stderr[:2048]}
+                            if submitted.returncode == 0:
+                                current['trigger'] = 'acknowledged'
+                            elif rejected := START_REJECTED.search(submitted.stderr[:2048]):
+                                current.update(trigger='not-issued', status='failed',
+                                               reason='临时服务启动失败：' + rejected[0][:220])
+                                in_flight = False
+                                context.mark_outcome('not-issued' if index == 1 else 'observed')
+                        except (OSError, subprocess.TimeoutExpired):
+                            current['submit'] = {'error': '触发回执未收到，继续观察原轮次'}
+                        if in_flight:
+                            current['status'], current['reason'] = self.observe(tag, before, baseline, evidence, current, **observation)
+                            in_flight = not current.get('round_finished', False)
+                        if evidence.incomplete and current['status'] == 'passed':
+                            current.update(status='uncertain', reason='原串口证据有缺口')
+                        if step is not None:
+                            if current.get('round_finished'):
+                                context.mark_outcome('observed')
+                            row.update(status=current['status'], reason=current['reason'], service=unit,
+                                       trigger=current['trigger'], boot_after=current.get('boot_after'))
+                            if current['status'] != 'passed':
+                                row['reason'] = f"第 {index} 条命令 · {current['reason']}"
+                                if current.get('expected_matched') is False:
+                                    row['failed_expected'] = step['expected']
+                            elif index == len(steps):
+                                row['reason'] = '全部命令及预期串口输出通过'
+                        if current['status'] != 'passed':
+                            break
                 except (ConnectionError, OSError, ValueError, subprocess.TimeoutExpired) as error:
                     row.update(status='uncertain', reason=str(error)[:256])
                 except TaskCancelled:
-                    break
+                    if not row.get('commands'):
+                        break
+                    row.update(status='cancelled', reason='已停止，剩余命令未执行')
                 if evidence:
                     row['serial_incomplete'] = evidence.incomplete
                     if evidence.data:
@@ -377,12 +462,20 @@ class BoardCase:
                     expected_boot = row.get('boot_after')
                     context.mark_outcome('observed')
                 else:
-                    first_issue = {key: value for key, value in row.items() if key not in ('preflight', 'submit', 'last_readback')}
-                    result['first_issue'] = first_issue
+                    first_issue = row
                 report.write((json.dumps(row, ensure_ascii=False) + '\n').encode())
-                recent.append({key: value for key, value in row.items() if key not in ('preflight', 'submit', 'last_readback')})
+                summary = {key: value for key, value in row.items()
+                           if key not in ('preflight', 'submit', 'last_readback', 'commands')}
+                if row.get('commands'):
+                    summary['command_results'] = [
+                        {key: command[key] for key in ('index', 'status', 'expected_matched') if key in command}
+                        for command in row['commands']]
+                if first_issue:
+                    result['first_issue'] = summary
+                recent.append(summary)
                 del recent[:-20]
                 result.update(completed_rounds=completed, in_flight=None)
+                result.pop('current_command', None)
                 context.store.update(context.id, result=result)
                 if first_issue or context.cancelled.is_set():
                     break
@@ -451,7 +544,7 @@ def start(manager, device, payload, actor):
             saved = manager.store.db.execute('SELECT * FROM board_test_cases WHERE id=? AND revision=?', (case, revision)).fetchone()
         if saved is None:
             raise TaskError('用例已更新，重新选择后再运行', 409)
-        custom = dict(saved)
+        custom = saved_case(saved)
     operation = BoardCase(manager, device, row, case, rounds, seconds, executable, custom=custom)
     return manager.tasks.start_board('board-test', actor, payload.get('client_id', ''), device.serial, operation.run,
         request_id=request_id, input_digest=digest, details={'attempt_id': request_id}, resources=['board-test-usb:' + row['usb_port']],

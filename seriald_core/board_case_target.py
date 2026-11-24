@@ -15,11 +15,12 @@ BOOT = '/proc/sys/kernel/random/boot_id'
 SERIAL = '/sys/class/dmi/id/product_serial'
 
 
-def run_command(argv, timeout, emit, *, capture_stdout=True):
+def run_command(argv, timeout, emit, *, capture_stdout=True, merge_output=False):
     stdout = bytearray()
     deadline = time.monotonic() + timeout
     timed_out = False
-    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    with subprocess.Popen(argv, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT if merge_output else subprocess.PIPE,
                           start_new_session=not capture_stdout) as process, DefaultSelector() as pipes:
         def stop():
             if capture_stdout:
@@ -29,7 +30,7 @@ def run_command(argv, timeout, emit, *, capture_stdout=True):
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-        for name in ('stdout', 'stderr'):
+        for name in ('stdout',) if merge_output else ('stdout', 'stderr'):
             pipes.register(getattr(process, name), EVENT_READ, name)
         while pipes.get_map():
             remaining = deadline - time.monotonic()
@@ -63,9 +64,12 @@ def identity():
 
 
 def main(case, uart, tag, serial, boot_id, encoded_script='', shell_timeout='60'):
-    def emit(text, raw=b''):
+    def write_uart(raw):
         with open(uart, 'wb') as output:
-            output.write(('\n' + text + '\n').encode('utf-8', 'replace') + raw)
+            output.write(raw)
+
+    def emit(text, raw=b''):
+        write_uart(('\n' + text + '\n').encode('utf-8', 'replace') + raw)
 
     def step(argv, timeout=12, capture=True):
         emit(f'{tag} CMD {shlex.join(argv)}')
@@ -106,6 +110,22 @@ def main(case, uart, tag, serial, boot_id, encoded_script='', shell_timeout='60'
         emit(tag + ' ISSUED')
         status, _ = step(['/bin/sh', '-c', script], timeout=int(shell_timeout), capture=False)
         done('passed' if status == 0 else 'failed', f'Shell 脚本退出码 {status}')
+        return
+    if case == 'shell-step':
+        command = base64.b64decode(encoded_script, validate=True).decode()
+        argv = ['/bin/sh', '-c', command]
+        emit(f'{tag} CMD {shlex.join(argv)}')
+        emit(tag + ' ISSUED')
+        emit(tag + ' OUTPUT')
+        try:
+            status, _ = run_command(argv, int(shell_timeout), lambda _channel, raw: write_uart(raw),
+                                    capture_stdout=False, merge_output=True)
+        except OSError as error:
+            status = 127
+            emit(f'{tag} stderr\n{error}')
+        emit(tag + ' OUTPUT-END')
+        emit(f'{tag} EXIT {status}')
+        done('passed' if status == 0 else 'failed', f'Shell 命令退出码 {status}')
         return
 
     modes = step(['cat', '/sys/power/mem_sleep'])[1]

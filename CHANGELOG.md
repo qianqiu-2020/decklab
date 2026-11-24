@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+## [1.17.79] - 2026-11-24
+
+### Added
+
+- 自定义板卡用例可逐条配置 Shell 命令及预期串口输出，上一条通过后才执行下一条。
+- 内置用例可查看脚本触发命令之外的运行与通过判定。
+
+### Changed
+
+- 设备页将刷机和电源入口相邻排列，并补齐近期新增入口的图标。
+
 ## [1.17.78] - 2026-11-24
 
 ### Changed
@@ -368,7 +379,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.78...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.79...HEAD
+[1.17.79]: https://github.com/qianqiu-2020/decklab/compare/v1.17.78...v1.17.79
 [1.17.78]: https://github.com/qianqiu-2020/decklab/compare/v1.17.77...v1.17.78
 [1.17.77]: https://github.com/qianqiu-2020/decklab/compare/v1.17.76...v1.17.77
 [1.17.76]: https://github.com/qianqiu-2020/decklab/compare/v1.17.75...v1.17.76

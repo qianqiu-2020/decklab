@@ -193,6 +193,7 @@
   .detail .hd #d-dev{padding:2px 6px;background:var(--surface-2);border-radius:4px;color:var(--ink-2)}
   .detail .hd #d-key{font-size:10px;color:var(--ink-3);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .detail .hd .sp{margin-left:auto;display:flex;align-items:center;gap:3px;flex-wrap:wrap}
+  .board-operations{display:flex;align-items:center;gap:3px}
   .detail .hd #b-identify{border-color:var(--accent-line);color:var(--accent);
     background:var(--accent-soft)}
   .detail .hd #b-close{border-color:transparent;background:transparent}
@@ -952,6 +953,16 @@
 .board-tests-definition textarea{width:100%;resize:vertical;padding:8px 10px;border:1px solid var(--line-strong);
   border-radius:6px;background:var(--surface);color:var(--ink)}
 .board-tests-editor-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(7rem,10rem);gap:10px}
+.board-tests-command{margin:10px 0;padding:10px 12px;border:1px solid var(--line);border-radius:6px}
+.board-tests-command .ft-field{margin:0 0 8px}
+.board-tests-command .ft-field:last-child{margin-bottom:0}
+#board-tests-definition-view h4{margin:12px 0 0}
+#board-tests-mechanisms{margin-top:12px}
+#board-tests-mechanisms summary{cursor:pointer}
+#board-tests-case-mechanisms{padding-inline-start:22px}
+#board-tests-case-steps pre{margin:4px 0}
+#board-tests-case-steps p,#board-tests-command-results{margin:4px 0}
+#board-tests-command-results:empty{display:none}
 #board-tests-edit-status{color:var(--ink-2);font-size:13px;margin-inline-start:8px}
 .board-tests-form{display:grid;grid-template-columns:minmax(0,1fr) 6rem 6rem auto;align-items:end;gap:8px 12px}
 .board-tests-form p,#board-tests-status,#board-tests-result p,#board-tests-log-note{margin:0;color:var(--ink-2);font-size:13px;overflow-wrap:anywhere}

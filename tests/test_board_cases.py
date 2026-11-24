@@ -34,6 +34,7 @@ class BoardCasesTests(unittest.TestCase):
             self.assertIn('systemctl --no-block reboot', cases['reboot-aging']['script'])
             self.assertIn('rtcwake -m no -s 35', cases['rtc-wake']['script'])
             self.assertTrue(cases['rtc-wake']['steps'])
+            self.assertTrue(cases['rtc-wake']['mechanisms'])
             fields = {'name': ' 检查测试 ', 'script': 'printf "中文"\r\nexit 0', 'timeout': 10}
             case = save_case(store, fields)
             self.assertEqual((case['kind'], case['name'], case['revision']), ('shell', '检查测试', 1))
@@ -50,6 +51,12 @@ class BoardCasesTests(unittest.TestCase):
                             {'script': '\x00exit'}, {'script': '中' * 8192}):
                 with self.assertRaises(TaskError):
                     save_case(store, dict(fields, **invalid))
+            steps = [{'command':'printf "中文"', 'expected':'中文'}, {'command':'true'}]
+            structured = save_case(store, {'name':'逐条核对', 'commands':steps, 'timeout':10})
+            self.assertEqual(structured['commands'], [steps[0], dict(steps[1], expected='')])
+            self.assertIn(structured, library(store)['cases'])
+            with self.assertRaises(TaskError):
+                save_case(store, {'name':'逐条核对', 'commands':[dict(steps[0], expected='a\nb')], 'timeout':10})
 
     def test_shell_runs_with_real_sh_and_logs_output_and_exit_code(self):
         for script, timeout, expected in [
@@ -75,6 +82,20 @@ class BoardCasesTests(unittest.TestCase):
                 if expected == 0:
                     self.assertIn('CASE stdout\n中文输出', output)
                     self.assertIn('CASE stderr\nstderr here', output)
+
+    def test_step_target_forwards_both_streams_inside_serial_markers_without_line_buffering(self):
+        uart = mock_open()
+        with tempfile.TemporaryDirectory() as directory:
+            serial_path, boot_path = Path(directory) / 'serial', Path(directory) / 'boot'
+            serial_path.write_text(SERIAL + '\n')
+            boot_path.write_text(BOOT1 + '\n')
+            script = base64.b64encode(b"printf 'abc'; printf 'def' >&2; exit 0").decode()
+            with patch('builtins.open', uart), patch.object(board_case_target, 'SERIAL', str(serial_path)), \
+                    patch.object(board_case_target, 'BOOT', str(boot_path)):
+                board_case_target.main('shell-step', '/dev/ttyS0', 'CASE', SERIAL, BOOT1, script, '2')
+        output = b''.join(call.args[0] for call in uart().write.call_args_list)
+        self.assertIn(b'CASE OUTPUT\nabcdef\nCASE OUTPUT-END\n', output)
+        self.assertIn(b'CASE EXIT 0\n', output)
 
     def test_rtc_wake_waits_for_journal_after_time_spent_suspended(self):
         entry = 'PM: suspend entry (deep)\n'
@@ -202,6 +223,36 @@ class BoardCasesTests(unittest.TestCase):
         case.maintenance.release.assert_not_called()
         case.maintenance.keep_recovery.assert_called_once_with(context.id)
         flash.return_value.update_details.assert_called_once_with(context.id, {'recovery_required': True})
+
+    def test_step_matching_reads_split_utf8_without_newline_and_stops_at_first_mismatch(self):
+        case, context = self.fake_case()
+        case.case, case.rounds = 'shell-fixture', 1
+        case.custom = {'name': 'fixture', 'revision': 2, 'timeout': 10, 'commands': [
+            {'command':'printf "中文通过"', 'expected':'中文通过'},
+            {'command':'true # 中文通过', 'expected':'中文通过'},
+            {'command':'never execute', 'expected':''}]}
+        tail = b''
+        def submit(*args):
+            nonlocal tail
+            index = case.command.call_count
+            tag = f'DECKLAB-CASE {context.id} 1 STEP {index}'.encode()
+            raw = '中文通过'.encode() if index == 1 else b'wrong'
+            case.device.buf.extend(tag + ' CMD 中文通过\n'.encode() + tag + b' ISSUED\r\n' + tag + b' OUTPUT\r\n' + raw[:2])
+            receipt = json.dumps({'serial': SERIAL, 'boot_id': BOOT1, 'status':'passed', 'reason':'exit 0'}).encode()
+            tail = raw[2:] + b'\r\n' + tag + b' OUTPUT-END\r\n' + tag + b' RESULT ' + receipt + b'\r\n'
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+        def finish_chunk(_seconds):
+            case.device.buf.extend(tail)
+        case.command = Mock(side_effect=submit)
+        with patch('seriald_core.board_cases.time.sleep', side_effect=finish_chunk), \
+                self.assertRaisesRegex(TaskError, '第 2 条命令 · 未看到预期串口输出'):
+            case.run(context)
+        self.assertEqual(case.command.call_count, 2)
+        result = context.store.update.call_args.kwargs['result']['first_issue']
+        self.assertEqual(result['command_results'], [
+            {'index':1,'status':'passed','expected_matched':True}, {'index':2,'status':'failed','expected_matched':False}])
+        self.assertEqual(result['failed_expected'], '中文通过')
+        case.maintenance.release.assert_called_once_with(context.id, confirmed=True)
 
     def test_passing_and_failing_rounds_are_ranges_in_one_serial_archive(self):
         case, context = self.fake_case()

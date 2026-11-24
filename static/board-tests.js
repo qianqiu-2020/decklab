@@ -3,7 +3,7 @@
   'use strict';
   const names = {'reboot-aging':'软件重启老化（NOR → UFS → Debian）','rtc-wake':'深度挂起与 RTC 唤醒'};
   const states = {queued:'排队',running:'运行中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
-  const roundStates = {passed:'通过',failed:'失败',uncertain:'无结果'};
+  const roundStates = {passed:'通过',failed:'失败',uncertain:'无结果',cancelled:'已停止'};
   function create({byId:$,fetch,getView,copyText}) {
     const client = global.SerialdTasks.createClient(fetch);
     const dialog = $('board-tests-dialog');
@@ -46,11 +46,61 @@
       $('board-tests-definition-title').textContent = item.name;
       const steps = $('board-tests-case-steps');
       steps.replaceChildren();
+      const rules = $('board-tests-case-rules');
+      rules.hidden = item.kind !== 'shell';
+      steps.hidden = item.kind === 'shell' && !item.commands?.length;
       if (item.kind === 'shell') {
-        text('li','在所选板卡以 root 执行，每轮超时 '+item.timeout+' 秒。退出码 0 为通过。',steps);
+        rules.textContent = '以 root 依次执行，每轮超时 '+item.timeout+' 秒。退出码须为 0，并核对已配置的串口输出。';
+        for (const step of item.commands || []) {
+          const row = text('li','',steps);
+          text('pre',step.command,row).dataset.i18nIgnore = '';
+          if (step.expected) text('p','预期串口输出 · '+step.expected,row).dataset.i18nIgnore = '';
+        }
       } else for (const step of item.steps) text('li',step,steps);
-      $('board-tests-case-script').textContent = item.script;
+      $('board-tests-trigger-title').hidden = $('board-tests-case-script').hidden = !item.script;
+      $('board-tests-trigger-title').textContent = item.kind === 'builtin' ? '主要触发命令' : 'Shell 脚本';
+      $('board-tests-case-script').textContent = item.script || '';
+      const mechanisms = $('board-tests-case-mechanisms');
+      mechanisms.replaceChildren();
+      $('board-tests-mechanisms').hidden = !item.mechanisms?.length;
+      $('board-tests-mechanisms').open = false;
+      for (const detail of item.mechanisms || []) text('li',detail,mechanisms);
       render();
+    }
+    function commandControls() {
+      const rows = Array.from($('board-tests-commands').children);
+      rows.forEach((row, index)=>{
+        row.querySelector('strong').textContent = '命令 '+(index+1);
+        row.querySelector('button').hidden = rows.length < 2;
+      });
+      $('board-tests-add-command').disabled = rows.length >= 16;
+    }
+    function addCommand(step = {}) {
+      const list = $('board-tests-commands');
+      if (list.children.length >= 16) return;
+      const row = text('section','',list);
+      row.className = 'board-tests-command';
+      const head = text('div','',row);
+      head.className = 'board-tests-log-head';
+      text('strong','',head);
+      const remove = text('button','移除此命令',head);
+      remove.type = 'button';
+      remove.addEventListener('click',()=>{row.remove();commandControls();});
+      const code = text('label','Shell 命令',row);
+      code.className = 'ft-field';
+      const command = text('textarea','',code);
+      command.rows = step.command?.includes('\n') ? 5 : 2;
+      command.spellcheck = false;
+      command.required = true;
+      command.value = step.command || '';
+      const check = text('label','预期串口输出（可选）',row);
+      check.className = 'ft-field';
+      const expected = text('input','',check);
+      expected.maxLength = 256;
+      expected.spellcheck = false;
+      expected.value = step.expected || '';
+      commandControls();
+      return command;
     }
     function editDefinition(item = {}) {
       formSequence++;
@@ -60,7 +110,8 @@
       $('board-tests-definition-title').textContent = item.id ? '编辑 Shell 用例' : '新建 Shell 用例';
       $('board-tests-case-name').value = item.name || '';
       $('board-tests-case-timeout').value = item.timeout || 60;
-      $('board-tests-case-input').value = item.script || '';
+      $('board-tests-commands').replaceChildren();
+      for (const step of item.commands?.length ? item.commands : [{command:item.script}]) addCommand(step);
       $('board-tests-edit-status').textContent = '';
       $('board-tests-save-case').disabled = false;
       $('board-tests-case-name').focus();
@@ -70,7 +121,7 @@
       formSequence++;
       draft = null; savingCase = false;
       $('board-tests-definition').hidden = true;
-      $('board-tests-case-input').value = '';
+      $('board-tests-commands').replaceChildren();
       render();
     }
     function trackRequest(id) {
@@ -104,6 +155,7 @@
       rawSerial = '';
       $('board-tests-log').hidden = $('board-tests-copy').hidden = $('board-tests-log-download').hidden = true;
       $('board-tests-log').textContent = '';
+      $('board-tests-command-results').textContent = '';
     }
     function updateRoundSelection() {
       for (const entry of $('board-tests-rounds').children) {
@@ -124,6 +176,8 @@
       $('board-tests-log-title').textContent = row ? '第 ' + row.round + ' 轮串口日志' : '本轮串口日志';
       const note = $('board-tests-log-note');
       if (!row) { note.textContent = active() ? '等待首轮结果' : '暂无可查看的轮次'; return; }
+      $('board-tests-command-results').textContent = (row.command_results || []).map(step=>'命令 '+step.index+' '+(roundStates[step.status] || '未执行')
+        +(step.expected_matched === true ? '（匹配串口）' : '')).concat(row.failed_expected ? ['预期串口输出 · '+row.failed_expected] : []).join(' · ');
       const summary = [roundStates[row.status], row.reason].filter(Boolean).join(' · ');
       if (!id) {
         const missing = row.serial_artifact_error || result.serial_artifact_error
@@ -203,8 +257,10 @@
       text('strong', result.case_name || names[result.case] || '板卡用例', summary);
       text('span',states[task.state] || task.state,summary).dataset.state = task.state;
       text('p','通过 '+(result.completed_rounds || 0)+' 轮'+(total?' / '+total:'')
-        +(result.in_flight?' · 正在观察第 '+result.in_flight+' 轮':''),box);
-      if (task.cancel_requested && active()) text('p','已请求停止发起后续轮次，等待本轮观察结束。',box);
+        +(result.in_flight?' · 正在观察第 '+result.in_flight+' 轮':'')
+        +(result.current_command?' · 命令 '+result.current_command+' / '+result.total_commands:''),box);
+      if (task.cancel_requested && active()) text('p',result.current_command
+        ? '等待当前命令的串口结果，随后停止。' : '等待本轮观察结束，随后停止。',box);
       if (task.flash?.recovery_required && result.service) {
         text('p','板卡仍保留给本任务。确认板端服务 '+result.service+' 已结束后释放。',box);
       }
@@ -317,12 +373,15 @@
     $('board-tests-new-case').addEventListener('click',()=>editDefinition());
     $('board-tests-edit-case').addEventListener('click',()=>editDefinition(chosen()));
     $('board-tests-hide-case').addEventListener('click',hideDefinition);
+    $('board-tests-add-command').addEventListener('click',()=>addCommand()?.focus());
     $('board-tests-case-form').addEventListener('submit',async event=>{
       event.preventDefault();
       if (!draft || savingCase) return;
       const gen=sequence, edit=formSequence;
-      const payload={name:$('board-tests-case-name').value,script:$('board-tests-case-input').value,
-        timeout:Number($('board-tests-case-timeout').value)};
+      const commands = Array.from($('board-tests-commands').children, row=>({
+        command:row.querySelector('textarea').value, expected:row.querySelector('input').value
+      }));
+      const payload={name:$('board-tests-case-name').value,commands,timeout:Number($('board-tests-case-timeout').value)};
       if (draft.id) Object.assign(payload,{id:draft.id,revision:draft.revision});
       savingCase=true;
       $('board-tests-save-case').disabled=true;

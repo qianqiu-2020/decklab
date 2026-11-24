@@ -167,11 +167,15 @@ def _registry_board_test_cases(db):
     db.execute('CREATE TABLE IF NOT EXISTS board_test_cases (id TEXT PRIMARY KEY, name TEXT NOT NULL, '
                'script TEXT NOT NULL, timeout INTEGER NOT NULL, revision INTEGER NOT NULL)')
 
+def _registry_board_test_commands(db):
+    if 'commands' not in {row[1] for row in db.execute('PRAGMA table_info(board_test_cases)')}:
+        db.execute("ALTER TABLE board_test_cases ADD COLUMN commands TEXT NOT NULL DEFAULT '[]'")
+
 
 REGISTRY_MIGRATIONS = (_registry_initial, _registry_history, _registry_tasks, _registry_artifacts,
                        _registry_connections, _registry_probe_settings, _registry_ssh_credentials,
                        _registry_flashing, _registry_attachment_labels, _registry_flash_targets,
-                       _registry_board_input_owners, _registry_board_test_cases)
+                       _registry_board_input_owners, _registry_board_test_cases, _registry_board_test_commands)
 GRANT_MIGRATIONS = (_grants_initial, _grants_connections, _grants_revocations)
 _SCHEMAS = {
     'registry': (0x444C5247, REGISTRY_MIGRATIONS, {
@@ -196,7 +200,7 @@ _SCHEMAS = {
         'flash_targets': 'id generation serial document seen present',
         'task_flash_targets': 'task_id target_id generation',
         'board_input_owners': 'serial id actor client_id generation token_hash state expires updated',
-        'board_test_cases': 'id name script timeout revision',
+        'board_test_cases': 'id name script timeout revision commands',
     }),
     'grants': (0x444C4147, GRANT_MIGRATIONS, {
         'grants': 'id token_hash actor scope serial created expires revoked key connection_id '
