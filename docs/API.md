@@ -120,6 +120,14 @@ of 1–180 seconds. A stale revision returns 409. Both routes require owner acce
 Start a saved case through `/api/task-start` using `kind:"board-test"`, the
 case ID in `case`, and its revision in `case_revision`.
 
+`GET /api/team-test-cases` lets the owner browse the team catalogue. Use
+`view=cases` for the paginated list, `view=groups` for groups, and
+`view=members&id=…` or `view=detail&id=…` for group members or case steps.
+An unconfigured collector returns `{"configured":false}`. To run one reviewed,
+automated case, send `kind:"board-test"`, `source:"titanx"`, its numeric `case`
+and `rounds` (1–100) through the task API for the mapped board.
+See [team workstation configuration](INTEGRATION.md#团队用例与测试工位).
+
 ## Requests, identity and errors
 
 GET parameters go in the query string. POST bodies are UTF-8 JSON objects with
@@ -266,6 +274,7 @@ POST device requests use `key`, expected `serial`, `actor` and optional human
 | --- | --- |
 | `/api/send` | `data`; literal serial input |
 | `/api/session-send` | `sid`, `data`; serial or SSH input |
+| `/api/adb-connect` | Open an interactive USB shell for the selected board and current connection. Returns its session ID in `sid`. |
 | `/api/ssh-connect` | Optional `title`, `ssh_user`, `ssh_password`; returns sid, session persistence policy and credential-save status; authentication rejection uses `code=ssh-authentication-failed` and nonsecret `ssh_user` |
 | `/api/session-resize` | `sid`, `cols`, `rows`; serial also requires `observed_off`, with optional `automatic` boolean, `presentation` boolean and per-page `client_id` |
 | `/api/session-close` | `sid` |
@@ -683,7 +692,11 @@ to Agent tokens. Downloading never prepares or writes a board.
 
 ## Desktop sessions
 
-`GET /api/desktop/sessions?key=...&serial=...` reports configured support, display and managed sessions. Owner responses also include redacted connection metadata and the existing settings revision for the device connection form. `POST /api/desktop/discover` identifies VNC/RDP on at most four known board IPs and fixed ports, without authentication or graphical input. The human owner may instead supply an explicit `host`, `port`, and `provider`. An RDP request for 3389 or 3390 checks both ports on that host; custom RDP ports and VNC check only the supplied port. Agent grants cannot choose arbitrary targets. `POST /api/desktop/configure` is owner-only and saves the selected device into the existing private desktop settings document with revision checking, preserving other devices and original reservation constraints. It applies that binding without restarting the collector; an active graphical session must first be explicitly closed. Newly observed RDP pins are saved only by the owner configure action. The Web form defaults its trust-and-pin checkbox to selected; saving pins that exact certificate, and subsequent connections still reject a mismatch. Discovery alone never saves trust. Passwords and credential-bearing URLs are never returned. `POST /api/desktop/open` uses the same board selector and opens one server-managed native connection. `GET /api/desktop/frame` adds `sid` and the Web `client_id`, and returns PNG plus frame ID, dimensions, scale, display kind and capture time. Connection-scoped Agent grants are denied.
+`GET /api/desktop/sessions?key=...&serial=...` reports configured support, display and managed sessions. Owner responses also include redacted connection metadata and the existing settings revision for the device connection form. `POST /api/desktop/discover` identifies VNC/RDP on at most four known board IPs and fixed ports, without authentication or graphical input. The human owner may instead supply an explicit `host`, `port`, and `provider`. An RDP request for 3389 or 3390 checks both ports on that host; custom RDP ports and VNC check only the supplied port. Agent grants cannot choose arbitrary targets. `POST /api/desktop/configure` is owner-only and saves the selected device into the existing private desktop settings document with revision checking, preserving other devices and original reservation constraints. It applies that binding without restarting the collector; an active graphical session must first be explicitly closed. Newly observed RDP pins are saved only by the owner configure action. New Web connections default to accepting the current certificate for the selected endpoint. Choosing fixed SHA-256 enables fingerprint checking on subsequent connections. Discovery alone never saves trust. Passwords and credential-bearing URLs are never returned. `POST /api/desktop/open` uses the same board selector and opens one server-managed native connection. `GET /api/desktop/frame` adds `sid` and the Web `client_id`, and returns PNG plus frame ID, dimensions, scale, display kind and capture time. Connection-scoped Agent grants are denied.
+
+`POST /api/desktop/quick-open` is the Web owner's automatic connection entry.
+For supported images it uses a verified USB ADB connection to identify the board
+and its desktop setup state. See [remote desktop setup](DESKTOP.md).
 
 `POST /api/desktop/input` requires `sid`, `frame_id`, `request_id`, `action` and its parameters: click `{x,y,button}`, scroll `{x,y,steps}` (positive down), key `{keys}`, or text `{text}`. It returns 202 and the original task. Poll `/api/task`; input delivery does not prove application effect. Mode/attachment changes invalidate observations; uncertain input requires a new observation, never a new write request. Typed text/images are not stored in task history.
 

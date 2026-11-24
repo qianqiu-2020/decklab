@@ -92,6 +92,9 @@ from two collectors.
 | `SERIALD_BY_PATH` | Linux `/dev/serial/by-path`; Windows `Windows COM` display value, discovery uses pySerial |
 | `SERIALD_RESCUE_BIN` | Linux source `/usr/local/sbin/seriald-rescue.sh`; Ubuntu `/usr/libexec/seriald/rescue.sh`; no Windows USB helper |
 | `SERIALD_AUTH_TOKEN` | Empty: open access. Nonempty: primary Basic/Bearer credential; browser Basic username is `seriald` |
+| `SERIALD_TEST_PLATFORM_URL` | Optional HTTPS origin of the team test catalogue |
+| `SERIALD_TEST_PLATFORM_TOKEN_FILE` | Path to the catalogue service credential readable by the collector |
+| `SERIALD_TEST_PLATFORM_BOARDS_FILE` | Path to the hardware serial to test workstation mapping required for execution. See [mapping format](INTEGRATION.md#团队用例与测试工位) |
 | `SERIALD_AGENT_TOKENS_FILE` | Optional JSON actor/token map; requires primary authentication; Linux and Windows |
 | `SERIALD_TRUST_LOOPBACK` | Windows-only, exact value `1` allows credential-free loopback access; LAN authenticated launcher enables it. Linux control does not read it |
 | `SERIALD_MCP_ENABLED` | Enabled by default; Debian 1.7.1+ and Windows packages include the server runtime. `0` disables the integrated `/mcp` endpoint |
