@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [1.17.78] - 2026-11-24
+
+### Changed
+
+- 开发板未进入下载模式时，刷机、读取设备存储和内存启动会先询问是否进入下载模式。确认后核对 USB 身份并继续原操作。
+- 未绑定控制槽位时，设备的刷机和内存启动页面提供绑定入口和 USB 检测。
+
 ## [1.17.77] - 2026-11-24
 
 ### Added
@@ -361,7 +368,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.77...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.78...HEAD
+[1.17.78]: https://github.com/qianqiu-2020/decklab/compare/v1.17.77...v1.17.78
 [1.17.77]: https://github.com/qianqiu-2020/decklab/compare/v1.17.76...v1.17.77
 [1.17.76]: https://github.com/qianqiu-2020/decklab/compare/v1.17.75...v1.17.76
 [1.17.75]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.17.75

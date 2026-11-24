@@ -1842,6 +1842,11 @@ async function confirmDownload(h, button, detectedCapabilities = usbCapabilities
   h.get(button).click();
   h.take('/api/flash-discover').resolve({targets:[otherUSB]}); await drain();
   h.take('/api/hardware').resolve({actions:['enter-download'],wiring:{revision:'revision-2'}}); await drain();
+  assert.equal(h.get('fl-reenter-dialog').open,true);
+  assert.match(h.get('fl-reenter-board').textContent, new RegExp(board.serial));
+  assert.match(h.get('fl-reenter-description').textContent,/重启此板/);
+  assert.equal(h.requests.some(r=>['/api/task-start','/api/flash-plan','/api/flash-stream'].includes(r.url)),false);
+  h.get('fl-reenter-submit').click(); h.get('fl-reenter-submit').click(); await drain();
   const control = h.take('/api/task-start');
   assert.equal(control.payload.kind,'hardware-enter-download');
   assert.equal(control.payload.serial,board.serial);
@@ -1902,6 +1907,74 @@ test('ordinary flash enters download and reads storage without a write plan', as
   assert.equal(read.payload.read_system,true);
   assert.ok(!('artifact_id' in read.payload));
   assert.equal(h.requests.some(r => r.payload),false);
+});
+
+test('normal preview asks before reset and resumes preview for the original image and USB target', async () => {
+  const h = harness(); await openWithoutUSB(h,'normal');
+  h.get('fl-cache').click(); h.chooseImage(artifact);
+  h.take('/api/image-prepare').resolve({task:{id:'prepared-image',state:'completed'}}); await drain();
+  assert.equal(h.get('fl-plan').disabled,false);
+  await confirmDownload(h,'fl-plan');
+  assert.match(h.get('fl-reenter-description').textContent,/再预览写入范围/);
+  const preview = h.take('/api/flash-plan');
+  assert.equal(preview.payload.artifact_id,artifact.id);
+  assert.equal(preview.payload.target_generation,scopedUSB.target_generation);
+  preview.resolve({plan:{id:'preview-after-download',ready:true,writes:[{storage:'disk-a',partition:'rootfs-a',size:32}]}}); await drain();
+  assert.equal(h.get('fl-start').disabled,false);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('cancelling download confirmation retains the draft and closing the workspace prevents late reset', async () => {
+  for (const closeWorkspace of [false,true]) {
+    const h = harness(); await openWithoutUSB(h,'normal');
+    h.get('fl-cache').click(); h.chooseImage(artifact);
+    h.take('/api/image-prepare').resolve({task:{id:'prepared-image',state:'completed'}}); await drain();
+    h.get('fl-plan').click();
+    h.take('/api/flash-discover').resolve({targets:[otherUSB]}); await drain();
+    const wiring = h.take('/api/hardware');
+    if (closeWorkspace) h.get('fl-close').click();
+    wiring.resolve({actions:['enter-download'],wiring:{revision:'revision-2'}}); await drain();
+    if (!closeWorkspace) {
+      assert.equal(h.get('fl-reenter-dialog').open,true);
+      h.get('fl-reenter-cancel').click(); await drain();
+      assert.equal(h.get('fl-plan').disabled,false);
+      assert.equal(h.get('fl-artifact').value,artifact.id);
+    }
+    assert.ok(!h.get('fl-reenter-dialog').open);
+    h.get('fl-reenter-submit').click(); await drain();
+    assert.equal(h.requests.some(r=>r.payload),false);
+  }
+});
+
+test('closing after download confirmation prevents a delayed control receipt from starting the original action', async () => {
+  const h = harness(); await openWithoutUSB(h,'fast');
+  h.get('fl-fast-url').value='https://images.example/os.tar.gz'; h.get('fl-fast-url').emit('input');
+  h.get('fl-fast-start').click();
+  h.take('/api/flash-discover').resolve({targets:[]}); await drain();
+  h.take('/api/hardware').resolve({actions:['enter-download'],wiring:{revision:'revision-2'}}); await drain();
+  h.get('fl-reenter-submit').click(); await drain();
+  const control = h.take('/api/task-start');
+  h.get('fl-close').click();
+  control.resolve({task:{id:'pending-control',state:'completed'}}); await drain();
+  assert.equal(h.requests.length,0);
+});
+
+test('ordinary flash without remote control exposes binding and starts no board action', async () => {
+  const bindings = [], h = harness(new Map(), {canBind:()=>true,bindControl:value=>bindings.push(value.serial)});
+  h.api.open(controlledBoard);
+  h.take('/api/flash-capabilities').resolve({...capabilities,supported:false}); await drain();
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-discover').resolve({targets:[]}); await drain();
+  h.take('/api/hardware').resolve({actions:[]}); await drain();
+  h.get('fl-prepare-board').click();
+  h.take('/api/flash-discover').resolve({targets:[]}); await drain();
+  h.take('/api/hardware').resolve({actions:[]}); await drain();
+  assert.ok(!h.get('fl-reenter-dialog').open);
+  assert.equal(h.get('fl-fast-connect').hidden,false);
+  assert.equal(h.get('fl-fast-bind').hidden,false);
+  assert.match(h.get('fl-status').textContent,/绑定控制槽位/);
+  h.get('fl-fast-bind').click(); assert.deepEqual(bindings,[controlledBoard.serial]);
+  assert.equal(h.requests.length,0);
 });
 
 test('a pre-write loader failure can re-enter download without leaving the flash workspace', async () => {
