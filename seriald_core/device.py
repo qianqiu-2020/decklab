@@ -18,7 +18,7 @@ from .terminal_backend import control_session
 from .console_visibility import ConsoleVisibility
 from .serial_health import SerialHealth
 from .serial_log import SerialLog
-from .protocol import PROBE_CMD, RE_LOGIN, RE_PROMPT, SSH_CMD, parse_probe
+from .protocol import PROBE_CMD, RE_LOGIN, RE_PROMPT, SSH_CMD, console_os_id, parse_probe, stock_os_id
 if sys.platform == 'win32':
     from serial import SerialException
     from .sessions_windows import SshSession, check_password_login
@@ -194,6 +194,31 @@ class Device:
         if include_default:
             result['default_command'] = PROBE_CMD
         return result
+
+    def login_os_family(self):
+        """Prefer current boot evidence to a successfully written image hint."""
+        load = getattr(getattr(self.manager, 'store', None), 'latest_flash_os', None)
+        learned, written = load(self.serial) if self.serial and callable(load) else ('', 0)
+        info = self.probe_info
+        with self.cv:
+            banner = console_os_id(ANSI.sub('', self.console_tail)) if self.last_rx >= written else ''
+        if banner:
+            return banner
+        timestamp = info.get('ts')
+        if info.get('os_id') and isinstance(timestamp, (float, int)) and timestamp >= written:
+            return stock_os_id(info['os_id'])
+        return stock_os_id(learned)
+
+    def console_login(self):
+        profile = self.profile
+        if (not profile.console_login_override and (profile.console_user, profile.console_password) == ('root', 'bianbu')
+                and self.login_os_family() == 'debian'):
+            return 'root', 'debian'
+        return profile.console_user, profile.console_password
+
+    @staticmethod
+    def _stock_ssh(profile):
+        return not profile.ssh_login_override and (profile.ssh_user, profile.ssh_password) == ('root', 'bianbu')
 
     def preload(self):
         """启动时把最近一份串口日志的尾部装回内存缓冲。
@@ -655,7 +680,8 @@ class Device:
 
     def ssh_settings(self, profile=None):
         """Public SSH configuration metadata; the password stays in the store."""
-        user = (profile or self.profile).ssh_user
+        profile = profile or self.profile
+        family = self.login_os_family()
         store = getattr(self.manager, 'store', None)
         metadata = getattr(store, 'get_ssh_credentials_metadata', None)
         if self.serial and callable(metadata):
@@ -665,8 +691,13 @@ class Device:
                 settings = None
             if (isinstance(settings, dict) and settings.get('saved')
                     and valid_ssh_user(settings.get('user'))):
-                return {'saved': True, 'user': settings['user']}
-        return {'saved': False, 'user': user}
+                return {'saved': True, 'user': settings['user'], **({'os_family': family} if family else {})}
+        result = {'saved': False, 'user': profile.ssh_user}
+        if family:
+            result['os_family'] = family
+        if family in ('debian', 'buildroot') and self._stock_ssh(profile):
+            result.update(user='', needs_credentials=True)
+        return result
 
     def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None):
         """Connect an independent SSH session without changing board credentials.
@@ -755,10 +786,13 @@ class Device:
                 stored['ssh_user'] if stored else profile.ssh_user)
             password = (ssh_password if ssh_password is not None
                         else stored['ssh_password'] if stored else profile.ssh_password)
+            family = self.login_os_family() if not explicit and stored is None else ''
+            if family in ('debian', 'buildroot') and self._stock_ssh(profile):
+                raise SSHAuthenticationError('', needs_credentials=True)
             if not valid_ssh_user(user) or not valid_ssh_password(password):
                 return None, 'SSH 用户或密码格式无效'
             candidates = [password]
-            if not explicit and stored is None:
+            if not explicit and stored is None and not family:
                 candidates.extend(candidate for candidate in ('bianbu', 'debian')
                                   if candidate not in candidates)
             for candidate in candidates:

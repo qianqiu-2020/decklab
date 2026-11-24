@@ -23,12 +23,22 @@ from seriald_core.devices import Manager
 from seriald_core.device import Device
 from seriald_core.flash_runner import FlashBook, FlashRunnerError, LocalFlashExecutor
 from seriald_core.flash_store import FlashStore, MAX_EVENTS
-from seriald_core.flash_tasks import FlashActions
+from seriald_core.flash_tasks import FlashActions, _system_os
 from seriald_core.httpd import BoundedThreadingTCPServer
 from seriald_core.storage import Store
 from seriald_core.tasks import TaskError
 from seriald_core.transactions import transactions_for
 from test_connection_access import api_request
+
+
+class FlashedSystemEvidenceTests(unittest.TestCase):
+    def test_system_hint_follows_written_payload_and_preserves_firmware_only_history(self):
+        root = {'storage': 'active', 'kind': 'partition', 'partition': 'rootfs', 'sha256': '1' * 64}
+        metadata = [dict(root, content={'os': {'id': 'debian'}})]
+        self.assertEqual(_system_os({'writes': [root]}, metadata), 'debian')
+        self.assertEqual(_system_os({'writes': [dict(root, sha256='2' * 64)]}, metadata), '')
+        self.assertIsNone(_system_os({'writes': [
+            {'storage': 'active', 'kind': 'partition', 'partition': 'uboot'}]}, metadata))
 
 
 class FakeFlashExecutor:

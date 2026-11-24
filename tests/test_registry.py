@@ -12,6 +12,7 @@ from seriald_core.transactions import TransactionError
 from seriald_core.profiles import BoardProfile, ProfileBook
 from seriald_core.storage import Store
 from seriald_core.models import Board
+from seriald_core.tasks import TaskStore
 
 
 class FakeSession:
@@ -66,6 +67,20 @@ class SessionRegistryTests(unittest.TestCase):
             self.addCleanup(patch.stop)
         self.device = seriald.Device('test-path', '/dev/test-only')
         self.device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
+
+    def test_known_os_uses_only_the_appropriate_stock_ssh_route(self):
+        for family in ('buildroot', 'debian'):
+            self.device.probe_info.update(os_id=family, ts=time.time())
+            with self.assertRaises(seriald.SSHAuthenticationError) as caught:
+                self.device.ssh_connect()
+            self.assertEqual(caught.exception.code, 'ssh-credentials-required')
+            self.assertTrue(self.device.ssh_settings()['needs_credentials'])
+        seriald.check_password_login.assert_not_called()
+        self.device.probe_info.update(os_id='bianbu', ts=time.time())
+        seriald.check_password_login.return_value = (False, True, '')
+        with self.assertRaises(seriald.SSHAuthenticationError):
+            self.device.ssh_connect()
+        seriald.check_password_login.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
 
     def test_pending_reservations_enforce_cap_and_ids_remain_unique(self):
         device = self.device
@@ -409,6 +424,20 @@ class SavedSshCredentialTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
         self.device = self.device_for('SN1')
+
+    def test_flash_hint_follows_the_board_and_loses_to_live_os(self):
+        self.manager.profiles = ProfileBook(base=BoardProfile())
+        other = self.device_for('SN2')
+        tasks = TaskStore(self.store)
+        task = tasks.create_board('flash', 'web', '', self.device.serial,
+                                  'fixture-flash', '0' * 64,
+                                  {'write_result': 'completed', 'system_os': 'debian'}, [])
+        self.assertEqual(self.device.login_os_family(), '')
+        tasks.update(task, state='completed', result={'ok': True})
+        self.assertEqual(self.device.console_login(), ('root', 'debian'))
+        self.assertEqual(other.login_os_family(), '')
+        self.device.probe_info.update(os_id='bianbu', ts=time.time())
+        self.assertEqual(self.device.login_os_family(), 'bianbu')
 
     def device_for(self, serial, path='test-usb', ip='192.0.2.1'):
         info = {'serial': serial, 'serial_source': 'device-tree',

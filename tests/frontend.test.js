@@ -714,6 +714,18 @@ function submitSshCredentials(h, user = 'ubuntu', password = 'private-ssh-passwo
   h.get('ssh-credentials-form').emit('submit', {preventDefault() {}});
 }
 
+test('known Debian and Buildroot open SSH setup without a speculative task', async () => {
+  for (const family of ['debian', 'buildroot']) {
+    const boards = sshBoards();
+    boards[0].ssh_settings = {needs_credentials:true,user:'',os_family:family};
+    const h = await sshCredentialFixture(boards);
+    h.get('d-tabs').children.at(-1).children[0].click();
+    assert.equal(h.get('ssh-credentials-dialog').open,true);
+    assert.equal(h.get('ssh-credentials-user').value,'');
+    assert.equal(h.requests.some(request=>request.url==='/api/task-start'),false);
+  }
+});
+
 test('SSH authentication failures offer explicit credentials without replaying default guesses', async () => {
   const h = await sshCredentialFixture();
   h.get('d-tabs').children.at(-1).children[0].click();
@@ -2019,6 +2031,17 @@ test('first serial command waits for board dimensions and environment setup', as
     revision:2,geometry:{cols:140,rows:42}}});
   await drain();
   assert.equal(h.sends().at(-1).body.data,'vim file\r');
+});
+
+test('a bare Return reaches an unconfigured serial console without starting size sync', async () => {
+  const h=await setup({sse:true}), terminal=h.select('A'), stream=h.streams.at(-1);
+  stream.emit({...readResponse('A','root@board:~# ',14),terminal_state:{managed:true,revision:1,
+    geometry:{cols:80,rows:24},phase:'shell',serial_ready:true,serial_configured:false}});
+  terminal.flush(); await drain();
+  terminal.data('\r'); await drain();
+  assert.equal(h.sends().at(-1).body.data,'\r');
+  assert.equal(h.requests.some(request=>request.url==='/api/session-resize'),false);
+  assert.equal(h.timer(400),undefined,'do not run the cancelled automatic setup during input');
 });
 
 test('serial size waiting notice clears when a quiet shared state confirms success', async () => {

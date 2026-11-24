@@ -25,7 +25,7 @@ $('d-tabs').innerHTML = '<button class="on" type="button">SSH</button><button ty
 window.fetch = async (url, options) => {
   const body = options && options.body ? JSON.parse(options.body) : null;
   if (body) fixture.posts.push({url, body});
-  const setup = () => ({revision:'fixture-revision',connection:fixture.connection,hosts:['10.0.0.88'],suggested_user:'user'});
+  const setup = () => ({revision:'fixture-revision',connection:fixture.connection,hosts:['10.0.0.88'],os_family:fixture.osFamily,suggested_user:fixture.osFamily?'':'user'});
   let data = url.startsWith('/api/desktop/sessions') ? {supported: fixture.configured, sessions: [],setup:setup()} :
     url === '/api/desktop/open' ? {session: {id: 'fixture-session', serial: 'FIXTURE-SN'}} : {ok: true};
   if(url==='/api/desktop/discover')data={candidates:fixture.discovered,reason:fixture.discovered.length?'':'未发现 VNC／RDP 服务，可填写地址手工连接'};
@@ -250,12 +250,16 @@ let chrome, ws;
     }
     const shot = await rpc('Page.captureScreenshot', {format: 'png'}); fs.writeFileSync(path.join(output,name+'.png'), Buffer.from(shot.data,'base64'));
   }
-  await evaluate('SerialdI18n.setLocale("zh-CN"); fixture.desktop.close(); fixture.configured=false; fixture.desktop.refresh(null);fixture.desktop.refresh(fixture.controller.current)');
+  await evaluate('SerialdI18n.setLocale("zh-CN"); fixture.desktop.close(); fixture.configured=false; fixture.osFamily="debian"; fixture.desktop.refresh(null);fixture.desktop.refresh(fixture.controller.current)');
   await until('!document.getElementById("b-desktop").hidden', 'unconfigured desktop entry remains visible');
   await evaluate('document.getElementById("b-desktop").click()');
   await until('document.getElementById("desktop-services").options.length===3 && !document.getElementById("desktop-detect").disabled', 'automatic VNC and RDP discovery');
   assert.equal(await evaluate('document.getElementById("desktop-connection").hidden'),false);
   assert.equal(await evaluate('document.getElementById("desktop-rdp-help").hidden'),false);
+  assert.equal(await evaluate('document.getElementById("desktop-user").value'),'rdp');
+  assert.equal(await evaluate('document.getElementById("desktop-password").value'),'');
+  await evaluate('document.getElementById("desktop-port").value="3390";document.getElementById("desktop-port").dispatchEvent(new Event("input"))');
+  assert.equal(await evaluate('document.getElementById("desktop-user").value'),'');
   const credentialsCommand = 'sudo grdctl --system status --show-credentials';
   assert.equal(await evaluate('document.querySelector("#desktop-rdp-help code").textContent'),credentialsCommand);
   await evaluate('SerialdI18n.setLocale("en")');
@@ -288,6 +292,11 @@ let chrome, ws;
   await until('fixture.sockets.length===3 && document.getElementById("desktop-overlay").hidden','manual VNC connects through same viewer');
   assert.equal(await evaluate('document.getElementById("desktop-rdp-help").hidden'),true);
   assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").at(-1).body.provider'),'vnc');
+  const discoveryCount=await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/discover").length');
+  await evaluate('fixture.desktop.close();fixture.configured=false;fixture.connection={};fixture.osFamily="buildroot";fixture.desktop.refresh(null);fixture.desktop.refresh(fixture.controller.current);document.getElementById("b-desktop").click()');
+  await until('!document.getElementById("desktop-stock-help").hidden','Buildroot desktop capability hint');
+  assert.equal(await evaluate('document.getElementById("desktop-user").value'),'');
+  assert.equal(await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/discover").length'),discoveryCount);
   assert.equal(requests.filter(r=>r.startsWith('/api/desktop/frame')).length,0, 'viewer must never poll screenshots');
   assert.ok(requests.includes('/vendor/novnc/core/display.js') && requests.includes('/vendor/novnc/core/input/keyboard.js'));
   assert.deepEqual(errors, []);

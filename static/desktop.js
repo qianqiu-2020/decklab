@@ -219,6 +219,7 @@
     var capabilities = {}, needFullFrame = true, hasObserved = false;
     var releaseBarrier = '', pendingIntent = null;
     var availability = null, setupValue = null, candidates = [], candidateId = '', detecting = false, savingSetup = false;
+    var suggestedGdmUser = false;
     var statusValue = '点击画面后控制桌面', overlayValue = '连接后显示远程桌面';
     var ackTimeout = options.ackTimeout || 8000;
     function scope(ctx) { return ctx && ctx.serial || ''; }
@@ -573,6 +574,7 @@
       $('desktop-host').value = saved.host || (setupValue.hosts || [])[0] || '';
       $('desktop-port').value = String(saved.port || 3389);
       $('desktop-user').value = saved.username || setupValue.suggested_user || '';
+      suggestedGdmUser = false;
       $('desktop-password').value = '';
       $('desktop-password').placeholder = saved.password_saved ? translate('已保存，留空保留') : '';
       $('desktop-certificate-policy').value = saved.certificate_policy || (saved.certificate_sha256 ? 'pin' : 'accept');
@@ -582,11 +584,21 @@
     }
     function setupFields() {
       var rdp = $('desktop-protocol').value === 'rdp';
+      var family = setupValue && setupValue.os_family;
+      var username = $('desktop-user');
+      if (family === 'debian' && !(setupValue.connection || {}).provider && (!username.value || suggestedGdmUser)) {
+        suggestedGdmUser = rdp && Number($('desktop-port').value) === 3389;
+        username.value = suggestedGdmUser ? 'rdp' : '';
+      }
       $('desktop-user-field').hidden = !rdp; $('desktop-user').required = rdp; $('desktop-certificate-field').hidden = !rdp;
       var pinned = rdp && $('desktop-certificate-policy').value === 'pin';
       $('desktop-pin-field').hidden = !pinned;
       $('desktop-trust-field').hidden = !pinned || !$('desktop-certificate').value.trim();
-      $('desktop-rdp-help').hidden = !rdp;
+      $('desktop-rdp-help').hidden = !rdp || !!family && family !== 'debian';
+      var stockHelp = {buildroot:'Buildroot 默认不提供远程桌面；自行启用后可手动连接。',
+        bianbu:'Bianbu 默认未开启远程桌面，请先在系统中启用 VNC 或 RDP。'}[family];
+      $('desktop-stock-help').hidden = !stockHelp || !!(setupValue.connection || {}).provider;
+      $('desktop-stock-help').textContent = stockHelp ? translate(stockHelp) : '';
     }
     function showSetup(automatic) {
       if (!setupValue) return;
@@ -598,7 +610,7 @@
       $('desktop-clipboard').hidden = true; $('desktop-settings').hidden = false;
       $('desktop-title').textContent = translate('远程桌面');
       connectionMessage(sid ? '请先断开现有连接，再修改设置。' : '');
-      if (automatic) detectServices();
+      if (automatic && setupValue.os_family !== 'buildroot') detectServices();
     }
     function chooseService() {
       var value = candidates.find(function (item) { return item.id === $('desktop-services').value; });
@@ -735,6 +747,7 @@
     $('desktop-services').addEventListener('change', chooseService);
     $('desktop-connection').addEventListener('submit', saveConnection);
     $('desktop-connection').addEventListener('input', function () { if (detecting) detecting.edited = true; });
+    $('desktop-user').addEventListener('input', function () { suggestedGdmUser = false; });
     ['desktop-host', 'desktop-port'].forEach(function (id) { $(id).addEventListener('input', function () {
       candidateId = ''; $('desktop-services').value = ''; $('desktop-certificate').value = ''; $('desktop-trust').checked = false; setupFields();
     }); });

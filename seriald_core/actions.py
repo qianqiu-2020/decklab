@@ -266,7 +266,7 @@ class DeviceActions:
                 s, err = d.ssh_connect(actor=actor, title=str(payload.get('title') or '')[:2048],
                                       ssh_user=ssh_user, ssh_password=ssh_password)
             except SSHAuthenticationError as error:
-                return response(502, {'ok': False, 'code': 'ssh-authentication-failed',
+                return response(502, {'ok': False, 'code': error.code,
                                       'ssh_user': error.user, 'error': str(error)})
             if not s:
                 return response(502, {'ok': False, 'error': err})

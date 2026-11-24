@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+## [1.17.75] - 2026-11-24
+
+### Added
+
+- 串口探测优先使用已识别系统的出厂账号，支持从确实写入的系统镜像读取类型。已保存的 SSH 凭据优先使用，Debian 可直接填写自己创建的用户，Bianbu 可使用出厂 SSH 账号。
+- 远程桌面按系统显示连接指引。Debian 的 3389 远程登录预填入口账号，桌面共享使用独立凭据。
+
+### Fixed
+
+- 回车不再触发串口尺寸同步。完成初次同步后，普通输出只更新显示；需要改变板端尺寸时，可使用手动同步。
+
 ## [1.17.74] - 2026-11-24
 
 ### Added
@@ -333,7 +344,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.75...HEAD
+[1.17.75]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.17.75
 [1.17.74]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.74
 [1.17.54]: https://github.com/qianqiu-2020/decklab/compare/v1.17.53...v1.17.54
 [1.17.53]: https://github.com/qianqiu-2020/decklab/compare/v1.17.52...v1.17.53

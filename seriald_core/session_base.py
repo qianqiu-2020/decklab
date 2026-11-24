@@ -11,9 +11,10 @@ from .terminal_backend import SharedTerminal
 
 class SSHAuthenticationError(RuntimeError):
     """Authentication was rejected; credentials never belong in error metadata."""
-    def __init__(self, user):
+    def __init__(self, user, *, needs_credentials=False):
         self.user = user
-        super().__init__('SSH 认证失败，请填写 SSH 用户和密码后重试')
+        self.code = 'ssh-credentials-required' if needs_credentials else 'ssh-authentication-failed'
+        super().__init__('请填写该系统的 SSH 用户和密码' if needs_credentials else 'SSH 认证失败，请填写 SSH 用户和密码后重试')
 
 
 def valid_ssh_user(value):

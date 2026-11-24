@@ -12,12 +12,33 @@ import time
 
 from .board_maintenance import maintenance_for
 from .flash_store import AUDIT_EVENTS, FlashStore
+from .protocol import stock_os_id
 from .results import response
 from .tasks import TaskCancelled, TaskError
 from .transactions import TransactionError
 
 
 _INIT_LOCK = threading.Lock()
+
+
+def _system_os(plan, metadata):
+    """A recognized OS is a hint from the exact payload, never from its filename."""
+    system_writes = [item for item in plan.get('writes', [])
+                     if str(item.get('storage') or '').lower() not in ('nor', 'mtd')]
+    keys = {(item.get('storage'), item.get('partition') or '', item.get('sha256'))
+            for item in system_writes if item.get('kind') in ('disk', 'partition')}
+    families = {stock_os_id((item.get('content', {}).get('os') or {}).get('id'))
+                for item in metadata
+                if (item.get('storage'), item.get('partition') or '', item.get('sha256')) in keys
+                and item.get('content', {}).get('os')}
+    if families:
+        return families.pop() if len(families) == 1 else ''
+    if any(item.get('kind') == 'disk'
+           or str(item.get('target') or '').lower() == 'gpt'
+           or str(item.get('partition') or '').lower() in ('rootfs', 'root', 'system', 'os')
+           for item in system_writes):
+        return ''
+    return None
 
 
 def _check_package_chip(binding, artifacts, preparations=None, actor='web'):
@@ -879,11 +900,14 @@ class FlashActions:
                         with _release_when_stopped(self.manager, context.id):
                             result = executor.stream_flash(binding, request, event, context.check)
                     except BaseException:
-                        store.update_details(context.id, {'write_result': 'partial-or-unknown' if started['writing'] else 'not-started'})
+                        outcome = {'write_result': 'not-started'}
+                        if started['writing']:
+                            outcome.update(write_result='partial-or-unknown', system_os='')
+                        store.update_details(context.id, outcome)
                         raise
                     store.update_details(context.id, {'write_result': result.get('write_result', 'completed'),
                         'verify_result': result.get('verify_result', 'not-requested'),
-                        'boot_result': result.get('boot_result', 'not-requested')})
+                        'boot_result': result.get('boot_result', 'not-requested'), 'system_os': ''})
                     return result
                 task = self.manager.tasks.start_board('flash', actor, client, device.serial, run,
                     request_id=payload.get('request_id'), input_digest=input_digest,
@@ -1677,6 +1701,9 @@ class FlashOperation:
                                              'source_workspaces': record.get('source_workspaces', []),
                                              'plan': actions._preview(record), 'write_inspection': _public(record.get('inspection') or {}),
                                              'payload_candidates': _public(record.get('payload_candidates') or []), 'write_result': 'running'})
+            system_os = _system_os(plan, record.get('payload_metadata') or [])
+            if system_os is not None:
+                store.update_details(context.id, {'system_os': ''})
             context.progress(0, 0, 'checking-image')
             from .flash_progress import FlashWriteProgress
             write_progress = FlashWriteProgress(plan)
@@ -1720,6 +1747,8 @@ class FlashOperation:
                 raise TaskError('required flash verification did not pass', 502)
             output.setdefault('boot_result', 'not-requested')
             output.update(ok=True, plan_id=record['plan_id'], plan_digest=record['digest'])
+            if system_os is not None:
+                output['system_os'] = system_os
             store.update_details(context.id, output)
             context.mark_outcome('verified' if output.get('verify_result') == 'verified' else 'acknowledged')
             if record['serial']:

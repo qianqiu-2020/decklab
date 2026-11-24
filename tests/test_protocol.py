@@ -376,6 +376,12 @@ class ShellLoginTests(DeviceFixture):
         self.assertTrue(ok)
         self.assertEqual(writes, ['root\r', 'bianbu\r'])
 
+    def test_debian_login_banner_uses_only_its_stock_serial_credentials(self):
+        (ok, _), writes, _ = self.login('Debian GNU/Linux 13 board ttyS0\r\nboard login: ',
+                                       ['Password:', '\r\nroot@board:~# '])
+        self.assertTrue(ok)
+        self.assertEqual(writes, ['root\r', 'debian\r'])
+
     def test_login_rejection_does_not_send_default_password(self):
         for failure in ('Login incorrect', '登录错误', '认证失败', 'Authentication failure'):
             with self.subTest(failure=failure):

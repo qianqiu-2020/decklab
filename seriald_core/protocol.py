@@ -16,6 +16,7 @@ SSH_STATE_CMD = (
     "else echo SSHD=inactive; fi"
 )
 PROBE_CMD = (
+    "printf 'OS_ID=%s\\n' \"$(sed -n 's/^ID=//p' /etc/os-release /usr/lib/os-release 2>/dev/null | head -n 1)\"; "
     "printf 'HOST=%s\\n' \"$(hostname 2>/dev/null | tr '\\r\\n' '  ')\"; "
     "printf 'SERIAL=%s\\n' \"$(cat /proc/device-tree/serial-number 2>/dev/null | tr -d '\\0' | tr '\\r\\n' '  ')\"; "
     "printf 'SOC_SERIAL=%s\\n' \"$(cat /sys/devices/soc0/serial_number 2>/dev/null | tr '\\r\\n' '  ')\"; "
@@ -62,6 +63,24 @@ RE_IDLE_SHELL_PROMPT = (
     r'(?:[^\s@]+@[^\s]+[#$]|\[[^\]\r\n]*@[^\]\r\n]+\][#$]|'
     r'(?:~(?:/[^\s#$]+)?|/[^\s#$]*)[ \t]+[#$])[ \t]*'
 )
+
+
+STOCK_OS_IDS = frozenset(('buildroot', 'bianbu', 'debian'))
+_OS_CONSOLE_BANNER = re.compile(
+    r'(?im)^(Debian) GNU/Linux [0-9][^\r\n]*|^(Bianbu) [0-9][^\r\n]*|^Welcome to (Buildroot)[ \t]*\r?$')
+
+
+def stock_os_id(value):
+    if isinstance(value, str):
+        value = value.strip().strip('"\'').lower()
+        if value in STOCK_OS_IDS:
+            return value
+    return ''
+
+
+def console_os_id(text):
+    matches = list(_OS_CONSOLE_BANNER.finditer(text))
+    return stock_os_id(next(value for value in matches[-1].groups() if value)) if matches else ''
 
 
 def parse_onie_serial(value):
@@ -122,6 +141,12 @@ def parse_probe(raw, strict=True):
 
     out['hostname'] = last('HOST', r'^HOST=(.*)$')
     out['serial'] = last('SERIAL', r'^SERIAL=(.*)$')
+    os_ids = re.findall(r'^OS_ID=(.*)$', body, re.M)
+    if len(os_ids) == 1:
+        # Keep unknown live OS IDs as evidence so an older flash hint cannot win.
+        value = os_ids[0].strip().strip('"\'').lower()
+        if re.fullmatch(r'[a-z0-9_-]{1,48}', value):
+            out['os_id'] = value
     for field in ('SOC_SERIAL', 'SOC_FAMILY', 'SOC_ID', 'EEPROM_SERIAL', 'EEPROM_HEX',
                   'BOOT_MARKER', 'UBOOT_VERSION'):
         if len(re.findall(r'^' + field + r'=', body, re.M)) > 1:

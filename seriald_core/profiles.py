@@ -77,6 +77,8 @@ class BoardProfile:
     probe: str = 'linux'
     probe_command: str = field(default='', repr=False)
     auto_configure_ssh: bool = True
+    console_login_override: bool = field(default=False, repr=False)
+    ssh_login_override: bool = field(default=False, repr=False)
 
     def __post_init__(self):
         if self.newline not in ('auto', 'cr', 'lf', 'crlf'):
@@ -179,6 +181,10 @@ class ProfileBook:
             raise ValueError('invalid serial fields for profile ' + name)
         if values.get('probe') in ('manual', 'custom') and 'auto_configure_ssh' not in values:
             values['auto_configure_ssh'] = False
+        if {'console_user', 'console_password'} & values.keys():
+            values['console_login_override'] = True
+        if {'ssh_user', 'ssh_password'} & values.keys():
+            values['ssh_login_override'] = True
         return replace(base, name=name, serial=replace(base.serial, **serial), **values)
 
     def resolve(self, serial='', port=''):

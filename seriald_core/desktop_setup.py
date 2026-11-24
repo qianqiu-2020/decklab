@@ -135,8 +135,11 @@ class DesktopSetup:
         snapshot = self.settings.snapshot()
         fields = connection_fields(self.desktop.book.boards.get(device.serial))
         ssh = device.ssh_settings()
+        family = ssh.get('os_family', '')
         return {'revision': snapshot['revision'], 'connection': fields, 'hosts': hosts_for(device),
-                'suggested_user': ssh.get('user', '') if ssh.get('saved') else '', 'protocols': ['vnc', 'rdp']}
+                'os_family': family,
+                'suggested_user': ssh.get('user', '') if not family and ssh.get('saved') else '',
+                'protocols': ['vnc', 'rdp']}
 
     def discover(self, device, endpoint=None):
         self.identified(device)

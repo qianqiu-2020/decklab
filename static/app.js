@@ -377,8 +377,10 @@
   function sshSettings(ctx) {
     var board = ctx && deviceDirectory.find(ctx.key);
     var settings = board && board.ssh_settings;
+    var manual = !!(settings && settings.needs_credentials);
     return { saved: !!(board && board.serial && settings && settings.saved === true),
-      user: settings && typeof settings.user === 'string' && settings.user
+      manual: manual, family: settings && settings.os_family,
+      user: manual ? '' : settings && typeof settings.user === 'string' && settings.user
         || ctx && ctx.sshUserHint || 'root' };
   }
   function sshConnectionCurrent(ctx, connectionId) {
@@ -433,6 +435,13 @@
   }
   function connectSSH(ctx, credentials) {
     if (!ctx || ctx.connecting || !sshConnectionCurrent(ctx, ctx.connectionId)) return;
+    var settings = sshSettings(ctx);
+    if (!credentials && settings.manual) {
+      openSshCredentials(ctx, '', settings.family === 'buildroot'
+        ? 'Buildroot 默认不提供 SSH；自行启用后可填写连接账号。'
+        : '请填写已在 Debian 上创建并允许 SSH 登录的用户。');
+      return;
+    }
     var connectionId = ctx.connectionId;
     var submittedUser = credentials && credentials.ssh_user;
     ctx.connecting = true;
@@ -468,9 +477,10 @@
         renderTabs();
         $('d-status').textContent = error.submissionUnknown
           ? ' 连接可能仍在后台执行，请先查看任务记录' : ' 失败：' + error.message;
-        if (!error.submissionUnknown && error.result && error.result.code === 'ssh-authentication-failed') {
+        if (!error.submissionUnknown && error.result && ['ssh-authentication-failed','ssh-credentials-required'].includes(error.result.code)) {
           ctx.sshUserHint = error.result.ssh_user || ctx.sshUserHint;
-          openSshCredentials(ctx, ctx.sshUserHint, 'SSH 认证失败，请填写账号和密码后重试');
+          openSshCredentials(ctx, error.result.code === 'ssh-credentials-required' ? '' : ctx.sshUserHint,
+            error.result.code === 'ssh-credentials-required' ? '请填写该系统的 SSH 用户和密码' : 'SSH 认证失败，请填写账号和密码后重试');
         }
       });
   }

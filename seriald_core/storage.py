@@ -119,6 +119,21 @@ class Store:
         with self.lock:
             return self._board(self.db.execute('SELECT * FROM boards WHERE serial=?', (serial,)).fetchone())
 
+    def latest_flash_os(self, serial):
+        """Read the newest system-write evidence for this board identity."""
+        with self.lock:
+            row = self.db.execute("""
+                SELECT json_extract(f.document,'$.system_os') AS family, t.updated
+                FROM task_board_targets AS b
+                JOIN tasks AS t ON t.id=b.task_id
+                JOIN flash_details AS f ON f.task_id=t.id
+                WHERE b.serial=? AND t.kind='flash' AND t.state NOT IN ('queued','running')
+                  AND json_type(f.document,'$.system_os')='text'
+                  AND json_extract(f.document,'$.write_result') <> 'not-started'
+                ORDER BY t.created DESC, t.id DESC LIMIT 1
+                """, (serial,)).fetchone()
+        return (row['family'], row['updated']) if row else ('', 0)
+
     def resolve(self, label):
         with self.lock:
             return self._board(self.db.execute('SELECT * FROM boards WHERE label=?', (label,)).fetchone())

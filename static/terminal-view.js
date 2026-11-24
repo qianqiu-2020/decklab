@@ -224,6 +224,9 @@
     }
     function requestSerialSize(ctx, automatic) {
       if (!terminalVisible(ctx) || ctx.serialSizePending) return;
+      // Once configured, a UART has one shared shell grid. A browser can
+      // refit locally, but only the manual control can change the board grid.
+      if (automatic && ctx.serialConfigured) return;
       if (!idleSerialPrompt(ctx)) {
         if (!automatic) {
           ctx.serialSizeRequest = null;
@@ -231,17 +234,9 @@
         }
         return;
       }
-      var dimensions = ctx.fit.proposeDimensions();
+      var dimensions = preferredGrid(ctx);
       if (!dimensions) return;
-      var render = ctx.term._core && ctx.term._core._renderService;
-      var cell = render && render.dimensions.css && render.dimensions.css.cell;
-      var viewport = ctx.term.element && ctx.term.element.querySelector('.xterm-viewport');
-      var ratio = ctx.term.options.fontSize / DEFAULT_TERMINAL_FONT_SIZE;
-      var rows = viewport && cell && cell.height ? Math.floor((viewport.clientHeight - 2) * ratio / cell.height) : dimensions.rows;
-      var cols = viewport && cell && cell.width ? Math.floor((viewport.clientWidth - 17) * ratio / cell.width) : dimensions.cols;
-      rows = Math.max(2, Math.min(200, rows)); cols = Math.max(20, Math.min(500, cols));
-      var currentGrid = ctx.screenManaged ? ctx.screenGeometry : {cols:ctx.serialCols, rows:ctx.serialRows};
-      if (automatic && ctx.serialConfigured && currentGrid && currentGrid.cols === cols && currentGrid.rows === rows) return;
+      var rows = dimensions.rows, cols = dimensions.cols;
       var signature = ctx.off + ':' + cols + ':' + rows;
       if (automatic && signature === ctx.autoSizeAttempt) return;
       ctx.autoSizeAttempt = signature; ctx.serialSizePending = true;
@@ -275,7 +270,7 @@
     function syncSerialSize() { requestSerialSize(view, false); }
     function scheduleSerialSize(ctx) {
       clearTimeout(ctx.serialSizeTimer);
-      if (!terminalVisible(ctx) || !idleSerialPrompt(ctx)) return;
+      if (!terminalVisible(ctx) || ctx.serialConfigured || !idleSerialPrompt(ctx)) return;
       ctx.serialSizeTimer = setTimeout(function () { requestSerialSize(ctx, true); }, 400);
     }
     function applySerialGeometry(ctx, geometry) {
@@ -373,6 +368,30 @@
       };
       return {cols: dimensions && dimensions.cols, rows: visibleTerminalRows(ctx, dimensions)};
     }
+    function viewSizeKey(ctx) {
+      var host = $('d-term'), font = ctx.term.options;
+      if (!host.clientWidth || !host.clientHeight) {
+        host = ctx.term.element && ctx.term.element.querySelector('.xterm-viewport');
+      }
+      if (!host || !host.clientWidth || !host.clientHeight) return '';
+      return [host.clientWidth, host.clientHeight, font.fontFamily, font.lineHeight, font.letterSpacing,
+        window.devicePixelRatio || 1].join(':');
+    }
+    function preferredGrid(ctx) {
+      var viewSize = viewSizeKey(ctx);
+      if (viewSize && viewSize === ctx.preferredGridKey) return ctx.preferredGrid;
+      var proposed = ctx.fit.proposeDimensions();
+      if (!proposed) return null;
+      var capacity = serialCapacity(ctx, proposed);
+      var ratio = ctx.term.options.fontSize / DEFAULT_TERMINAL_FONT_SIZE;
+      // A shared grid can change the renderer font and scrollbar measurements.
+      // Keep the requested grid stable until the browser container changes.
+      var grid = {cols: Math.max(20, Math.min(500, Math.floor(capacity.cols * ratio))),
+        rows: Math.max(2, Math.min(200, Math.floor(capacity.rows * ratio)))};
+      ctx.preferredGridKey = viewSize;
+      ctx.preferredGrid = grid;
+      return grid;
+    }
     function fitTerminal(ctx) {
       if (!terminalVisible(ctx)) return;
       // UART has no PTY window-size negotiation. Linux serial consoles,
@@ -384,11 +403,8 @@
         var cap = !ctx.linuxConsole && required >= 40 && document.body.classList.contains('terminal-max')
           ? 10 : DEFAULT_TERMINAL_FONT_SIZE;
         var requiredCols = ctx.screenManaged ? ctx.screenGeometry.cols : ctx.serialCols || 80;
-        var viewport = ctx.term.element && ctx.term.element.querySelector('.xterm-viewport');
-        var signature = viewport && viewport.clientWidth && viewport.clientHeight
-          ? [viewport.clientWidth, viewport.clientHeight, requiredCols, required, cap,
-            ctx.term.options.fontFamily, ctx.term.options.lineHeight, ctx.term.options.letterSpacing,
-            window.devicePixelRatio || 1].join(':') : '';
+        var viewSize = viewSizeKey(ctx);
+        var signature = viewSize ? [viewSize, requiredCols, required, cap].join(':') : '';
         if (signature && signature === ctx.fixedFitSignature) {
           if (ctx.term.cols !== requiredCols || ctx.term.rows !== required) ctx.term.resize(requiredCols, required);
           return;
@@ -466,12 +482,8 @@
       clearTimeout(ctx.sizeTimer);
       ctx.sizeTimer = setTimeout(function () {
         if (!terminalVisible(ctx) || ctx.readonly) return;
-        var dimensions = ctx.fit.proposeDimensions();
-        if (ctx.screenManaged) {
-          var capacity = serialCapacity(ctx, dimensions);
-          var ratio = ctx.term.options.fontSize / DEFAULT_TERMINAL_FONT_SIZE;
-          dimensions = {cols: Math.floor(capacity.cols * ratio), rows: Math.floor(capacity.rows * ratio)};
-        } else dimensions = {cols: ctx.term.cols, rows: ctx.term.rows};
+        var dimensions = ctx.screenManaged ? preferredGrid(ctx) : {cols: ctx.term.cols, rows: ctx.term.rows};
+        if (!dimensions) return;
         var signature = dimensions.cols + ':' + dimensions.rows;
         if (signature === ctx.lastSizeRequest) return;
         ctx.lastSizeRequest = signature;
@@ -530,17 +542,15 @@
           scheduleSerialSize(ctx); pushSize(ctx);
           if (terminalVisible(ctx) && ctx.sid === 'serial' && ctx.screenPhase === 'text' && !ctx.readonly && !ctx.internalOutput
               && !ctx.inputQueue.length && !ctx.inputSending) {
-            var capacity = serialCapacity(ctx, ctx.fit.proposeDimensions());
-            var ratio = ctx.term.options.fontSize / DEFAULT_TERMINAL_FONT_SIZE;
-            var cols = Math.floor(capacity.cols * ratio), rows = Math.floor(capacity.rows * ratio);
+            var grid = preferredGrid(ctx);
             // A firmware/boot reset can replace the shared grid while this
             // viewport stays unchanged. Retry once for that screen revision.
-            var size = cols + ':' + rows + ':' + ctx.terminalRevision;
-            if ((ctx.screenGeometry.cols !== cols || ctx.screenGeometry.rows !== rows)
+            var size = grid && grid.cols + ':' + grid.rows + ':' + ctx.terminalRevision;
+            if (grid && (ctx.screenGeometry.cols !== grid.cols || ctx.screenGeometry.rows !== grid.rows)
                 && ctx.presentationAttempt !== size) {
               ctx.presentationAttempt = size;
               fetch('/api/session-resize', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({key: ctx.key, serial: ctx.serial, sid: 'serial', cols: cols, rows: rows,
+                body: JSON.stringify({key: ctx.key, serial: ctx.serial, sid: 'serial', cols: grid.cols, rows: grid.rows,
                   observed_off: ctx.off, automatic: true, presentation: true})}).catch(function () {});
             }
           }
@@ -806,7 +816,8 @@
         $('d-status').textContent = ctx.kind === 'log' ? ' 当前是只读归档日志' : ' 当前会话由另一客户端控制，可介入后输入';
         return;
       }
-      if (ctx.screenManaged && ctx.sid === 'serial' && !ctx.serialConfigured && idleSerialPrompt(ctx)) {
+      if (ctx.screenManaged && ctx.sid === 'serial' && !ctx.serialConfigured
+          && /[^\r\n]/.test(text) && idleSerialPrompt(ctx)) {
         ctx.serialStartupPending = true;
         requestSerialSize(ctx, false);
       }

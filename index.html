@@ -237,6 +237,7 @@ PasswordAuthentication yes</code></pre>
           <label id="desktop-pin-field" hidden>服务器证书 SHA256<input id="desktop-certificate" autocomplete="off" spellcheck="false"></label>
           <label id="desktop-trust-field" class="desktop-check" hidden title="保存并连接后固定当前指纹；后续证书不匹配时拒绝连接"><input id="desktop-trust" type="checkbox" checked>信任并固定此证书指纹</label>
         </details>
+        <p id="desktop-stock-help" class="log-note" hidden></p>
         <div id="desktop-rdp-help" class="desktop-connection-help">
           <p><strong>Debian GNOME 远程登录</strong><span>（GDM，通常 3389）：入口用户默认为 rdp；连接后再用 Linux 用户登录。</span></p>
           <p><span>在开发板串口查看入口账号和密码：</span><code id="desktop-credentials-command" data-i18n-ignore>sudo grdctl --system status --show-credentials</code><button type="button" id="desktop-credentials-stage">填入串口</button> <button type="button" id="desktop-credentials-copy">复制命令</button></p><span id="desktop-command-status" role="status"></span>

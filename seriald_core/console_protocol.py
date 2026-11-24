@@ -140,9 +140,10 @@ class ConsoleProtocol:
                     break
         if not at_login:
             return False, base
+        user, password = device.console_login()
         device._say('停在登录提示符,使用配置的账户自动登录')
         base = device.now_off()
-        if not device._write(device.profile.console_user + device.newline)[0]:
+        if not device._write(user + device.newline)[0]:
             return False, base
         failure = r'(?:[Ll]ogin incorrect|登录错误|认证失败|Authentication failure)'
         match = device._wait(base, RE_PASSWD + r'\s*$|' + RE_PROMPT + '|' + failure, 12)
@@ -151,7 +152,7 @@ class ConsoleProtocol:
         if re.search(RE_PROMPT, match.group(0)):
             return True, device.now_off()       # 免密码登录不能继续盲发默认密码
         base = device.now_off()
-        if not device._write(device.profile.console_password + device.newline)[0]:
+        if not device._write(password + device.newline)[0]:
             return False, base
         match = device._wait(base, RE_PROMPT + '|' + failure, 20)
         return (bool(match and re.search(RE_PROMPT, match.group(0))), device.now_off())

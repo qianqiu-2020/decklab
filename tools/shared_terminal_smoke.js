@@ -144,6 +144,23 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
   await checkVimPaste(a, 'serial-paste.txt', true);
   await input(a, '\x1b:q!\r');
   await wait(()=>a.evaluate('testTerm.buffer.active.type==="normal"'),'serial Vim exit');
+  const idlePrompt = 'testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+testTerm.buffer.active.cursorY)?.translateToString().trim()==="root@fixture:~#"';
+  await wait(()=>a.evaluate(idlePrompt),'idle shell after Vim');
+  await delay(800);
+  const geometryAfterReturn = `new Promise(resolve => {
+    const term = testTerm, host = document.querySelector('#d-term'), geometry = new Set();
+    const measure = () => geometry.add([term.cols,term.rows,term.options.fontSize,host.clientWidth,host.clientHeight].join(':'));
+    measure();
+    const timer = setInterval(measure, 20);
+    term.input('\\r');
+    setTimeout(() => { clearInterval(timer); measure(); resolve([...geometry]); }, 900);
+  })`;
+  const responsiveGeometry = await a.evaluate(geometryAfterReturn);
+  assert.deepEqual(responsiveGeometry,[responsiveGeometry[0]],'Return with a responsive shell keeps the grid and font stable');
+  await input(a, "stty -echo; printf '\\nQUIET-PTY\\n'; sleep 3; stty echo\r");
+  await wait(()=>a.evaluate('Array.from({length:testTerm.rows},(_,i)=>testTerm.buffer.active.getLine(testTerm.buffer.active.baseY+i)?.translateToString().trim()).includes("QUIET-PTY")'),'silent console fixture');
+  const silentGeometry = await a.evaluate(geometryAfterReturn);
+  assert.deepEqual(silentGeometry,[silentGeometry[0]],'Return with no output keeps the grid and font stable');
   console.log('Shared terminal smoke passed: real Vim over serial/SSH PTYs, exact native and toolbar paste bytes, late join, live edits, takeover, resize, quiet tab restoration and exit.');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   for(const socket of sockets)socket.close();
