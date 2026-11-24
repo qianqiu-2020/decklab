@@ -275,6 +275,7 @@
   .info .v{font-family:var(--font-mono);font-size:12.5px;overflow-wrap:anywhere}
   .info .v.hi{color:var(--accent);font-weight:500}
   .termhost .xterm{height:100%}
+  .termhost.terminal-touch-scroll{touch-action:pinch-zoom}
   .termhost .xterm,.termhost .xterm-viewport{overscroll-behavior:contain}
   .termhost .xterm-viewport{background:transparent!important;color-scheme:dark}
   /* Style the native scrollbar only; keep its hit area and xterm's layer order. */

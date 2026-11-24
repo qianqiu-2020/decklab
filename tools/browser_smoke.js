@@ -550,6 +550,49 @@ let chrome, ws;
   await delay(100);
   assert.ok(await evaluate('document.querySelector("#d-term .xterm-viewport").scrollTop > 0'),
     'mobile serial history should remain scrollable');
+  if (process.argv.includes('--terminal-touch-only')) {
+    await rpc('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});
+    async function checkTouchScroll() {
+      const touchPoint = await evaluate(`(async () => {
+        await new Promise(resolve=>testTerm.write('\\r\\nphone scroll fixture'.repeat(180),resolve));
+        testTerm.scrollToLine(60);
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        const screen=document.querySelector('#d-term .xterm-screen').getBoundingClientRect();
+        window.terminalTouchClicks=0;
+        document.querySelector('#d-term').addEventListener('click',()=>window.terminalTouchClicks++,{once:true});
+        return {x:Math.round(screen.left+40),y:Math.round(screen.top+screen.height/2),rowHeight:screen.height/testTerm.rows};
+      })()`);
+      const topRow = () => evaluate('testTerm.buffer.active.viewportY');
+      const touch = (type, offset=0) => rpc('Input.dispatchTouchEvent',
+        {type,touchPoints:type==='touchEnd'?[]:[{x:touchPoint.x,y:touchPoint.y+offset}]});
+      const shortDrag = Math.max(4,Math.floor(touchPoint.rowHeight/2)+1);
+      const startingRow = await topRow();
+      await touch('touchStart');
+      await touch('touchMove',shortDrag);
+      await delay(40);
+      assert.equal(await topRow(),startingRow-1,'a short finger drag should immediately move one row');
+      await evaluate("new Promise(resolve=>testTerm.write('\\r\\noutput during touch',resolve))");
+      await touch('touchMove',0);
+      await delay(40);
+      assert.equal(await topRow(),startingRow,'reversing the drag during new output should return to the original row');
+      await touch('touchEnd');
+      await delay(40);
+      assert.equal(await evaluate('window.terminalTouchClicks'),0,'a short drag must not focus the terminal as a tap');
+      await touch('touchStart');
+      await touch('touchEnd');
+      await delay(100);
+      assert.equal(await evaluate('window.terminalTouchClicks'),1,'a genuine tap should still reach the terminal');
+    }
+    await checkTouchScroll();
+    await evaluate(`document.activeElement.blur();Array.from(document.querySelectorAll('#d-tabs button'))
+      .find(button=>button.textContent.includes('串口日志')).click();`);
+    for(let n=0;n<20&&!await evaluate('testTerm.options.convertEol');n++)await delay(50);
+    assert.equal(await evaluate('testTerm.options.convertEol'),true,'touch fixture must switch to the archive');
+    await checkTouchScroll();
+    await rpc('Emulation.setTouchEmulationEnabled',{enabled:false});
+    console.log('Mobile terminal touch passed on live serial and archive: short drag, incoming output, reversal and tap.');
+    return;
+  }
   const regularHeight = await evaluate('document.querySelector("#d-term").getBoundingClientRect().height');
   await evaluate('document.querySelector("#b-expand").click()');
   await delay(200);

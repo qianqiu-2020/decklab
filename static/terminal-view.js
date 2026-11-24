@@ -28,6 +28,7 @@
       if (old.wheelHandler && $('d-term').removeEventListener) {
         $('d-term').removeEventListener('wheel', old.wheelHandler, false);
       }
+      if (old.removeTouchScroll) old.removeTouchScroll();
       if (old.ctrl) old.ctrl.abort();
       if (old.stream) old.stream.close();
       clearTimeout(old.loopTimer);
@@ -42,6 +43,77 @@
       // reset() 不会清空 xterm 的异步解析队列；旧 CSI 6n 还可能触发 onData，
       // 把上一台的终端应答写到新设备。销毁实例，并让所有旧回调检查所属视图。
       old.term.dispose();
+    }
+
+    function installTouchScroll(ctx) {
+      if (!global.PointerEvent || ctx.sid !== 'serial' && ctx.kind !== 'log') return;
+      var host = $('d-term'), gesture = null, suppressTap = false;
+      function canScroll() {
+        return isCurrent(ctx) && ctx.term.buffer.active.type === 'normal'
+          && ctx.term.modes.mouseTrackingMode === 'none';
+      }
+      function down(event) {
+        if (event.pointerType !== 'touch') { suppressTap = false; return; }
+        gesture = null;
+        if (!event.isPrimary) return;
+        suppressTap = false;
+        if (!canScroll()) return;
+        var screen = ctx.term.element.querySelector('.xterm-screen');
+        var rowHeight = screen && screen.getBoundingClientRect().height / ctx.term.rows;
+        if (rowHeight > 0) gesture = {id:event.pointerId, x:event.clientX, y:event.clientY,
+          lastY:event.clientY, rowHeight:rowHeight, remainder:0, scrolling:false};
+      }
+      function move(event) {
+        if (!gesture || event.pointerId !== gesture.id || !canScroll()) return;
+        if (!gesture.scrolling) {
+          var dx = Math.abs(event.clientX - gesture.x), dy = Math.abs(event.clientY - gesture.y);
+          if (dx > dy && dx >= 3) { gesture = null; return; }
+          if (dy < 3) return;
+          gesture.scrolling = true;
+          suppressTap = true;
+        }
+        // xterm displays whole rows. Keep the sub-row distance independently
+        // of scrollTop, which xterm synchronizes again as fresh bytes arrive.
+        gesture.remainder += gesture.lastY - event.clientY;
+        gesture.lastY = event.clientY;
+        var buffer = ctx.term.buffer.active;
+        var lines = Math.sign(gesture.remainder) * Math.round(Math.abs(gesture.remainder) / gesture.rowHeight);
+        var next = Math.max(0, Math.min(buffer.baseY, buffer.viewportY + lines));
+        var moved = next - buffer.viewportY;
+        if (moved) ctx.term.scrollLines(moved);
+        if ((next === 0 && gesture.remainder < 0) || (next === buffer.baseY && gesture.remainder > 0)) gesture.remainder = 0;
+        else gesture.remainder -= moved * gesture.rowHeight;
+      }
+      function end(event) {
+        if (gesture && event.pointerId === gesture.id) gesture = null;
+      }
+      function skipLegacyTouch(event) {
+        // Pointer moves already handled this gesture. Leave the browser's
+        // default pinch gesture alone while avoiding a second xterm scroll.
+        if (canScroll()) event.stopPropagation();
+      }
+      function ignoreDragTap(event) {
+        // Short drags can still be classified as taps by the browser.
+        // Keep them from focusing xterm and opening the mobile keyboard.
+        if (!suppressTap || event.detail === 0) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type === 'click') suppressTap = false;
+      }
+      var handlers = {pointerdown:down,pointermove:move,pointerup:end,pointercancel:end,
+        lostpointercapture:end,touchmove:skipLegacyTouch};
+      host.classList.toggle('terminal-touch-scroll', true);
+      Object.entries(handlers).forEach(function (entry) {
+        host.addEventListener(entry[0], entry[1], {capture:true, passive:true});
+      });
+      host.addEventListener('mousedown', ignoreDragTap, true);
+      host.addEventListener('click', ignoreDragTap, true);
+      ctx.removeTouchScroll = function () {
+        host.classList.toggle('terminal-touch-scroll', false);
+        Object.entries(handlers).forEach(function (entry) { host.removeEventListener(entry[0], entry[1], true); });
+        host.removeEventListener('mousedown', ignoreDragTap, true);
+        host.removeEventListener('click', ignoreDragTap, true);
+      };
     }
 
     /* ---------- 终端模拟器 ---------- */
@@ -89,6 +161,7 @@
       $('d-command-nav').textContent = '';
       $('command-nav-count').textContent = '0 条';
       ctx.term.open($('d-term'));
+      installTouchScroll(ctx);
       if (sid === 'serial') {
         ctx.term.parser.registerCsiHandler({final: 't'}, function (params) {
           if (!isCurrent(ctx) || params[0] !== 8 || params.length !== 3) return false;
@@ -111,6 +184,7 @@
       // viewport edge.
       ctx.scrollHandler = function (event) {
         if (!isCurrent(ctx) || !event || !event.target || !event.target.classList
+            || event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents
             || !event.target.classList.contains('xterm-viewport')) return;
         var viewport = event.target;
         var rect = viewport.getBoundingClientRect && viewport.getBoundingClientRect();

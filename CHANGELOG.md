@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [1.17.80] - 2026-11-24
+
+### Fixed
+
+- 手机触屏拖动实时串口和归档日志时，短距离滑动即可滚动，连续输出期间小幅位移也会累计。
+
 ## [1.17.79] - 2026-11-24
 
 ### Added
@@ -379,7 +385,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.79...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.17.80...HEAD
+[1.17.80]: https://github.com/qianqiu-2020/decklab/compare/v1.17.79...v1.17.80
 [1.17.79]: https://github.com/qianqiu-2020/decklab/compare/v1.17.78...v1.17.79
 [1.17.78]: https://github.com/qianqiu-2020/decklab/compare/v1.17.77...v1.17.78
 [1.17.77]: https://github.com/qianqiu-2020/decklab/compare/v1.17.76...v1.17.77
