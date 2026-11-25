@@ -9,7 +9,7 @@
 ```sh
 sudo apt install ./decklab_latest_amd64.deb
 systemctl status decklab decklab-collector
-decklab-access
+sudo decklab-access
 ```
 
 `decklab-access` 显示网页入口。如果浏览器也在控制机上，默认地址为 `http://127.0.0.1:8898/`。需要从其他电脑访问时，先在[主机环境变量](../reference/environment.md)里核对监听地址和访问凭据，再使用 DeckLab 生成的分享链接。

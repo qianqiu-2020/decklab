@@ -29,4 +29,4 @@
 - [刷机性能](reference/flash-performance.md)、[文件传输性能](reference/transfer-performance.md)及[板卡身份观测](reference/device-identity-observations.md)保留测试条件和结果。
 - [完整包构建](development/complete-build.md)、[Windows 依赖审查](development/windows-native-notices.md)和[第三方库替换](development/windows-rebuild.md)说明依赖与交付材料。
 - [发布流程](operations/release.md)和[发布验收](operations/release-acceptance.md)列出出包、核对和发布步骤。
-- [开发贡献](../CONTRIBUTING.md)、[项目安全](../SECURITY.md)、[品牌资源](development/brand-assets.md)、[当前变更](../CHANGELOG.md)及[历史构建记录](history/changelog-archive.md)。
+- [开发贡献](../CONTRIBUTING.md)、[项目安全](../SECURITY.md)、[品牌资源](development/brand-assets.md)、[当前变更](../CHANGELOG.md)、[历史构建记录](history/changelog-archive.md)及[历史维护记录](history/maintenance-notes.md)。
