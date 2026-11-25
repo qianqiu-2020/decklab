@@ -1,10 +1,14 @@
 # 完整包构建
 
-1.10.0 起 Linux 和 Windows 构建入口默认生成完整单机安装。构建机提前准备刷机执行器、匹配的 RAM 加载材料、许可证；Windows 还需官方 USB 驱动和有合法发布者签名的 `driverinstall.exe`。安装时不从源码仓库下载刷机组件，不运行 pip。Linux 的发行版依赖由 apt 安装，Windows 内置应用运行时。
+完整安装包含 DeckLab、刷机执行器、K1/K3 临时加载器、远程桌面运行库、MCP 服务及第三方声明。Windows 安装器另含 USB 驱动。Linux 需要 Ubuntu 22.04 或更高版本的系统依赖，Windows 自带 Python 与 Node.js 运行时。
 
-goflash 是独立的非开源组件，DeckLab 的 Apache-2.0 不授予其源码或二进制再分发权。本次公开完整包已获 goflash 二进制及 RAM 材料的独立分发授权，不附 goflash 源码。RAM U-Boot 的对应源码、构建配置和许可证另行提供；FSBL 和 USB 驱动遵守各自许可。
+## 准备两平台的依赖
 
-材料仅是构建输入，放在 `build/install-components/<平台>/`，正式版交付平台为 `linux-amd64`、`windows-amd64`。主程序不要求用户填写包内路径；已有显式外部组件设置继续优先，便于已有部署升级。
+使用工作流固定的公开组件归档及 SHA-256。脚本校对归档内容和目标 CPU 架构，再套用当前提交中审查过的刷机材料。Linux 在 Ubuntu 22.04 的容器构建 MCP 服务，确保在最低支持版本上运行。Windows 在 x64 Windows 上使用 Python 3.12 和 Inno Setup 6。
+
+把组件放在 `build/install-components/<平台>/`，本地 Debian 包和 Windows 安装器都输出到 `dist/`。运行目录与构建目录独立。
+
+## 组件清单
 
 `manifest.json` 示例：
 
@@ -20,14 +24,19 @@ goflash 是独立的非开源组件，DeckLab 的 Apache-2.0 不授予其源码�
 
 `files` 必须包含相应目录全部文件的实际长度和摘要，可由 `tools.install_components.tree_inventory` 生成。Windows 增加 `driver` 同样结构，要求包含 `spacemit_usb.inf`、`WinUSB/spacemit_amd64.cat`、`driverinstall.exe` 和该驱动依赖的其他文件。构建离线核对精确清单、CPU 架构和 RAM 清单；缺少或改变材料立即失败。
 
-Linux 构建机：
+## Linux amd64
+
+在构建机准备并校对组件后，使用以下命令生成 MCP 运行时与 Debian 包。
 
 ```sh
-python3 tools/install_components.py --platform linux-amd64
-python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime --output dist
+python3 tools/build_linux_mcp.py --arch amd64 \
+  --desktop-runtime build/install-components/linux-amd64/desktop-runtime
+python3 tools/build_deb.py --local-fast --runtime build/linux-mcp/amd64/runtime --output dist
 ```
 
-Windows 构建机：
+## Windows x64
+
+本地快速出包复用依赖环境和冻结运行时。每次重新加入 DeckLab 的 Python 模块、网页和文档，并检查清单及打包后主程序的启动。给构建脚本加 `-ValidateRuntime` 可同时检查 MCP、远程桌面与命令行入口。
 
 ```powershell
 .\Build-decklab.cmd
@@ -43,6 +52,8 @@ Windows 完整安装提供勾选安装 USB 驱动和稍后安装入口。优先�
 
 在 Linux 构建机下载公开输入时，将工作流里的固定 URL 与 SHA-256 分别设为 `DECKLAB_COMPONENTS_URL` 和 `DECKLAB_COMPONENTS_SHA256`，运行 `python3 tools/fetch_install_components.py --platform linux-amd64`。然后执行 `python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime`，再按上文组装。Windows 同理使用 `--platform windows-amd64`，构建时传 `-DesktopRuntime .\build\install-components\windows-amd64\desktop-runtime`。
 
-本地交付包直接放 `dist/`，使用版本文件名；不额外套交付目录。正式 GitHub 1.9.0 历史附件保持原样；1.14.0 提供 x86_64 Linux 与 Windows x64 完整包，预装 RAM 材料仅含 K3。
+## 干净构建与依赖许可
 
-1.17.33 起 Linux amd64 与 Windows x64 完整包均内置 K1、K3 RAM 材料；1.17.38 起 K3 RAM U-Boot 另启用原生 `CONFIG_PCI_INIT_R`。K1 对应源码索取方式见随包的 `flash-loaders/k1/SOURCE-OFFER.txt`。
+使用空的构建输出目录重新生成冻结运行时，再打包。Windows 可通过不带 `-LocalFast` 的脚本调用重新准备 Python 环境并运行完整验证。Linux 复用 Docker 的工具链层，MCP 运行时每次重新生成。首次联网取依赖的耗时取决于各依赖源。
+
+goflash 独立于 DeckLab 的 Apache-2.0 许可证。完整包按组件授权公开 goflash 可执行文件、FSBL、RAM U-Boot 和 USB 驱动。K1 RAM U-Boot 对应源码的索取方式见安装包中的 `flash-loaders/k1/SOURCE-OFFER.txt`。

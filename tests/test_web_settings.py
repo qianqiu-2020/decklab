@@ -193,8 +193,8 @@ except SettingsError as error:
                 process.stdin.write('x')
                 process.stdin.flush()
             results = [process.communicate(timeout=5) for process in processes]
+            self.assertEqual([process.returncode for process in processes], [0, 0], results)
             self.assertEqual(sorted(int(result[0]) for result in results), [200, 409])
-            self.assertTrue(all(process.returncode == 0 for process in processes))
         finally:
             for process in processes:
                 if process.poll() is None:

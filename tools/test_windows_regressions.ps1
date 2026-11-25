@@ -27,8 +27,7 @@ try {
                     'test_models', 'test_maintenance', 'test_agent_grants',
                     'test_board_control', 'test_desktop', 'test_desktop_setup',
                     'test_desktop_native', 'test_desktop_provider_stream', 'test_desktop_freerdp',
-                    'test_desktop_runtime_package', 'test_websocket_io', 'test_desktop_proxy',
-                    'test_desktop_stream', 'test_desktop_stream_wire', 'test_ui_language',
+                    'test_desktop_runtime_package', 'test_desktop_stream', 'test_ui_language',
                     'test_boot_compare', 'test_sse', 'test_terminal_backend',
                     'test_terminal_runtime', 'test_console_visibility', 'test_serial_health',
                     'test_demo', 'test_process_windows', 'test_serial_handoff',
@@ -37,6 +36,12 @@ try {
     }
     & $Python tools/run_windows_regressions.py @suites
     if ($LASTEXITCODE -ne 0) { throw 'Windows regression failed.' }
+    if (-not $PackagingOnly) {
+        # The WebSocket transport uses vendored h11. The MCP SDK imports the
+        # packaging interpreter's h11, so test transport in its own process.
+        & $Python tools/run_windows_regressions.py test_websocket_io test_desktop_proxy test_desktop_stream_wire
+        if ($LASTEXITCODE -ne 0) { throw 'Windows WebSocket regression failed.' }
+    }
     if (Get-Command node -ErrorAction SilentlyContinue) {
         & node tests/frontend.test.js
         if ($LASTEXITCODE -ne 0) { throw 'Frontend regression tests failed.' }

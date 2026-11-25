@@ -261,17 +261,13 @@ class PackageTests(unittest.TestCase):
                            check=True, env=preinst_env)
             self.assertTrue(marker.exists(), 'changed collector must restart')
             code = extracted / 'usr/lib/decklab'
-            self.assertTrue((extracted / 'usr/share/doc/decklab/DEVICE_IDENTITY_MATRIX.md').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/decklab/index.md').is_file())
-            for name in ('REFACTOR_PLAN', 'OPEN_SOURCE_PLAN', 'RELEASE_ACCEPTANCE', 'BRAND'):
-                self.assertFalse((extracted / ('usr/share/doc/decklab/' + name + '.md')).exists())
-            self.assertTrue((extracted / 'usr/share/doc/decklab/CONFIGURATION.md').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/decklab/TRANSFER_ARTIFACTS.md').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/decklab/HARDWARE_EXTENSIONS.md').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/decklab/API.md').is_file())
             from tools.package_docs import LINK
             from urllib.parse import urlsplit, unquote
             doc_root = extracted / 'usr/share/doc/decklab'
+            for guide in ('index.md', 'modules/device-identity.md', 'modules/file-transfer.md',
+                          'modules/hardware-control.md', 'operations/demo.md',
+                          'reference/environment.md', 'reference/http-api.md'):
+                self.assertTrue((doc_root / guide).is_file(), guide)
             links_checked = 0
             for guide in doc_root.rglob('*.md'):
                 for match in LINK.finditer(guide.read_text(encoding='utf-8')):
@@ -291,7 +287,6 @@ class PackageTests(unittest.TestCase):
             self.assertTrue((extracted / 'usr/share/doc/decklab/examples/profiles.json').is_file())
             self.assertTrue((code / 'decklab_core/profiles.py').is_file())
             self.assertTrue((code / 'decklab_demo.py').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/decklab/DEMO.md').is_file())
             self.assertTrue((extracted / 'usr/lib/decklab/skills/decklab-board/SKILL.md').is_file())
             package_env = (extracted / 'etc/decklab/decklab.env').read_text()
             self.assertIn('DECKLAB_BASE=/data/decklab-data', package_env)

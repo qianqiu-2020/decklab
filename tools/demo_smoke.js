@@ -249,8 +249,12 @@ async function until(check, description) {
     if (ready && !state.serial_configured && !requestedSizeSync) {
       requestedSizeSync = await evaluate(`(() => {
         const control = document.querySelector('#b-serial-size');
-        if (control.disabled || !control.getClientRects().length) return false;
+        if (control.disabled || control.hidden) return false;
+        const menu = document.querySelector('#terminal-view-menu');
+        if (!menu.matches(':popover-open')) document.querySelector('#terminal-tools-trigger').click();
+        if (!control.getClientRects().length) return false;
         control.click();
+        if (menu.matches(':popover-open')) menu.hidePopover();
         return true;
       })()`);
     }

@@ -1,12 +1,8 @@
-# Host transfer artifacts
+# 板卡文件传输与产物
 
-This storage layer supports collector-owned upload/download tasks and scoped HTTP
-staging/download endpoints described in [TASKS.md](tasks.md). Browser task history
-can retrieve completed downloads. The browser transfer dialog and CLI `--background` transfers use collector-owned
-tasks. Browser uploads require the page during staging only; submitted tasks
-survive reload. Default CLI transfers submit the same tasks and wait; no CLI UART transfer loop
-remains. Staging and local retrieval require the client, but collector execution
-continues independently.
+网页可以上传文件到板卡、从板卡下载，也可在两块板之间复制。上传先将文件放到控制机，提交任务后，控制机向板子发送文件。下载由控制机保存结果，打开任务记录即可取回文件。两种任务都能在离开页面后继续执行。
+
+命令行和网页共用任务。命令行默认等待结果，指定 `--background` 时返回任务编号。发生断线时，通过任务编号查结果或取回已完成的文件。传输期间的板卡占用、进度和取消见[后台任务](tasks.md)。
 
 ## Files and ownership
 

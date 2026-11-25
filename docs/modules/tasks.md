@@ -1,14 +1,10 @@
-# Durable tasks: implementation contract
+# 后台任务与结果
 
-Durable tasks currently support `identify`, `ssh-enable` and `ssh-connect` through
-the collector API, CLI and browser. Collector-owned `file-copy` is available
-through the task API, browser and CLI `file-copy --background`. Collector-owned
-upload/download are available through the task API and HTTP artifact staging. The browser task panel can retrieve completed downloads.
-CLI `file-put --background` stages and verifies a local file before submitting an
-upload; `file-get --background` stores a download on the host for later retrieval.
-Without this flag, CLI transfers submit the same collector task and wait for its
-result; downloads then stream the artifact into the requested local path. The browser
-file-transfer dialog uses collector-owned tasks for upload, download and copy.
+DeckLab 收到刷机、设备识别、文件传输或测试用例请求后，会在连接设备的控制机上建立任务。网页、CLI 和 MCP 查同一条任务记录。页面刷新或客户端退出后，重新打开「任务」可以看到进度、结果或恢复入口。
+
+运行多板复制时，任务会预留两端设备的执行权限。取消请求交给正在执行的控制机处理。若执行中断且结果暂时无法确定，任务保留原操作及恢复记录。根据现场证据检查原任务，再决定下一步。
+
+下面是调用方与实现者使用的状态、接口和所有权约定。
 
 ## API and CLI
 

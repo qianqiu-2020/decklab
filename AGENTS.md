@@ -2,18 +2,20 @@
 
 ## Project Structure & Module Organization
 
-`decklab.py` contains the Linux serial capture service, device registry, SSH sessions, and HTTP API. `index.html` holds the UI with inline CSS and JavaScript; `vendor/` supplies xterm assets. `rescue.sh` is the privileged USB recovery helper. `tests/` contains backend and frontend regression tests. Read `FIXES.md` for architecture decisions and known limitations. Runtime `logs/`, `labels.json`, and `decklab.log` are ignored by Git.
+`decklab.py` and `decklab_windows.py` start the Linux collector and Windows host. Application modules live in `decklab_core/`, browser code in `static/` and `index.html`, dependencies in `vendor/`, and release tooling in `tools/` and `packaging/`. Start with the [documentation index](docs/index.md) and the [architecture guide](docs/modules/architecture.md).
 
 ## Build, Test, and Development Commands
 
-There is no build step or package manager configuration. The backend uses Python 3's standard library; frontend tests require Node.js. SSH sessions also require system `ssh` and `sshpass`.
+Use `python3 decklab_demo.py` for local development with simulated devices. Use the real collector only on an idle development host. Run the checks related to your changes before packaging.
 
-- `python3 decklab.py 8898 127.0.0.1` — start the service locally on an idle development host; it discovers real serial devices.
-- `python3 -m unittest discover -s tests` — run backend regression tests.
-- `node tests/frontend.test.js` — run the frontend's custom Node assertion harness.
-- `python3 -m py_compile decklab.py` — check Python syntax.
-- `bash -n rescue.sh` — check shell syntax without executing recovery.
-- `git diff --check` — catch whitespace errors before submitting.
+- `python3 -m unittest discover -s tests` runs backend tests.
+- `node tests/frontend.test.js` runs frontend tests.
+- `python3 tools/check_public_docs.py` checks public configuration and routes against their references.
+- `node tools/demo_smoke.js` exercises the Web UI, API and simulated devices in Chromium.
+- `bash -n rescue.sh` checks shell syntax without performing recovery.
+- `git diff --check` catches whitespace errors before submitting.
+
+See the [build guide](docs/development/complete-build.md) for Linux and Windows package commands, reviewed inputs and clean build procedures.
 
 Local Debian packages go directly in `dist/`, using versioned filenames such as
 `decklab_1.7.5~web8_amd64.deb`; do not create a per-build delivery subdirectory.
@@ -37,7 +39,7 @@ History uses concise, action-oriented Chinese subjects prefixed with `decklab:` 
 
 ## Branches & Releases
 
-Keep a single long-lived branch, `main`; GitHub `main` must always fast-forward to it and is never force-pushed. Do not create `release/*` or version-named branches (such as `decklab-1.17.40`). A release is an annotated `v<version>` tag on a `main` commit, following [docs/RELEASING.md](docs/operations/release.md). For isolated release acceptance use `git worktree add --detach` and remove the worktree once the release is published. Delete short-lived task branches after they merge. Push tags one by one, never with `--tags`; local archive tags stay local.
+Keep a single long-lived branch, `main`; GitHub `main` must always fast-forward to it and is never force-pushed. Do not create `release/*` or version-named branches (such as `decklab-1.17.40`). A release is an annotated `v<version>` tag on a `main` commit, following [the release guide](docs/operations/release.md). For isolated release acceptance use `git worktree add --detach` and remove the worktree once the release is published. Delete short-lived task branches after they merge. Push tags one by one, never with `--tags`; local archive tags stay local.
 
 ## Serial Safety & Configuration
 

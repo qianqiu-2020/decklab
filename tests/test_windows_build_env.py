@@ -78,7 +78,7 @@ Write-Output 'SDK reconciliation order and failure gate passed'
 
     def test_fast_build_only_reuses_a_complete_matching_dependency_installation(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch('venv.EnvBuilder') as builder:
-            root = Path(directory)
+            root = Path(directory).resolve()
             (root / 'tools').mkdir()
             (root / 'tools/build_windows.ps1').write_text('script')
             requirements = root / 'requirements-windows.txt'

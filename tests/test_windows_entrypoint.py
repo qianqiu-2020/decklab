@@ -39,7 +39,8 @@ public class Fixture {
                 # build accounts may have no DPAPI user profile.
                 token_file = Path(directory, 'data', 'lan-token.dpapi')
                 token_file.unlink(missing_ok=True)
-                command = "function ConvertFrom-SecureString { process { 'fixture' } }; & $env:FIXTURE_LAUNCHER -Port 19543"
+                command = ("function ConvertTo-SecureString { param($String, [switch]$AsPlainText, [switch]$Force) 'secure' }; "
+                           "function ConvertFrom-SecureString { process { 'fixture' } }; & $env:FIXTURE_LAUNCHER -Port 19543")
                 result = subprocess.run([*powershell, '-Command', command],
                                         cwd=directory, env=dict(os.environ, FIXTURE_LAUNCHER=launcher,
                                                                 FIXTURE_HOST_EXIT=str(code)),

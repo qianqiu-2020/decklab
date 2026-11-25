@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Portable Windows COM-port host for the decklab web and agent API."""
+"""Windows COM-port host for the DeckLab Web and agent API."""
 import os
 import sys
 

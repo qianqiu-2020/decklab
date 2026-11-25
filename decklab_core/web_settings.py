@@ -71,8 +71,8 @@ def _disk_lock(path):
     try:
         if os.name == 'nt':
             import msvcrt
-            if os.fstat(descriptor).st_size == 0:
-                os.write(descriptor, b'\0')
+            # Windows permits locking a byte past EOF. Writing to an empty
+            # lock file here would race another writer's lock acquisition.
             os.lseek(descriptor, 0, os.SEEK_SET)
             msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
         else:

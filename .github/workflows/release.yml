@@ -5,71 +5,33 @@ on:
 permissions:
   contents: read
 jobs:
-  linux:
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-22.04
-            archive_hosts: archive.ubuntu.com security.ubuntu.com
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Validate version tag
-        run: python tools/check_release_tag.py "$GITHUB_REF_NAME"
-      - name: Verify Ubuntu archive DNS on the temporary runner
-        run: python tools/ci_ubuntu_network.py --repair --hosts ${{ matrix.archive_hosts }}
-      - name: Prepare reviewed complete-install inputs
-        env:
-          DECKLAB_COMPONENTS_URL: ${{ vars.COMPONENTS_LINUX_AMD64_URL || secrets.COMPONENTS_LINUX_AMD64_URL || 'https://github.com/qianqiu-2020/decklab/releases/download/components-1.14.0/decklab-components-1.14.0-linux-amd64.zip' }}
-          DECKLAB_COMPONENTS_SHA256: ${{ vars.COMPONENTS_LINUX_AMD64_SHA256 || secrets.COMPONENTS_LINUX_AMD64_SHA256 || '804be4bc200ddefbc99a614e676ba829670100556d6da405bb3597cfb667127c' }}
-        run: python tools/fetch_install_components.py --platform linux-amd64
-      - name: Freeze the included MCP worker in the Ubuntu 22.04 build container
-        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
-      - run: python tools/build_deb.py --local-fast --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
-      - name: Check fresh installs and upgrades on Ubuntu 22.04 and 24.04 in parallel
-        run: |
-          curl --fail --location --retry 3 https://github.com/qianqiu-2020/decklab/releases/download/v1.7.0/seriald_1.7.0_all.deb --output build/decklab_1.7.0_all.deb
-          echo 'b0020684d469cec4db2fa36f5e967f81c860deb236fbdd1d25da4831857cb1a9  build/decklab_1.7.0_all.deb' | sha256sum --check
-          pids=()
-          for ubuntu in 22.04 24.04; do
-            for mode in fresh upgrade; do
-              args=()
-              if [[ $mode == upgrade ]]; then args+=(--upgrade-from build/decklab_1.7.0_all.deb); fi
-              python tools/test_deb_container.py --image "ubuntu:$ubuntu" --package dist/decklab_*_amd64.deb "${args[@]}" >"build/install-$ubuntu-$mode.log" 2>&1 &
-              pids+=("$!")
-            done
-          done
-          result=0
-          for pid in "${pids[@]}"; do wait "$pid" || result=1; done
-          for log in build/install-*.log; do cat "$log"; done
-          exit "$result"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: decklab-linux-${{ matrix.arch }}
-          path: dist/*.deb
-          compression-level: 0
-  windows:
-    uses: ./.github/workflows/windows-installer.yml
-    secrets: inherit
   publish:
-    needs: [linux, windows]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Validate version tag
+        run: python3 tools/check_release_tag.py "$GITHUB_REF_NAME"
+      - name: Download the exact commit's accepted packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir packages
+          for target in ci.yml:decklab-linux-amd64 windows-installer.yml:decklab-windows; do
+            workflow=${target%%:*}
+            artifact=${target#*:}
+            run_id=$(gh run list --workflow "$workflow" --branch main --commit "$GITHUB_SHA" \
+              --status success --limit 10 --json databaseId,event,headSha \
+              --jq 'map(select(.event == "push" or .event == "workflow_dispatch"))[0].databaseId // empty')
+            test -n "$run_id" || { echo "No accepted $workflow run for $GITHUB_SHA"; exit 1; }
+            gh run download "$run_id" --name "$artifact" --dir packages
+          done
       - name: Extract checked-out release notes
         run: python3 tools/release_notes.py release-notes.md
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: decklab-*
-          merge-multiple: true
-          path: packages
       - name: Create reviewable release
         env:
           GH_TOKEN: ${{ github.token }}

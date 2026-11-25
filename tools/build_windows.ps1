@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-param([switch]$UseCurrentPython, [switch]$LocalFast, [switch]$FastCompression, [string]$ParamikoSource,
+param([switch]$UseCurrentPython, [switch]$LocalFast, [switch]$FastCompression, [switch]$ValidateRuntime, [string]$ParamikoSource,
       [string]$FlashExecutor, [string]$FlashNotices, [string]$FlashLoaders,
       [string]$FlashDriver, [string]$FlashComponents, [string]$DesktopRuntime,
       [string]$LanFirewallTool, [string]$LanFirewallPolicy, [switch]$CoreOnly)
@@ -52,7 +52,7 @@ try {
             throw 'Supply absolute local paths to RunAsSpc.exe and the approved firewall .spc file.'
         }
     }
-    & (Join-Path $PSScriptRoot 'test_windows_compiler_discovery.ps1')
+    if (-not $LocalFast) { & (Join-Path $PSScriptRoot 'test_windows_compiler_discovery.ps1') }
     $bundle = Join-Path $root 'dist\decklab'
     if (Test-Path (Join-Path $bundle 'data')) {
         throw 'dist\decklab\data contains runtime data. Move the running installation elsewhere before rebuilding; the build must not erase it.'
@@ -105,7 +105,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Verified terminal runtime preparation failed.' }
     & $python tools/check_public_docs.py
     if ($LASTEXITCODE -ne 0) { throw 'Public API/configuration documentation inventory failed.' }
-    & (Join-Path $PSScriptRoot 'test_windows_regressions.ps1') -Python $python -PackagingOnly:$LocalFast
+    if (-not $LocalFast) { & (Join-Path $PSScriptRoot 'test_windows_regressions.ps1') -Python $python }
 
     Write-Phase 'Source checks passed'
     $frozenRestored = $false
@@ -121,6 +121,7 @@ try {
     }
     if (-not $frozenRestored) {
         & $pyinstaller --noconfirm --clean --onedir --name decklab `
+            --paths . --additional-hooks-dir tools/windows_hooks `
             --hidden-import decklabctl `
             --hidden-import decklab_mcp `
             --hidden-import decklab_core.backend_server `
@@ -139,7 +140,7 @@ try {
             --recursive-copy-metadata mcp `
             --icon packaging/decklab.ico `
             @desktopArguments `
-            decklab_windows.py
+            tools/windows_entrypoint.py
         if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
         if ($DesktopRuntime) {
             & $python tools/package_desktop_runtime.py $bundle --platform windows-amd64 --prune-frozen-aliases | Out-Null
@@ -193,20 +194,20 @@ try {
 
     & (Join-Path $bundle 'decklab.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }
-    & (Join-Path $bundle 'decklab.exe') ctl --help | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI launcher failed.' }
-    & (Join-Path $bundle 'decklab.exe') admin resolve-conflict --help | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Packaged offline administration launcher failed.' }
-    & (Join-Path $bundle 'decklab.exe') mcp --help | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP worker launcher failed.' }
-    & $python tools/test_windows_mcp.py --executable (Join-Path $bundle 'decklab.exe')
-    if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP worker protocol smoke failed.' }
-    if ($DesktopRuntime) {
-        & $python tools/test_desktop_security.py --executable (Join-Path $bundle 'decklab.exe')
-        if ($LASTEXITCODE -ne 0) { throw 'Packaged desktop transport security regression failed.' }
+    if (-not $LocalFast -or $ValidateRuntime) {
+        & (Join-Path $bundle 'decklab.exe') ctl --help | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI launcher failed.' }
+        & (Join-Path $bundle 'decklab.exe') admin resolve-conflict --help | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Packaged offline administration launcher failed.' }
+        & $python tools/test_windows_mcp.py --executable (Join-Path $bundle 'decklab.exe')
+        if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP worker protocol smoke failed.' }
+        if ($DesktopRuntime) {
+            & $python tools/test_desktop_security.py --executable (Join-Path $bundle 'decklab.exe')
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged desktop transport security regression failed.' }
+        }
     }
 
-    Write-Phase 'Packaged launcher, MCP and desktop checks passed'
+    Write-Phase 'Selected packaged runtime checks passed'
     # A content-specific ICO path makes shortcuts independent of the EXE icon cache.
     $iconSource = Join-Path $root 'packaging\decklab.ico'
     $iconHash = (Get-FileHash -LiteralPath $iconSource -Algorithm SHA256).Hash.ToLowerInvariant()

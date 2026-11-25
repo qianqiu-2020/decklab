@@ -1,7 +1,7 @@
 # Contributing to DeckLab
 
 DeckLab is a shared development-board workbench for OS/BSP developers. Keep
-installation and everyday operation simple. Read `docs/ARCHITECTURE.md` before
+installation and everyday operation simple. Read [the architecture guide](docs/modules/architecture.md) before
 changing ownership or persistence rules. The [documentation index](docs/index.md)
 lists current guides; Git history retains completed plans and old investigations.
 
@@ -51,7 +51,7 @@ git diff --check
 `node tools/browser_smoke.js` uses an isolated HTTP fixture and real Chrome;
 `node tools/demo_smoke.js` exercises the real HTTP/SSE service with simulated
 boards. Run `python3 decklab_demo.py` for interactive hardware-free development;
-see `docs/DEMO.md` for its supported commands and virtual files.
+see [the demo guide](docs/operations/demo.md) for its supported commands and virtual files.
 `node tools/shared_terminal_smoke.js` runs real Vim on disposable local PTYs
 with two differently sized browser tabs. It needs Linux and Vim, and never
 discovers boards or opens hardware. It checks serial/SSH late joins, paste,

@@ -5,12 +5,9 @@ import tempfile
 import shutil
 import unittest
 from unittest.mock import patch
-import zipfile
 from types import SimpleNamespace
 
-from tools.bundle_manifest import create
-from tools.collect_windows_notices import inventory, OPENSSL_PROVIDERS
-from tools.verify_release import checksums, unpack_portable, inspect_release, inspect_linux_runtime, ROOT
+from tools.verify_release import checksums, inspect_release, inspect_linux_runtime, ROOT
 from tools.build_linux_mcp import SOURCES
 
 
@@ -41,103 +38,40 @@ class ReleaseVerificationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             checksums(self.root, manifest.name, ['fixture.deb'])
 
-    def test_windows_zip_separators_normalize_without_changing_bytes(self):
-        archive = self.root / 'portable.zip'
-        with zipfile.ZipFile(archive, 'w') as output:
-            output.writestr('decklab\\file.txt', b'unchanged\r\n')
-        root = unpack_portable(archive, self.root / 'extracted')
-        self.assertEqual((root / 'file.txt').read_bytes(), b'unchanged\r\n')
-
-    def test_unsafe_archive_is_rejected_before_any_member_is_written(self):
-        archive = self.root / 'portable.zip'
-        for name in ('decklab/../outside', '/decklab/file', 'decklab/data/file',
-                     'decklab/FILE.txt', 'decklab\\file.txt', 'C:/decklab/file'):
-            with self.subTest(name=name):
-                with zipfile.ZipFile(archive, 'w') as output:
-                    output.writestr('decklab/file.txt', b'first')
-                    output.writestr(name, b'bad')
-                destination = self.root / 'extracted'
-                with self.assertRaises(ValueError):
-                    unpack_portable(archive, destination)
-                self.assertFalse(destination.exists())
-
-    def fixture(self, version='1.5.0'):
-        bundle = self.root / 'build' / 'decklab'
-        bundle.mkdir(parents=True)
-        (bundle / 'decklab.exe').write_bytes(b'MZ fixture host')
-        (bundle / 'package-version.txt').write_text(version + '\n')
-        python_license = self.root / 'Python-LICENSE.txt'
-        python_license.write_text('fixture notice')
-        for relative, provider_version in zip(OPENSSL_PROVIDERS, ('3.0.16', '4.0.3')):
-            path = bundle / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b'MZ OpenSSL ' + provider_version.encode() + b' fixture')
-        # Model the already published 1.5.0 bundle, before source-graph supplements.
-        with patch('tools.collect_windows_notices.native_source_notices', return_value=[]):
-            inventory([], bundle / 'third-party', python_license, native_bundle=bundle)
-        create(bundle)
-        archive = self.root / 'decklab-windows-portable.zip'
-        with zipfile.ZipFile(archive, 'w') as output:
-            for path in bundle.rglob('*'):
-                if path.is_file():
-                    output.write(path, 'decklab/' + path.relative_to(bundle).as_posix())
-        deb = 'decklab_%s_all.deb' % version
-        (self.root / deb).write_bytes(b'fixture deb')
-        setup = self.root / ('decklab-%s-windows-x64-setup.exe' % version)
-        setup.write_bytes(b'MZ fixture installer')
-        setup.with_suffix('.exe.sha256').write_text(hashlib.sha256(setup.read_bytes()).hexdigest())
-        names = (deb, setup.name, archive.name)
-        lines = [hashlib.sha256((self.root / name).read_bytes()).hexdigest() + '  ' + name for name in names]
-        (self.root / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n')
-        (self.root / 'linux-SHA256SUMS.txt').write_text(lines[0] + '\n')
-
-    def test_end_to_end_fixture_checks_metadata_bundle_notices_and_version(self):
-        self.fixture()
-        result = SimpleNamespace(stdout='Package: decklab\nVersion: 1.5.0\nArchitecture: all\n')
-        with patch('tools.verify_release.subprocess.run', return_value=result):
-            verified = inspect_release(self.root, '1.5.0')
-        self.assertEqual(verified['version'], '1.5.0')
-        result.stdout = 'Package: decklab\nVersion: 1.4.50\nArchitecture: all\n'
-        with patch('tools.verify_release.subprocess.run', return_value=result):
-            with self.assertRaisesRegex(ValueError, 'metadata mismatch'):
-                inspect_release(self.root, '1.5.0')
-
-    def test_new_releases_require_reviewed_native_source_supplements(self):
-        self.fixture('1.5.1')
-        result = SimpleNamespace(stdout='Package: decklab\nVersion: 1.5.1\nArchitecture: all\n')
-        with patch('tools.verify_release.subprocess.run', return_value=result):
-            with self.assertRaisesRegex(ValueError, 'native source catalog missing'):
-                inspect_release(self.root, '1.5.1')
-
-    def test_stable_aliases_are_required_and_must_match_even_with_valid_checksums(self):
-        version = '1.7.0'
-        self.fixture(version)
-        result = SimpleNamespace(stdout='Package: decklab\nVersion: 1.7.0\nArchitecture: all\n')
-        aliases = {'decklab_latest_all.deb': 'decklab_1.7.0_all.deb',
-                   'decklab-windows-x64-setup.exe': 'decklab-1.7.0-windows-x64-setup.exe'}
-        with self.assertRaisesRegex(ValueError, 'file set mismatch'):
-            inspect_release(self.root, version)
-        for alias, canonical in aliases.items():
+    def fixture(self):
+        self.deb = 'decklab_1.19.0_amd64.deb'
+        self.setup = 'decklab-1.19.0-windows-x64-setup.exe'
+        self.receipt = 'windows-install-verification.json'
+        self.aliases = {'decklab_latest_amd64.deb': self.deb,
+                        'decklab_latest_all.deb': self.deb,
+                        'decklab-windows-x64-setup.exe': self.setup}
+        (self.root / self.deb).write_bytes(b'fixture deb')
+        (self.root / self.setup).write_bytes(b'MZ fixture installer')
+        digest = hashlib.sha256((self.root / self.setup).read_bytes()).hexdigest()
+        (self.root / (self.setup + '.sha256')).write_text(digest)
+        (self.root / self.receipt).write_text(json.dumps({
+            'schema': 1, 'version': '1.19.0', 'sha256': digest,
+            'bundle_files': 26, 'distribution_notice_sets': 4,
+        }))
+        for alias, canonical in self.aliases.items():
             (self.root / alias).write_bytes((self.root / canonical).read_bytes())
+        self.artifacts = [self.deb, self.setup, self.receipt, *self.aliases]
+        self.write_checksums('SHA256SUMS.txt', self.artifacts)
+        self.write_checksums('linux-SHA256SUMS.txt', [self.deb])
 
-        def update_manifest():
-            names = ['decklab_1.7.0_all.deb', 'decklab-1.7.0-windows-x64-setup.exe',
-                     'decklab-windows-portable.zip', *aliases]
-            (self.root / 'SHA256SUMS.txt').write_text('\n'.join(
-                hashlib.sha256((self.root / name).read_bytes()).hexdigest() + '  ' + name
-                for name in names) + '\n')
-
-        update_manifest()
-        # The old notice fixture intentionally lacks the post-1.5.0 source
-        # supplements. Reaching that independent gate proves aliases passed.
-        with patch('tools.verify_release.subprocess.run', return_value=result):
-            with self.assertRaisesRegex(ValueError, 'native source catalog missing'):
-                inspect_release(self.root, version)
-        (self.root / 'decklab-windows-x64-setup.exe').write_bytes(b'MZ different installer')
-        update_manifest()  # A checksum alone must not bless a mismatched alias.
+    def test_aliases_must_match_and_installer_receipt_is_bound_to_exact_file(self):
+        self.fixture()
+        (self.root / 'decklab_latest_all.deb').write_bytes(b'different deb')
+        self.write_checksums('SHA256SUMS.txt', self.artifacts)
         with self.assertRaisesRegex(ValueError, 'alias differs'):
-            inspect_release(self.root, version)
-
+            inspect_release(self.root, '1.19.0')
+        shutil.copyfile(self.root / self.deb, self.root / 'decklab_latest_all.deb')
+        receipt = json.loads((self.root / self.receipt).read_text())
+        receipt['sha256'] = '1' * 64
+        (self.root / self.receipt).write_text(json.dumps(receipt))
+        self.write_checksums('SHA256SUMS.txt', self.artifacts)
+        with self.assertRaisesRegex(ValueError, 'does not match the exact installer'):
+            inspect_release(self.root, '1.19.0')
 
     def linux_runtime(self, architecture='amd64'):
         runtime = self.root / ('runtime-' + architecture)
@@ -177,23 +111,6 @@ class ReleaseVerificationTests(unittest.TestCase):
         (runtime / 'runtime-manifest.json').write_text(json.dumps(manifest))
         return runtime
 
-    def release_arch_fixtures(self, version='1.7.1'):
-        self.fixture(version)
-        (self.root / ('decklab_%s_all.deb' % version)).unlink()
-        debs = ['decklab_%s_%s.deb' % (version, architecture) for architecture in ('amd64', 'arm64')]
-        for name in debs:
-            (self.root / name).write_bytes(name.encode())
-        aliases = {'decklab_latest_amd64.deb': debs[0], 'decklab_latest_arm64.deb': debs[1],
-                   'decklab_latest_all.deb': debs[0],
-                   'decklab-windows-x64-setup.exe': 'decklab-%s-windows-x64-setup.exe' % version}
-        for alias, canonical in aliases.items():
-            (self.root / alias).write_bytes((self.root / canonical).read_bytes())
-        names = [*debs, 'decklab-%s-windows-x64-setup.exe' % version,
-                 'decklab-windows-portable.zip', *aliases]
-        self.write_checksums('SHA256SUMS.txt', names)
-        self.write_checksums('linux-SHA256SUMS.txt', debs)
-        return debs, aliases
-
     def write_checksums(self, manifest, names):
         (self.root / manifest).write_text(''.join(
             hashlib.sha256((self.root / name).read_bytes()).hexdigest() + '  ' + name + '\n'
@@ -228,42 +145,24 @@ class ReleaseVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'executable architecture mismatch'):
             inspect_linux_runtime(runtime, 'arm64')
 
-    def test_new_release_requires_both_architectures_and_all_stable_aliases(self):
-        debs, aliases = self.release_arch_fixtures()
-        complete = (self.root / 'SHA256SUMS.txt').read_text()
-        for missing in (*debs, *aliases):
-            with self.subTest(missing=missing):
-                (self.root / 'SHA256SUMS.txt').write_text(''.join(
-                    row + '\n' for row in complete.splitlines() if not row.endswith('  ' + missing)))
-                with self.assertRaisesRegex(ValueError, 'file set mismatch'):
-                    inspect_release(self.root, '1.7.1')
-        (self.root / 'SHA256SUMS.txt').write_text(complete)
-        (self.root / 'decklab_latest_all.deb').write_bytes((self.root / debs[1]).read_bytes())
-        names = [row.split('  ', 1)[1] for row in complete.splitlines()]
-        self.write_checksums('SHA256SUMS.txt', names)
-        with self.assertRaisesRegex(ValueError, 'alias differs'):
-            inspect_release(self.root, '1.7.1')
-
-    def test_new_release_inspects_native_runtime_for_each_debian_architecture(self):
-        self.release_arch_fixtures()
-        runtimes = {architecture: self.linux_runtime(architecture) for architecture in ('amd64', 'arm64')}
+    def test_release_checks_installer_receipt_and_debian_runtime(self):
+        self.fixture()
+        runtime = self.linux_runtime()
         def dpkg(command, **kwargs):
-            architecture = 'arm64' if '_arm64.deb' in command[2] else 'amd64'
             if command[1] == '--field':
-                return SimpleNamespace(stdout='Package: decklab\nVersion: 1.7.1\nArchitecture: %s\n' % architecture)
+                return SimpleNamespace(stdout='Package: decklab\nVersion: 1.19.0\nArchitecture: amd64\n')
             self.assertEqual(command[1], '--extract')
             code = Path(command[3]) / 'usr/lib/decklab'
-            shutil.copytree(runtimes[architecture], code / 'mcp-runtime')
+            shutil.copytree(runtime, code / 'mcp-runtime')
             for name in ('decklab_mcp.py', 'decklabctl.py'):
                 shutil.copyfile(ROOT / name, code / name)
             return SimpleNamespace(returncode=0)
-        # This fixture still models the old Windows notices. Reaching that gate
-        # proves both independent Debian runtime and stable-alias checks passed.
-        with patch('tools.verify_release.subprocess.run', side_effect=dpkg) as invoked:
-            with self.assertRaisesRegex(ValueError, 'native source catalog missing'):
-                inspect_release(self.root, '1.7.1')
-        self.assertEqual(sum(call.args[0][1] == '--extract' for call in invoked.call_args_list), 2)
-
+        with patch('tools.verify_release.subprocess.run', side_effect=dpkg), \
+             patch('tools.verify_release.inspect_complete_install'), \
+             patch('tools.verify_release.inspect_desktop_runtime'):
+            result = inspect_release(self.root, '1.19.0')
+        self.assertEqual(result['debian_architectures'], ['amd64'])
+        self.assertEqual(result['bundle_files'], 26)
 
     def test_native_debian_notices_and_library_provenance_are_independently_checked(self):
         runtime = self.linux_runtime()

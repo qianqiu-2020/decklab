@@ -4,16 +4,12 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
-import stat
 import subprocess
 import sys
 import tempfile
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tools.bundle_manifest import verify as verify_bundle
-from tools.collect_windows_notices import verify as verify_notices
 from tools.collect_linux_mcp_notices import verify as verify_linux_notices
 from tools.install_components import executor_metadata, tree_inventory
 from tools.package_flash_loaders import publish as inspect_loaders
@@ -60,35 +56,6 @@ def checksums(directory, manifest, expected, source_prefix=''):
     for name, digest in rows.items():
         if hashlib.sha256((directory / name).read_bytes()).hexdigest() != digest:
             raise ValueError('release checksum mismatch: ' + name)
-
-
-def unpack_portable(archive_path, destination):
-    """Normalize Windows ZIP separators; reject ambiguous paths before writing."""
-    with zipfile.ZipFile(archive_path) as archive:
-        members = archive.infolist()
-        if len(members) > 4096 or sum(item.file_size for item in members) > 512 * 1024 * 1024:
-            raise ValueError('portable archive exceeds inspection bounds')
-        entries, seen = [], set()
-        for member in members:
-            name = member.filename.replace('\\', '/')
-            relative = PurePosixPath(name)
-            key = name.rstrip('/').casefold()
-            if (relative.is_absolute() or ':' in name or '..' in relative.parts
-                    or not relative.parts or relative.parts[0] != 'decklab'
-                    or key in seen or stat.S_ISLNK(member.external_attr >> 16)):
-                raise ValueError('unsafe or duplicate portable archive path: ' + name)
-            if len(relative.parts) > 1 and relative.parts[1].casefold() == 'data':
-                raise ValueError('portable archive contains runtime data')
-            seen.add(key)
-            entries.append((member, relative, name.endswith('/')))
-        for member, relative, directory in entries:
-            target = destination / relative
-            if directory:
-                target.mkdir(parents=True, exist_ok=True)
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(archive.read(member))
-    return destination / 'decklab'
 
 
 def inspect_linux_runtime(runtime, architecture):
@@ -157,86 +124,48 @@ def inspect_release(directory, version):
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
         raise ValueError('invalid package version')
     directory = Path(directory)
-    release_version = tuple(map(int, version.split('.')))
-    architectures = ('amd64',) if release_version >= (1, 14, 0) else (
-        ('amd64', 'arm64') if release_version >= (1, 7, 1) else ('all',))
-    debs = {architecture: 'decklab_%s_%s.deb' % (version, architecture)
-            for architecture in architectures}
-    setup = 'decklab-%s-windows-x64-setup.exe' % version
+    deb = f'decklab_{version}_amd64.deb'
+    setup = f'decklab-{version}-windows-x64-setup.exe'
     windows_receipt = 'windows-install-verification.json'
-    windows_evidence = windows_receipt if release_version >= (1, 18, 23) else 'decklab-windows-portable.zip'
-    aliases = {}
-    if release_version >= (1, 7, 0):
-        aliases['decklab-windows-x64-setup.exe'] = setup
-        aliases['decklab_latest_all.deb'] = debs.get('all', debs.get('amd64'))
-    if release_version >= (1, 7, 1):
-        aliases.update({'decklab_latest_%s.deb' % arch: name for arch, name in debs.items()})
-    checksums(directory, 'SHA256SUMS.txt', (*debs.values(), setup, windows_evidence, *aliases))
+    aliases = {'decklab-windows-x64-setup.exe': setup,
+               'decklab_latest_amd64.deb': deb, 'decklab_latest_all.deb': deb}
+    checksums(directory, 'SHA256SUMS.txt', (deb, setup, windows_receipt, *aliases))
     for alias, canonical in aliases.items():
         if hashlib.sha256((directory / alias).read_bytes()).digest() != hashlib.sha256(
                 (directory / canonical).read_bytes()).digest():
             raise ValueError('stable download alias differs from versioned package: ' + alias)
-    # Older workflow output names the build directory; artifacts retain basenames.
-    checksums(directory, 'linux-SHA256SUMS.txt', debs.values(), source_prefix='dist/')
-    digest = (directory / (setup + '.sha256')).read_text(encoding='ascii').strip()
-    if not re.fullmatch(r'[0-9a-fA-F]{64}', digest):
+    checksums(directory, 'linux-SHA256SUMS.txt', [deb])
+    digest = (directory / (setup + '.sha256')).read_text(encoding='ascii').strip().lower()
+    if not re.fullmatch(r'[0-9a-f]{64}', digest):
         raise ValueError('invalid installer checksum')
-    if hashlib.sha256((directory / setup).read_bytes()).hexdigest() != digest.lower():
+    if hashlib.sha256((directory / setup).read_bytes()).hexdigest() != digest:
         raise ValueError('installer checksum mismatch')
-    for architecture, deb in debs.items():
-        fields = subprocess.run(['dpkg-deb', '--field', str(directory / deb), 'Package', 'Version', 'Architecture'],
-                                check=True, capture_output=True, text=True).stdout
-        expected = {'Package': 'decklab', 'Version': version, 'Architecture': architecture}
-        actual = dict(line.split(': ', 1) for line in fields.splitlines())
-        if actual != expected:
-            raise ValueError('Debian package metadata mismatch: ' + deb)
-        if release_version >= (1, 7, 1):
-            with tempfile.TemporaryDirectory(prefix='decklab-debian-inspection-') as temporary:
-                subprocess.run(['dpkg-deb', '--extract', str(directory / deb), temporary], check=True)
-                code = Path(temporary) / 'usr/lib/decklab'
-                if release_version >= (1, 10, 0):
-                    inspect_complete_install(Path(temporary), 'linux-' + architecture)
-                if release_version >= (1, 12, 2) and architecture == 'amd64':
-                    inspect_desktop_runtime(code / 'mcp-runtime' / DESKTOP_RUNTIME, 'linux-amd64')
-                runtime = inspect_linux_runtime(code / 'mcp-runtime', architecture)
-                for name in ('decklab_mcp.py', 'decklabctl.py'):
-                    if hashlib.sha256((code / name).read_bytes()).hexdigest() != runtime['source_files'][name]:
-                        raise ValueError('Debian adapter and embedded MCP runtime differ: ' + name)
-    if (directory / setup).read_bytes()[:2] != b'MZ':
-        raise ValueError('installer is not a Windows executable')
-    if windows_evidence == windows_receipt:
-        report = json.loads((directory / windows_receipt).read_text(encoding='utf-8'))
-        if (report.get('schema') != 1 or report.get('version') != version or report.get('sha256') != digest.lower()
-                or not all(type(report.get(key)) is int and report[key] > 0
-                           for key in ('bundle_files', 'distribution_notice_sets'))):
-            raise ValueError('Windows installed-file verification does not match the exact installer')
-        return {'version': version, 'debian_architectures': list(architectures),
-                'bundle_files': report['bundle_files'], 'distribution_notice_sets': report['distribution_notice_sets']}
-    with tempfile.TemporaryDirectory(prefix='decklab-release-inspection-') as temporary:
-        bundle = unpack_portable(directory / windows_evidence, Path(temporary))
-        manifest = verify_bundle(bundle)
-        if release_version >= (1, 10, 0):
-            inspect_complete_install(bundle, 'windows-amd64')
-        if release_version >= (1, 12, 2):
-            inspect_desktop_runtime(bundle / DESKTOP_RUNTIME, 'windows-amd64')
-        notices = verify_notices(bundle / 'third-party')
-        if (bundle / 'package-version.txt').read_text(encoding='ascii').strip() != version:
-            raise ValueError('portable package version mismatch')
-        if (bundle / 'decklab.exe').read_bytes()[:2] != b'MZ':
-            raise ValueError('portable host is not a Windows executable')
-        if len(notices.get('native_crypto_providers', [])) != 2:
-            raise ValueError('native crypto provider notices missing')
-        if len(notices.get('runtime_source_notices', [])) != 3:
-            raise ValueError('runtime source notices missing')
-        if tuple(map(int, version.split('.'))) >= (1, 5, 1):
-            if not notices.get('native_source_notices'):
-                raise ValueError('reviewed native source catalog missing')
-            sources = notices.get('corresponding_sources', [])
-            paramiko = [row for row in notices['distributions'] if row['name'].lower() == 'paramiko']
-            if len(sources) != 1 or len(paramiko) != 1 or sources[0]['installed_version'] != paramiko[0]['version']:
-                raise ValueError('Paramiko corresponding source/version mismatch')
-        return {'version': version, 'debian_architectures': list(architectures), 'bundle_files': len(manifest['files']),
-                'distribution_notice_sets': len(notices['distributions'])}
+    with (directory / setup).open('rb') as installer:
+        if installer.read(2) != b'MZ':
+            raise ValueError('installer is not a Windows executable')
+    report = json.loads((directory / windows_receipt).read_text(encoding='utf-8'))
+    if (report.get('schema') != 1 or report.get('version') != version or report.get('sha256') != digest
+            or not all(type(report.get(key)) is int and report[key] > 0
+                       for key in ('bundle_files', 'distribution_notice_sets'))):
+        raise ValueError('Windows installed-file verification does not match the exact installer')
+
+    fields = subprocess.run(['dpkg-deb', '--field', str(directory / deb), 'Package', 'Version', 'Architecture'],
+                            check=True, capture_output=True, text=True).stdout
+    expected = {'Package': 'decklab', 'Version': version, 'Architecture': 'amd64'}
+    if dict(line.split(': ', 1) for line in fields.splitlines()) != expected:
+        raise ValueError('Debian package metadata mismatch: ' + deb)
+    with tempfile.TemporaryDirectory(prefix='decklab-debian-inspection-') as temporary:
+        subprocess.run(['dpkg-deb', '--extract', str(directory / deb), temporary], check=True)
+        root = Path(temporary)
+        inspect_complete_install(root, 'linux-amd64')
+        code = root / 'usr/lib/decklab'
+        inspect_desktop_runtime(code / 'mcp-runtime' / DESKTOP_RUNTIME, 'linux-amd64')
+        runtime = inspect_linux_runtime(code / 'mcp-runtime', 'amd64')
+        for name in ('decklab_mcp.py', 'decklabctl.py'):
+            if hashlib.sha256((code / name).read_bytes()).hexdigest() != runtime['source_files'][name]:
+                raise ValueError('Debian adapter and embedded MCP runtime differ: ' + name)
+    return {'version': version, 'debian_architectures': ['amd64'],
+            'bundle_files': report['bundle_files'], 'distribution_notice_sets': report['distribution_notice_sets']}
 
 
 def main():
@@ -246,7 +175,7 @@ def main():
     args = parser.parse_args()
     try:
         result = inspect_release(args.directory, args.version)
-    except (ValueError, OSError, KeyError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
+    except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, 'Release verification failed: %s\n' % error)
     print('Release verified: %s; %s bundle files; %s distribution notice sets' %
           (result['version'], result['bundle_files'], result['distribution_notice_sets']))

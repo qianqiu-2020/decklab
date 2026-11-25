@@ -1,65 +1,13 @@
 name: Windows packages
 on:
-  workflow_call:
-    secrets:
-      COMPONENTS_WINDOWS_AMD64_URL:
-        required: false
-      COMPONENTS_WINDOWS_AMD64_SHA256:
-        required: false
   pull_request:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - '.gitattributes'
-      - 'decklab_windows.py'
-      - 'decklab_demo.py'
-      - 'decklab_core/**'
-      - 'decklabctl.py'
-      - 'decklab_mcp.py'
-      - 'requirements-mcp.txt'
-      - 'pyproject.toml'
-      - 'static/**'
-      - 'vendor/**'
-      - 'index.html'
-      - 'requirements-windows.txt'
-      - 'tests/**'
-      - 'skills/**'
-      - 'LICENSE'
-      - 'NOTICE'
-      - 'THIRD_PARTY.md'
-      - 'README*.md'
-      - 'CONTRIBUTING.md'
-      - 'SECURITY.md'
-      - 'CHANGELOG.md'
-      - 'tools/*windows*.ps1'
-      - 'tools/windows_frozen_inputs.py'
-      - 'tools/run_windows_regressions.py'
-      - 'packaging/windows-upgrade-mode.ps1'
-      - 'tools/install_inno_build_tool.ps1'
-      - 'tools/package_docs.py'
-      - 'tools/collect_windows_notices.py'
-      - 'tools/prepare_windows_build.py'
-      - 'tools/prepare_terminal_runtime.py'
-      - 'tools/prepare_terminal_assets.py'
-      - 'tools/check_public_docs.py'
-      - 'tools/test_windows_mcp.py'
-      - 'tools/bundle_manifest.py'
-      - 'tools/install_components.py'
-      - 'tools/fetch_install_components.py'
-      - 'tools/windows-launchers/**'
-      - 'packaging/decklab-windows.iss'
-      - 'packaging/decklab.ico'
-      - 'packaging/inno-languages/**'
-      - 'packaging/third-party/**'
-      - 'docs/**'
-      - 'examples/**'
-      - '.github/workflows/windows-installer.yml'
 permissions:
   contents: read
 jobs:
   regression:
-    if: "!startsWith(github.ref, 'refs/tags/')"
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,10 +28,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Validate version tag
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        run: python tools/check_release_tag.py $env:GITHUB_REF_NAME
       - name: Install installer compiler
         shell: pwsh
         run: .\tools\install_inno_build_tool.ps1
@@ -96,7 +40,7 @@ jobs:
         shell: pwsh
         # Exercise the replacement-source path with the reviewed upstream archive.
         run: |
-          $arguments = @('-ExecutionPolicy','Bypass','-File','.\tools\build_windows.ps1','-LocalFast','-DesktopRuntime','.\build\install-components\windows-amd64\desktop-runtime','-ParamikoSource','.\packaging\third-party\paramiko-4.0.0\paramiko-4.0.0.tar.gz')
+          $arguments = @('-ExecutionPolicy','Bypass','-File','.\tools\build_windows.ps1','-LocalFast','-ValidateRuntime','-DesktopRuntime','.\build\install-components\windows-amd64\desktop-runtime','-ParamikoSource','.\packaging\third-party\paramiko-4.0.0\paramiko-4.0.0.tar.gz')
           & powershell @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Windows package build failed.' }
       - name: Smoke test staged Windows host
@@ -165,7 +109,6 @@ jobs:
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: decklab-windows
           path: |
