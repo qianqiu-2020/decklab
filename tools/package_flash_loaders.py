@@ -24,8 +24,10 @@ def publish(source, destination):
     def validate(family, material, protocols):
         if not isinstance(material, dict) or material.get('protocol') not in protocols:
             raise ValueError('unsupported RAM loader protocol')
-        for name in ('fsbl', 'uboot', 'fsbl_fallback'):
-            if name == 'fsbl_fallback' and name not in material:
+        if 'usb2_uboot' in material and family != 'k3':
+            raise ValueError('USB 2.0 download loader requires K3')
+        for name in ('fsbl', 'uboot', 'fsbl_fallback', 'usb2_uboot'):
+            if name in ('fsbl_fallback', 'usb2_uboot') and name not in material:
                 continue  # optional; DeckLab K3 FSBLs since 1.17.41 train DDR themselves
             entry = material[name]
             extra = {'training_slots'} if family == 'k3' and name == 'fsbl' else set()

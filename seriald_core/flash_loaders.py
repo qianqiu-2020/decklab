@@ -231,11 +231,22 @@ def prepare_materials(binding, workspace, check, root=None, *, ram_boot=False):
     destination = Path(workspace) / 'ram-loaders'
     if Path(workspace).parent.name == 'images':
         destination = destination / hashlib.sha256(raw).hexdigest() / family
+    port = _port(binding)
+    use_usb2 = False
+    if family == 'k3' and not ram_boot and port:
+        from .config import SETTINGS
+        saved = SETTINGS.read().get('environment', {})
+        ports = saved.get('FLASH_USB2_PORTS', os.environ.get('SERIALD_FLASH_USB2_PORTS', ''))
+        use_usb2 = '.'.join(map(str, port)) in {value.strip() for value in ports.split(',')}
+    uboot_key = 'usb2_uboot' if use_usb2 else 'uboot'
+    if use_usb2:
+        if not material.get(uboot_key):
+            raise TaskError('已选择 USB 2.0 兼容端口，请安装包含 K3 兼容加载器的组件包', 409)
+        destination /= 'usb2'
     fsbl_entry = _loader_entry(material.get('fsbl'), frozenset({'training_slots'}))
     training = None
     if family == 'k3' and 'training_slots' in fsbl_entry:
         training = _training_for(binding, root, fsbl_entry['sha256'])
-    port = _port(binding)
     if port is not None:
         _EMBEDDED[port] = training is not None
     embedded = None
@@ -257,7 +268,7 @@ def prepare_materials(binding, workspace, check, root=None, *, ram_boot=False):
         output['trained_for'] = record['board_serial']
     destination.mkdir(mode=0o700, parents=True, exist_ok=True)
     for key in ('fsbl', 'uboot'):
-        entry = fsbl_entry if key == 'fsbl' else _loader_entry(material.get('uboot'))
+        entry = fsbl_entry if key == 'fsbl' else _loader_entry(material.get(uboot_key))
         expected = hashlib.sha256(embedded).hexdigest() if key == 'fsbl' and embedded is not None else entry['sha256']
         source = (bundle / entry['file']).resolve()
         if source == bundle or bundle not in source.parents or not source.is_file():

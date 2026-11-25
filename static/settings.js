@@ -15,7 +15,7 @@
     ]],
     ['flash', '刷机与接线', [
       ['组织镜像', ['IMAGE_INTERNAL_BROWSE', 'IMAGE_INTERNAL_DOWNLOAD']],
-      ['高级刷机设置', ['HARDWARE', 'FLASH', 'FLASH_EXECUTOR', 'FLASH_LOADERS', 'RESCUE_BIN'], true, ['hardware', 'flash']]
+      ['高级刷机设置', ['HARDWARE', 'FLASH', 'FLASH_EXECUTOR', 'FLASH_LOADERS', 'FLASH_USB2_PORTS', 'RESCUE_BIN'], true, ['hardware', 'flash']]
     ]],
     ['storage', '日志与文件', [
       ['日志保留', ['LOG_RETENTION_DAYS', 'DISK_MIN_FREE_MB', 'DISK_MIN_FREE_PERCENT']],
@@ -33,6 +33,7 @@
     DESKTOP: '图形接入配置文件',
     BACKEND_URL: '后端 HTTPS 地址', BACKEND_TOKEN: '节点间访问密钥', BACKEND_CA: '后端 CA 证书文件',
     BACKEND_BIND: '后端监听地址', BACKEND_PORT: '后端监听端口', BACKEND_CERT: '后端 TLS 证书文件', BACKEND_KEY: '后端 TLS 私钥文件',
+    FLASH_USB2_PORTS: 'K3 使用 USB 2.0 的刷机端口（填写 USB 路径，多个用逗号分隔）',
     FLASH_LOADERS: '预备刷机环境清单',
     UI_LANGUAGE: '默认界面语言', SCROLLBACK: '实时输出缓存（字节）', SSH_LIMIT: '每设备终端会话上限', SSH_IDLE: '终端会话空闲超时（秒）', SHARE_SECONDS: '网页分享有效期（秒）',
     PORT: '监听端口', BIND: '监听地址', AUTH_TOKEN: '主访问密码', TRUST_LOOPBACK: '信任本机访问（Windows）',

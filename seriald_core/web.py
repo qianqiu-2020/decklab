@@ -337,7 +337,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                            (q.get('serial') or [None])[0], limit, offset,
                                            (q.get('connection_id') or [None])[0],
                                            (q.get('target_serial') or [None])[0],
-                                           (q.get('target_id') or [None])[0], request_id=request_id)
+                                           (q.get('target_id') or [None])[0], request_id=request_id,
+                                           flash_history=q.get('category') == ['flashing'])
             return self._json(result.status, result.payload)
 
         if route == '/api/input-owner':

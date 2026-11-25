@@ -44,6 +44,16 @@ const server = http.createServer((req,res) => {
     let body='';req.on('data',data=>body+=data);req.on('end',()=>{
       try {
         const payload=JSON.parse(body || '{}');
+        if(url.pathname==='/api/image-prepare' && current?.id==='read-to-cancel') {
+          assert.equal(payload.id, urlArtifact.id);
+          return json({task:{id:'prepare-replacement',kind:'image-prepare',state:'completed',result:{preparation:{}}}});
+        }
+        if(url.pathname==='/api/task-cancel') {
+          assert.equal(current.id, 'read-to-cancel');
+          assert.equal(payload.id, current.id);
+          current = {...current, state:'cancelled', error:'task cancelled'};
+          return json({task:current});
+        }
         if(url.pathname==='/api/flash-target') {targetReads.push(payload);return json({target,capabilities:{supported:true,preparable:true,
           nor_workspace_supported:true,storage_inventory_supported:true,binding_revision:1,modes:['full','partitions'],artifacts:[],storages:[],
           executor:{provider:'goflash',node:'local',endpoint:'fixture-only'},console:null}});}
@@ -179,9 +189,19 @@ let chrome,ws;
   assert.equal(await evaluate('document.querySelector("#fl-mode").closest("details")'),null);
   assert.equal(await evaluate('document.querySelector("#fl-read-nor").hidden'),false);
   assert.equal(await evaluate('document.querySelector("#fl-read-nor").textContent'),'读取设备存储');
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1366,height:768,deviceScaleFactor:1,mobile:false});
+  const rect = id => evaluate('document.getElementById('+JSON.stringify(id)+').getBoundingClientRect().toJSON()');
+  const imageBox = await rect('fl-image-section'), boardBox = await rect('fl-connect');
+  assert.equal(imageBox.top, boardBox.top);
+  assert.ok(imageBox.right <= boardBox.left, 'home opens with the image first');
+  assert.ok((await rect('fl-mode')).bottom <= (await rect('fl-stage-body')).bottom);
+  assert.equal(await evaluate('document.querySelector("#fl-other-sources").open'), false);
+  assert.equal(await evaluate('document.querySelector("#fl-image-information-details").open'), false);
   await shot('full-package-connect-light-fixture');
   await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
-  assert.ok(await evaluate(fits));await shot('full-package-connect-mobile-fixture');
+  assert.ok(await evaluate(fits));
+  assert.ok((await rect('fl-image-section')).bottom <= (await rect('fl-connect')).top);
+  await shot('full-package-connect-mobile-fixture');
   await rpc('Emulation.setDeviceMetricsOverride',{width:1600,height:1100,deviceScaleFactor:1,mobile:false});
   await evaluate('document.querySelector("#fl-store").click();window.fixtureChooseFile('+JSON.stringify(packageArtifact)+');document.querySelector("#fl-plan").click()');
   await wait('document.querySelector("#fl-progress-text").textContent.includes("解压镜像")');
@@ -207,6 +227,8 @@ let chrome,ws;
   current=null;previewTask=null;
   await evaluate('sessionStorage.clear()');await rpc('Page.reload');
   await wait('document.querySelector("#fl-read-nor")?.disabled===false');
+  await evaluate('document.querySelector("#fl-other-sources > summary").click()');
+  assert.ok(await evaluate('document.querySelector("#fl-url-toggle").checkVisibility()'));
   await evaluate('document.querySelector("#fl-url-toggle").click();(()=>{const d=new DataTransfer();d.setData("text","https://images.example/url-fixture.itb");document.querySelector("#fl-url").dispatchEvent(new ClipboardEvent("paste",{clipboardData:d,bubbles:true,cancelable:true}));})()');
   await wait('document.querySelector("#fl-source-summary").textContent.includes("url-fixture.itb")');
   await evaluate('document.querySelector("#fl-url").dispatchEvent(new Event("change"))');await delay(100);
@@ -243,6 +265,13 @@ let chrome,ws;
   assert.ok(await evaluate('document.querySelector("#fl-system").closest("section").contains(document.querySelector("#fl-device"))'));
   if (!await evaluate('document.querySelector("#fl-storage-details").open')) await evaluate('document.querySelector("#fl-storage-details > summary").click()');
   assert.ok(await evaluate('document.querySelector("#fl-system-parts .fl-map-heading").textContent.includes("板上已有布局")'));
+  const footerDiskVisible = `(()=>{const s=document.querySelector('#fl-target-storage'),r=s.getBoundingClientRect();
+    return !!s.closest('.fl-actions') && !s.disabled && r.width>0 && r.top>=0 && r.bottom<=innerHeight;
+  })()`;
+  assert.equal(await evaluate(footerDiskVisible), true);
+  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  assert.equal(await evaluate(footerDiskVisible), true);
+  await rpc('Emulation.setDeviceMetricsOverride',{width:1600,height:1100,deviceScaleFactor:1,mobile:false});
   const destination = await evaluate('document.querySelector("#fl-target-storage").value');
   await evaluate(`document.querySelectorAll("${diskList} > summary")[1].click()`);
   assert.match(await evaluate(`document.querySelectorAll("${diskList}[open] > summary")[1].textContent`),/scsi:0/);
@@ -376,6 +405,30 @@ let chrome,ws;
   await evaluate('document.querySelector("#fl-new").click()');
   await wait('!document.querySelector("#fl-files").disabled && !document.querySelector("#fl-task-status").textContent');
   assert.equal(targetReads.length,readsAfterFailure+1);
+  assert.equal(submissions.length,submissionsBeforeRedetect);
+  current={...current,state:'failed',error:'flash partition selection timed out; storage was not written',
+    progress:{phase:'awaiting-selection'}};
+  await evaluate('ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
+  await wait('document.querySelector("#fl-task-status").textContent.includes("确认已超时")');
+  for (const [width,height] of [[390,844],[1600,1100]]) {
+    await rpc('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<500});
+    assert.ok(await evaluate(`(()=>{const b=document.querySelector('#fl-new'),r=b.getBoundingClientRect();
+      return b.closest('.fl-actions') && !b.disabled && r.width>0 && r.top>=0 && r.bottom<=innerHeight
+        && b.textContent==='重新检测设备' && !document.querySelector('#fl-start').getClientRects().length})()`));
+  }
+  await evaluate('document.querySelector("#fl-new").click()');
+  await wait('!document.querySelector("#fl-files").disabled && !document.querySelector("#fl-task-status").textContent');
+  assert.equal(targetReads.length,readsAfterFailure+2);
+  assert.equal(submissions.length,submissionsBeforeRedetect);
+  current={id:'read-to-cancel',kind:'flash',state:'running',progress:{phase:'reading-system-metadata'},
+    flash_targets:[{target_id:target.target_id,generation:target.target_generation}],
+    flash:{operation:'nor-workspace',write_result:'not-started'}};
+  await evaluate('ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
+  await wait('!document.querySelector("#fl-cancel").disabled');
+  await evaluate('document.querySelector("#fl-cancel").click()');
+  await wait('document.querySelector("#fl-status").textContent.includes("可重新选择镜像")');
+  await evaluate('document.querySelector("#fl-cache").click(); window.fixtureChooseFile('+JSON.stringify(urlArtifact)+')');
+  assert.equal(await evaluate('document.querySelector("#fl-artifact").value'),urlArtifact.id);
   assert.equal(submissions.length,submissionsBeforeRedetect);
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,preparations,fullWrites,async_preview_progress:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,

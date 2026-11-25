@@ -76,6 +76,31 @@ Write-Output 'SDK reconciliation order and failure gate passed'
             self.assertIn('prepared desktop SDK runtime-manifest.json is required', result.stdout + result.stderr)
             self.assertTrue(marker.is_file())
 
+    def test_fast_build_only_reuses_a_complete_matching_dependency_installation(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch('venv.EnvBuilder') as builder:
+            root = Path(directory)
+            (root / 'tools').mkdir()
+            (root / 'tools/build_windows.ps1').write_text('script')
+            requirements = root / 'requirements-windows.txt'
+            requirements.write_text('dependency==1')
+            environment = root / 'build/windows-venv'
+            scripts = environment / 'Scripts'
+            scripts.mkdir(parents=True)
+            for name in ('python.exe', 'pyinstaller.exe'):
+                (scripts / name).touch()
+            key = prepare(root, local_fast=True)
+            builder.return_value.create.assert_called_once_with(environment)
+            stamp = environment / 'decklab-dependencies.sha256'
+            stamp.write_text(key)
+            self.assertEqual(prepare(root, local_fast=True), 'cached')
+            builder.return_value.create.assert_called_once()
+            requirements.write_text('dependency==2')
+            self.assertNotEqual(prepare(root, local_fast=True), key)
+            requirements.write_text('dependency==1')
+            (scripts / 'python.exe').unlink()
+            self.assertEqual(prepare(root, local_fast=True), key)
+            self.assertEqual(builder.return_value.create.call_count, 3)
+
     def test_rebuild_removes_extra_packages_and_preserves_development(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -271,13 +271,15 @@ class TaskStore:
         return record
 
     def list(self, actor=None, serials=None, limit=20, offset=0, connection_id=None, target_serial=None,
-             target_id=None):
+             target_id=None, flash_history=False):
         if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0:
             raise TaskError('invalid task pagination')
         if target_id is not None and (not isinstance(target_id, str)
                                       or not re.fullmatch(r'[0-9a-f]{24}', target_id)):
             raise TaskError('invalid flash target filter')
         clauses, arguments = [], []
+        if flash_history:
+            clauses.append("kind IN ('flash','flash-inspect','flash-preview','ram-boot')")
         if actor is not None:
             clauses.append('actor=?')
             arguments.append(actor)

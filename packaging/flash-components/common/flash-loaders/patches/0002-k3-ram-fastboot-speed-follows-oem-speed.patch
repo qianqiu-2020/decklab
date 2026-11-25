@@ -1,0 +1,30 @@
+diff --git a/cmd/fastboot.c b/cmd/fastboot.c
+--- a/cmd/fastboot.c
++++ b/cmd/fastboot.c
+@@ -16,6 +16,9 @@
+ #include <watchdog.h>
+ #include <linux/stringify.h>
+ #include <usb/tcpm.h>
++#if IS_ENABLED(CONFIG_TARGET_SPACEMIT_K3) && CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_SPEED)
++#include <fb_spacemit.h>
++#endif
+ 
+ static int do_fastboot_udp(int argc, char *const argv[],
+ 			   uintptr_t buf_addr, size_t buf_size)
+@@ -70,6 +73,16 @@
+ 	}
+ #endif
+ 
++#if IS_ENABLED(CONFIG_TARGET_SPACEMIT_K3) && CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_SPEED)
++	/*
++	 * DeckLab RAM loader: enumerate at high speed unless the host asked the
++	 * FSBL for SuperSpeed ("oem speed:super-speed"). Some USB 3 hubs never
++	 * establish the SuperSpeed link, and the gadget does not fall back.
++	 */
++	g_dnl_set_max_speed(spacemit_k3_fastboot_requested_speed());
++	printf("fastboot: %s requested\n",
++	       spacemit_k3_fastboot_requested_speed() == USB_SPEED_SUPER ? "super-speed" : "high-speed");
++#endif
+ 	g_dnl_clear_detach();
+ 	ret = g_dnl_register("usb_dnl_fastboot");
+ 	if (ret)

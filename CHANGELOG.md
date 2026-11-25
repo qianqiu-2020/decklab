@@ -6,6 +6,108 @@
 
 ## [Unreleased]
 
+## [1.18.22] - 2026-11-25
+
+### Changed
+
+- 刷机准备页自动跟随 USB 下载设备的插拔和重新连接。从设备页打开时匹配当前开发板，多板连接时保留已选目标。手动刷新收在连接详情中。
+
+## [1.18.21] - 2026-11-25
+
+### Changed
+
+- 普通刷机在宽屏并排显示开发板和镜像。默认收起镜像布局、文件管理和较少使用的镜像来源，刷写方式在性能配置之前显示。
+
+## [1.18.20] - 2026-11-25
+
+### Fixed
+
+- 刷机确认超时后，工作区底部直接显示“重新检测设备”，可保留已选镜像并重新预览。
+
+## [1.18.19] - 2026-11-25
+
+### Fixed
+
+- Windows 密码共享启动时检查现有入站防火墙规则，已放行时跳过 IT 工具。可在安装目录只读查询指定端口。
+- 刷机预览并列显示 NOR、EC、已选磁盘及保留的磁盘。NOR 分区映射和目标磁盘的 GPT 覆盖说明各自显示在对应介质下。
+
+## [1.18.18] - 2026-11-25
+
+### Fixed
+
+- 从镜像库选包后，若已识别多块系统盘，提示选择目标盘。
+
+## [1.18.17] - 2026-11-25
+
+### Changed
+
+- 普通刷机选中支持磁盘枚举的 K3 后，自动读取磁盘列表。多盘时先选目标盘，完整读取设备存储也可在设备区域直接发起。
+
+## [1.18.16] - 2026-11-25
+
+### Added
+
+- 本地 Debian 和 Windows 构建增加快速打包选项。Windows 可复用同一工作目录的打包依赖。
+
+### Fixed
+
+- 普通刷机在底部显示目标系统盘。预览沿用已选磁盘及配套固件，取消写入前的读取任务后可直接换镜像。
+
+## [1.18.15] - 2026-11-25
+
+### Fixed
+
+- 开发板接受 U-Boot 启动命令后，若控制机等不到新的 USB 刷机接口，刷机工作区会说明尚未写盘，并提示如何重新进入下载模式。
+
+## [1.18.14] - 2026-11-25
+
+### Changed
+
+- 设备页点击「换板」时显示板卡名称和序列号，确认后才解除串口和刷机关联。
+
+## [1.18.13] - 2026-11-25
+
+### Fixed
+
+- K3 可为指定的刷机 USB 端口启用 USB 2.0 兼容加载器，解决加载 U-Boot 后设备消失，导致绑定槽位或读取存储超时的问题。其他端口继续使用默认加载器。
+
+## [1.18.12] - 2026-11-25
+
+### Fixed
+
+- 串口进入 Linux 后，首次观看启动日志可按浏览器窗口宽度显示，即使之前有过串口输入或正在等待登录。
+
+## [1.18.11] - 2026-11-25
+
+### Added
+
+- 刷机工作区可按时间查看控制机的刷机记录和执行命令，设备离线时也能查看。
+
+### Fixed
+
+- 临时加载器超时会标明是等待 SPL 还是等待 U-Boot 的 USB 下载接口。
+
+## [1.18.10] - 2026-11-25
+
+### Changed
+
+- Windows 安装完成页和桌面快捷方式默认启动局域网有密码共享。内部安装包支持在共享就绪后自动调用 IT 已部署的防火墙工具。
+
+## [1.18.9] - 2026-11-25
+
+### Fixed
+
+- Windows 使用“局域网有密码”启动时，保存配置并重启后能正确读取旧进程退出码，正常退出时不再显示空错误。
+- 修复 Windows 镜像商店下载和镜像上传在数据块末尾遇到特定字节时中断的问题。
+
+## [1.18.8] - 2026-11-25
+
+### Fixed
+
+- Windows 安装器升级运行中的标准本机或局域网主机后，按原端口和访问方式重新启动。首次交互安装可在完成页直接启动。
+- Windows 局域网启动器先检查主机就绪状态，再创建访问链接。刷机页面区分 Windows USB 枚举、Fastboot 接口和串口配对状态。
+- Debian 包升级时恢复服务启动顺序，清除失败服务的启动限流，并报告具体启动故障。
+
 ## [1.18.7] - 2026-11-25
 
 ### Added
@@ -376,7 +478,22 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.18.7...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.18.22...HEAD
+[1.18.22]: https://github.com/qianqiu-2020/decklab/compare/v1.18.21...v1.18.22
+[1.18.21]: https://github.com/qianqiu-2020/decklab/compare/v1.18.20...v1.18.21
+[1.18.20]: https://github.com/qianqiu-2020/decklab/compare/v1.18.19...v1.18.20
+[1.18.19]: https://github.com/qianqiu-2020/decklab/compare/v1.18.18...v1.18.19
+[1.18.18]: https://github.com/qianqiu-2020/decklab/compare/v1.18.17...v1.18.18
+[1.18.17]: https://github.com/qianqiu-2020/decklab/compare/v1.18.16...v1.18.17
+[1.18.16]: https://github.com/qianqiu-2020/decklab/compare/v1.18.15...v1.18.16
+[1.18.15]: https://github.com/qianqiu-2020/decklab/compare/v1.18.14...v1.18.15
+[1.18.14]: https://github.com/qianqiu-2020/decklab/compare/v1.18.13...v1.18.14
+[1.18.13]: https://github.com/qianqiu-2020/decklab/compare/v1.18.12...v1.18.13
+[1.18.12]: https://github.com/qianqiu-2020/decklab/compare/v1.18.11...v1.18.12
+[1.18.11]: https://github.com/qianqiu-2020/decklab/compare/v1.18.10...v1.18.11
+[1.18.10]: https://github.com/qianqiu-2020/decklab/compare/v1.18.9...v1.18.10
+[1.18.9]: https://github.com/qianqiu-2020/decklab/compare/v1.18.8...v1.18.9
+[1.18.8]: https://github.com/qianqiu-2020/decklab/compare/v1.18.7...v1.18.8
 [1.18.7]: https://github.com/qianqiu-2020/decklab/compare/v1.18.0...v1.18.7
 [1.18.0]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.18.0
 [1.17.74]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.74

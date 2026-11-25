@@ -525,6 +525,33 @@ class FlashRunnerTests(unittest.TestCase):
                 self.runner.inspect(binding)
             self.assertIn('下载样本计算的 CRC 与控制机不一致', str(error.exception))
 
+    def test_loader_timeout_reports_which_usb_stage_was_expected(self):
+        for diagnostic, expected in [
+                ('RAM FSBL did not reach its download stage', '等待 SPL'),
+                ('download stage timed out', '等待下一阶段')]:
+            binding = self.binding("print(json.dumps({'event':'error','code':'loader-fsbl-timeout',"
+                                   "'message':%r}))" % diagnostic)
+            with self.assertRaises(FlashRunnerError) as error:
+                self.runner.inspect(binding)
+            self.assertIn(expected, str(error.exception))
+            self.assertNotIn('板子已接受 U-Boot 启动命令', str(error.exception))
+
+    def test_uboot_reconnect_timeout_reports_observed_facts_with_or_without_cached_training(self):
+        binding = self.binding("print(json.dumps({'event':'error','code':'loader-fsbl-timeout',"
+                               "'message':'RAM U-Boot did not start after the FSBL loaded it'}))")
+        for embedded in (False, True):
+            with self.subTest(embedded=embedded), mock.patch(
+                    'seriald_core.flash_loaders.discard_training', return_value=embedded) as discard:
+                with self.assertRaises(FlashRunnerError) as error:
+                    self.runner.inspect(binding)
+                discard.assert_called_once()
+                self.assertEqual(error.exception.code, 'loader-fsbl-timeout')
+                message = str(error.exception)
+                self.assertIn('板子已接受 U-Boot 启动命令，控制机尚未发现新的 USB 刷机接口。尚未写盘。', message)
+                self.assertIn('复位开发板', message)
+                self.assertIn('重新进入下载模式', message)
+                self.assertNotIn('DDR', message)
+
     def test_legacy_executor_usb_timeout_does_not_cache_speed(self):
         binding = self.binding("print(json.dumps({'event':'error','code':'loader-superspeed-failed',"
                                "'message':'RAM U-Boot did not enumerate after requesting SuperSpeed'}))")

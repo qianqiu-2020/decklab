@@ -31,7 +31,7 @@ DEFAULTS = {
     'SSH_USER': 'root', 'SSH_PASSWORD': 'bianbu', 'CONSOLE_USER': '',
     'CONSOLE_PASSWORD': '', 'PROBE': 'linux', 'PROBE_COMMAND': '',
     'AUTO_CONFIGURE_SSH': '1', 'PROFILES': '', 'HARDWARE': '', 'FLASH': '', 'DESKTOP': '',
-    'FLASH_EXECUTOR': '', 'FLASH_LOADERS': '', 'LOG_RETENTION_DAYS': '0', 'DISK_MIN_FREE_MB': '1024',
+    'FLASH_EXECUTOR': '', 'FLASH_LOADERS': '', 'FLASH_USB2_PORTS': '', 'LOG_RETENTION_DAYS': '0', 'DISK_MIN_FREE_MB': '1024',
     'TEAM_CATALOGUE_URL': '', 'TEAM_CATALOGUE_TOKEN': '',
     'IMAGE_INTERNAL_BROWSE': '', 'IMAGE_INTERNAL_DOWNLOAD': '',
     'DISK_MIN_FREE_PERCENT': '5', 'TRANSFER_MAX_FILES': '128',
@@ -52,7 +52,7 @@ CHOICES = {'PARITY': ['N', 'E', 'O'], 'DATA_BITS': ['5', '6', '7', '8'],
            'MCP_ENABLED': ['0', '1'], 'TRUST_LOOPBACK': ['0', '1'],
            'AUTO_CONFIGURE_SSH': ['0', '1', 'false', 'true']}
 CHOICES['UI_LANGUAGE'] = ['auto', 'en', 'zh-CN']
-CATALOGUE_FIELDS = {'TEAM_CATALOGUE_URL', 'TEAM_CATALOGUE_TOKEN'}
+LIVE_FIELDS = {'TEAM_CATALOGUE_URL', 'TEAM_CATALOGUE_TOKEN', 'FLASH_USB2_PORTS'}
 SENSITIVE = {'TEAM_CATALOGUE_TOKEN', 'BACKEND_TOKEN', 'AUTH_TOKEN', 'SSH_PASSWORD', 'CONSOLE_PASSWORD'}
 CONTROL = {'BACKEND_URL', 'BACKEND_TOKEN', 'BACKEND_CA', 'PORT', 'BIND', 'AUTH_TOKEN', 'AGENT_TOKENS_FILE', 'TRUST_LOOPBACK',
            'MCP_ENABLED', 'MCP_PYTHON', 'MCP_ALLOWED_HOSTS', 'STATIC', 'UI_LANGUAGE', 'SHARE_SECONDS'}
@@ -140,6 +140,9 @@ def _shape(record):
             raise SettingsError('配置值无效：' + name)
         if name != 'PROBE_COMMAND' and ('\r' in value or '\n' in value):
             raise SettingsError('配置必须为单行：' + name)
+        if name == 'FLASH_USB2_PORTS' and value and any(
+                not re.fullmatch(r'[0-9]{1,3}(?:\.[0-9]{1,3})*', port.strip()) for port in value.split(',')):
+            raise SettingsError('USB 路径请按设备列表中的数字填写，多个路径用逗号分隔')
         if name in CHOICES and value not in CHOICES[name]:
             raise SettingsError('选项无效：' + name)
     for name, document in docs.items():
@@ -213,7 +216,7 @@ class WebSettings:
                            if key not in saved.get('documents', {})}}
         revision = hashlib.sha256(_bytes(source_revision)).hexdigest()
         startup = deepcopy(source_revision)
-        for key in CATALOGUE_FIELDS:
+        for key in LIVE_FIELDS:
             startup['saved'].get('environment', {}).pop(key, None)
         restart_revision = hashlib.sha256(_bytes(startup)).hexdigest()
         if not secrets:
@@ -224,7 +227,7 @@ class WebSettings:
                 if key == 'agent_tokens' else _redact(value)) for key, value in docs.items()}
         return {'revision': revision, 'restart_revision': restart_revision, 'configuration': document,
                 'fields': [{'name': name, 'secret': name in SENSITIVE, 'path': name in PATHS,
-                            'choices': CHOICES.get(name), 'restart': 'live' if name in CATALOGUE_FIELDS else 'both' if name in SHARED else
+                            'choices': CHOICES.get(name), 'restart': 'live' if name in LIVE_FIELDS else 'both' if name in SHARED else
                             'control' if name in CONTROL else 'collector'} for name in DEFAULTS],
                 'apply': 'restart-required'}
 
@@ -322,7 +325,7 @@ def load_environment(path):
     """Run before configuration imports; corrupt saved configuration fails closed."""
     record = WebSettings(path).read()
     for key, value in record.get('environment', {}).items():
-        if key not in CATALOGUE_FIELDS:
+        if key not in LIVE_FIELDS:
             os.environ['SERIALD_' + key] = value
     documents = record.get('documents', {})
     if documents:

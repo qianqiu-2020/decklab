@@ -60,6 +60,16 @@ class HandlerTests(unittest.TestCase):
         handler.static_root = str(ROOT)
         return handler
 
+    def test_control_json_disconnected_client(self):
+        handler = self.control_handler('/api/access')
+        handler.wfile = mock.Mock()
+        handler.wfile.write.side_effect = ConnectionAbortedError(10053, 'aborted')
+        handler._json(200, {})
+        self.assertTrue(handler.close_connection)
+        handler.wfile.write.side_effect = OSError('unrelated error')
+        with self.assertRaisesRegex(OSError, 'unrelated error'):
+            handler._json(200, {})
+
     def test_boot_search_validates_query_and_pagination(self):
         self.device.label = 'board-key'
         for query in ('q=', 'q=' + 'x' * 201, 'q=panic&offset=-1', 'q=panic&limit=51'):

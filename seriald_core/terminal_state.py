@@ -143,8 +143,13 @@ class SerialTerminalState:
         actor, client = d.transactions.source_actor, d.transactions.client_id
         with d.cv:
             state = self.screen.metadata()
-            if (state.get('phase') != 'text' or state.get('internal_output') or self.input_pending or self.geometry
-                    or not self.screen.control(actor, client)):
+            if state.get('phase') != 'text' or state.get('internal_output') or self.geometry:
+                return {'ok': True, 'skipped': True}
+            # The first Linux log viewport can be supplied even while login is
+            # pending. Keep any existing input controller and its shell guards.
+            initial = state.get('needs_boot_viewport')
+            if ((self.input_pending and not initial)
+                    or (not self.screen.control(actor, client) and not initial)):
                 return {'ok': True, 'skipped': True}
             ok = self.screen.resize(cols, rows, presentation=True)
             d.cv.notify_all()

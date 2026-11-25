@@ -33,40 +33,59 @@ case "$1" in
     if [ -d /run/systemd/system ]; then
       restart_marker=/run/seriald-collector-restart-required
       systemctl daemon-reload
-      # Keep the administrator-selected node role during upgrades. Remote Web
-      # upgrades must never enable a local hardware collector.
+      # Package helpers may return success without running a unit (policy-rc.d).
+      # Preserve service policy in images and keep failures visible to dpkg.
+      deferred=false
+      service_action() {
+        action=$1 unit=$2
+        if [ -x /usr/sbin/policy-rc.d ]; then
+          policy=0
+          /usr/sbin/policy-rc.d "$unit" "$action" >/dev/null || policy=$?
+          if [ "$policy" = 101 ]; then
+            echo "seriald: $action $unit deferred by policy-rc.d"
+            deferred=true
+            return 0
+          fi
+        fi
+        if [ "$action" != stop ] && systemctl is-failed --quiet "$unit"; then
+          systemctl reset-failed "$unit"
+        fi
+        if ! deb-systemd-invoke "$action" "$unit" ||
+           { [ "$action" != stop ] && ! systemctl is-active --quiet "$unit"; }; then
+          echo "seriald: $action $unit failed; see journalctl -u $unit -b" >&2
+          systemctl --no-pager --lines=0 status "$unit" >&2 || true
+          return 1
+        fi
+      }
       if systemctl is-enabled --quiet seriald-web.service; then
-        deb-systemd-invoke restart seriald-web.service || echo "seriald: Web service restart failed; check journalctl -u seriald-web" >&2
+        service_action restart seriald-web.service
       elif systemctl is-enabled --quiet seriald-backend.service; then
         if systemctl is-active --quiet seriald-backend.service && [ ! -e "$restart_marker" ]; then
           echo "seriald: hardware backend kept running (code unchanged)"
         else
-          deb-systemd-invoke restart seriald-backend.service || echo "seriald: backend restart failed; check journalctl -u seriald-backend" >&2
+          service_action restart seriald-backend.service
         fi
       else
         deb-systemd-helper enable seriald-collector.service >/dev/null
         deb-systemd-helper enable seriald.service >/dev/null
         if systemctl is-active --quiet seriald-collector.service; then
-          # preinst compares the previous and incoming collector fingerprints before
-          # dpkg overwrites either copy. UI/control-only upgrades preserve tty and SSH.
-          if [ -n "${2:-}" ] && [ -e "$restart_marker" ]; then
-            if deb-systemd-invoke restart seriald-collector.service; then
-              echo "seriald: collector restarted (collector code changed)"
-            else
-              echo "seriald: collector restart failed" >&2
-            fi
+          if [ -e "$restart_marker" ]; then
+            service_action restart seriald-collector.service
+            $deferred || echo "seriald: collector restarted (collector code changed)"
           else
             echo "seriald: collector kept running (collector code unchanged)"
           fi
         else
-          if deb-systemd-invoke start seriald-collector.service; then
-            echo "seriald: collector started (was not running)"
-          else
-            echo "seriald: collector start failed" >&2
+          # A pre-split package can still hold the serial ports in seriald.service.
+          if [ -n "${2:-}" ] && systemctl is-active --quiet seriald.service; then
+            service_action stop seriald.service
           fi
+          service_action start seriald-collector.service
+          $deferred || echo "seriald: collector started (was not running)"
         fi
-        deb-systemd-invoke restart seriald.service || echo "seriald: Web service restart failed; check journalctl -u seriald" >&2
+        service_action restart seriald.service
       fi
+      if $deferred; then exit 0; fi
       rm -f "$restart_marker"
     fi
     PYTHONPATH=/usr/lib/seriald /usr/bin/python3 - <<'PY' || echo "seriald: could not determine access addresses" >&2

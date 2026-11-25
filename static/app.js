@@ -1065,6 +1065,10 @@
   $('b-switch').addEventListener('click', function () {
     var ctx = terminalView.current;
     if (!isCurrent(ctx) || !ctx.serial) return;
+    var question = '确认换板？当前板卡的串口和刷机关联将解除。';
+    var board = $('d-name').textContent + ' · SN ' + ctx.serial;
+    if (!window.confirm((window.SerialdI18n ? window.SerialdI18n.translate(question) : question) + '\n' + board)
+        || !isCurrent(ctx)) return;
     $('d-status').textContent = ' 正在解除串口和刷机关联…';
     fetch('/api/switch-mode', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId, actor: 'web' }) })
@@ -1469,6 +1473,9 @@
     if (deviceDirectory.jump(direction, position) && terminalView.current) terminalView.current.term.focus();
   });
   pollDevices();
-  setInterval(pollDevices, 3000);
+  setInterval(function () {
+    pollDevices();
+    if (flashing) flashing.refreshUSB();
+  }, 3000);
   archives.startRefresh();
 })();

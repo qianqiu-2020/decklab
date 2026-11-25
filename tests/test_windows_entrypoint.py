@@ -5,6 +5,8 @@ import io
 import os
 from pathlib import Path
 import runpy
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,6 +20,36 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WindowsEntrypointTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'win32', 'requires Windows PowerShell')
+    def test_protected_lan_launcher_reports_actual_child_exit(self):
+        with tempfile.TemporaryDirectory(prefix='launcher test ') as directory:
+            launcher = shutil.copy(ROOT / 'tools/windows-launchers/Start-seriald-LAN.ps1', directory)
+            compile_child = """Add-Type -OutputAssembly ./seriald.exe -OutputType ConsoleApplication -TypeDefinition '
+public class Fixture {
+    public static int Main(string[] args) {
+        if (string.Join(" ", args) != "--bind 0.0.0.0 --port 19543") return 99;
+        return int.Parse(System.Environment.GetEnvironmentVariable("FIXTURE_HOST_EXIT"));
+    }
+}'"""
+            powershell = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass']
+            subprocess.run([*powershell, '-Command', compile_child], cwd=directory,
+                           check=True, capture_output=True, timeout=30)
+            for code in (0, 37):
+                # Isolate credential persistence from process supervision. Windows SSH
+                # build accounts may have no DPAPI user profile.
+                token_file = Path(directory, 'data', 'lan-token.dpapi')
+                token_file.unlink(missing_ok=True)
+                command = "function ConvertFrom-SecureString { process { 'fixture' } }; & $env:FIXTURE_LAUNCHER -Port 19543"
+                result = subprocess.run([*powershell, '-Command', command],
+                                        cwd=directory, env=dict(os.environ, FIXTURE_LAUNCHER=launcher,
+                                                                FIXTURE_HOST_EXIT=str(code)),
+                                        capture_output=True, timeout=30)
+                if code:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(b'seriald exited with code 37', result.stderr)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
     def run_admin(self, arguments):
         return self.run_dispatch('admin', arguments)
 

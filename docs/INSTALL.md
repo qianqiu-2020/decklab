@@ -45,7 +45,7 @@ serialctl devices
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime
 python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dist/seriald_1.18.7_amd64.deb
+sudo apt install ./dist/seriald_1.18.11_amd64.deb
 ```
 
 历史 ARM 构建代码保留，本轮不提供 ARM 完整包。

@@ -2,6 +2,8 @@ The K3 download FSBL uses U-Boot revision
 88206a912b449de51bca97104ba48fd73a7102d2 and FSBL-CONFIGURATION.txt.
 The temporary U-Boot uses c3b2fd89a30d6c70582198a88057655f707affff and
 the configuration and parameters in ../CONFIGURATION.txt and ../BUILD-INFO.txt.
+The optional u-boot-usb2.itb adds ../patches/0002-k3-ram-fastboot-speed-follows-oem-speed.patch
+to the same U-Boot source and configuration.
 OpenSBI retains its separate license in OPENSBI-LICENSE.txt.
 
 Under section 3(b) of the GNU General Public License, version 2, the
@@ -13,5 +15,5 @@ after distribution of each copy of these binaries.
 
 To request the source, open an issue at
 https://github.com/qianqiu-2020/decklab/issues
-and identify DeckLab 1.17.51 and the loader directory and filenames.
+and identify the installed DeckLab version and the loader directory and filenames.
 The GPL license is included in ../COPYING.txt.

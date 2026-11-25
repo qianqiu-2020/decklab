@@ -1,8 +1,8 @@
 #Requires -Version 5.1
-param([switch]$UseCurrentPython, [switch]$PortableOnly, [string]$ParamikoSource,
+param([switch]$UseCurrentPython, [switch]$LocalFast, [switch]$PortableOnly, [string]$ParamikoSource,
       [string]$FlashExecutor, [string]$FlashNotices, [string]$FlashLoaders,
       [string]$FlashDriver, [string]$FlashComponents, [string]$DesktopRuntime,
-      [switch]$CoreOnly)
+      [string]$LanFirewallTool, [string]$LanFirewallPolicy, [switch]$CoreOnly)
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') {
@@ -42,13 +42,27 @@ if ($ParamikoSource) {
 }
 Push-Location $root
 try {
+    if ($LanFirewallTool -or $LanFirewallPolicy) {
+        if ($LanFirewallTool -notmatch '^[A-Za-z]:\\(?:[^\\":\r\n]+\\)*RunAsSpc\.exe$' -or
+            $LanFirewallPolicy -notmatch '^[A-Za-z]:\\(?:[^\\":\r\n]+\\)*[^\\":\r\n]+\.spc$') {
+            throw 'Supply absolute local paths to RunAsSpc.exe and the approved firewall .spc file.'
+        }
+    }
     & (Join-Path $PSScriptRoot 'test_windows_compiler_discovery.ps1')
     $bundle = Join-Path $root 'dist\seriald'
     if (Test-Path (Join-Path $bundle 'data')) {
         throw 'dist\seriald\data contains runtime data. Move the running installation elsewhere before rebuilding; the build must not erase it.'
     }
-    if ($UseCurrentPython) { & python tools/prepare_windows_build.py $root }
-    else { & py -3.12 tools/prepare_windows_build.py $root }
+    # The environment and dist tree belong to one build at a time.
+    $buildDir = [IO.Directory]::CreateDirectory((Join-Path $root 'build'))
+    $buildLock = [IO.File]::Open((Join-Path $buildDir.FullName 'package.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    $prepareArgs = @('tools/prepare_windows_build.py', $root)
+    if ($LocalFast) {
+        $prepareArgs += '--local-fast'
+        if ($ParamikoSource) { $prepareArgs += @('--paramiko-source', $ParamikoSource) }
+    }
+    if ($UseCurrentPython) { $cacheKey = & python @prepareArgs }
+    else { $cacheKey = & py -3.12 @prepareArgs }
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is required (install it with the py launcher).' }
     $python = Join-Path $root 'build\windows-venv\Scripts\python.exe'
     $pyinstaller = Join-Path $root 'build\windows-venv\Scripts\pyinstaller.exe'
@@ -70,84 +84,55 @@ try {
     & $python -c 'import sys; sys.exit(0 if sys.maxsize > 2**32 else 1)'
     if ($LASTEXITCODE -ne 0) { throw 'The Windows x64 package requires 64-bit Python.' }
 
-    & $python -m pip install -r requirements-windows.txt
-    if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+    if ($cacheKey -ne 'cached') {
+        & $python -m pip install -r requirements-windows.txt
+        if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+        if ($ParamikoSource) {
+            & $python -m pip install --no-deps --force-reinstall $ParamikoSource
+            if ($LASTEXITCODE -ne 0) { throw 'Replacement Paramiko source installation failed.' }
+        }
+        if ($LocalFast) {
+            Set-Content -LiteralPath (Join-Path $root 'build/windows-venv/decklab-dependencies.sha256') -Value $cacheKey -Encoding ASCII
+        }
+    } else { Write-Host 'Reusing local packaging dependencies.' }
     & $python tools/prepare_terminal_runtime.py
     if ($LASTEXITCODE -ne 0) { throw 'Verified terminal runtime preparation failed.' }
-    if ($ParamikoSource) {
-        & $python -m pip install --no-deps --force-reinstall $ParamikoSource
-        if ($LASTEXITCODE -ne 0) { throw 'Replacement Paramiko source installation failed.' }
-    }
     & $python tools/check_public_docs.py
     if ($LASTEXITCODE -ne 0) { throw 'Public API/configuration documentation inventory failed.' }
-    & $python -m unittest discover -s tests -p test_request_json.py
-    if ($LASTEXITCODE -ne 0) { throw 'Request JSON validation tests failed.' }
-    & $python -m unittest discover -s tests -p test_collector_injection.py
-    if ($LASTEXITCODE -ne 0) { throw 'Collector initialization/isolation tests failed.' }
-    & $python -m unittest discover -s tests -p test_serial_log.py
-    if ($LASTEXITCODE -ne 0) { throw 'Serial archive writer tests failed.' }
-    & $python -m unittest discover -s tests -p test_windows_build_env.py
-    if ($LASTEXITCODE -ne 0) { throw 'Packaging environment isolation tests failed.' }
-    & $python -m unittest discover -s tests -p test_windows_portable.py
-    if ($LASTEXITCODE -ne 0) { throw 'Windows portable tests failed.' }
-    & $python -m unittest discover -s tests -p test_windows_entrypoint.py
-    if ($LASTEXITCODE -ne 0) { throw 'Windows offline administration entrypoint tests failed.' }
-    & $python -m unittest discover -s tests -p test_mcp.py
-    if ($LASTEXITCODE -ne 0) { throw 'MCP transport and client tests failed.' }
-    & $python -m unittest discover -s tests -p test_mcp_integration.py
-    if ($LASTEXITCODE -ne 0) { throw 'MCP authorization integration tests failed.' }
-    & $python -m unittest discover -s tests -p test_mcp_host.py
-    if ($LASTEXITCODE -ne 0) { throw 'Server-managed MCP lifecycle tests failed.' }
-    & $python -m unittest discover -s tests -p test_mcp_host_proxy.py
-    if ($LASTEXITCODE -ne 0) { throw 'Single-port MCP proxy tests failed.' }
-    & $python -m unittest discover -s tests -p test_session_contract.py
-    if ($LASTEXITCODE -ne 0) { throw 'Shared SSH lifecycle and archive tests failed.' }
-    & $python -m unittest discover -s tests -p test_protocol.py
-    if ($LASTEXITCODE -ne 0) { throw 'Console dialogue/framing tests failed.' }
-    & $python -m unittest discover -s tests -p test_transactions.py
-    if ($LASTEXITCODE -ne 0) { throw 'Console transaction tests failed.' }
-    & $python -m unittest discover -s tests -p test_profiles.py
-    if ($LASTEXITCODE -ne 0) { throw 'Configuration tests failed.' }
-    $failedSuites = @()
-    foreach ($suite in @('test_cli.py', 'test_schema.py', 'test_identity.py', 'test_identity_association.py',
-                         'test_tasks.py', 'test_task_actions.py', 'test_flash_foundation.py',
-                         'test_board_ownership.py', 'test_agent_revocation.py', 'test_discrete_task_contract.py',
-                         'test_integration_client.py', 'test_capabilities.py', 'test_mcp_leases.py',
-                         'test_flash_runner.py', 'test_flash_integration.py', 'test_flash_recovery.py',
-                         'test_flash_targets.py', 'test_flash_discovery_review.py',
-                         'test_flash_discovery_integration.py', 'test_pending_labels.py',
-                         'test_web_settings.py', 'test_settings_restart.py', 'test_device_preferences.py',
-                         'test_backend_link.py', 'test_collector_lock.py', 'test_windows_entrypoint.py',
-                         'test_image_download.py', 'test_image_catalog.py', 'test_access_info.py',
-                         'test_install_components.py', 'test_flash_loaders.py',
-                         'test_transfer_artifacts.py', 'test_file_tasks.py',
-                         'test_transfer_tasks.py', 'test_input_ownership.py',
-                         'test_models.py', 'test_maintenance.py', 'test_agent_grants.py', 'test_board_control.py',
-                         'test_desktop.py', 'test_desktop_setup.py', 'test_desktop_native.py', 'test_desktop_provider_stream.py',
-                         'test_desktop_freerdp.py', 'test_desktop_runtime_package.py',
-                         'test_websocket_io.py', 'test_desktop_proxy.py',
-                         'test_desktop_stream.py', 'test_desktop_stream_wire.py',
-                         'test_ui_language.py', 'test_boot_compare.py', 'test_sse.py',
-                         'test_terminal_backend.py', 'test_terminal_runtime.py',
-                         'test_console_visibility.py', 'test_serial_health.py')) {
-        & $python -m unittest discover -s tests -p $suite
-        if ($LASTEXITCODE -ne 0) { $failedSuites += $suite }
+    if ($LocalFast) {
+        $suites = @('test_windows_portable.py', 'test_windows_entrypoint.py', 'test_bundle_manifest.py')
+    } else {
+        $suites = @('test_request_json.py', 'test_collector_injection.py', 'test_serial_log.py',
+                    'test_windows_build_env.py', 'test_windows_portable.py', 'test_windows_entrypoint.py',
+                    'test_mcp.py', 'test_mcp_integration.py', 'test_mcp_host.py',
+                    'test_mcp_host_proxy.py', 'test_session_contract.py', 'test_protocol.py',
+                    'test_transactions.py', 'test_profiles.py', 'test_cli.py',
+                    'test_schema.py', 'test_identity.py', 'test_identity_association.py',
+                    'test_tasks.py', 'test_task_actions.py', 'test_flash_foundation.py',
+                    'test_board_ownership.py', 'test_agent_revocation.py', 'test_discrete_task_contract.py',
+                    'test_integration_client.py', 'test_capabilities.py', 'test_mcp_leases.py',
+                    'test_flash_runner.py', 'test_flash_integration.py', 'test_flash_recovery.py',
+                    'test_flash_targets.py', 'test_flash_discovery_review.py', 'test_flash_discovery_integration.py',
+                    'test_pending_labels.py', 'test_web_settings.py', 'test_settings_restart.py',
+                    'test_device_preferences.py', 'test_backend_link.py', 'test_collector_lock.py',
+                    'test_image_download.py', 'test_image_catalog.py', 'test_access_info.py',
+                    'test_install_components.py', 'test_flash_loaders.py', 'test_transfer_artifacts.py',
+                    'test_file_tasks.py', 'test_transfer_tasks.py', 'test_input_ownership.py',
+                    'test_models.py', 'test_maintenance.py', 'test_agent_grants.py',
+                    'test_board_control.py', 'test_desktop.py', 'test_desktop_setup.py',
+                    'test_desktop_native.py', 'test_desktop_provider_stream.py', 'test_desktop_freerdp.py',
+                    'test_desktop_runtime_package.py', 'test_websocket_io.py', 'test_desktop_proxy.py',
+                    'test_desktop_stream.py', 'test_desktop_stream_wire.py', 'test_ui_language.py',
+                    'test_boot_compare.py', 'test_sse.py', 'test_terminal_backend.py',
+                    'test_terminal_runtime.py', 'test_console_visibility.py', 'test_serial_health.py',
+                    'test_demo.py', 'test_process_windows.py', 'test_serial_handoff.py',
+                    'test_package_docs.py', 'test_windows_notices.py', 'test_bundle_manifest.py',
+                    'test_hardware.py')
     }
-    if ($failedSuites.Count -gt 0) { throw ('Native storage/task/collaboration tests failed: ' + ($failedSuites -join ', ')) }
-    & $python -m unittest discover -s tests -p test_demo.py
-    if ($LASTEXITCODE -ne 0) { throw 'Hardware-free demo tests failed.' }
-    & $python -m unittest discover -s tests -p test_process_windows.py
-    if ($LASTEXITCODE -ne 0) { throw 'Windows helper Job Object tests failed.' }
-    & $python -m unittest discover -s tests -p test_serial_handoff.py
-    if ($LASTEXITCODE -ne 0) { throw 'Serial handoff regression tests failed' }
-    & $python -m unittest discover -s tests -p test_package_docs.py
-    if ($LASTEXITCODE -ne 0) { throw 'Installed documentation tests failed.' }
-    & $python -m unittest discover -s tests -p test_windows_notices.py
-    if ($LASTEXITCODE -ne 0) { throw 'Windows distribution notice tests failed.' }
-    & $python -m unittest discover -s tests -p test_bundle_manifest.py
-    if ($LASTEXITCODE -ne 0) { throw 'Complete bundle integrity tests failed.' }
-    & $python -m unittest discover -s tests -p test_hardware.py
-    if ($LASTEXITCODE -ne 0) { throw 'Configured hardware task tests failed.' }
+    foreach ($suite in $suites) {
+        & $python -m unittest discover -s tests -p $suite
+        if ($LASTEXITCODE -ne 0) { throw "Windows regression failed: $suite" }
+    }
     if (Get-Command node -ErrorAction SilentlyContinue) {
         & node tests/frontend.test.js
         if ($LASTEXITCODE -ne 0) { throw 'Frontend regression tests failed.' }
@@ -224,10 +209,15 @@ try {
 
     $launchers = Join-Path $root 'tools\windows-launchers'
     foreach ($name in @('Start-seriald.cmd', 'Start-seriald-LAN.cmd', 'Start-seriald-LAN.ps1',
-                       'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN-Open.ps1',
+                       'Get-seriald-LANFirewall.ps1', 'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN-Open.ps1',
                        'serialctl.cmd', 'seriald-admin.cmd', 'Start-seriald-Web.cmd', 'Start-seriald-Backend.cmd')) {
         Copy-Item -LiteralPath (Join-Path $launchers $name) -Destination $bundle
     }
+    $lanProfile = Join-Path $bundle 'lan-firewall.json'
+    if ($LanFirewallTool) {
+        @{tool=$LanFirewallTool; policy=$LanFirewallPolicy} | ConvertTo-Json |
+            Set-Content -LiteralPath $lanProfile -Encoding UTF8
+    } elseif (Test-Path -LiteralPath $lanProfile) { Remove-Item -LiteralPath $lanProfile }
     & $python tools/package_docs.py $bundle --platform windows
     if ($LASTEXITCODE -ne 0) { throw 'Installed documentation links failed validation.' }
     & (Join-Path $bundle 'seriald.exe') --help | Out-Null
@@ -265,15 +255,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Complete bundle integrity validation failed.' }
 
     $archive = Join-Path $root 'dist\seriald-windows-portable.zip'
-    Compress-Archive -Path $bundle -DestinationPath $archive -Force
+    $compression = if ($LocalFast) { 'Fastest' } else { 'Optimal' }
+    Compress-Archive -Path $bundle -DestinationPath $archive -Force -CompressionLevel $compression
     Write-Host "Built $archive"
     Write-Host "seriald.exe SHA-256: $exeHash"
-    if (-not $PortableOnly) { & (Join-Path $PSScriptRoot 'build_windows_installer.ps1') }
+    if (-not $PortableOnly) { & (Join-Path $PSScriptRoot 'build_windows_installer.ps1') -LocalFast:$LocalFast }
     if ($PortableOnly) { Write-Host 'ZIP only: run Install-seriald.cmd to install/update.' }
     else { Write-Host 'Distribute the setup EXE for installation and future upgrades.' }
 } finally {
     if ($desktopSnapshot -and (Test-Path -LiteralPath $desktopSnapshot)) {
         Remove-Item -LiteralPath $desktopSnapshot -Recurse -Force
     }
+    if ($buildLock) { $buildLock.Dispose() }
     Pop-Location
 }

@@ -49,7 +49,8 @@ function info(s) {
   return {geometry: {cols: s.term.cols, rows: s.term.rows},
     phase: b.type === 'alternate' || s.progress && s.progress.active() ? 'application' : s.phase,
     revision: s.revision, off: s.off, modes: s.term.modes,
-    cursor: {x: b.cursorX, y: b.cursorY, buffer: b.type}, internal_output: false};
+    cursor: {x: b.cursorX, y: b.cursorY, buffer: b.type}, internal_output: false,
+    needs_boot_viewport: s.kind === 'serial' && !!s.linux && !s.textGeometry && s.phase === 'text' && b.type === 'normal'};
 }
 function resize(s, cols, rows) {
   if (cols >= 20 && cols <= 500 && rows >= 2 && rows <= 200

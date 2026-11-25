@@ -27,8 +27,13 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 OutputDir={#OutputDir}
 OutputBaseFilename=seriald-{#AppVersion}-windows-x64-setup
+#ifdef LocalFast
+Compression=zip/1
+SolidCompression=no
+#else
 Compression=lzma2
 SolidCompression=yes
+#endif
 WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
@@ -46,10 +51,14 @@ Name: "usbdriver"; Description: "Install USB flashing driver / 安装 USB 刷机
 #endif
 
 [Files]
+Source: "windows-upgrade-mode.ps1"; Flags: dontcopy
 #if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
 Source: "{#BundleDir}\Install-seriald-USB-Driver.ps1"; Flags: dontcopy
 #endif
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Excludes: "data\*"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+Type: files; Name: "{app}\lan-firewall.json"
 
 [Dirs]
 ; Runtime data belongs to the user: upgrades and uninstall leave it intact.
@@ -63,9 +72,71 @@ Name: "{group}\DeckLab - 局域网有密码"; Filename: "{app}\Start-seriald-LAN
 Name: "{group}\DeckLab - 安装 USB 刷机驱动"; Filename: "{app}\Install-seriald-USB-Driver.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"
 #endif
 Name: "{group}\卸载 DeckLab"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\DeckLab"; Filename: "{app}\Start-seriald.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"; Tasks: desktopicon
+Name: "{userdesktop}\DeckLab"; Filename: "{app}\Start-seriald-LAN.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppIcon}"; Tasks: desktopicon
+
+[CustomMessages]
+english.LaunchProtectedLAN=Start DeckLab with password-protected LAN sharing
+chinesesimplified.LaunchProtectedLAN=启动 DeckLab（局域网有密码）
+
+[Run]
+Filename: "{code:HostProgram}"; Parameters: "{code:HostArguments}"; WorkingDir: "{app}"; Check: ResumeHost; Flags: nowait runasoriginaluser
+Filename: "{sysnative}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Start-seriald-LAN.ps1"""; WorkingDir: "{app}"; Description: "{cm:LaunchProtectedLAN}"; Check: OfferDefaultStart; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [Code]
+var
+  PreviousMode, PreviousPort: Integer;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Code: Integer;
+begin
+  Result := '';
+  if (PreviousMode <> 0) or not FileExists(ExpandConstant('{app}\seriald.exe')) then Exit;
+  ExtractTemporaryFile('windows-upgrade-mode.ps1');
+  if Exec(ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\windows-upgrade-mode.ps1') + '" -InstallDir "' + ExpandConstant('{app}') + '"',
+    ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code) then
+  begin
+    if (Code div 65536 >= 1) and (Code div 65536 <= 3) and (Code mod 65536 > 0) then
+    begin
+      PreviousMode := Code div 65536;
+      PreviousPort := Code mod 65536;
+      Log('Will resume the installed DeckLab host on port ' + IntToStr(PreviousPort));
+    end;
+  end;
+end;
+
+function ResumeHost: Boolean;
+begin
+  Result := PreviousMode <> 0;
+end;
+
+function OfferDefaultStart: Boolean;
+begin
+  Result := not ResumeHost;
+end;
+
+function HostProgram(Param: String): String;
+begin
+  if PreviousMode > 1 then
+    Result := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe')
+  else Result := ExpandConstant('{app}\seriald.exe');
+end;
+
+function HostArguments(Param: String): String;
+var
+  Launcher: String;
+begin
+  if PreviousMode > 1 then
+  begin
+    if PreviousMode = 2 then Launcher := 'Start-seriald-LAN.ps1'
+    else Launcher := 'Start-seriald-LAN-Open.ps1';
+    Result := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\') +
+      Launcher + '" -Port ' + IntToStr(PreviousPort);
+  end else Result := '--bind 127.0.0.1 --port ' + IntToStr(PreviousPort);
+end;
+
 #if FileExists(BundleDir + "\usb-driver\spacemit_usb.inf")
 var
   DriverProbeDone, CompatibleDriverInstalled: Boolean;

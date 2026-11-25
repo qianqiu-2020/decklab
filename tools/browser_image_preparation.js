@@ -29,7 +29,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   if(url.pathname==='/api/image-prepare'){preparations++;assert.equal(p.id,artifact.id);assert.equal(p.serial,undefined);return json({task:prepareTask()});}
   throw new Error('unexpected mutation '+url.pathname);
  }catch(e){errors.push(e.stack);res.statusCode=500;json({error:e.message});}});return;}
- if(url.pathname==='/') {res.setHeader('Content-Type','text/html');return res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/static/app.css"><body>'+dialog+'<p>SIMULATED · 模拟镜像与板卡，无真实设备操作</p><script src="/static/ui-common.js"></script><script src="/static/tasks.js"></script><script src="/static/flashing.js"></script><script>window.ui=SerialdFlashing.create({byId:id=>document.getElementById(id),fetch:fetch,copyText:SerialdUI.copyText,openImageStore:choose=>choose('+JSON.stringify(artifact)+'),formatBytes:n=>(n/1e9).toFixed(1)+" GB"});ui.open('+JSON.stringify(target)+');</script></body></html>');}
+ if(url.pathname==='/') {res.setHeader('Content-Type','text/html');return res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/static/app.css"><body>'+dialog+'<p>SIMULATED · 模拟镜像与板卡，无真实设备操作</p><script src="/static/ui-common.js"></script><script src="/static/tasks.js"></script><script src="/static/flashing.js"></script><script>window.ui=SerialdFlashing.create({byId:id=>document.getElementById(id),fetch:fetch,copyText:SerialdUI.copyText,openImageStore:choose=>choose('+JSON.stringify(artifact)+'),formatBytes:n=>(n/1e9).toFixed(1)+" GB"});ui.open('+JSON.stringify(target)+');setInterval(()=>ui.refreshUSB(),500);</script></body></html>');}
  if(url.pathname==='/api/tasks')return json({tasks:[]});
  if(url.pathname==='/api/flash-discover')return json({targets:[target]});
  if(url.pathname==='/api/task')return json({task:prepareTask()});
@@ -56,16 +56,19 @@ let chrome,ws;const delay=ms=>new Promise(r=>setTimeout(r,ms));
  await evaluate('document.querySelector("#fl-close").click();ui.open()');
  assert.equal(preparations,1,'closing must not restart image preparation');
  target={...target,target_generation:'bootrom-a-reconnected'};
- await evaluate('document.querySelector("#fl-discover").click()');
+ for(let n=0;n<100 && probe<2;n++)await delay(100);
+ assert.ok(probe>=2,'reconnect must automatically probe the new generation');
  await wait('!document.querySelector("#fl-cache").disabled && document.querySelector("#fl-artifact").value==="browser-image"');
  assert.equal(preparations,1);assert.equal(await evaluate('document.querySelector("#fl-start").disabled'),true);
  target={target_id:'board-b',target_generation:'bootrom-b',serial:'B',label:'模拟板卡 B'};
- await evaluate('document.querySelector("#fl-discover").click()');
+ await wait('document.querySelector("#fl-device option[value=board-b]") && !document.querySelector("#fl-device").value');
+ await evaluate('document.querySelector("#fl-device").value="board-b";document.querySelector("#fl-device").dispatchEvent(new Event("change"))');
  await wait('document.querySelector("#fl-board").textContent.includes("模拟板卡 B") && !document.querySelector("#fl-cache").disabled');
  assert.equal(preparations,1);assert.equal(await evaluate('document.querySelector("#fl-artifact").value'),artifact.id);
  phase='completed';await wait('document.querySelector("#fl-image-information").textContent.includes("Debian GNU/Linux 13")');
  assert.equal(await evaluate('document.querySelector("#fl-plan").disabled'),false);
- assert.ok(await evaluate('document.querySelector("#fl-image-information-details").open'));
+ assert.equal(await evaluate('document.querySelector("#fl-image-information-details").open'),false);
+ await evaluate('document.querySelector("#fl-image-information-details summary").click()');
  assert.equal(await evaluate('document.querySelector("#fl-image-information-details").closest("section.fl-section").getAttribute("aria-labelledby")'),'fl-image-title');
  assert.equal(await evaluate('document.querySelector("#fl-system").hidden'),true,'prepared package does not provide board readings');
  assert.equal(await evaluate('document.querySelector("#fl-board").textContent.includes("K1")'),true);

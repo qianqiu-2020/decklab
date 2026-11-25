@@ -105,7 +105,9 @@ try {
     })
     if ($launchLinks.Count -ne 3) { throw "Expected three start-menu launch shortcuts; found $($launchLinks.Count) in $group." }
     if (-not (Test-Path -LiteralPath $desktopLink)) { throw 'Desktop shortcut is missing.' }
-    $launchLinks += $shell.CreateShortcut($desktopLink)
+    $desktopShortcut = $shell.CreateShortcut($desktopLink)
+    if ($desktopShortcut.TargetPath -ne "$target\Start-seriald-LAN.cmd") { throw 'Desktop shortcut must start password-protected LAN sharing.' }
+    $launchLinks += $desktopShortcut
     foreach ($shortcut in $launchLinks) {
         if ($shortcut.IconLocation -ne "$iconPath,0") { throw "Shortcut still references a program/default icon: $($shortcut.IconLocation)" }
     }

@@ -174,7 +174,10 @@ class TransferArtifacts:
             before = os.lstat(path)
             if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
                 raise TaskError('artifact file is not a private regular file', 409)
-            fd = os.open(path, os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+            # Windows text-mode O_RDWR drops a trailing 0x1a on open,
+            # before fdopen gets the chance to switch the descriptor to binary.
+            flags = os.O_RDWR | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+            fd = os.open(path, flags | getattr(os, 'O_NONBLOCK', 0))
             with os.fdopen(fd, 'r+b') as output:
                 after = os.fstat(output.fileno())
                 if ((before.st_dev, before.st_ino) != (after.st_dev, after.st_ino) or

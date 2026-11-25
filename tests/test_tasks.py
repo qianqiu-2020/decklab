@@ -375,6 +375,18 @@ class TaskTests(unittest.TestCase):
         with self.assertRaises(TaskError):
             history.list(limit=0)
 
+    def test_flash_history_includes_offline_usb_and_filters_before_pagination(self):
+        history = self.tasks.store
+        wanted = history.create('flash', 'web', '', [{'serial':'', 'connection_id':'usb-session'}])
+        with self.store.lock, self.store.db:
+            self.store.db.execute("INSERT INTO flash_targets(id,generation,document,seen,present) VALUES(?,?,'{}',0,0)",
+                                  ('a' * 24, 'b' * 24))
+            self.store.db.execute('INSERT INTO task_flash_targets VALUES(?,?,?)', (wanted, 'a' * 24, 'b' * 24))
+        history.create('identify', 'web', '', [TARGET])
+        self.assertEqual([t['id'] for t in history.list(flash_history=True, limit=1)], [wanted])
+        self.assertEqual(history.list(flash_history=True, serials=['SN-ONE']), [])
+        self.assertEqual(history.list(flash_history=True, actor='agent'), [])
+
     def test_connection_filter_is_applied_before_pagination_and_preserves_serial_scope(self):
         history = self.tasks.store
         wanted = history.create('identify', 'web', '', [TARGET])

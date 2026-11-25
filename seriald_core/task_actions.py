@@ -199,7 +199,7 @@ class TaskActions:
         return execute
 
     def query(self, task_id=None, actor='web', serial=None, limit=20, offset=0, connection_id=None, target_serial=None,
-              target_id=None, request_id=None):
+              target_id=None, request_id=None, flash_history=False):
         try:
             self.tasks._check_actor(actor)
             if request_id is not None:
@@ -222,7 +222,7 @@ class TaskActions:
             tasks = self.tasks.store.list(actor=actor if actor != 'web' else None,
                                          serials=[serial] if serial is not None else None,
                                          limit=limit, offset=offset, connection_id=connection_id, target_serial=target_serial,
-                                         target_id=target_id)
+                                         target_id=target_id, flash_history=flash_history)
             return response(200, {'tasks': tasks})
         except TaskError as error:
             return response(error.status, {'error': str(error)})

@@ -1283,7 +1283,7 @@ class LocalFlashExecutor:
                         'image-permission-denied': '控制机没有读取镜像或写入缓存的权限',
                         'system-package-loader-unsupported': '所选加载器不支持安全整包写入系统盘。可选用支持系统盘核对的 DeckLab 内置加载器',
                         'system-disk-unavailable': 'K1 下载环境未检测到可使用 partition_universal.json 的系统盘，请检查存储介质和启动模式',
-                        'system-disk-selection-required': '请在「读取设备存储」工作区中明确选择目标系统盘',
+                        'system-disk-selection-required': '有多块候选系统盘，请选择本次要写入的目标系统盘',
                         'target-permission-denied': '控制机无权打开重新连接的 USB 下载设备。请检查安装包的 USB 权限规则后重新检测',
                         'image-archive-corrupt': '镜像压缩包不完整或校验失败，请重新下载',
                         'image-invalid': '镜像格式或包内布局无效'}
@@ -1319,11 +1319,19 @@ class LocalFlashExecutor:
                         stopped = {'loader-fsbl-timeout': '控制机等待下一阶段的 USB 下载设备上线超时',
                                    'loader-training-mismatch': '该 USB 口上换了板子，保存的 DDR 训练结果不属于这块板',
                                    }.get(event['code'], '板上对下载样本计算的 CRC 与控制机不一致')
-                        if embedded:
+                        loader_timeout = event['code'] == 'loader-fsbl-timeout' and isinstance(diagnostic, str)
+                        if loader_timeout and 'RAM FSBL did not reach its download stage' in diagnostic:
+                            stopped = '已发送第一阶段加载器并收到启动应答，控制机等待 SPL 的 USB 下载接口超时'
+                        if loader_timeout and 'RAM U-Boot did not start after the FSBL loaded it' in diagnostic:
+                            message = ('板子已接受 U-Boot 启动命令，控制机尚未发现新的 USB 刷机接口。尚未写盘。'
+                                       '请复位开发板，使其重新进入下载模式后重试。若仍超时，可将刷机线直连控制机后再试。')
+                        elif embedded:
                             message = (stopped + '，尚未写入。这次复用了这块板之前保存的 DDR 训练结果，已作废；'
                                        '请让板子重新进入下载模式后重试，下次会重新训练 DDR（约多 6 秒）')
                         elif event['code'] == 'device-ram-unstable':
                             message = stopped + '，尚未写入。请分别检查 USB 传输和板上内存读写'
+                        elif event['code'] == 'loader-fsbl-timeout':
+                            message = stopped + '，尚未写入。请对照本次启动的串口日志和控制机 USB 枚举记录'
                         else:
                             message = (stopped + '，尚未写入。请查看串口输出，断电后重新进入下载模式再试')
                     if event.get('code') == 'device-data-corrupt':

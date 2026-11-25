@@ -67,6 +67,34 @@ class FlashLoaderTests(unittest.TestCase):
             publish(manifest.parent, root / 'installed')
             self.assertEqual((root / 'installed/uboot.bin').read_bytes(), b'RAM only uboot')
 
+    def test_compatible_download_loader_is_isolated_by_port_and_operation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.bundle(root / 'bundle')
+            document = json.loads(manifest.read_bytes())
+            family = document['families']['k3']
+            family['ram_boot'] = dict(family, protocol=K3_RAM_BOOT_PROTOCOL)
+            payload = b'usb2 compatible'
+            (manifest.parent / 'usb2.itb').write_bytes(payload)
+            family['usb2_uboot'] = {'file': 'usb2.itb', 'sha256': hashlib.sha256(payload).hexdigest()}
+            manifest.write_text(json.dumps(document))
+            publish(manifest.parent, root / 'installed')
+            workspace = root / 'images' / 'shared'
+            def prepare(port, **options):
+                binding = SimpleNamespace(profile_data={'chip_family': 'k3'}, device={'port_path': port})
+                materials = prepare_materials(binding, workspace, lambda: None, **options)
+                return Path(materials['uboot']['path'])
+            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(root / 'installed/manifest.json'),
+                                              'SERIALD_FLASH_USB2_PORTS': '1.2, 2.3'}):
+                selected = prepare([2, 3])
+                normal = prepare([2, 30])
+                self.assertEqual(selected.read_bytes(), payload)
+                self.assertEqual(normal.read_bytes(), b'RAM only uboot')
+                self.assertEqual(prepare([2, 3], ram_boot=True).read_bytes(), b'RAM only uboot')
+                self.assertEqual(prepare([1, 2]), selected)
+                with mock.patch('seriald_core.config.SETTINGS.read', return_value={'environment': {'FLASH_USB2_PORTS': ''}}):
+                    self.assertEqual(prepare([2, 3]), normal)
+
     def test_old_url_loader_is_ignored_and_omitted_from_new_packages(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

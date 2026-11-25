@@ -652,7 +652,8 @@ test('pending view follows its promoted board after collector restart', async ()
 });
 
 test('preparing a board swap moves the live UART to an unprovisioned view', async () => {
-  const h = harness();
+  let approved = false;
+  const h = harness({confirm: () => approved});
   h.take('/api/devices').resolve({ devices: [{ key: 'milkv', label: 'milkv', serial: 'SN001',
     state: 'online', connection_id: 'connection-1', by_path: 'usb-1', alive: true,
     dev: '/mock/ttyUSB1', hostname: 'riscv-118',
@@ -660,6 +661,13 @@ test('preparing a board swap moves the live UART to an unprovisioned view', asyn
       identity_status: 'provisional', ts: 12 } }] });
   await drain(); h.select('milkv');
   assert.equal(h.get('b-switch').hidden, false);
+  const status = h.get('d-status').textContent;
+  h.get('b-switch').click();
+  assert.match(h.dialogs[0].text, /串口和刷机关联.*\nmilkv · SN SN001/);
+  assert.ok(!h.requests.some(r => r.url === '/api/switch-mode'));
+  assert.equal(h.get('d-status').textContent, status);
+  assert.equal(h.get('d-name').textContent, 'milkv');
+  approved = true;
   h.get('b-switch').click();
   const request = h.take('/api/switch-mode');
   assert.deepEqual(request.body, { key: 'milkv', serial: 'SN001', connection_id:'connection-1', actor: 'web', client_id: h.clientId });

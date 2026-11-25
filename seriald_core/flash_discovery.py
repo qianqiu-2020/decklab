@@ -296,7 +296,11 @@ class FlashDiscovery:
             targets = [self.public(self.get(target_id)) for target_id in sorted(seen)]
             targets.extend(self._recoverable_targets(exclude=seen))
         self.manager.refresh_flash_presence()
-        return {'available': True, 'targets': targets}
+        response = {'available': True, 'targets': targets}
+        if os.name == 'nt' and not candidates:
+            from .windows_flash_usb import empty_scan_reason
+            response['reason'] = empty_scan_reason()
+        return response
 
     def view(self, target_id, generation=None, require_present=True):
         row = self.get(target_id, generation, require_present)

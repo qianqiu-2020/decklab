@@ -384,6 +384,7 @@
         ctx.terminalRevision = state.revision;
         if (!metadataOnly) {
           ctx.screenManaged = true; ctx.screenPhase = state.phase;
+          ctx.needsBootViewport = state.needs_boot_viewport === true;
           ctx.linuxConsole = state.phase !== 'firmware';
           applyManagedGeometry(ctx, state.geometry);
         }
@@ -420,7 +421,7 @@
       if (window.requestAnimationFrame) window.requestAnimationFrame(function () {
         if (!terminalVisible(ctx)) return;
         try { fitTerminal(ctx); syncTerminalLayers(ctx); ctx.term.refresh(0, ctx.term.rows - 1); } catch (e) {}
-        pushSize(ctx);
+        pushSize(ctx); syncSerialPresentation(ctx);
       });
       pushSize(ctx);
       scheduleSerialSize(ctx);
@@ -646,7 +647,7 @@
     }
     function syncSerialPresentation(ctx) {
       if (!terminalVisible(ctx) || !ctx.screenManaged || ctx.sid !== 'serial' || ctx.screenPhase !== 'text'
-          || ctx.readonly || ctx.internalOutput || ctx.inputQueue.length || ctx.inputSending) return;
+          || (ctx.readonly && !ctx.needsBootViewport) || ctx.internalOutput || ctx.inputQueue.length || ctx.inputSending) return;
       var grid = preferredGrid(ctx);
       // A firmware or boot reset can replace the shared grid in an unchanged viewport.
       var size = grid && grid.cols + ':' + grid.rows + ':' + ctx.terminalRevision;

@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--jobs', type=int, default=8)
     parser.add_argument('--opensbi', type=Path, required=True, help='OpenSBI fw_dynamic.bin started by SPL before U-Boot')
     parser.add_argument('--opensbi-sha256', required=True)
+    parser.add_argument('--usb2-compatible', action='store_true', help='build the optional K3 USB 2.0 download loader')
     args = parser.parse_args()
     if digest(args.opensbi) != args.opensbi_sha256:
         parser.error('OpenSBI checksum mismatch')
@@ -49,6 +50,9 @@ def main():
                 subprocess.run(['git', '-C', str(args.source), 'archive', commit], stdout=output, check=True)
             with tarfile.open(work / 'source.tar') as archive:
                 archive.extractall(source)
+            speed_patch = Path(__file__).resolve().parents[1] / 'packaging/flash-components/common/flash-loaders/patches' / '0002-k3-ram-fastboot-speed-follows-oem-speed.patch'
+            if args.usb2_compatible:
+                subprocess.run(['patch', '--batch', '--forward', '-p1', '-i', str(speed_patch)], cwd=source, check=True)
             profile = source / 'configs/decklab-k3-download.config'
             environment = source / 'board/spacemit/k3/decklab-download.env'
             (args.output / 'BUILD-INPUT.json').write_text(json.dumps({
@@ -57,6 +61,7 @@ def main():
                 'cross_compile': args.cross_compile, 'configuration': 'k3_defconfig', 'ram_only': True,
                 'ddr_training_persistence': False, 'target': 'u-boot.bin', 'jobs': args.jobs,
                 'opensbi_sha256': args.opensbi_sha256,
+                'usb_speed_patch_sha256': digest(speed_patch) if args.usb2_compatible else None,
             }, indent=2) + '\n')
             with (args.output / 'build.log.txt').open('w') as log:
                 command = ['make', 'O=' + str(build), 'CROSS_COMPILE=' + args.cross_compile]

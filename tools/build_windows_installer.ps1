@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-param([string]$Compiler)
+param([string]$Compiler, [switch]$LocalFast)
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Run this builder on Windows.' }
@@ -54,7 +54,9 @@ if (-not (Test-Path -LiteralPath $bundleIcon -PathType Leaf) -or
     throw 'The bundle icon is missing or outdated. Rebuild with Build-seriald.cmd.'
 }
 $output = Join-Path $root 'dist'
-& $Compiler "/DAppVersion=$version" "/DBundleDir=$bundle" "/DOutputDir=$output" "/DAppIcon=$iconName" (Join-Path $root 'packaging\seriald-windows.iss')
+$compressionArgs = @()
+if ($LocalFast) { $compressionArgs += '/DLocalFast' }
+& $Compiler @compressionArgs "/DAppVersion=$version" "/DBundleDir=$bundle" "/DOutputDir=$output" "/DAppIcon=$iconName" (Join-Path $root 'packaging\seriald-windows.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Windows installer compilation failed.' }
 $setup = Join-Path $output "seriald-$version-windows-x64-setup.exe"
 if (-not (Test-Path -LiteralPath $setup -PathType Leaf)) { throw 'Installer output is missing.' }

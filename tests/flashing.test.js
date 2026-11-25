@@ -297,11 +297,15 @@ test('async preview displays actual extraction progress and only returns a revie
 });
 
 test('cancel during asynchronous extraction cancels only the preview task', async () => {
-  const h=harness();await open(h);h.get('fl-plan').click();
+  const storage=new Map(), h=harness(storage);await open(h);h.get('fl-plan').click();
   h.take('/api/flash-plan').resolve({task:{id:'cancel-preview',state:'running',progress:{phase:'expanding-image',done:1,total:32}}},202);await drain();
   h.get('fl-cancel').click();const cancel=h.take('/api/task-cancel');assert.equal(cancel.payload.id,'cancel-preview');cancel.resolve({ok:true});
   h.take('/api/task?id=cancel-preview').resolve({task:{id:'cancel-preview',state:'cancelled',error:'task cancelled'}});await drain();
   assert.equal(h.get('fl-start').disabled,true);assert.equal(h.get('fl-plan').disabled,false);
+  assert.equal(storage.has('decklab-flash-task:' + board.serial), false);
+  h.get('fl-cache').click();
+  h.chooseImage({id:'new-source', name:'next.tar.gz', size:512});
+  assert.equal(h.get('fl-artifact').value, 'new-source');
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
 });
 
@@ -423,21 +427,24 @@ test('lost preview response recovers its original request without submitting a n
 test('selection timeout has a persistent recovery entry which only detects devices', async () => {
   const h=harness(),expired={...norReady,state:'failed',error:'flash partition selection timed out; storage was not written'};
   h.api.open(norTarget,expired);await drain();
-  assert.equal(h.get('fl-expired').hidden,false);assert.equal(h.get('fl-restart').disabled,false);
+  assert.equal(h.get('fl-new').hidden,false);assert.equal(h.get('fl-new').disabled,false);
+  assert.equal(h.get('fl-new').textContent,'重新检测设备');
+  assert.equal(h.get('flash-dialog').dataset.stage,'run');
   assert.match(h.get('fl-task-status').textContent,/确认已超时.*未开始写入.*重新检测/);
   h.get('fl-mode').value='partitions';h.get('fl-mode').emit('change');
-  assert.equal(h.get('fl-expired').hidden,false);assert.match(h.get('fl-task-status').textContent,/确认已超时/);
-  h.get('fl-restart').click();const detect=h.take('/api/flash-discover');
+  assert.equal(h.get('fl-new').hidden,false);assert.match(h.get('fl-task-status').textContent,/确认已超时/);
+  h.get('fl-new').click();const detect=h.take('/api/flash-discover');
   assert.equal(detect.payload,undefined);assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
   detect.resolve({targets:[]});await drain();
   h.api.open(norTarget,{...expired,flash:{...expired.flash,recovery_required:true}});await drain();
-  assert.equal(h.get('fl-restart').disabled,true);
+  assert.equal(h.get('fl-new').hidden,true);
+  assert.match(h.get('fl-task-status').textContent,/恢复占用/);
 });
 
 test('selection confirmation shows remaining time before expiry', async () => {
   const h=harness();h.api.open(norTarget,{...norReady,flash:{...norReady.flash,selection_deadline:Date.now()/1000+90}});await drain();
   assert.match(h.get('fl-task-status').textContent,/确认剩余.*1:[23][09]/);
-  assert.equal(h.get('fl-expired').hidden,true);
+  assert.equal(h.get('fl-new').hidden,true);
 });
 
 test('new previews use the current defaults, editing drops the plan and execution resumes in its own stage', async () => {
@@ -551,6 +558,7 @@ test('OS package in a read workspace previews GPT and all package payloads witho
   const poll=[...h.timers.values()][0];poll();h.take('/api/task?id=').resolve({task:JSON.parse(JSON.stringify(norReady))});await drain();
   assert.equal(h.get('fl-mode').value,'full');assert.equal(h.get('fl-partitions').children[0].partitionId,'ESP');
   h.get('fl-select').click();const preview=h.take('/api/flash-selection');
+  assert.equal(preview.payload.target_storage, undefined, 'keep the initial automatically resolved disk intent');
   assert.equal(preview.payload.plan_id,'catalogue-os');assert.equal(preview.payload.layout_digest,'nor-live');
   assert.equal(preview.payload.mode,'full');assert.deepEqual(preview.payload.selections,[]);
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
@@ -580,6 +588,57 @@ test('NOR Firmware verification changes never inherit the default UFS system dis
   h.get('fl-select').click();const preview=h.take('/api/flash-selection');
   assert.equal('target_storage' in preview.payload,false);assert.equal(preview.payload.verify,'none');
   assert.equal(preview.payload.mode,'full');assert.deepEqual(preview.payload.selections,[]);
+});
+
+test('cancelled storage read unlocks the image picker and ignores late updates from the old task', async () => {
+  const h = harness();
+  h.api.open(norTarget, norReady);
+  await drain();
+  const oldPoll = [...h.timers.values()][0];
+  oldPoll();
+  const late = h.take('/api/task?id=');
+  h.get('fl-cancel').click();
+  h.take('/api/task-cancel').resolve({task:{...norReady, state:'cancelled', error:'task cancelled',
+    flash:{...norReady.flash, write_result:'not-started', recovery_required:false}}});
+  await drain();
+  assert.equal(h.get('flash-dialog').dataset.stage, 'setup');
+  for (const key of ['fl-local','fl-cache','fl-store']) assert.equal(h.get(key).disabled, false);
+  h.get('fl-cache').click();
+  h.chooseImage({id:'replacement', name:'next.tar.gz', size:1024});
+  late.resolve({task:norReady});
+  await drain();
+  assert.equal(h.get('fl-artifact').value, 'replacement');
+  assert.equal(h.get('fl-cache').disabled, false);
+  assert.equal(h.requests.some(r => r.url === '/api/task-start' || r.url === '/api/flash-selection'), false);
+});
+
+test('two-disk workspace keeps the explicit disk and companion throughout package review', async () => {
+  const h = harness();
+  const storages = ['scsi:0','nvme:0'].map(id => ({id, size:64*1024**3}));
+  const state = {...norReady, flash:{...norReady.flash, storage_inventory:{default_storage:'scsi:0', storages}}};
+  h.api.open(norTarget, state);
+  await drain();
+  const disk = h.get('fl-target-storage');
+  assert.equal(h.get('fl-target-storage-field').hidden, false);
+  assert.equal(disk.value, '');
+  assert.equal(disk.disabled, false);
+  disk.value = 'nvme:0';
+  disk.emit('change');
+  h.get('fl-cache').click();
+  h.chooseImage({id:'os', name:'os.tar.gz', size:2000, firmware:{id:'fw', name:'Firmware.tar.gz', size:1024}});
+  const first = h.take('/api/flash-selection');
+  assert.equal(first.payload.target_storage, 'nvme:0');
+  assert.equal(first.payload.firmware_artifact_id, 'fw');
+  first.resolve({plan:{id:'both', firmware_artifact_id:'fw', writes:[]}, inspection:{layout_digest:'table',
+    storages:[{id:'active', physical_device:'nvme:0', partitions:[{name:'rootfs', size:1000}]}]}});
+  await drain();
+  assert.equal(disk.value, 'nvme:0');
+  h.get('fl-select').click();
+  const next = h.take('/api/flash-selection');
+  assert.equal(next.payload.plan_id, 'both');
+  assert.equal(next.payload.target_storage, 'nvme:0');
+  assert.equal(next.payload.firmware_artifact_id, 'fw');
+  assert.equal(next.payload.preview, true);
 });
 
 test('a USB workspace task reached from its serial board keeps the task USB scope', async () => {
@@ -760,6 +819,35 @@ test('flash preview pins exact storage/partition and upload reference, never a h
   assert.equal(h.get('fl-start').disabled, false);
   h.get('fl-verify').value = 'required'; h.get('fl-verify').emit('change');
   assert.equal(h.get('fl-start').disabled, true, 'changing intent invalidates preview');
+});
+
+test('EC has a peer medium section for both retained firmware and a planned update', async () => {
+  for (const [options, label] of [[{skip_ec:true},'本次保留'],[{ec:{state:'selected',version_text:'v2'}},'将更新']]) {
+    const h = harness(); await open(h);
+    h.get('fl-plan').click();
+    h.take('/api/flash-plan').resolve({plan:{id:'media', ...options,
+      writes:[{storage:'disk-b',partition:'rootfs',size:32}]}});
+    await drain();
+    const sections = h.get('fl-preview').children.filter(node => node.className === 'fl-projection');
+    assert.match(sections[1].textContent,/EC · 控制器固件/);
+    assert.ok(sections[1].textContent.includes(label));
+    if (options.ec) assert.match(sections[1].textContent,/包内版本 · v2/);
+  }
+});
+
+test('full package explains NOR mapping and GPT replacement under the affected medium', async () => {
+  const h = harness(); await open(h);
+  h.get('fl-plan').click();
+  h.take('/api/flash-plan').resolve({plan:{id:'dual',writes:[
+    {component:'Firmware',storage:'NOR',target:'fsbl',size:128},
+    {component:'OS',storage:'nvme:0',target:'gpt',kind:'layout'}],
+    warnings:['Firmware: 本次不写分区表；擦除风险限定在所选 NOR 分区内。',
+      'OS: 将覆盖目标系统盘的 GPT，旧分区可能无法访问。确认新分区表后再写入包内系统分区。']}});
+  await drain();
+  const media = h.get('fl-preview').children.filter(el=>el.className==='fl-projection');
+  assert.match(media[0].textContent,/NOR.*仅擦除所选 NOR 分区/);
+  assert.match(media[1].textContent,/nvme:0.*重写 GPT 分区表.*原分区可能无法访问/);
+  assert.doesNotMatch(h.get('fl-preview').textContent,/本次不写分区表/);
 });
 
 test('full-image preview shows OS payload facts as text under the matching write', async () => {
@@ -1160,6 +1248,39 @@ test('automatic discovery probes one USB target and flashes without a UART or in
   assert.match(h.get('fl-usb-speed').textContent, /USB 3\.0.*5 Gb\/s/);
   assert.equal(h.get('fl-usb-fast').hidden, false);
   assert.equal(h.get('fl-usb-hint').textContent, '');
+});
+
+test('hotplug follows the selected USB connection without switching boards or disturbing choices', async () => {
+  const h = harness(), one = {target_id:'one', target_generation:'one-1'}, two = {target_id:'two', target_generation:'two-1'};
+  h.api.discover(); h.take('/api/flash-discover').resolve({targets:[]}); await drain();
+  async function tick(targets) {
+    h.api.refreshUSB(); h.api.refreshUSB();
+    h.take('/api/flash-discover').resolve({targets}); await drain();
+  }
+  async function probe(expected) {
+    h.take('/api/tasks').resolve({tasks:[]}); await drain();
+    const req = h.take('/api/flash-target');
+    assert.equal(req.payload.target_generation, expected.target_generation);
+    req.resolve({target:expected, capabilities}); await drain();
+  }
+  await tick([one]); await probe(one);
+  h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change');
+  h.get('fl-target-storage').value = 'disk-b';
+  await tick([one, two]); await tick([two, one]);
+  assert.equal(h.get('fl-device').value, 'one');
+  assert.equal(h.get('fl-target-storage').value, 'disk-b');
+  assert.equal(h.requests.length, 0);
+  await tick([two]);
+  assert.equal(h.get('fl-device').value, '');
+  assert.equal(h.requests.length, 0);
+  const returned = {...one, target_generation:'one-2'};
+  await tick([two, returned]); await probe(returned);
+  assert.equal(h.get('fl-device').value, 'one');
+  assert.equal(h.get('fl-artifact').value, artifact.id);
+  h.api.refreshUSB(); const late = h.take('/api/flash-discover');
+  h.get('fl-close').click(); late.resolve({targets:[]}); await drain();
+  h.api.refreshUSB(); assert.equal(h.requests.length, 0);
+  assert.equal(h.get('fl-device').value, 'one');
 });
 
 test('multiple USB candidates require an explicit target and pin its generation', async () => {
@@ -2096,11 +2217,10 @@ test('first-use fast flash offers binding and lets an unpaired BootROM be select
   assert.equal(h.get('fl-fast-bind').hidden,false);
   h.get('fl-fast-bind').click(); assert.deepEqual(bindings,[controlledBoard.serial]);
   h.get('fl-fast-url').value='https://images.example/os.tar.gz';
-  h.get('fl-fast-detect').click();
+  h.api.refreshUSB();
   const unpaired = {...scopedUSB,serial:'',console_link:{state:'paired'}};
   h.take('/api/flash-discover').resolve({targets:[unpaired,otherUSB]}); await drain();
   h.take('/api/flash-target').resolve({target:unpaired,capabilities:usbCapabilities}); await drain();
-  h.take('/api/hardware').resolve({actions:[]}); await drain();
   assert.equal(h.get('fl-target-picker').hidden,false);
   assert.deepEqual(h.get('fl-device').children.map(node=>node.value),['',unpaired.target_id]);
   assert.equal(h.requests.length,0);
@@ -2109,6 +2229,28 @@ test('first-use fast flash offers binding and lets an unpaired BootROM be select
   h.take('/api/flash-target').resolve({target:unpaired,capabilities:usbCapabilities}); await drain();
   assert.equal(h.get('fl-fast-start').disabled,false);
   assert.equal(h.get('fl-fast-url').value,'https://images.example/os.tar.gz');
+  assert.equal(h.requests.length,0);
+});
+
+test('normal flash exposes enumerated USB without a serial and rejects a conflicting selection probe', async () => {
+  const h = harness();
+  h.api.open(controlledBoard, null, false, 'normal');
+  h.take('/api/flash-capabilities').resolve({...capabilities,supported:false}); await drain();
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  const usb = {...scopedUSB,serial:'',label:'USB 2.3',mode:'unknown',supported:false,console_link:null,
+    usb:{port_path:[2,3],vendor_id:13852,product_id:4097}};
+  h.take('/api/flash-discover').resolve({available:true,targets:[usb,otherUSB]}); await drain();
+  h.take('/api/flash-target').resolve({target:usb,capabilities:usbCapabilities}); await drain();
+  h.take('/api/hardware').resolve({actions:[]}); await drain();
+  assert.equal(h.get('fl-target-picker').hidden,false);
+  assert.deepEqual(h.get('fl-device').children.map(o=>o.value),['',usb.target_id]);
+  h.get('fl-device').value=usb.target_id; h.get('fl-device').emit('change');
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  const selected=h.take('/api/flash-target');
+  assert.equal(selected.payload.target_generation,usb.target_generation);
+  selected.resolve({target:{...usb,console_link:{state:'mismatch'}},capabilities:usbCapabilities}); await drain();
+  assert.equal(h.get('fl-board-context').hidden,false);
+  assert.equal(h.get('fl-read-nor').disabled,true);
   assert.equal(h.requests.length,0);
 });
 
@@ -2169,6 +2311,47 @@ test('benchmarks skip disk selection by default and send the disk chosen for a w
     assert.equal(payload.measure_write, measureWrite);
     assert.equal(payload.system_storage, measureWrite ? 'nvme:0' : 'auto');
   }
+});
+
+test('selecting a K3 lists physical disks before preview, keeps the picker usable, and submits the selected disk', async () => {
+  const h = harness();
+  const target = {...norTarget, mode:'loader',chip:'k3',serial:'SN-K3'};
+  const caps = {...capabilities,chip:'k3',nor_workspace_supported:true,storage_inventory_supported:true};
+  h.api.open(target);
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-target').resolve({target, capabilities:caps}); await drain();
+  const read = h.take('/api/task-start');
+  assert.equal(read.payload.inventory_only, true);
+  assert.equal(read.payload.read_system, true);
+  assert.equal(read.payload.artifact_id, undefined);
+  const running = {kind:'flash',id:'disk-list',state:'running',flash_targets:[{target_id:target.target_id,generation:target.target_generation}],
+    flash:{operation:'storage-inventory',write_result:'not-started',request_serial:target.serial}};
+  read.resolve({task:running}); await drain();
+  assert.equal(h.get('fl-cache').disabled,false);
+  h.get('fl-cache').click();
+  const poll = [...h.timers.values()].pop(); poll();
+  const updated = {...target,target_generation:'loader-after-listing'};
+  const inventory = {default_storage:'scsi:0',storages:['scsi:0','nvme:0'].map(id=>({id,size:128000000000,capacity_verified:true}))};
+  h.take('/api/task?id=disk-list').resolve({task:{...running,state:'completed',result:{target_generation:updated.target_generation},
+    flash:{...running.flash, storage_inventory:inventory}}}); await drain();
+  h.take('/api/flash-discover').resolve({targets:[updated]}); await drain();
+  h.take('/api/flash-target').resolve({target:updated,capabilities:caps}); await drain();
+  h.chooseImage({id:'os-disk',name:'os.tar.gz',size:1024});
+  const disk=h.get('fl-target-storage');
+  assert.equal(disk.value,''); assert.equal(h.get('fl-target-storage-field').hidden,false);
+  assert.match(disk.textContent,/SSD.*UFS|UFS.*SSD/);
+  assert.equal(h.get('fl-status').textContent,'请选择目标系统盘');
+  assert.equal(h.get('fl-plan').disabled,true);
+  disk.value='nvme:0';disk.emit('change');
+  h.get('fl-plan').click();
+  const preview=h.take('/api/flash-plan');
+  assert.equal(preview.payload.target_storage,'nvme:0');
+  assert.equal(preview.payload.target_generation,updated.target_generation);
+  preview.resolve({plan:{id:'os-nvme',writes:[{storage:'nvme:0',partition:'rootfs',size:512}]}});
+  await drain();
+  const media=h.get('fl-preview').children.filter(el=>el.className==='fl-projection');
+  assert.ok(media.some(el=>el.textContent.includes('UFS / SCSI · scsi:0本次保留')));
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
 });
 
 test('unified storage read starts once from full mode and requests system metadata with NOR backup', async () => {
@@ -2237,6 +2420,20 @@ test('uncertain EEPROM write cannot be resubmitted as another change', async () 
   h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:inventory,boot_priority_change:{state:'unknown'}}});await drain();
   assert.equal(h.get('fl-boot-priority').disabled,true);assert.equal(h.get('fl-boot-save').disabled,true);
   assert.match(h.get('fl-boot-status').textContent,/未确认/);
+});
+
+test('flash history shows a disconnected target and its recorded commands without opening the device', async () => {
+  const h = harness();
+  h.get('fl-history').click();
+  h.take('/api/tasks?category=flashing').resolve({tasks:[{id:'failed-usb',kind:'flash',state:'failed',created:1,error:'loader timeout'}]});
+  await drain();
+  const row = h.get('fl-history-list').children[0];
+  assert.match(row.textContent, /失败.*failed-usb.*loader timeout/);
+  row.open = true; row.emit('toggle');
+  h.take('/api/flash-events?id=failed-usb').resolve({events:[{cursor:35,event:'command',command:'continue',status:'OKAY'}],next_after:35});
+  await drain();
+  assert.match(row.textContent, /35 · continue · OKAY/);
+  assert.equal(h.requests.some(r => /flash-capabilities|task-start|flash-plan/.test(r.url)),false);
 });
 
 (async () => {

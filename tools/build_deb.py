@@ -85,7 +85,7 @@ def flash_notice_files(directory):
 
 
 def build(output, version, runtime=None, flash_executor=None, flash_notices=None, flash_loaders=None,
-          complete=False, components_manifest=None):
+          complete=False, components_manifest=None, local_fast=False):
     if runtime is None:
         architecture = {'x86_64': 'amd64', 'aarch64': 'arm64',
                         'riscv64': 'riscv64'}.get(platform.machine())
@@ -215,7 +215,12 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
                 flash_dependency += ', lz4'
         desktop_dependency = ', libstdc++6, libgcc-s1' if desktop_runtime.is_dir() else ''
         write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), python3-cryptography, nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s%s\nRecommends: adb\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
-        subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)
+        compression = ['-Zgzip', '-z1'] if local_fast else []
+        with tempfile.TemporaryDirectory(dir=output) as package_dir:
+            candidate = Path(package_dir) / artifact.name
+            subprocess.run(['dpkg-deb', *compression, '--root-owner-group', '--build',
+                            str(stage), str(candidate)], check=True)
+            candidate.replace(artifact)
     return artifact
 
 
@@ -223,6 +228,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'dist',
                         help='package output directory (default: dist/)')
+    parser.add_argument('--local-fast', action='store_true', help='use fast gzip compression for local installations')
     parser.add_argument('--version', default=__version__)
     parser.add_argument('--runtime', type=Path, help='prepared architecture-specific MCP runtime')
     parser.add_argument('--components-manifest', type=Path, help='hash-pinned standalone installation input manifest')
@@ -237,4 +243,4 @@ if __name__ == '__main__':
         parser.error('--core-only cannot be combined with flashing components')
     print(build(args.output, args.version, runtime=args.runtime, flash_executor=args.flash_executor,
                 flash_notices=args.flash_notices, flash_loaders=args.flash_loaders,
-                complete=not args.core_only, components_manifest=args.components_manifest))
+                complete=not args.core_only, components_manifest=args.components_manifest, local_fast=args.local_fast))

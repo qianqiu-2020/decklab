@@ -31,6 +31,10 @@
           "file": "k3-ram-boot/u-boot.itb",
           "sha256": "acb32f12de373cdf2745bc0c2c7e566da2c0c5aafa3a1d69030dca8a09a3f65b"
         }
+      },
+      "usb2_uboot": {
+        "file": "k3/u-boot-usb2.itb",
+        "sha256": "c29f097d6a1633e11a12bf80b63f35f82589332b55f6db998960e6f0ebb1f882"
       }
     },
     "k1": {

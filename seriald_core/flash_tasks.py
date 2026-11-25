@@ -1439,6 +1439,8 @@ class FlashActions:
                                 raise TaskError('source image preview changed or expired', 409)
                         cached = (source_record if source_record['executor_plan'].get('image_type') in ('package', 'payload', 'payload.gz', 'bundle')
                                   and bool(source_record['intent'].get('skip_ec')) == bool(intent.get('skip_ec'))
+                                  and source_record['intent']['mode'] == intent['mode']
+                                  and source_record['intent'].get('target_storage', '') == intent.get('target_storage', '')
                                   and source_record['intent']['verify'] == intent['verify']
                                   and source_record['intent']['artifact_id'] == intent['artifact_id']
                                   and source_record['intent'].get('firmware_artifact_id') == intent.get('firmware_artifact_id')

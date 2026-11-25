@@ -45,6 +45,18 @@ class ArtifactTests(unittest.TestCase):
         finally:
             reopened.close()
 
+    def test_image_download_preserves_ctrl_z_at_chunk_boundaries(self):
+        chunks = (b'compressed\r\n\x1a', b'next\n\x1a')
+        data = b''.join(chunks)
+        row = self.spool.create('upload', 'image.tar.gz', len(data))
+        artifact_id = row['id']
+        self.spool.append(artifact_id, 0, chunks[0])
+        self.spool.append(artifact_id, 0, chunks[0])
+        self.spool.append(artifact_id, len(chunks[0]), chunks[1])
+        self.spool.seal(artifact_id, expected_sha256=hashlib.sha256(data).hexdigest())
+        with self.spool.open(artifact_id) as result:
+            self.assertEqual(result.read(), data)
+
     def test_upload_retry_checks_bytes_and_incomplete_upload_cannot_seal(self):
         row = self.spool.create('upload', 'firmware', 7)
         artifact_id = row['id']

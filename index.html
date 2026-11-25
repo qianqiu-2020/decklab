@@ -490,7 +490,7 @@ PasswordAuthentication yes</code></pre>
   <div class="fl-head"><div><strong id="fl-title">刷机工作区</strong><small id="fl-board" data-i18n-ignore></small>
     <div class="fl-usb-link" id="fl-usb-link" hidden aria-live="polite">
       <span id="fl-usb-speed"></span><span class="fl-usb-fast" id="fl-usb-fast" hidden>极速</span><span id="fl-usb-hint"></span>
-    </div></div><button id="fl-close" type="button">关闭</button></div>
+    </div></div><div><button id="fl-history" type="button">刷机记录</button> <button id="fl-close" type="button">关闭</button></div></div>
   <ol class="fl-stage-list" aria-label="刷机阶段"><li id="fl-step-setup" aria-current="step">准备镜像与设备</li><li id="fl-step-review">核对写入范围</li><li id="fl-step-run">执行与结果</li></ol>
   <div id="fl-stage-body" tabindex="-1">
   <div id="fl-setup">
@@ -505,14 +505,19 @@ PasswordAuthentication yes</code></pre>
       <div class="fl-source-actions" role="group" aria-label="选择镜像来源">
         <button id="fl-local" type="button">上传镜像文件</button><input id="fl-files" type="file" multiple hidden aria-label="上传镜像文件">
         <button id="fl-store" type="button">镜像商店</button><button id="fl-cache" type="button">已下载</button>
-        <button id="fl-directory" type="button">从控制机导入</button><button id="fl-url-toggle" type="button" aria-expanded="false" aria-controls="fl-url-panel">从 URL 下载到控制机</button>
+        <details id="fl-other-sources" class="fl-details fl-more"><summary>更多来源</summary>
+          <div class="fl-source-actions"><button id="fl-directory" type="button">从控制机导入</button><button id="fl-url-toggle" type="button" aria-expanded="false" aria-controls="fl-url-panel">从 URL 下载到控制机</button></div>
+        </details>
       </div>
       <div id="fl-url-panel" hidden>
         <label class="ft-field">镜像 URL<input id="fl-url" type="url" placeholder="粘贴链接即下载，手动输入后按回车" spellcheck="false"></label>
         <details class="fl-details"><summary>校验 SHA-256（可选，请先填写）</summary><label class="ft-field">预期 SHA-256（可选）<input id="fl-url-sha256" type="text" maxlength="64" spellcheck="false"></label></details>
         <button id="fl-download" type="button" hidden>重试下载</button>
       </div>
-      <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-source-clear" type="button" hidden>清除选择</button><button id="fl-delete" type="button" aria-controls="fl-delete-field" aria-expanded="false" disabled>删除镜像缓存</button></div>
+      <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-source-clear" type="button" hidden>清除选择</button></div>
+      <details id="fl-image-tools" class="fl-details fl-more" hidden><summary>镜像文件管理</summary>
+        <div class="fl-source-actions"><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-delete" type="button" aria-controls="fl-delete-field" aria-expanded="false" disabled>删除镜像缓存</button></div>
+      </details>
       <fieldset id="fl-delete-field" class="fl-alert" hidden><legend>确认删除镜像</legend>
         <p id="fl-delete-name" data-i18n-ignore style="overflow-wrap:anywhere"></p>
         <p>仅删除服务端保存的这份镜像，不影响开发板内容；任务占用中的镜像不能删除。</p>
@@ -536,7 +541,7 @@ PasswordAuthentication yes</code></pre>
         <div class="fl-preparation-head"><div><strong id="fl-image-preparation-status"></strong><span id="fl-image-preparation-bytes"></span><button type="button" id="fl-image-error-copy" hidden>复制错误详情</button></div><button id="fl-image-preparation-cancel" type="button" hidden>取消准备</button><button id="fl-image-preparation-retry" type="button" hidden>重新准备镜像</button></div>
         <progress id="fl-image-preparation-progress" max="100" aria-label="镜像准备进度"></progress>
         <div id="fl-image-overall" hidden><p id="fl-image-overall-text"></p><ol id="fl-image-stages"></ol></div>
-        <details id="fl-image-information-details" open hidden><summary>镜像布局</summary><div id="fl-image-information"></div></details>
+        <details id="fl-image-information-details" class="fl-details" hidden><summary>镜像布局</summary><div id="fl-image-information"></div></details>
         <div id="fl-image-recovery" hidden>
           <label><input id="fl-image-stopped" type="checkbox">已检查并确认原镜像准备进程停止</label>
           <input id="fl-image-recovery-reason" type="text" placeholder="确认依据" aria-label="镜像准备恢复依据">
@@ -553,9 +558,8 @@ PasswordAuthentication yes</code></pre>
         <span id="fl-board-link" role="status"></span></div>
       <button id="fl-prepare-board" class="pri" type="button" hidden>进入下载模式并读取设备存储</button>
     </div>
-    <div id="fl-target-picker" class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label><button id="fl-discover" type="button">刷新 USB 列表</button></div>
+    <div id="fl-target-picker" class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label></div>
     <div id="fl-fast-connect" class="ft-actions" hidden>
-      <button id="fl-fast-detect" type="button">检测 USB 下载设备</button>
       <button id="fl-fast-bind" type="button" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-device-usb"/></svg>绑定控制槽位</button>
     </div>
     <p id="fl-fast-attach-hint" class="fl-hint" hidden>请按物理 USB 位置确认本次目标。选择 USB 设备用于本次刷机。</p>
@@ -564,8 +568,8 @@ PasswordAuthentication yes</code></pre>
       <button id="fl-fast-read-disks" type="button">读取磁盘列表</button>
     </div>
     <p id="fl-fast-disk-status" class="fl-hint" role="status" hidden></p>
-    <details id="fl-storage-details" class="fl-details"><summary>板上已有内容与备份</summary>
       <div class="fl-read-action"><button id="fl-read-nor" type="button" disabled>读取设备存储</button></div>
+    <details id="fl-storage-details" class="fl-details"><summary>板上已有内容与备份</summary>
       <span id="fl-read-status" role="status" hidden></span>
       <div id="fl-live-gpt" hidden></div>
       <div class="fl-board-media" aria-label="板上介质">
@@ -587,7 +591,7 @@ PasswordAuthentication yes</code></pre>
         </details>
       </div>
     </details>
-    <details id="fl-connection-details" class="fl-details" hidden><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl></details>
+    <details id="fl-connection-details" class="fl-details" hidden><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl><button id="fl-discover" type="button">刷新 USB 列表</button></details>
   </section>
       <section id="fl-fast" class="fl-section" aria-label="系统包 URL" hidden>
         <div class="fl-discovery">
@@ -600,6 +604,20 @@ PasswordAuthentication yes</code></pre>
           <button id="fl-fast-normal" type="button">改用普通刷机更新固件</button>
         </div>
       </section>
+  <section id="fl-write-section" class="fl-section" aria-labelledby="fl-replace-title">
+    <h3 id="fl-replace-title">写入目标与方式</h3>
+    <div class="fl-inputs">
+      <label class="ft-field fl-mode-field">刷写方式<select id="fl-mode"><option value="full">整包刷写</option><option value="partitions">指定分区</option></select></label>
+      <label id="fl-loader-field" class="ft-field" hidden>临时刷机加载器<select id="fl-loader-source"><option value="builtin">DeckLab 内置</option><option value="image">镜像自带</option></select></label>
+    </div>
+    <label id="fl-ec-field" class="ft-check" hidden><input id="fl-write-ec" type="checkbox" checked><span id="fl-ec-label">更新 EC 固件</span></label>
+    <fieldset id="fl-partitions-field" hidden><legend class="visually-hidden">分区内容与替换文件</legend>
+      <div id="fl-partition-tools" class="fl-partition-tools"><label><input id="fl-all-partitions" type="checkbox"><span id="fl-all-label">全选分区</span></label></div>
+      <div class="fl-partition-heading" aria-hidden="true"><span>分区</span><span id="fl-current-heading">板上现有内容</span><span>将写入的文件</span></div>
+      <div id="fl-current-layout"></div>
+      <div id="fl-partitions"></div>
+    </fieldset>
+  </section>
       <details id="fl-tuning" class="fl-details" hidden>
         <summary>刷写配置 <span id="fl-tuning-state"></span></summary>
         <p class="fl-hint">在这块板上实测 USB、板上解压、控制机压缩速度和可选的写盘速度，为当前 USB 口生成刷写配置。</p>
@@ -611,21 +629,6 @@ PasswordAuthentication yes</code></pre>
         </label>
         <div class="fl-tuning-actions"><button id="fl-tuning-run" type="button" disabled>实测并生成配置</button><button id="fl-tuning-forget" type="button" hidden>清除此 USB 口的配置</button></div>
       </details>
-  <section id="fl-write-section" class="fl-section" aria-labelledby="fl-replace-title">
-    <h3 id="fl-replace-title">写入目标与方式</h3>
-    <div class="fl-inputs">
-      <label class="ft-field fl-mode-field">刷写方式<select id="fl-mode"><option value="full">整包刷写</option><option value="partitions">指定分区</option></select></label>
-      <label id="fl-loader-field" class="ft-field" hidden>临时刷机加载器<select id="fl-loader-source"><option value="builtin">DeckLab 内置</option><option value="image">镜像自带</option></select></label>
-      <label class="ft-field" id="fl-target-storage-field">要写入的板上磁盘<select id="fl-target-storage"></select><small>有多块候选磁盘时，请选择要刷写的那一块。</small></label>
-    </div>
-    <label id="fl-ec-field" class="ft-check" hidden><input id="fl-write-ec" type="checkbox" checked><span id="fl-ec-label">更新 EC 固件</span></label>
-    <fieldset id="fl-partitions-field" hidden><legend class="visually-hidden">分区内容与替换文件</legend>
-      <div id="fl-partition-tools" class="fl-partition-tools"><label><input id="fl-all-partitions" type="checkbox"><span id="fl-all-label">全选分区</span></label></div>
-      <div class="fl-partition-heading" aria-hidden="true"><span>分区</span><span id="fl-current-heading">板上现有内容</span><span>将写入的文件</span></div>
-      <div id="fl-current-layout"></div>
-      <div id="fl-partitions"></div>
-    </fieldset>
-  </section>
   </div>
   <section id="fl-review" class="fl-section" aria-labelledby="fl-review-title" hidden>
     <h3 id="fl-review-title">预计写入后布局</h3>
@@ -649,10 +652,6 @@ PasswordAuthentication yes</code></pre>
     <p id="fl-result-firmware" class="fl-hint" data-i18n-ignore hidden></p>
     <div id="fl-result-backup"></div>
   </section>
-  <div id="fl-expired" class="fl-alert" role="alert" hidden>
-    <p>确认已超时，本次未开始写入。镜像可复用；重新检测后可再次预览刷写。</p>
-    <button id="fl-restart" type="button">重新检测设备</button>
-  </div>
   <fieldset id="fl-recovery-field" class="fl-alert" hidden><legend>恢复占用待处理</legend>
     <p>执行器退出尚未确认。仅在你已确认外部刷机进程停止后释放占用；释放不表示写入成功，也不改变原任务结果。</p>
     <label class="ft-field">确认依据<input id="fl-recovery-reason" type="text" maxlength="1000" placeholder="填写已确认进程停止的检查方式和结果"></label>
@@ -674,7 +673,13 @@ PasswordAuthentication yes</code></pre>
     <p id="fl-event-status" role="status"></p>
   </details>
   </div>
-  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-edit" type="button" hidden>返回修改</button><button id="fl-new" type="button" hidden>准备下一次刷写</button><div id="fl-confirm-options"><label>回读校验 <select id="fl-verify"><option value="none" selected>关闭</option><option value="if-supported">能力支持时校验</option><option value="required">必须通过</option></select></label><label><input type="checkbox" id="fl-reset-after">刷完自动复位</label></div><button id="fl-fast-start" class="pri" type="button" hidden disabled>确认覆盖并刷写</button><button id="fl-ram-boot" class="pri" type="button" hidden>从镜像内存启动</button><button id="fl-plan" class="pri" type="button">预览写入范围</button><button id="fl-reenter" type="button" hidden>重新进入下载模式</button><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-edit" type="button" hidden>返回修改</button><button id="fl-new" type="button" hidden>准备下一次刷写</button><label id="fl-target-storage-field" hidden>目标系统盘 <select id="fl-target-storage"></select></label><div id="fl-confirm-options"><label>回读校验 <select id="fl-verify"><option value="none" selected>关闭</option><option value="if-supported">能力支持时校验</option><option value="required">必须通过</option></select></label><label><input type="checkbox" id="fl-reset-after">刷完自动复位</label></div><button id="fl-fast-start" class="pri" type="button" hidden disabled>确认覆盖并刷写</button><button id="fl-ram-boot" class="pri" type="button" hidden>从镜像内存启动</button><button id="fl-plan" class="pri" type="button">预览写入范围</button><button id="fl-reenter" type="button" hidden>重新进入下载模式</button><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+</dialog>
+<dialog id="fl-history-dialog" class="identity-association-dialog" aria-labelledby="fl-history-title">
+  <header class="ft-head"><strong id="fl-history-title">控制机刷机记录</strong><button id="fl-history-close" type="button">关闭</button></header>
+  <div id="fl-history-list"></div>
+  <p id="fl-history-status" role="status"></p>
+  <div class="ft-actions"><button id="fl-history-prev" type="button">上一页</button><button id="fl-history-next" type="button">下一页</button></div>
 </dialog>
 <dialog id="fl-reenter-dialog" class="identity-association-dialog" aria-labelledby="fl-reenter-title">
   <div class="agent-share-head"><strong id="fl-reenter-title">重新进入下载模式？</strong></div>

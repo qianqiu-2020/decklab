@@ -239,6 +239,19 @@ class SerialTerminalTests(unittest.TestCase):
         self.assertEqual(self.device.terminal.screen.metadata()['geometry'], {'cols': 140, 'rows': 42})
         self.write.assert_not_called()
 
+    def test_first_linux_log_viewport_after_input_preserves_the_input_controller(self):
+        self.device.terminal.screen.control('web', 'previous-tab')
+        self.device.terminal.input_pending = True
+        self.feed(b'\r\n[    0.000000] Booting Linux on hartid 0\r\n')
+        result = self.resize(client='new-tab', presentation=True)
+        state = result.payload['terminal_state']
+        self.assertEqual(state['geometry'], {'cols': 140, 'rows': 42})
+        self.assertEqual(state['controller']['client_id'], 'previous-tab')
+        self.assertFalse(state['needs_boot_viewport'])
+        self.assertTrue(self.resize(client='other', cols=90, presentation=True).payload['skipped'])
+        self.assertTrue(self.device.terminal.input_pending)
+        self.write.assert_not_called()
+
     def test_split_resize_and_boot_reset(self):
         state = SerialTerminalState(self.device)
         state.observe(b'\x1b[8;42;')

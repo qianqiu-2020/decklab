@@ -93,6 +93,11 @@
   .identity-association-dialog{width:min(540px,calc(100vw - 28px));max-height:calc(100dvh - 28px);overflow:auto;
     padding:22px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);
     color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.3)}
+  #fl-history-dialog{width:min(820px,calc(100vw - 28px))}
+  #fl-history-list details{border-bottom:1px solid var(--line);padding:10px 0}
+  #fl-history-list summary{cursor:pointer;font-weight:600}
+  #fl-history-list small{color:var(--ink-2)}
+  #fl-history-list pre{max-height:38vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
   .identity-association-dialog::backdrop{background:rgba(9,23,25,.6)}
   .identity-association-dialog p{color:var(--ink-2);font-size:13px;line-height:1.65}
   .ssh-credentials-dialog{width:min(620px,calc(100vw - 28px));max-height:calc(100dvh - 28px);overflow:auto;
@@ -388,6 +393,16 @@
   #fl-sources{margin:14px 0;padding:0}
   .fl-mode-field{max-width:320px}
   .fl-source-actions{display:flex;flex-wrap:wrap;gap:8px}
+  .fl-more{margin:0;align-self:center}
+  .fl-more>summary{min-height:32px;box-sizing:border-box}
+  .fl-source-actions>.fl-more[open]{flex-basis:100%}
+  #fl-package-contents:empty{display:none}
+  @media(min-width:900px){
+    .flash-dialog[data-flow="normal"] #fl-setup:not([hidden]){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:12px;padding-block:12px}
+    .flash-dialog[data-flow="normal"] #fl-setup>*{grid-column:1/-1;margin:0;min-width:0}
+    .flash-dialog[data-flow="normal"] #fl-setup>:is(#fl-image-section,#fl-connect){grid-column:auto}
+    #fl-sources{margin-block:0}
+  }
   .fl-current-source{display:flex;align-items:center;gap:10px;padding:12px 0;border-block:1px solid var(--line)}
   #fl-source-summary{flex:1;min-width:0;overflow-wrap:anywhere;font-family:var(--font-mono);font-size:12px}
   .fl-current-source button{flex:none;font-size:12px}
@@ -464,6 +479,8 @@
   .fl-map-review details{margin-top:6px;color:var(--ink-2)}
   .fl-map-review details>strong{display:block;margin-top:9px}
   .fl-projection{margin:14px 0 18px}
+  .fl-projection + .fl-projection{border-top:1px solid var(--line);padding-top:12px}
+  .fl-projection > .fl-map-heading{font-size:14px}
   .fl-scope-table td:nth-child(2),.fl-scope-table td:nth-child(3){white-space:nowrap}
   .fl-scope-table td:last-child{overflow-wrap:anywhere}
   @media(max-width:600px){.fl-preview .fl-scope-table :is(td,th){padding:5px}.fl-scope-table td:last-child{max-width:33vw}}
@@ -516,6 +533,8 @@
   .fl-event-raw .ft-actions{margin-top:8px}
   #fl-events{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 var(--font-mono);margin:10px 0 0;padding:10px;background:var(--term);color:var(--term-ink);border-radius:6px}
   .fl-actions{position:sticky;bottom:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px -22px 0;padding:12px 22px;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -8px 20px -16px rgba(0,0,0,.35)}
+  #fl-target-storage-field{display:flex;align-items:center;gap:6px;max-width:100%}
+  #fl-target-storage{min-width:0;max-width:clamp(12em,24vw,24em)}
   #fl-confirm-options{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin:0;padding:4px 12px;border-inline-start:2px solid var(--accent)}
   #fl-confirm-options[hidden]{display:none}
   #fl-confirm-options label{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
