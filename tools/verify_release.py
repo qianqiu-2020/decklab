@@ -128,7 +128,7 @@ def inspect_release(directory, version):
     setup = f'decklab-{version}-windows-x64-setup.exe'
     windows_receipt = 'windows-install-verification.json'
     aliases = {'decklab-windows-x64-setup.exe': setup,
-               'decklab_latest_amd64.deb': deb, 'decklab_latest_all.deb': deb}
+               'decklab_latest_amd64.deb': deb}
     checksums(directory, 'SHA256SUMS.txt', (deb, setup, windows_receipt, *aliases))
     for alias, canonical in aliases.items():
         if hashlib.sha256((directory / alias).read_bytes()).digest() != hashlib.sha256(

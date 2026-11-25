@@ -23,7 +23,8 @@ def prepare(root, local_fast=False, paramiko_source=None):
         for value in (sys.executable, sys.version, sysconfig.get_platform(),
                       str(root), 'paramiko-source' if paramiko_source else 'standard'):
             digest.update(value.encode() + b'\0')
-        for path in (root / 'requirements-windows.txt', Path(__file__), root / 'tools/build_windows.ps1'):
+        for path in sorted(root.glob('requirements-*.txt')) + [Path(__file__), root / 'tools/build_windows.ps1']:
+            digest.update(path.name.encode() + b'\0')
             digest.update(hashlib.sha256(path.read_bytes()).digest())
         if paramiko_source:
             digest.update(hashlib.sha256(Path(paramiko_source).read_bytes()).digest())

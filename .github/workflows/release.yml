@@ -39,8 +39,6 @@ jobs:
         run: |
           cd packages
           cp "decklab_${GITHUB_REF_NAME#v}_amd64.deb" decklab_latest_amd64.deb
-          # Keep existing x86 download links usable; the package metadata is amd64.
-          cp "decklab_${GITHUB_REF_NAME#v}_amd64.deb" decklab_latest_all.deb
           sha256sum "decklab_${GITHUB_REF_NAME#v}_amd64.deb" > linux-SHA256SUMS.txt
           cp "decklab-${GITHUB_REF_NAME#v}-windows-x64-setup.exe" decklab-windows-x64-setup.exe
           sha256sum *.deb *.exe windows-install-verification.json > SHA256SUMS.txt

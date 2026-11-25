@@ -8,7 +8,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.bundle_manifest import NAME, verify
-from tools.verify_release import inspect_complete_install, DESKTOP_RUNTIME, inspect_desktop_runtime, verify_notices
+from tools.collect_windows_notices import verify as verify_notices
+from tools.verify_release import inspect_complete_install, DESKTOP_RUNTIME, inspect_desktop_runtime
 from decklab_core.version import __version__
 
 

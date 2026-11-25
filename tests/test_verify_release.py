@@ -43,7 +43,6 @@ class ReleaseVerificationTests(unittest.TestCase):
         self.setup = 'decklab-1.19.0-windows-x64-setup.exe'
         self.receipt = 'windows-install-verification.json'
         self.aliases = {'decklab_latest_amd64.deb': self.deb,
-                        'decklab_latest_all.deb': self.deb,
                         'decklab-windows-x64-setup.exe': self.setup}
         (self.root / self.deb).write_bytes(b'fixture deb')
         (self.root / self.setup).write_bytes(b'MZ fixture installer')
@@ -61,11 +60,11 @@ class ReleaseVerificationTests(unittest.TestCase):
 
     def test_aliases_must_match_and_installer_receipt_is_bound_to_exact_file(self):
         self.fixture()
-        (self.root / 'decklab_latest_all.deb').write_bytes(b'different deb')
+        (self.root / 'decklab_latest_amd64.deb').write_bytes(b'different deb')
         self.write_checksums('SHA256SUMS.txt', self.artifacts)
         with self.assertRaisesRegex(ValueError, 'alias differs'):
             inspect_release(self.root, '1.19.0')
-        shutil.copyfile(self.root / self.deb, self.root / 'decklab_latest_all.deb')
+        shutil.copyfile(self.root / self.deb, self.root / 'decklab_latest_amd64.deb')
         receipt = json.loads((self.root / self.receipt).read_text())
         receipt['sha256'] = '1' * 64
         (self.root / self.receipt).write_text(json.dumps(receipt))
