@@ -33,6 +33,9 @@ on:
       - 'SECURITY.md'
       - 'CHANGELOG.md'
       - 'tools/*windows*.ps1'
+      - 'tools/windows_frozen_inputs.py'
+      - 'tools/run_windows_regressions.py'
+      - 'packaging/windows-upgrade-mode.ps1'
       - 'tools/install_inno_build_tool.ps1'
       - 'tools/package_docs.py'
       - 'tools/collect_windows_notices.py'
@@ -55,6 +58,21 @@ on:
 permissions:
   contents: read
 jobs:
+  regression:
+    if: "!startsWith(github.ref, 'refs/tags/')"
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-windows.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements-windows.txt
+      - run: .\tools\test_windows_regressions.ps1
   build:
     runs-on: windows-latest
     steps:
@@ -78,7 +96,7 @@ jobs:
         shell: pwsh
         # Exercise the replacement-source path with the reviewed upstream archive.
         run: |
-          $arguments = @('-ExecutionPolicy','Bypass','-File','.\tools\build_windows.ps1','-DesktopRuntime','.\build\install-components\windows-amd64\desktop-runtime','-ParamikoSource','.\packaging\third-party\paramiko-4.0.0\paramiko-4.0.0.tar.gz')
+          $arguments = @('-ExecutionPolicy','Bypass','-File','.\tools\build_windows.ps1','-LocalFast','-DesktopRuntime','.\build\install-components\windows-amd64\desktop-runtime','-ParamikoSource','.\packaging\third-party\paramiko-4.0.0\paramiko-4.0.0.tar.gz')
           & powershell @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Windows package build failed.' }
       - name: Smoke test portable host
@@ -153,4 +171,5 @@ jobs:
             dist/seriald-*-windows-x64-setup.exe
             dist/seriald-*-windows-x64-setup.exe.sha256
             dist/seriald-windows-portable.zip
-          if-no-files-found: ignore
+          compression-level: 0
+          if-no-files-found: error

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+import zipfile
 
 NAME = 'bundle-manifest.json'
 
@@ -80,10 +81,32 @@ def verify(root):
     return manifest
 
 
+def pack(root, output, compression):
+    root, output = Path(root), Path(output)
+    manifest = verify(root)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+        with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED, compresslevel=compression) as archive:
+            for name in [*manifest['files'], NAME]:
+                archive.write(root / name, root.name + '/' + name)
+        temporary.replace(output)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('bundle', type=Path)
     parser.add_argument('--verify', action='store_true')
+    parser.add_argument('--zip', type=Path)
+    parser.add_argument('--compression', type=int, choices=range(1, 10), default=6)
     args = parser.parse_args()
+    if args.zip:
+        pack(args.bundle, args.zip, args.compression)
+        parser.exit()
+
     result = verify(args.bundle) if args.verify else create(args.bundle)
     print('Bundle %s: %d files' % ('verified' if args.verify else 'inventoried', len(result['files'])))

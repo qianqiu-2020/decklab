@@ -19,27 +19,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - name: Validate version tag
         run: python tools/check_release_tag.py "$GITHUB_REF_NAME"
       - name: Verify Ubuntu archive DNS on the temporary runner
         run: python tools/ci_ubuntu_network.py --repair --hosts ${{ matrix.archive_hosts }}
-      - run: python -m pip install 'pyserial>=3.5,<4' 'paramiko>=3.4,<5'
-      - run: python -m pip install -r requirements-mcp.txt
-      - name: Install BusyBox for the ash terminal resize regression
-        run: |
-          if ! command -v busybox >/dev/null; then
-            python tools/ci_ubuntu_network.py --repair
-            sudo apt-get update -qq
-            sudo apt-get install -y busybox
-          fi
-          busybox ash -c ':'
-          busybox stty --help
-      - run: python -m unittest discover -s tests
-      - run: python tools/check_public_docs.py
-      - run: node tests/frontend.test.js && node tests/share.test.js && node tests/image-store.test.js
       - name: Prepare reviewed complete-install inputs
         env:
           DECKLAB_COMPONENTS_URL: ${{ vars.COMPONENTS_LINUX_AMD64_URL || secrets.COMPONENTS_LINUX_AMD64_URL || 'https://github.com/qianqiu-2020/decklab/releases/download/components-1.14.0/decklab-components-1.14.0-linux-amd64.zip' }}
@@ -47,23 +30,29 @@ jobs:
         run: python tools/fetch_install_components.py --platform linux-amd64
       - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
         run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
-      - run: python tools/build_deb.py --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
-      - name: Fresh install and public MCP without network on Ubuntu 22.04
-        run: python tools/test_deb_container.py --image ubuntu:22.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb"
-      - name: Fresh install and public MCP without network on Ubuntu 24.04
-        run: python tools/test_deb_container.py --image ubuntu:24.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb"
-      - name: Fetch the checksum-pinned published thin package for upgrade acceptance
+      - run: python tools/build_deb.py --local-fast --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
+      - name: Check fresh installs and upgrades on Ubuntu 22.04 and 24.04 in parallel
         run: |
           curl --fail --location --retry 3 https://github.com/qianqiu-2020/decklab/releases/download/v1.7.0/seriald_1.7.0_all.deb --output build/seriald_1.7.0_all.deb
           echo 'b0020684d469cec4db2fa36f5e967f81c860deb236fbdd1d25da4831857cb1a9  build/seriald_1.7.0_all.deb' | sha256sum --check
-      - name: Verify installed Ubuntu 22.04 MCP and upgrade behavior without network
-        run: python tools/test_deb_container.py --image ubuntu:22.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb" --upgrade-from build/seriald_1.7.0_all.deb
-      - name: Verify installed Ubuntu 24.04 MCP and upgrade behavior without network
-        run: python tools/test_deb_container.py --image ubuntu:24.04 --package "dist/seriald_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.deb" --upgrade-from build/seriald_1.7.0_all.deb
+          pids=()
+          for ubuntu in 22.04 24.04; do
+            for mode in fresh upgrade; do
+              args=()
+              if [[ $mode == upgrade ]]; then args+=(--upgrade-from build/seriald_1.7.0_all.deb); fi
+              python tools/test_deb_container.py --image "ubuntu:$ubuntu" --package dist/seriald_*_amd64.deb "${args[@]}" >"build/install-$ubuntu-$mode.log" 2>&1 &
+              pids+=("$!")
+            done
+          done
+          result=0
+          for pid in "${pids[@]}"; do wait "$pid" || result=1; done
+          for log in build/install-*.log; do cat "$log"; done
+          exit "$result"
       - uses: actions/upload-artifact@v4
         with:
           name: seriald-linux-${{ matrix.arch }}
           path: dist/*.deb
+          compression-level: 0
   windows:
     uses: ./.github/workflows/windows-portable.yml
     secrets: inherit

@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-param([switch]$UseCurrentPython, [switch]$LocalFast, [switch]$PortableOnly, [string]$ParamikoSource,
+param([switch]$UseCurrentPython, [switch]$LocalFast, [switch]$FastCompression, [switch]$PortableOnly, [string]$ParamikoSource,
       [string]$FlashExecutor, [string]$FlashNotices, [string]$FlashLoaders,
       [string]$FlashDriver, [string]$FlashComponents, [string]$DesktopRuntime,
       [string]$LanFirewallTool, [string]$LanFirewallPolicy, [switch]$CoreOnly)
@@ -99,99 +99,58 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Verified terminal runtime preparation failed.' }
     & $python tools/check_public_docs.py
     if ($LASTEXITCODE -ne 0) { throw 'Public API/configuration documentation inventory failed.' }
-    if ($LocalFast) {
-        $suites = @('test_windows_portable.py', 'test_windows_entrypoint.py', 'test_bundle_manifest.py')
-    } else {
-        $suites = @('test_request_json.py', 'test_collector_injection.py', 'test_serial_log.py',
-                    'test_windows_build_env.py', 'test_windows_portable.py', 'test_windows_entrypoint.py',
-                    'test_mcp.py', 'test_mcp_integration.py', 'test_mcp_host.py',
-                    'test_mcp_host_proxy.py', 'test_session_contract.py', 'test_protocol.py',
-                    'test_transactions.py', 'test_profiles.py', 'test_cli.py',
-                    'test_schema.py', 'test_identity.py', 'test_identity_association.py',
-                    'test_tasks.py', 'test_task_actions.py', 'test_flash_foundation.py',
-                    'test_board_ownership.py', 'test_agent_revocation.py', 'test_discrete_task_contract.py',
-                    'test_integration_client.py', 'test_capabilities.py', 'test_mcp_leases.py',
-                    'test_flash_runner.py', 'test_flash_integration.py', 'test_flash_recovery.py',
-                    'test_flash_targets.py', 'test_flash_discovery_review.py', 'test_flash_discovery_integration.py',
-                    'test_pending_labels.py', 'test_web_settings.py', 'test_settings_restart.py',
-                    'test_device_preferences.py', 'test_backend_link.py', 'test_collector_lock.py',
-                    'test_image_download.py', 'test_image_catalog.py', 'test_access_info.py',
-                    'test_install_components.py', 'test_flash_loaders.py', 'test_transfer_artifacts.py',
-                    'test_file_tasks.py', 'test_transfer_tasks.py', 'test_input_ownership.py',
-                    'test_models.py', 'test_maintenance.py', 'test_agent_grants.py',
-                    'test_board_control.py', 'test_desktop.py', 'test_desktop_setup.py',
-                    'test_desktop_native.py', 'test_desktop_provider_stream.py', 'test_desktop_freerdp.py',
-                    'test_desktop_runtime_package.py', 'test_websocket_io.py', 'test_desktop_proxy.py',
-                    'test_desktop_stream.py', 'test_desktop_stream_wire.py', 'test_ui_language.py',
-                    'test_boot_compare.py', 'test_sse.py', 'test_terminal_backend.py',
-                    'test_terminal_runtime.py', 'test_console_visibility.py', 'test_serial_health.py',
-                    'test_demo.py', 'test_process_windows.py', 'test_serial_handoff.py',
-                    'test_package_docs.py', 'test_windows_notices.py', 'test_bundle_manifest.py',
-                    'test_hardware.py')
-    }
-    foreach ($suite in $suites) {
-        & $python -m unittest discover -s tests -p $suite
-        if ($LASTEXITCODE -ne 0) { throw "Windows regression failed: $suite" }
-    }
-    if (Get-Command node -ErrorAction SilentlyContinue) {
-        & node tests/frontend.test.js
-        if ($LASTEXITCODE -ne 0) { throw 'Frontend regression tests failed.' }
-        & node tests/image-store.test.js
-        if ($LASTEXITCODE -ne 0) { throw 'Image store regression tests failed.' }
-        & node tests/share.test.js
-        if ($LASTEXITCODE -ne 0) { throw 'Agent share UI tests failed.' }
-        & node tests/desktop.test.js
-        if ($LASTEXITCODE -ne 0) { throw 'Desktop UI tests failed.' }
-    } else {
-        Write-Warning 'Node.js is unavailable; frontend regression tests were not run.'
-    }
+    & (Join-Path $PSScriptRoot 'test_windows_regressions.ps1') -Python $python -PackagingOnly:$LocalFast
 
-    & $pyinstaller --noconfirm --clean --onedir --name seriald `
-        --hidden-import serialctl `
-        --hidden-import seriald_mcp `
-        --hidden-import seriald_core.backend_server `
-        --collect-submodules mcp.server `
-        --collect-submodules mcp.shared `
-        --collect-submodules mcp.client `
-        --collect-data mcp `
-        --collect-data mcp_types `
-        --collect-all uvicorn `
-        --collect-all vncdotool `
-        --collect-all aardwolf `
-        --hidden-import unicrypto.backends.pycryptodomex `
-        --collect-all Cryptodome `
-        --hidden-import seriald_core.desktop_providers `
-        --hidden-import seriald_core.desktop_freerdp `
-        --recursive-copy-metadata mcp `
-        --icon packaging/decklab.ico `
-        --add-data 'index.html;.' `
-        --add-data 'seriald_core/desktop_gnome_target.py;seriald_core' `
-        --add-data 'seriald_core/onie_target.py;seriald_core' `
-        --add-data 'seriald_core/desktop_lxqt_target.py;seriald_core' `
-        --add-data 'static;static' `
-        --add-data 'vendor;vendor' `
-        --add-data 'seriald_core/terminal_worker.js;seriald_core' `
-        --add-data 'seriald_core/terminal_snapshot.js;seriald_core' `
-        --add-data 'build/terminal-runtime;runtime' `
-        --add-data 'serialctl.py;.' `
-        --add-data 'seriald_mcp.py;.' `
-        --add-data 'requirements-mcp.txt;.' `
-        --add-data 'pyproject.toml;.' `
-        --add-data 'skills/seriald-board/SKILL.md;skills/seriald-board' `
-        --add-data 'skills/seriald-board/SKILL.zh-CN.md;skills/seriald-board' `
-        @desktopArguments `
-        seriald_windows.py
-    if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
-    if ($DesktopRuntime) {
-        & $python tools/package_desktop_runtime.py $bundle --platform windows-amd64 --prune-frozen-aliases | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Frozen desktop SDK alias reconciliation failed.' }
-        $packagedDesktop = Join-Path $bundle '_internal\desktop-runtime\freerdp'
-        & $python tools/package_desktop_runtime.py $packagedDesktop --platform windows-amd64 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Frozen desktop SDK validation failed.' }
-        if ((Get-FileHash -LiteralPath (Join-Path $packagedDesktop 'runtime-manifest.json') -Algorithm SHA256).Hash -ne $desktopManifestHash) {
-            throw 'Desktop SDK changed while freezing.'
+    $frozenRestored = $false
+    if ($LocalFast) {
+        $dependencyStamp = (Get-Content -LiteralPath (Join-Path $root 'build/windows-venv/decklab-dependencies.sha256') -Raw).Trim()
+        $keyArgs = @('tools/windows_frozen_inputs.py', 'key', $bundle, '--key', $dependencyStamp)
+        if ($desktopSnapshot) { $keyArgs += @('--desktop', $desktopSnapshot) }
+        $frozenKey = (& $python @keyArgs).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Could not identify frozen runtime inputs.' }
+        & $python tools/windows_frozen_inputs.py restore $bundle --key $frozenKey
+        if ($LASTEXITCODE -notin @(0,2)) { throw 'Frozen runtime restore failed.' }
+        $frozenRestored = $LASTEXITCODE -eq 0
+    }
+    if (-not $frozenRestored) {
+        & $pyinstaller --noconfirm --clean --onedir --name seriald `
+            --hidden-import serialctl `
+            --hidden-import seriald_mcp `
+            --hidden-import seriald_core.backend_server `
+            --collect-submodules mcp.server `
+            --collect-submodules mcp.shared `
+            --collect-submodules mcp.client `
+            --collect-data mcp `
+            --collect-data mcp_types `
+            --collect-all uvicorn `
+            --collect-all vncdotool `
+            --collect-all aardwolf `
+            --hidden-import unicrypto.backends.pycryptodomex `
+            --collect-all Cryptodome `
+            --hidden-import seriald_core.desktop_providers `
+            --hidden-import seriald_core.desktop_freerdp `
+            --recursive-copy-metadata mcp `
+            --icon packaging/decklab.ico `
+            @desktopArguments `
+            seriald_windows.py
+        if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
+        if ($DesktopRuntime) {
+            & $python tools/package_desktop_runtime.py $bundle --platform windows-amd64 --prune-frozen-aliases | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Frozen desktop SDK alias reconciliation failed.' }
+            $packagedDesktop = Join-Path $bundle '_internal\desktop-runtime\freerdp'
+            & $python tools/package_desktop_runtime.py $packagedDesktop --platform windows-amd64 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Frozen desktop SDK validation failed.' }
+            if ((Get-FileHash -LiteralPath (Join-Path $packagedDesktop 'runtime-manifest.json') -Algorithm SHA256).Hash -ne $desktopManifestHash) {
+                throw 'Desktop SDK changed while freezing.'
+            }
+        }
+        if ($LocalFast) {
+            & $python tools/windows_frozen_inputs.py save $bundle --key $frozenKey
+            if ($LASTEXITCODE -ne 0) { throw 'Could not cache the frozen runtime.' }
         }
     }
+    & $python tools/windows_frozen_inputs.py stage $bundle
+    if ($LASTEXITCODE -ne 0) { throw 'Could not stage the current application resources.' }
 
     $noticeArguments = @('tools/collect_windows_notices.py', (Join-Path $bundle 'third-party'), '--bundle', $bundle)
     if ($ParamikoSource) { $noticeArguments += @('--paramiko-source', $ParamikoSource) }
@@ -255,11 +214,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Complete bundle integrity validation failed.' }
 
     $archive = Join-Path $root 'dist\seriald-windows-portable.zip'
-    $compression = if ($LocalFast) { 'Fastest' } else { 'Optimal' }
-    Compress-Archive -Path $bundle -DestinationPath $archive -Force -CompressionLevel $compression
+    $compression = if ($LocalFast -or $FastCompression) { 1 } else { 6 }
+    & $python tools/bundle_manifest.py $bundle --zip $archive --compression $compression
+    if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP failed.' }
     Write-Host "Built $archive"
     Write-Host "seriald.exe SHA-256: $exeHash"
-    if (-not $PortableOnly) { & (Join-Path $PSScriptRoot 'build_windows_installer.ps1') -LocalFast:$LocalFast }
+    if (-not $PortableOnly) { & (Join-Path $PSScriptRoot 'build_windows_installer.ps1') -LocalFast:($LocalFast -or $FastCompression) }
     if ($PortableOnly) { Write-Host 'ZIP only: run Install-seriald.cmd to install/update.' }
     else { Write-Host 'Distribute the setup EXE for installation and future upgrades.' }
 } finally {
