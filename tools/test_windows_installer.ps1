@@ -91,6 +91,11 @@ try {
     $sourceIcon = Join-Path $root 'packaging\decklab.ico'
     if ((Get-FileHash -LiteralPath $iconPath).Hash -ne (Get-FileHash -LiteralPath $sourceIcon).Hash) { throw 'Installed shortcut icon is wrong.' }
     $shell = New-Object -ComObject WScript.Shell
+    $files = New-Object -ComObject Scripting.FileSystemObject
+    function Same-FilePath([string]$Actual, [string]$Expected) {
+        if (-not $files.FileExists($Actual) -or -not $files.FileExists($Expected)) { return $false }
+        return $files.GetFile($Actual).ShortPath -eq $files.GetFile($Expected).ShortPath
+    }
     $group = Join-Path ([Environment]::GetFolderPath('Programs')) 'DeckLab'
     $shortcutFiles = @(Get-ChildItem -LiteralPath $group -Filter '*.lnk')
     $launchLinks = @($shortcutFiles | ForEach-Object {
@@ -106,10 +111,14 @@ try {
     if ($launchLinks.Count -ne 3) { throw "Expected three start-menu launch shortcuts; found $($launchLinks.Count) in $group." }
     if (-not (Test-Path -LiteralPath $desktopLink)) { throw 'Desktop shortcut is missing.' }
     $desktopShortcut = $shell.CreateShortcut($desktopLink)
-    if ($desktopShortcut.TargetPath -ne "$target\Start-seriald-LAN.cmd") { throw 'Desktop shortcut must start password-protected LAN sharing.' }
+    if (-not (Same-FilePath $desktopShortcut.TargetPath "$target\Start-seriald-LAN.cmd")) {
+        throw "Desktop shortcut must start password-protected LAN sharing. Found: $($desktopShortcut.TargetPath)"
+    }
     $launchLinks += $desktopShortcut
     foreach ($shortcut in $launchLinks) {
-        if ($shortcut.IconLocation -ne "$iconPath,0") { throw "Shortcut still references a program/default icon: $($shortcut.IconLocation)" }
+        if ($shortcut.IconLocation -notmatch '^(.*),0$' -or -not (Same-FilePath $Matches[1] $iconPath)) {
+            throw "Shortcut still references a program/default icon: $($shortcut.IconLocation)"
+        }
     }
     $process = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw 'Uninstall failed.' }
