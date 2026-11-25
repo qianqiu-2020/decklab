@@ -4,6 +4,7 @@ No host mounts, devices, published ports or privileged mode. This tests real dpk
 scripts and installed entrypoints, not systemd activation or real serial adapters.
 """
 import argparse
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -235,7 +236,7 @@ file = legacy / 'rename-check.txt'
 file.write_text('legacy file still referenced by its old path')
 os.chown(file, account.pw_uid, account.pw_gid)
 file.chmod(0o600)
-subprocess.run(['apt-get', '--no-download', 'install', '-y', '/tmp/decklab.deb'], check=True)
+subprocess.run(['apt-get', 'install', '-y', '/tmp/decklab.deb'], check=True)
 new_config = Path('/etc/decklab/decklab.env').read_text()
 assert '# legacy config retained by the rename' in new_config and 'DECKLAB_PORT=19088' in new_config
 assert Path('/data/decklab-data/rename-check.txt').read_bytes() == file.read_bytes()
@@ -281,10 +282,16 @@ def main():
             subprocess.run(['docker', 'exec', '-e', 'DEBIAN_FRONTEND=noninteractive', name,
                             'apt-get', 'install', '-y', initial], check=True, timeout=300)
             if args.upgrade_from:
-                # Resolve and cache the actual future transaction, including
-                # recommendations, while the legacy application stays installed.
+                # Install the candidate's OS dependencies before disconnecting.
+                # The application itself is still the old version at this point.
+                packages = []
+                for field in ('Depends', 'Recommends'):
+                    declared = subprocess.check_output(
+                        ['dpkg-deb', '--field', str(package), field], text=True)
+                    packages.extend(re.match(r'[a-z0-9][a-z0-9+.-]*', item.strip())[0]
+                                    for item in declared.split(',') if item.strip())
                 subprocess.run(['docker', 'exec', '-e', 'DEBIAN_FRONTEND=noninteractive', name,
-                                'apt-get', '--download-only', 'install', '-y', '/tmp/decklab.deb'],
+                                'apt-get', 'install', '-y', *packages],
                                check=True, timeout=300)
             subprocess.run(['docker', 'network', 'disconnect', 'bridge', name], check=True)
             if args.upgrade_from:
