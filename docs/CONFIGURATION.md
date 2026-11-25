@@ -1,5 +1,13 @@
 # Host and board configuration
 
+## Web 的 HTTP 和 HTTPS 入口
+
+HTTP 默认端口为 8898，HTTPS 默认端口为 8443。两者使用同一监听地址、设备、授权和历史记录。安装或升级后，原 HTTP 地址继续可用。HTTPS 端口已有反向代理时，保留代理原有的证书和访问范围。
+
+首次启动原生 HTTPS 时，控制机会在数据目录的 `web-tls/` 生成专属证书。用控制机的局域网 IP 或主机名打开 HTTPS。客户端首次使用时，从可信的控制机取得 `/DeckLab-Root-CA.cer`，核对证书指纹后导入受信任的根证书。升级保留此信任关系。更换局域网 IP 后，重启 Web 服务会重新签发站点证书。
+
+可通过环境变量 `SERIALD_HTTPS_PORT` 指定端口，或设为 0 交给外部代理。使用组织证书时，同时设置 `SERIALD_HTTPS_CERT` 和 `SERIALD_HTTPS_KEY` 为证书链和私钥的 PEM 文件路径，并允许 Web 服务账号读取。HTTPS 启动失败会在服务日志记录原因，HTTP 继续可用。
+
 ## Web settings, export and import
 
 Open **系统配置 / System settings** using the primary Web credential. Choose

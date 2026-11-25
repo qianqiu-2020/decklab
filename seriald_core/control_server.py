@@ -14,6 +14,7 @@ import signal
 import re
 import secrets
 import socket
+import ssl
 import sqlite3
 import threading
 import time
@@ -25,6 +26,7 @@ from .web_settings import SettingsError
 from .settings_restart import configure_control, reexecute
 from .agent_grants import AgentGrantStore
 from .artifact_actions import body_limit
+from .web_tls import https_listener
 from .httpd import BoundedThreadingTCPServer
 from . import __version__
 from .results import response as api_response
@@ -195,7 +197,8 @@ def public_mcp_host_allowed(server, authority):
         if bind not in ('0.0.0.0', '::', ''):
             names.add(bind.lower())
         names.update(lan_hosts())
-        allowed = {(name, port) for name in names if name}
+        ports = {port, getattr(server, 'https_port', port)}
+        allowed = {(name, p) for name in names if name for p in ports}
         for value in os.environ.get('SERIALD_MCP_ALLOWED_HOSTS', '').split(','):
             value = value.strip()
             if not value:
@@ -213,7 +216,7 @@ def public_mcp_host_allowed(server, authority):
                         allowed.add((host, None))
             except ValueError:
                 continue  # Invalid configured names never broaden the policy.
-        if port in (80, 443):
+        if ports.intersection((80, 443)):
             allowed.update((name, None) for name in names if name)
         server._mcp_public_hosts = frozenset(allowed)
     return requested in allowed or (requested[0], '*') in allowed
@@ -311,7 +314,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get('Cookie', ''))
-            session = cookie.get('seriald_share')
+            session = cookie.get(self._share_cookie_name())
         except Exception:
             session = None
         return bool(session and self._valid_share(session.value))
@@ -328,7 +331,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get('Cookie', ''))
-            session = cookie.get('seriald_share')
+            session = cookie.get(self._share_cookie_name())
         except Exception:
             session = None
         return bool(session and self._valid_share(session.value))
@@ -367,13 +370,18 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
         except (AttributeError, ValueError):
             return False
 
+    def _share_cookie_name(self):
+        return 'seriald_tls_share' if isinstance(getattr(self, 'connection', None), ssl.SSLSocket) else 'seriald_share'
+
     def _accept_share(self, token):
         if not self._valid_share(token):
             return self._json(403, {'error': '分享链接无效或已过期'})
         self.send_response(303)
         self.send_header('Location', '/')
-        self.send_header('Set-Cookie', 'seriald_share=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax' %
-                         (token, max(0, int(token.split('.')[0]) - int(time.time()))))
+        name = self._share_cookie_name()
+        max_age = max(0, int(token.split('.')[0]) - int(time.time()))
+        cookie = f'{name}={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
+        self.send_header('Set-Cookie', cookie + ('; Secure' if name == 'seriald_tls_share' else ''))
         self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Length', '0')
         self.end_headers()
@@ -424,6 +432,8 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 else:
                     result = self.settings.snapshot()
                 result['active_revision'] = getattr(self.server, 'settings_revision', None)
+                if result.get('restart_revision') == getattr(self.server, 'settings_restart_revision', False):
+                    result['active_revision'] = result['revision']
                 check_wiring = getattr(self.server, 'wiring_is_active', None)
                 if check_wiring and result['active_revision'] != result['revision'] and check_wiring(result['revision']):
                     result['active_revision'] = result['revision']
@@ -614,7 +624,7 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
                 return self._json(403, {'error': '发现 USB 设备需要全部设备范围的授权'})
             if agent_actor and route == '/api/control-slots':
                 return self._json(403, {'error': '只有管理员可以管理工位接线'})
-            if route == '/api/desktop/quick-open' and not self._owner_authorized():
+            if route in ('/api/desktop/quick-open', '/api/desktop/login-stage') and not self._owner_authorized():
                 return self._json(403, {'error': '自动连接仅限网页主操作者'})
             if agent_actor and route == '/api/desktop/configure':
                 return self._json(403, {'error': '只有网页操作者可以配置桌面连接'})
@@ -816,6 +826,16 @@ class ControlHandler(http.server.SimpleHTTPRequestHandler):
             return self._mcp_proxy()
         if route.startswith('/share/'):
             return self._accept_share(route[len('/share/'):])
+        if route == '/DeckLab-Root-CA.cer':
+            ca = getattr(self.server, 'https_ca', None)
+            if not ca:
+                return self._json(404, {'error': 'no local CA'})
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/pkix-cert')
+            self.send_header('Content-Length', str(len(ca)))
+            self.end_headers()
+            self.wfile.write(ca)
+            return
         if route in self.public_agent_files:
             return super().do_GET()
         if self._require_auth():
@@ -997,7 +1017,8 @@ def main():
                     lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
                 print('seriald control on http://%s:%d/' % (args.bind, server.server_address[1]), flush=True)
                 try:
-                    server.serve_forever()
+                    with https_listener(server, BASE):
+                        server.serve_forever()
                 except KeyboardInterrupt:
                     pass
     finally:

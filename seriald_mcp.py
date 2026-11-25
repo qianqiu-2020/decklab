@@ -404,12 +404,14 @@ class Adapter:
             binding_revision=binding_revision, request_id=request_id, read_system=read_system), post=True, token=token)
 
     def preview_flash(self, target, artifact_id, mode, binding_revision, selections=None,
-                      verify='required', target_storage='', token=None, reset_after=False):
+                      verify='required', target_storage='', token=None, reset_after=False, skip_ec=False):
         parameters = dict(artifact_id=artifact_id, mode=mode,
             binding_revision=binding_revision, selections=selections or [], verify=verify,
             target_storage=target_storage)
         if reset_after:
             parameters['reset_after'] = True
+        if skip_ec:
+            parameters['skip_ec'] = True
         return self.flash_api(target, '/api/flash-plan', parameters, post=True, token=token)
 
     def start_flash(self, target, plan_id, binding_revision, request_id, token=None):
@@ -428,10 +430,12 @@ class Adapter:
 
     def select_flash(self, target, task_id, layout_digest, selections=None,
                      plan_id='', request_id='', preview=True, token=None,
-                     artifact_id='', target_storage='', source_plan_id='', verify='if-supported', reset_after=False):
+                     artifact_id='', target_storage='', source_plan_id='', verify='if-supported', reset_after=False, skip_ec=False):
         parameters = dict(id=task_id, layout_digest=layout_digest)
         if preview:
             parameters.update(preview=True, selections=selections or [])
+            if skip_ec:
+                parameters['skip_ec'] = True
             if verify != 'if-supported':
                 parameters['verify'] = verify
             if reset_after:
@@ -771,11 +775,11 @@ def create_server(settings, adapter=None):
     def preview_flash(target: FlashTarget, artifact_id: str, mode: Literal['full', 'partitions'],
                       binding_revision: int, ctx: Context, selections: list[dict[str, str]] | None = None,
                       verify: Literal['required', 'if-supported', 'none'] = 'required', target_storage: str = '',
-                      execution_lease: dict[str, Any] | None = None, reset_after: bool = False) -> dict[str, Any]:
-        """Preview concrete full-image or selected-partition writes; no storage writes. selections entries contain storage, partition and optional artifact_id (defaults to artifact_id). Full mode uses no selections, optional target_storage. Review erase/write_layout/verification and user authorization before start_flash. reset_after explicitly requests one Fastboot reset after successful writes and selected verification; it does not prove OS boot. If a task awaits selection, use preview_flash_selection instead."""
+                      execution_lease: dict[str, Any] | None = None, reset_after: bool = False, skip_ec: bool = False) -> dict[str, Any]:
+        """Preview concrete full-image or selected-partition writes; no storage writes. selections entries contain storage, partition and optional artifact_id (defaults to artifact_id). Full mode uses no selections, optional target_storage. Review erase/write_layout/verification and user authorization before start_flash. skip_ec omits the optional embedded controller update. reset_after explicitly requests one Fastboot reset after successful writes and selected verification; it does not prove OS boot. If a task awaits selection, use preview_flash_selection instead."""
         return call(ctx, adapter.preview_flash, target=target, artifact_id=artifact_id, mode=mode,
                     binding_revision=binding_revision, selections=selections, verify=verify,
-                    target_storage=target_storage, execution_lease=execution_lease, reset_after=reset_after)
+                    target_storage=target_storage, execution_lease=execution_lease, reset_after=reset_after, skip_ec=skip_ec)
 
     @server.tool(annotations=write, structured_output=True)
     def start_flash(target: FlashTarget, plan_id: str, binding_revision: int, request_id: str,
@@ -804,11 +808,11 @@ def create_server(settings, adapter=None):
                                 selections: list[dict[str, str]], ctx: Context,
                                 execution_lease: dict[str, Any] | None = None,
                                 artifact_id: str = '', target_storage: str = '', source_plan_id: str = '',
-                                verify: Literal['required', 'if-supported', 'none'] = 'if-supported', reset_after: bool = False) -> dict[str, Any]:
-        """Preview replacements under an existing awaiting-selection task. Use its original flash_targets and layout_digest; each selection has storage, partition, artifact_id. A package can supply several partitions. In a read_device_storage workspace, pass artifact_id with empty selections to inspect the package target catalogue and actual OS layout; optional target_storage is an explicit nvme/scsi/mmc/usb:N disk. Then select desired candidate partitions, or all candidates for a package update, and pass source_plan_id to reuse the sealed catalogue. Unreferenced firmware materials are not write targets; existing GPT is preserved. reset_after explicitly requests a reset only after successful writes and selected verification. Returns a preview; does not flash."""
+                                verify: Literal['required', 'if-supported', 'none'] = 'if-supported', reset_after: bool = False, skip_ec: bool = False) -> dict[str, Any]:
+        """Preview replacements under an existing awaiting-selection task. Use its original flash_targets and layout_digest; each selection has storage, partition, artifact_id. A package can supply several partitions. In a read_device_storage workspace, pass artifact_id with empty selections to inspect the package target catalogue and actual OS layout; optional target_storage is an explicit nvme/scsi/mmc/usb:N disk. Then select desired candidate partitions, or all candidates for a package update, and pass source_plan_id to reuse the sealed catalogue. Unreferenced firmware materials are not write targets; existing GPT is preserved. skip_ec omits the optional embedded controller update. reset_after explicitly requests a reset only after successful writes and selected verification. Returns a preview; does not flash."""
         return call(ctx, adapter.select_flash, target=target, task_id=task_id,
                     layout_digest=layout_digest, selections=selections, execution_lease=execution_lease,
-                    artifact_id=artifact_id, target_storage=target_storage, source_plan_id=source_plan_id, verify=verify, reset_after=reset_after)
+                    artifact_id=artifact_id, target_storage=target_storage, source_plan_id=source_plan_id, verify=verify, reset_after=reset_after, skip_ec=skip_ec)
 
     @server.tool(annotations=write, structured_output=True)
     def confirm_flash_selection(target: FlashTarget, task_id: str, layout_digest: str, plan_id: str,

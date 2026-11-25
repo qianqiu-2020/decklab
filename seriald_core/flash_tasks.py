@@ -445,6 +445,10 @@ class FlashActions:
             result['firmware_table'] = table
         if companion:
             result['firmware_artifact_id'] = companion
+        if type(payload.get('skip_ec', False)) is not bool:
+            raise TaskError('invalid EC selection')
+        if payload.get('skip_ec'):
+            result['skip_ec'] = True
         if 'loader_source' in payload:
             if payload['loader_source'] not in ('builtin', 'image'):
                 raise TaskError('invalid flash loader source')
@@ -514,6 +518,8 @@ class FlashActions:
                                    artifact=artifacts[value['artifact_id']]) for value in intent['selections']]
                 check()
                 arguments = {'target_storage': intent['target_storage']} if intent.get('target_storage') else {}
+                if intent.get('skip_ec'):
+                    arguments['skip_ec'] = True
                 if intent.get('loader_source'):
                     arguments['loader_source'] = intent['loader_source']
                 if on_event is not None:
@@ -604,6 +610,8 @@ class FlashActions:
     @staticmethod
     def _preview(record):
         result = _public(record['executor_plan'])
+        if record['intent'].get('skip_ec'):
+            result['skip_ec'] = True
         if record['intent'].get('firmware_table'):
             result['firmware_table'] = record['intent']['firmware_table']
         if record['intent'].get('firmware_artifact_id'):
@@ -624,7 +632,7 @@ class FlashActions:
         try:
             if not isinstance(payload, dict) or set(payload) - {
                     'key', 'serial', 'actor', 'client_id', 'binding_revision',
-                    'artifact_id', 'firmware_artifact_id', 'firmware_table', 'mode', 'selections', 'verify', 'target_storage', 'reset_after', 'loader_source',
+                    'artifact_id', 'firmware_artifact_id', 'firmware_table', 'mode', 'selections', 'verify', 'target_storage', 'reset_after', 'loader_source', 'skip_ec',
                     'target_id', 'target_generation', 'request_id'}:
                 raise TaskError('invalid flash plan request')
             device = self._device(device, payload, actor)
@@ -1331,7 +1339,7 @@ class FlashActions:
             if not isinstance(payload, dict) or set(payload) - {
                     'id', 'key', 'serial', 'actor', 'client_id', 'layout_digest', 'selections',
                     'preview', 'plan_id', 'request_id', 'target_id', 'target_generation',
-                    'artifact_id', 'firmware_artifact_id', 'firmware_table', 'mode', 'target_storage', 'verify', 'reset_after', 'retain_backup'}:
+                    'artifact_id', 'firmware_artifact_id', 'firmware_table', 'mode', 'target_storage', 'verify', 'reset_after', 'skip_ec', 'retain_backup'}:
                 raise TaskError('invalid flash selection request')
             task_id = payload.get('id')
             historical_target = None
@@ -1379,7 +1387,7 @@ class FlashActions:
                     raise TaskError('flash target layout changed; refresh selection', 409)
                 if payload.get('preview') is True:
                     intent = dict(record['intent'], selections=payload.get('selections', []))
-                    for option in ('verify', 'reset_after'):
+                    for option in ('verify', 'reset_after', 'skip_ec'):
                         if option in payload:
                             intent[option] = payload[option]
                     if record.get('operation') != 'nor-workspace' and any(key in payload for key in ('artifact_id', 'mode', 'target_storage')):
@@ -1423,12 +1431,14 @@ class FlashActions:
                                     or source_record['intent']['artifact_id'] != intent['artifact_id']
                                     or source_record['intent'].get('firmware_artifact_id') != intent.get('firmware_artifact_id')
                                     or source_record['intent'].get('firmware_table') != intent.get('firmware_table')
+                                    or bool(source_record['intent'].get('skip_ec')) != bool(intent.get('skip_ec'))
                                     or source_record['intent']['mode'] != intent['mode']
                                     or source_record['intent']['verify'] != intent['verify']
                                     or source_record['intent'].get('target_storage', '') != intent.get('target_storage', '')
                                     or time.time() - source_record['created'] > 600):
                                 raise TaskError('source image preview changed or expired', 409)
                         cached = (source_record if source_record['executor_plan'].get('image_type') in ('package', 'payload', 'payload.gz', 'bundle')
+                                  and bool(source_record['intent'].get('skip_ec')) == bool(intent.get('skip_ec'))
                                   and source_record['intent']['verify'] == intent['verify']
                                   and source_record['intent']['artifact_id'] == intent['artifact_id']
                                   and source_record['intent'].get('firmware_artifact_id') == intent.get('firmware_artifact_id')
@@ -1727,7 +1737,7 @@ class FlashOperation:
                 result = self.executor.execute(self.binding, plan, event, check, **execution_args)
             if not isinstance(result, dict):
                 raise TaskError('flash executor did not confirm success', 502)
-            output = {key: result[key] for key in ('write_result', 'verify_result', 'boot_result',
+            output = {key: result[key] for key in ('write_result', 'ec_result', 'verify_result', 'boot_result',
                                                   'written_bytes', 'verified_bytes', 'readback_bytes', 'verification_scope') if key in result}
             outcome.update(output)
             store.update_details(context.id, outcome)
@@ -1761,7 +1771,7 @@ class FlashOperation:
             if not cleanup_confirmed:
                 actions._retain_sources(error, context.id, self.actor, record['serial'], claimed)
             reported = getattr(error, 'outcome', {})
-            outcome.update({key: reported[key] for key in ('write_result', 'verify_result', 'boot_result',
+            outcome.update({key: reported[key] for key in ('write_result', 'ec_result', 'verify_result', 'boot_result',
                                                           'written_bytes', 'verified_bytes', 'readback_bytes', 'verification_scope') if key in reported})
             raw_after = getattr(error, 'nor_snapshots', {}).get('nor_after')
             if cleanup_confirmed and nor_baseline is not None and raw_after is not None:

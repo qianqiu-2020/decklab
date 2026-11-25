@@ -2,10 +2,11 @@ DeckLab K3 RAM-only download environment
 U-Boot source commit: c3b2fd89a30d6c70582198a88057655f707affff
 Profile: decklab-k3-download.config
 FSBL SHA-256: b971b060137183a77cae3a8f78dcbb24d900c2bea66d7f384f3115643aa73abe
-Toolchain prefix: /data/toolchains/spacemit-toolchain-linux-glibc-x86_64-v1.1.2/bin/riscv64-unknown-linux-gnu-
+Toolchain prefix: riscv64-unknown-linux-gnu-
 Build: k3_defconfig + native RAM configuration, u-boot.bin, compressed multi-DTB FIT
 OpenSBI fw_dynamic SHA-256: 8774a68f9cec0205c920be022886c87fe028ea79225fe27e23099d4e980f21bc (started by SPL; U-Boot runs in S-mode)
 DDR training policy: decided by the staged FSBL; board_late_init disabled, so nothing is saved.
 Loaders are RAM-only, never partition payloads. NOR map selection does not save env or write storage.
 EEPROM: native commands; host restricts TLV 0x83 and verifies physical readback.
 Compiled/offline checked; no physical-board acceptance implied.
+EC support: native eSPI, Chrome EC and crosec commands enabled in the temporary U-Boot.

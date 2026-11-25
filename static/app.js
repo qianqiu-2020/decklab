@@ -797,7 +797,7 @@
         setPager('activity', sessionPage, sessionTotal, d.sessions.length);
 
         var eventBox = $('d-events'); eventBox.textContent = '';
-        var actionNames = { identified: '识别完成', identify: '识别请求',
+        var actionNames = { 'desktop-adb': '远程桌面 · ADB', identified: '识别完成', identify: '识别请求',
           'identity-promoted': '身份升级', 'identity-corrected': '身份更正',
           'identity-confirmed': '身份确认', 'identity-conflict-resolved': '解除身份冲突',
           'boot-marker-initialized': '初始化 /boot 标记',

@@ -568,6 +568,7 @@ class Manager:
                                 break
                             with d.cv:
                                 d.console_tail = ''
+                                d.terminal.reset_input()
                                 d.newline = d.profile.line_ending
                             settings = d.profile.serial
                             d.fd = open_serial(os.path.join(BY_PATH, d.by_path),

@@ -133,18 +133,24 @@
       </div>
       <div id="desktop-input-tools" class="desktop-input-tools">
         <span id="desktop-status" role="status" aria-live="polite">点击画面后控制桌面</span>
-        <details class="desktop-key-tools"><summary>键盘操作</summary><div>
-        <button id="desktop-release" type="button">释放按键</button>
-        <span id="desktop-system-key-hint" hidden>本机系统键未锁定，可点 Win / Super。</span>
+        <span id="desktop-system-key-hint" hidden>当前无法独占 Win 键。可点 Win / Super 发送到远端。</span>
         <button id="desktop-super" type="button" title="向远端发送 Windows 或 Super 键">Win / Super</button>
+        <details class="desktop-key-tools"><summary>键盘操作</summary><div>
+        <label><input id="desktop-f8-super" type="checkbox"> 用 F8 发送 Win 键</label>
+        <button id="desktop-release" type="button">释放按键</button>
         <select id="desktop-keys" aria-label="远程组合键"><option value="ControlLeft AltLeft Delete">Ctrl+Alt+Del</option><option value="AltLeft Tab">Alt+Tab</option><option value="ControlLeft Escape">Ctrl+Esc</option><option value="Escape">Esc</option></select>
         <button id="desktop-key" type="button">发送组合键</button>
         </div></details>
         <button id="desktop-clipboard-toggle" type="button" aria-expanded="false" aria-controls="desktop-clipboard">剪贴板</button>
       </div>
       <div id="desktop-clipboard" class="desktop-clipboard" hidden>
+        <label><input id="desktop-drag-copy" type="checkbox"> GNOME 终端拖选后复制（Ctrl+Shift+C）</label>
         <label for="desktop-text">远端剪贴板</label>
-        <textarea id="desktop-text" rows="3" readonly spellcheck="false"></textarea>
+        <textarea id="desktop-text" rows="2" readonly spellcheck="false"></textarea>
+        <button id="desktop-copy-local" type="button" disabled>复制到本机</button>
+        <label for="desktop-paste-text">本机文本</label>
+        <textarea id="desktop-paste-text" rows="2" spellcheck="false"></textarea>
+        <button id="desktop-paste-submit" type="button">粘贴到远端</button>
       </div>
     </section>
     <div class="terminal-tools">
@@ -171,8 +177,9 @@
           <hr>
           <label class="terminal-font-option" for="terminal-font-size">终端字号
             <select id="terminal-font-size" aria-label="终端字号">
+              <option value="auto" selected>自动适应窗口</option>
               <option value="10">10 px</option><option value="12">12 px</option>
-              <option value="14.5" selected>14.5 px</option><option value="16">16 px</option>
+              <option value="14.5">14.5 px</option><option value="16">16 px</option>
               <option value="18">18 px</option><option value="20">20 px</option>
               <option value="22">22 px</option><option value="24">24 px</option>
             </select>
@@ -561,13 +568,18 @@ PasswordAuthentication yes</code></pre>
       <div class="fl-read-action"><button id="fl-read-nor" type="button" disabled>读取设备存储</button></div>
       <span id="fl-read-status" role="status" hidden></span>
       <div id="fl-live-gpt" hidden></div>
-      <div id="fl-nor-current" class="fl-system-parts" hidden></div>
+      <div class="fl-board-media" aria-label="板上介质">
+        <details id="fl-nor-medium" class="fl-details fl-disk" hidden>
+          <summary id="fl-nor-summary">NOR · 启动固件</summary>
+          <div id="fl-nor-current" class="fl-system-parts" hidden></div>
+        </details>
+        <div id="fl-ec-running" class="fl-disk fl-ec-medium" hidden></div>
+        <div id="fl-system-parts"></div>
+      </div>
       <div id="fl-board-backup"><details id="fl-backup-files" hidden><summary>NOR 备份下载</summary><div id="fl-backups" class="fl-backups"></div></details></div>
       <div id="fl-system" hidden>
         <p id="fl-eeprom-identity" class="log-note" hidden></p>
-        <label class="ft-field">查看板上磁盘<select id="fl-system-storage"></select></label>
         <p id="fl-system-origin" class="log-note" role="status"></p>
-        <div id="fl-system-parts" class="fl-system-parts"></div>
         <details id="fl-boot-config" class="fl-details" hidden><summary>修改板上启动介质</summary>
           <label class="ft-field">EEPROM 优先启动介质<select id="fl-boot-priority"><option value="">请选择</option><option value="UFS">UFS</option><option value="SSD">SSD / NVMe</option><option value="MMC">eMMC / SD</option><option value="USB">USB</option></select></label>
           <button id="fl-boot-save" type="button">保存到 EEPROM</button>
@@ -606,6 +618,7 @@ PasswordAuthentication yes</code></pre>
       <label id="fl-loader-field" class="ft-field" hidden>临时刷机加载器<select id="fl-loader-source"><option value="builtin">DeckLab 内置</option><option value="image">镜像自带</option></select></label>
       <label class="ft-field" id="fl-target-storage-field">要写入的板上磁盘<select id="fl-target-storage"></select><small>有多块候选磁盘时，请选择要刷写的那一块。</small></label>
     </div>
+    <label id="fl-ec-field" class="ft-check" hidden><input id="fl-write-ec" type="checkbox" checked><span id="fl-ec-label">更新 EC 固件</span></label>
     <fieldset id="fl-partitions-field" hidden><legend class="visually-hidden">分区内容与替换文件</legend>
       <div id="fl-partition-tools" class="fl-partition-tools"><label><input id="fl-all-partitions" type="checkbox"><span id="fl-all-label">全选分区</span></label></div>
       <div class="fl-partition-heading" aria-hidden="true"><span>分区</span><span id="fl-current-heading">板上现有内容</span><span>将写入的文件</span></div>

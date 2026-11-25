@@ -24,7 +24,7 @@ class LiveFrames:
     """Coalesce native paint callbacks; never request or poll screenshots.
 
     The encoder sleeps until a native update or an explicit resync. Each queue
-    is bounded; an overrun discards patches and schedules a complete reset.
+    is bounded. While the consumer is busy, new paints accumulate in dirty.
     """
     def __init__(self, capacity=4):
         self.events = queue.Queue(maxsize=capacity)
@@ -105,7 +105,10 @@ class LiveFrames:
 
     def next_event(self, timeout=1):
         try:
-            return self.events.get(timeout=timeout)
+            event = self.events.get(timeout=timeout)
+            with self.condition:
+                self.condition.notify()
+            return event
         except queue.Empty:
             return None
 
@@ -121,7 +124,8 @@ class LiveFrames:
     def _encode(self):
         while True:
             with self.condition:
-                self.condition.wait_for(lambda: self.closed or (self.active and self.dirty is not None))
+                self.condition.wait_for(lambda: self.closed or (
+                    self.active and self.dirty is not None and not self.events.full()))
                 if self.closed:
                     return
                 reset = self.reset
@@ -148,11 +152,7 @@ class LiveFrames:
                         'rect_width': image.width, 'rect_height': image.height,
                         'mime': 'image/png', 'png_base64': encoded, 'reset': reset,
                         'source_updated_at': updated_at}
-                    try:
-                        self.events.put_nowait(event)
-                    except queue.Full:
-                        self._clear()
-                        self._resync()
+                    self.events.put_nowait(event)
             except Exception:
                 self.close('native desktop frame failed')
 

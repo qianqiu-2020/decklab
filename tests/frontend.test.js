@@ -1237,6 +1237,17 @@ test('terminal font size persists across board changes and reload', async () => 
   assert.equal(next.select('A').options.fontSize,20);
 });
 
+test('manual font survives fixed firmware geometry and auto restores fitting', async () => {
+  const h = await setup(), terminal = h.select('A'), font = h.get('terminal-font-size');
+  h.take('/api/session').resolve(readResponse('A', '\x1b[47m\x1b[50;27H<Enter>=Select'));
+  await drain(); terminal.flush();
+  font.value = '24'; font.emit('change');
+  assert.equal(terminal.options.fontSize,24);
+  assert.deepEqual([terminal.cols,terminal.rows],[80,50]);
+  font.value = 'auto'; font.emit('change');
+  assert.ok(terminal.options.fontSize < 24);
+});
+
 test('selecting and replaying the third board never writes cursor position replies', async () => {
   const h = harness();
   h.take('/api/devices').resolve({ devices: [{ key: 'musepi2', label: 'musepi2',

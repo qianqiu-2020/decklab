@@ -80,6 +80,7 @@ class ConsoleProtocol:
     """Login, framed command completion and explicit SSH provisioning dialogue."""
     def __init__(self, connection):
         self.connection = connection
+        self.login_error = ''
 
     def wait(self, base, pattern, timeout=20.0):
         device = self.connection
@@ -114,10 +115,14 @@ class ConsoleProtocol:
     def ensure_shell(self, base):
         """仅从现场输出判断登录状态,兼容 ANSI、免密码登录以及 CR/LF。"""
         device = self.connection
+        self.login_error = ''
         if device.profile.probe == 'manual':
             return False, base
         with device.cv:
             tail = ANSI.sub('', device.console_tail).rstrip()[-120:]
+        if re.search(RE_PASSWD + r'\s*$', tail):
+            self.login_error = '串口正在等待密码，请先完成当前登录，再识别设备'
+            return False, base
         if device.newline is not None and re.search(RE_PROMPT, tail):
             return True, base
         at_login = bool(re.search(RE_LOGIN + r'\s*$', tail))
@@ -140,8 +145,9 @@ class ConsoleProtocol:
                     break
         if not at_login:
             return False, base
-        user, password = device.console_login()
-        device._say('停在登录提示符,使用配置的账户自动登录')
+        family = device.login_os_family()
+        user, password = device.console_login(family)
+        device._say('串口登录 · %s · 用户 %s' % (family or '系统未识别', user))
         base = device.now_off()
         if not device._write(user + device.newline)[0]:
             return False, base
@@ -155,6 +161,9 @@ class ConsoleProtocol:
         if not device._write(password + device.newline)[0]:
             return False, base
         match = device._wait(base, RE_PROMPT + '|' + failure, 20)
+        if match and re.search(failure, match.group(0)):
+            self.login_error = '串口登录被拒绝 · %s · 用户 %s，请核对该板的串口凭据' % (family or '系统未识别', user)
+            device._say(self.login_error)
         return (bool(match and re.search(RE_PROMPT, match.group(0))), device.now_off())
 
     def run_command(self, cmd, timeout=30.0, expected_connection=None):
@@ -185,7 +194,7 @@ class ConsoleProtocol:
         if ensure_shell:
             ok, base = device.ensure_shell(device.now_off())
             if not ok:
-                return False, '板子不在 shell 提示符,且自动登录失败(可能需要手动处理)'
+                return False, self.login_error or '板子不在 shell 提示符,且自动登录失败(可能需要手动处理)'
         elif not device.newline:
             return False, '本连接尚未确定 shell 换行方式'
         nonce = secrets.token_hex(12)

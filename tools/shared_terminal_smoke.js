@@ -107,6 +107,18 @@ const screen = `(() => {const b=testTerm.buffer.active;return {cols:testTerm.col
     consecutiveMatches = JSON.stringify(controller) === JSON.stringify(observer) ? consecutiveMatches + 1 : 0;
     return consecutiveMatches >= 2;
   }, 'live screens converge with identical cursor and modes after escape');
+  async function chooseFont(value) {
+    await b.evaluate(`(() => {const picker=document.querySelector('#terminal-font-size');
+      picker.value=${JSON.stringify(value)}; picker.dispatchEvent(new Event('change'));})()`);
+  }
+  await chooseFont('24');
+  await wait(()=>b.evaluate(`(() => {const host=document.querySelector('#d-term');
+    host.scrollLeft=40; host.scrollTop=30;
+    return testTerm.options.fontSize===24 && host.scrollLeft>0 && host.scrollTop>0;
+  })()`),'observer can zoom and pan the fixed Vim grid');
+  assert.deepEqual(await b.evaluate(screen),await a.evaluate(screen),'local zoom preserves the shared grid');
+  await chooseFont('auto');
+  await wait(()=>b.evaluate('!document.querySelector("#d-term").classList.contains("terminal-fixed-zoom")'),'automatic fitting restored');
   await b.evaluate('new Promise(resolve=>testTerm.write(new Uint8Array([27,80,43,113,65]),resolve))');
   await b.evaluate('document.querySelector("#b-redraw").click()');
   await wait(()=>b.evaluate('testTerm.buffer.active.type==="alternate"'),'observer redraw restores Vim');

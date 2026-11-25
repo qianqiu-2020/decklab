@@ -7,6 +7,7 @@ logs/
 
 # 服务自身的 stdout/stderr
 seriald.log
+/web-tls/
 
 # 设备编号映射:本机状态,换机器无意义
 labels.json

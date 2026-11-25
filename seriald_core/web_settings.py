@@ -32,6 +32,7 @@ DEFAULTS = {
     'CONSOLE_PASSWORD': '', 'PROBE': 'linux', 'PROBE_COMMAND': '',
     'AUTO_CONFIGURE_SSH': '1', 'PROFILES': '', 'HARDWARE': '', 'FLASH': '', 'DESKTOP': '',
     'FLASH_EXECUTOR': '', 'FLASH_LOADERS': '', 'LOG_RETENTION_DAYS': '0', 'DISK_MIN_FREE_MB': '1024',
+    'TEAM_CATALOGUE_URL': '', 'TEAM_CATALOGUE_TOKEN': '',
     'IMAGE_INTERNAL_BROWSE': '', 'IMAGE_INTERNAL_DOWNLOAD': '',
     'DISK_MIN_FREE_PERCENT': '5', 'TRANSFER_MAX_FILES': '128',
     'TRANSFER_MAX_FILE_BYTES': str(8 * 1024 ** 3),
@@ -51,7 +52,8 @@ CHOICES = {'PARITY': ['N', 'E', 'O'], 'DATA_BITS': ['5', '6', '7', '8'],
            'MCP_ENABLED': ['0', '1'], 'TRUST_LOOPBACK': ['0', '1'],
            'AUTO_CONFIGURE_SSH': ['0', '1', 'false', 'true']}
 CHOICES['UI_LANGUAGE'] = ['auto', 'en', 'zh-CN']
-SENSITIVE = {'BACKEND_TOKEN', 'AUTH_TOKEN', 'SSH_PASSWORD', 'CONSOLE_PASSWORD'}
+CATALOGUE_FIELDS = {'TEAM_CATALOGUE_URL', 'TEAM_CATALOGUE_TOKEN'}
+SENSITIVE = {'TEAM_CATALOGUE_TOKEN', 'BACKEND_TOKEN', 'AUTH_TOKEN', 'SSH_PASSWORD', 'CONSOLE_PASSWORD'}
 CONTROL = {'BACKEND_URL', 'BACKEND_TOKEN', 'BACKEND_CA', 'PORT', 'BIND', 'AUTH_TOKEN', 'AGENT_TOKENS_FILE', 'TRUST_LOOPBACK',
            'MCP_ENABLED', 'MCP_PYTHON', 'MCP_ALLOWED_HOSTS', 'STATIC', 'UI_LANGUAGE', 'SHARE_SECONDS'}
 SHARED = {'BASE', 'SOCKET'}
@@ -210,15 +212,19 @@ class WebSettings:
                            for key, value in document['documents'].items()
                            if key not in saved.get('documents', {})}}
         revision = hashlib.sha256(_bytes(source_revision)).hexdigest()
+        startup = deepcopy(source_revision)
+        for key in CATALOGUE_FIELDS:
+            startup['saved'].get('environment', {}).pop(key, None)
+        restart_revision = hashlib.sha256(_bytes(startup)).hexdigest()
         if not secrets:
             docs = document['documents']
             document['environment'] = {key: deepcopy(REDACTED) if key in SENSITIVE and value else value
                                        for key, value in document['environment'].items()}
             document['documents'] = {key: ({actor: deepcopy(REDACTED) for actor in value}
                 if key == 'agent_tokens' else _redact(value)) for key, value in docs.items()}
-        return {'revision': revision, 'configuration': document,
+        return {'revision': revision, 'restart_revision': restart_revision, 'configuration': document,
                 'fields': [{'name': name, 'secret': name in SENSITIVE, 'path': name in PATHS,
-                            'choices': CHOICES.get(name), 'restart': 'both' if name in SHARED else
+                            'choices': CHOICES.get(name), 'restart': 'live' if name in CATALOGUE_FIELDS else 'both' if name in SHARED else
                             'control' if name in CONTROL else 'collector'} for name in DEFAULTS],
                 'apply': 'restart-required'}
 
@@ -227,6 +233,10 @@ class WebSettings:
         for name in env.keys() & (PATHS - {'BY_PATH'}):
             if env[name] and not os.path.isabs(env[name]):
                 raise SettingsError('路径必须为服务端绝对路径：' + name)
+        if ('TEAM_CATALOGUE_URL' in env and env['TEAM_CATALOGUE_URL'] != current['environment']['TEAM_CATALOGUE_URL']
+                and current['environment']['TEAM_CATALOGUE_TOKEN'] and
+                not isinstance(incoming['environment'].get('TEAM_CATALOGUE_TOKEN'), str)):
+            raise SettingsError('更换团队用例平台地址时，请重新填写令牌')
         return {'version': 1, 'environment': dict(saved.get('environment', {}), **env),
                 'documents': dict(saved.get('documents', {}), **docs)}
 
@@ -240,6 +250,9 @@ class WebSettings:
         from .image_catalog import configured_sources
         from .tasks import TaskError
         try:
+            if merged['TEAM_CATALOGUE_URL'] or merged['TEAM_CATALOGUE_TOKEN']:
+                from .team_cases import TeamCases
+                TeamCases(merged['TEAM_CATALOGUE_URL'], merged['TEAM_CATALOGUE_TOKEN'])
             configured_sources({'SERIALD_IMAGE_INTERNAL_BROWSE': merged['IMAGE_INTERNAL_BROWSE'],
                                 'SERIALD_IMAGE_INTERNAL_DOWNLOAD': merged['IMAGE_INTERNAL_DOWNLOAD']})
         except TaskError as error:
@@ -309,7 +322,8 @@ def load_environment(path):
     """Run before configuration imports; corrupt saved configuration fails closed."""
     record = WebSettings(path).read()
     for key, value in record.get('environment', {}).items():
-        os.environ['SERIALD_' + key] = value
+        if key not in CATALOGUE_FIELDS:
+            os.environ['SERIALD_' + key] = value
     documents = record.get('documents', {})
     if documents:
         revision = hashlib.sha256(_bytes(record)).hexdigest()

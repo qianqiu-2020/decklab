@@ -4,6 +4,7 @@ from copy import deepcopy
 import hashlib
 import ipaddress
 import json
+import logging
 from pathlib import Path
 import shlex
 import shutil
@@ -12,6 +13,7 @@ import re
 import secrets
 import socket
 import ssl
+import sqlite3
 import struct
 import threading
 import time
@@ -129,6 +131,12 @@ class DesktopSetup:
         self.desktop, self.settings = desktop, settings
         self.cache, self.lock = {}, threading.Lock()
 
+    def log_adb(self, serial, actor, detail):
+        try:
+            self.desktop.manager.store.event(serial, actor, 'desktop-adb', detail)
+        except sqlite3.Error:
+            logging.getLogger(__name__).exception('Cannot persist desktop ADB activity')
+
     def identified(self, device):
         if not device or not device.serial:
             raise TaskError('请先识别设备，再配置远程桌面', 409)
@@ -152,7 +160,7 @@ class DesktopSetup:
                      or fields.get('provider') == 'rdp' and fields.get('host') in hosts_for(device)
                      and fields.get('port') == 3389 and fields.get('username') == 'rdp'))
 
-    def quick_config(self, device, previous):
+    def quick_config(self, device, previous, *, stage_only=False, actor='web'):
         from .adb_session import usb_endpoints
         from .board_cases import READ_IDENTITY, adb_command, find_transport
         fields = connection_fields(previous)
@@ -161,6 +169,12 @@ class DesktopSetup:
         serial, connection = device.serial, device.connection_id
         executable = shutil.which('adb')
         registered = self.desktop.manager.hardware.board_tests.get(serial)
+        started = time.monotonic()
+        step = 'adb devices -l · 匹配 USB 连接并核对板卡身份'
+
+        def receipt(result):
+            self.log_adb(serial, actor, f'{step} · {result} · {time.monotonic() - started:.1f} 秒')
+
         try:
             _, endpoint, facts = find_transport(executable, serial, registered, usb_endpoints=usb_endpoints)
             lxqt = Path(__file__).with_name('desktop_lxqt_target.py').read_text(encoding='utf-8')
@@ -171,17 +185,46 @@ class DesktopSetup:
             command = (guard + "if grep -qx 'ID=bianbu' /etc/os-release; then\nexec python3 -I - <<'DECKLAB_LXQT'\n"
                        + lxqt + '\nreport_lxqt()\nDECKLAB_LXQT\nelse\n' + "exec python3 -I - <<'DECKLAB_GNOME'\n"
                        + gnome + '\nDECKLAB_GNOME\nfi')
+            if stage_only:
+                command = guard + "exec python3 -I - --stage-only <<'DECKLAB_GNOME'\n" + gnome + '\nDECKLAB_GNOME'
+            step = ('adb shell · 查询首次设置状态' if stage_only else 'adb shell · 读取桌面类型、登录阶段和连接设置')
             reply = adb_command(executable, '-t', endpoint, 'shell', '-T', command, timeout=12)
-            data = json.loads(reply.stdout) if not reply.returncode else {}
-        except (ValueError, OSError, subprocess.SubprocessError):
+            if reply.returncode:
+                receipt(f'失败，ADB 退出码 {reply.returncode}')
+                return None, ''
+            data = json.loads(reply.stdout)
+        except subprocess.TimeoutExpired:
+            receipt('等待 ADB 回执超时')
             return None, ''
-        self.identified(device)
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            receipt('失败，' + type(error).__name__)
+            return None, ''
+        try:
+            self.identified(device)
+        except TaskError:
+            receipt('板卡身份已变化，结果已丢弃')
+            raise
         if (device.serial != serial or device.connection_id != connection or not device.present
                 or device.board.connection is not device):
+            receipt('板卡接线已变化，结果已丢弃')
             raise TaskError('板卡接线已变化，请重新打开桌面', 409)
         if not isinstance(data, dict):
+            receipt('ADB 退出码 0，无法识别桌面回执')
             return None, ''
         stage = data.get('stage', '')
+        stages = {'initial':'GNOME 首次设置', 'finishing':'GNOME 首次设置即将完成', 'login':'GNOME 登录',
+                  'no-user':'尚无普通用户', 'lxqt-initial':'LXQt 首次设置', 'lxqt-finishing':'LXQt 首次设置即将完成',
+                  'lxqt-greeter':'LXQt 登录', 'lxqt-desktop':'LXQt 用户桌面', 'lxqt-unavailable':'LXQt 屏幕不可用'}
+        names = {'accounts':'busctl get-property HasNoUsers', 'show-seat':'loginctl show-seat',
+                 'show-session':'loginctl show-session', 'grdctl':'grdctl --system status --show-credentials'}
+        queries = data.get('queries')
+        if isinstance(queries, list):
+            steps = [names[q] for q in queries[:8] if isinstance(q, str) and q in names]
+            if steps:
+                step += ' · ' + ' → '.join(steps)
+        receipt('ADB 退出码 0，' + (stages.get(stage, '未识别桌面状态') if isinstance(stage, str) else '无效的桌面状态'))
+        if stage_only:
+            return None, stage if stage in ('initial', 'finishing', 'login', 'no-user') else ''
         if stage == 'lxqt-unavailable':
             return None, stage
         if stage in ('lxqt-initial', 'lxqt-finishing', 'lxqt-greeter', 'lxqt-desktop'):

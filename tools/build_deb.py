@@ -22,7 +22,7 @@ from tools.build_linux_mcp import DESKTOP_RUNTIME, MACHINES, validate_runtime
 
 def collector_build_id(root=ROOT):
     """Hash code and service policy that require replacing the live collector."""
-    excluded = {'admin.py', 'control_server.py', 'desktop_proxy.py', 'mcp_host.py', 'version.py'}
+    excluded = {'admin.py', 'control_server.py', 'web_tls.py', 'desktop_proxy.py', 'mcp_host.py', 'version.py'}
     sources = [path for path in (root / 'seriald_core').glob('*.py')
                if path.name not in excluded]
     sources.append(root / 'packaging/seriald-collector.service')
@@ -214,7 +214,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             if lz4 is None:
                 flash_dependency += ', lz4'
         desktop_dependency = ', libstdc++6, libgcc-s1' if desktop_runtime.is_dir() else ''
-        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s%s\nRecommends: adb\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
+        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), python3-cryptography, nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s%s\nRecommends: adb\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(artifact)], check=True)
     return artifact
 

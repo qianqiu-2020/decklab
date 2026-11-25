@@ -4,11 +4,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {spawn} = require('node:child_process');
 
-async function launchBrowser(profile) {
+async function launchBrowser(profile, extraArgs = []) {
   const chrome = spawn(process.env.CHROME_BIN || '/usr/bin/google-chrome', [
     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
     '--disable-gpu', '--remote-debugging-port=0', '--user-data-dir=' + profile,
-    'about:blank'], {stdio: ['ignore', 'ignore', 'pipe']});
+    ...extraArgs, 'about:blank'], {stdio: ['ignore', 'ignore', 'pipe']});
   let diagnostics = '', launchError;
   chrome.stderr.on('data', chunk => { diagnostics = (diagnostics + chunk).slice(-8192); });
   chrome.on('error', error => { launchError = error; });

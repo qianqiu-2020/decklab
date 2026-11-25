@@ -32,6 +32,8 @@ def assemble(steps, artifact, base_profile=None):
         'pending_checks':sorted({value for step in steps for value in step['result']['plan'].get('pending_checks',[])}),
         'confirm_after_prepare':any(s['result']['plan'].get('confirm_after_prepare') for s in steps)}
     plan['layout_digest'] = hashlib.sha256(json.dumps([s['result']['plan'].get('layout_digest') for s in steps]).encode()).hexdigest()
+    if steps[0]['result']['plan'].get('ec'):
+        plan['ec'] = steps[0]['result']['plan']['ec']
     if base_profile is not None:
         plan['base_profile'] = base_profile
     first = steps[0]['result']
@@ -114,13 +116,14 @@ def execute_bundle(executor, binding, plan, on_event, check, **options):
         except BaseException as error:
             if completed:
                 previous = getattr(error, 'outcome', {}) or {}
-                error.outcome = dict(previous, write_result='unknown' if previous.get('write_result') == 'unknown' else 'partial',
+                error.outcome = dict({k: output[k] for k in ('ec_result',) if k in output}, **previous)
+                error.outcome.update(write_result='unknown' if previous.get('write_result') == 'unknown' else 'partial',
                                      written_bytes=output['written_bytes'] + previous.get('written_bytes', 0))
             raise
         completed.append(result)
         for key in ('written_bytes','verified_bytes','readback_bytes'):
             output[key] += result.get(key, 0)
-        for key in ('nor_before','nor_after'):
+        for key in ('nor_before','nor_after','ec_result'):
             if result.get(key):
                 output[key] = result[key]
         if index == len(steps)-1:

@@ -5,14 +5,24 @@ import os
 from pathlib import Path
 import ssl
 import subprocess
+import sys
+
+
+queried = []
 
 
 def run(*args):
+    if args[0] == 'busctl':
+        queried.append('accounts')
+    elif args[0] == 'loginctl':
+        queried.append(args[1])
+    elif args[0] == 'grdctl':
+        queried.append('grdctl')
     return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL, timeout=4,
                                    env=dict(os.environ, LC_ALL='C', SYSTEMD_COLORS='0'))
 
 
-def inspect():
+def inspect(stage_only=False):
     if 'ID=debian' not in Path('/etc/os-release').read_text().splitlines():
         return {}
     if not Path('/usr/bin/grdctl').is_file():
@@ -33,7 +43,7 @@ def inspect():
     stage = ('initial' if no_users == 'b true' else 'finishing') if wizard else (
         'no-user' if no_users == 'b true' else 'login')
     result = {'stage': stage}
-    if stage == 'no-user':
+    if stage_only or stage == 'no-user':
         return result
     try:
         # Only the RDP section may supply these fields; VNC has its own password.
@@ -59,6 +69,7 @@ def inspect():
 
 if __name__ == '__main__':
     try:
-        print(json.dumps(inspect()))
+        report = inspect('--stage-only' in sys.argv[1:])
     except (OSError, ValueError, subprocess.SubprocessError):
-        print('{}')
+        report = {}
+    print(json.dumps(dict(report, queries=queried)))

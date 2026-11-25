@@ -1,8 +1,9 @@
 """Shared UART display geometry and idle-shell setup; no extra serial reader."""
 import re
+import time
 
 from .config import ANSI
-from .protocol import RE_IDLE_SHELL_PROMPT
+from .protocol import RE_IDLE_SHELL_PROMPT, console_os_id
 from .transactions import TransactionError
 from .terminal_backend import SharedTerminal
 
@@ -11,7 +12,7 @@ class SerialTerminalState:
     def __init__(self, device):
         self.device = device
         self.screen = SharedTerminal('serial')
-        self.tail = b''
+        self.reset_input()
         self.geometry = None
         self.history = []
         self.authority = None
@@ -19,9 +20,14 @@ class SerialTerminalState:
         self.environment_pending = False
         self.input_pending = False
 
+    def reset_input(self):
+        self.tail = b''
+        self.os_banner = ('', 0)
+
     def observe(self, data):
         joined = self.tail + data
         previous = len(self.tail)
+        line_start = 0
         start = self.device.base + len(self.device.buf)
         pattern = rb'\x1b\[8;(\d{1,3});(\d{1,3})t|(?:^|[\r\n])(?:\[[^\r\n]{1,40}\]\s*)?Linux version \d|(?:^|[\r\n])\[\s*0\.000000\] |\x00sys:\s*0x[0-9a-f]+|(?:^|[\r\n])U-Boot(?: SPL)? \d{4}\.\d{2}'
         for match in re.finditer(pattern, joined):
@@ -33,11 +39,21 @@ class SerialTerminalState:
                     self.geometry = {'rows': rows, 'cols': cols}
                     self.history.append((start + match.end() - previous, self.geometry))
             else:
+                self.os_banner = ('', 0)
+                line_start = match.end()
                 self.geometry = None
                 self.history.append((start + match.end() - previous, None))
                 self.authority = None
                 self.attempted = False
                 self.environment_pending = False
+        # Retain the getty banner for this boot even after kernel messages
+        # scroll it out of the prompt buffer. Only inspect newly received lines.
+        if b'\n' in data or b'\r' in data:
+            line_start = max(line_start, joined.rfind(b'\n', 0, previous) + 1,
+                             joined.rfind(b'\r', 0, previous) + 1)
+            family = console_os_id(ANSI.sub('', joined[line_start:].decode('utf-8', 'replace')))
+            if family:
+                self.os_banner = (family, time.time())
         self.tail = joined[-256:]
         if self.prompt():
             self.input_pending = False

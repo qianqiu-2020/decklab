@@ -66,6 +66,10 @@ def main():
                                cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
                 subprocess.run([str(source / 'scripts/config'), '--file', str(build / '.config'),
                                 '--set-str', 'DEFAULT_ENV_FILE', str(environment)], check=True)
+                ec_config = [str(source / 'scripts/config'), '--file', str(build / '.config')]
+                for symbol in ('ESPI', 'DM_ESPI', 'ESPI_SPACEMIT_K3', 'CROS_EC', 'CROS_EC_ESPI', 'CMD_CROS_EC'):
+                    ec_config.extend(['-e', symbol])
+                subprocess.run(ec_config, check=True)
                 subprocess.run(command + ['olddefconfig'], cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
                 configuration = (build / '.config').read_text()
                 (args.output / 'CONFIGURATION.txt').write_text(configuration)
@@ -131,7 +135,7 @@ def main():
             (args.output / 'manifest.json').write_text(json.dumps({'version': 1, 'families': {'k3': materials}}, indent=2) + '\n')
             (args.output / 'BUILD-INFO.txt').write_text('DeckLab K3 RAM-only download environment\n' +
                 'U-Boot source commit: ' + commit + '\nProfile: ' + profile.name + '\n' +
-                'FSBL SHA-256: ' + args.fsbl_sha256 + '\nToolchain prefix: ' + args.cross_compile + '\n' +
+                'FSBL SHA-256: ' + args.fsbl_sha256 + '\nToolchain prefix: ' + Path(args.cross_compile).name + '\n' +
                 'Build: k3_defconfig + native RAM configuration, u-boot.bin, compressed multi-DTB FIT\n' +
                 'OpenSBI fw_dynamic SHA-256: ' + args.opensbi_sha256 + ' (started by SPL; U-Boot runs in S-mode)\n' +
                 'DDR training policy: decided by the staged FSBL; board_late_init disabled, so nothing is saved.\n' +

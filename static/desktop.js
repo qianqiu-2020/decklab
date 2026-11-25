@@ -18,6 +18,7 @@
     var width = 0, height = 0, writable = false, disposed = false, grabbed = false;
     var keys = new Map(), buttons = 0, pointer = {x: 0, y: 0}, scale = 'fit';
     var clipboardKeys = new Set(), pasteWithShift = false;
+    var copyDrag = null, superFromF8 = false;
     var pendingMove = null, moveTimer = null, wheelRemainder = 0;
     var raf = options.requestAnimationFrame || global.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); };
     var caf = options.cancelAnimationFrame || global.cancelAnimationFrame || clearTimeout;
@@ -47,7 +48,10 @@
       if (options.onKeyLockUnavailable) options.onKeyLockUnavailable(unavailable);
     }
     function unlockSystemKeys() {
-      if (keyboardLock) { keyboardLock.api.unlock(); keyboardLock = null; }
+      if (keyboardLock) {
+        ['MetaLeft','MetaRight'].forEach(function (code) { if (keys.has(code)) emitKey(keys.get(code), code, false); });
+        keyboardLock.api.unlock(); keyboardLock = null;
+      }
       keyHint(false);
     }
     function systemKeys() {
@@ -58,11 +62,13 @@
       if (keyboardLock) return;
       var request = {api: api}; keyboardLock = request;
       // A denied request is retried only after the user refocuses the viewer.
-      api.lock(['MetaLeft', 'MetaRight', 'Tab']).catch(function () { if (keyboardLock === request) keyHint(true); });
+      api.lock(['MetaLeft', 'MetaRight', 'Tab']).then(function () {
+        if (keyboardLock === request) { request.active = true; keyHint(false); }
+      }).catch(function () { if (keyboardLock === request) keyHint(true); });
     }
     function grab() { if (!disposed && writable && !grabbed) { keyboard.grab(); grabbed = true; systemKeys(); } }
     function release(reason) {
-      clipboardKeys.clear(); pasteWithShift = false;
+      clipboardKeys.clear(); pasteWithShift = false; copyDrag = null; superFromF8 = false;
       unlockSystemKeys(); flushMove();
       if (grabbed) { keyboard.ungrab(); grabbed = false; }
       keys.forEach(function (keysym, code) { send({type: 'key', keysym: keysym, code: code, down: false}); });
@@ -78,7 +84,9 @@
       flushMove(); pointer = point;
       buttons |= ({0: 1, 1: 2, 2: 4})[event.button];
       if (canvas.setPointerCapture && event.pointerId != null) canvas.setPointerCapture(event.pointerId);
-      send({type: 'pointer', x: point.x, y: point.y, buttons: buttons});
+      var accepted = send({type: 'pointer', x: point.x, y: point.y, buttons: buttons});
+      copyDrag = accepted && buttons === 1 && event.isPrimary !== false && options.copyDragEnabled && options.copyDragEnabled()
+        ? {id:event.pointerId, x:event.clientX, y:event.clientY} : null;
     }
     function pointerMove(event) {
       if (!writable) return;
@@ -92,7 +100,11 @@
       event.preventDefault(); flushMove();
       pointer = position(event) || pointer;
       buttons &= ~({0: 1, 1: 2, 2: 4})[event.button];
-      send({type: 'pointer', x: pointer.x, y: pointer.y, buttons: buttons});
+      var accepted = send({type: 'pointer', x: pointer.x, y: pointer.y, buttons: buttons});
+      var drag = copyDrag; copyDrag = null;
+      if (accepted && drag && drag.id === event.pointerId && event.button === 0 && !buttons &&
+          Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >= 4 && options.copyDragEnabled() &&
+          combination(pasteCodes('KeyC', true), true)) options.copy();
       if (!buttons && canvas.releasePointerCapture && event.pointerId != null &&
           (!canvas.hasPointerCapture || canvas.hasPointerCapture(event.pointerId))) canvas.releasePointerCapture(event.pointerId);
     }
@@ -125,15 +137,42 @@
       return true;
     }
     function clipboardKey(event) {
+      var meta = event.code === 'MetaLeft' || event.code === 'MetaRight';
+      var captured = keyboardLock && keyboardLock.active;
+      var commandClipboard = /Mac|iPhone|iPad/.test((global.navigator || {}).platform || '')
+        && event.metaKey && ['KeyC','KeyV'].includes(event.code);
+      if (event.code === 'F8' && (superFromF8 || event.type === 'keydown' && !event.repeat &&
+          writable && options.useF8 && options.useF8() && !keys.has('MetaLeft'))) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) {
+          superFromF8 = event.type === 'keydown';
+          emitKey(0xffeb, 'MetaLeft', superFromF8);
+        }
+        return;
+      }
+      if (meta) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (writable && captured && !(superFromF8 && event.code === 'MetaLeft')) {
+          if (event.type === 'keydown' && !event.repeat || event.type === 'keyup' && keys.has(event.code))
+            emitKey(event.code === 'MetaLeft' ? 0xffeb : 0xffec, event.code, event.type === 'keydown');
+        } else if (writable) keyHint(true);
+        return;
+      }
+      if (event.type === 'keydown' && event.metaKey && !captured && !commandClipboard) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!keys.has(event.code)) clipboardKeys.add(event.code);
+        return;
+      }
       if (event.type === 'keyup') {
         if (clipboardKeys.delete(event.code)) { event.preventDefault(); event.stopImmediatePropagation(); }
         return;
       }
-      if (!writable || event.altKey || !(event.ctrlKey || event.metaKey)
+      if (!writable || event.altKey || !(event.ctrlKey || commandClipboard)
           || !['KeyC','KeyV'].includes(event.code)) return;
       event.stopImmediatePropagation();
       clipboardKeys.add(event.code);
-      if (event.code === 'KeyV' && !event.repeat) {
+      if (event.code === 'KeyV') {
+        if (event.repeat) { event.preventDefault(); return; }
         pasteWithShift = event.shiftKey;
         // Let the browser fire its native paste event, including on HTTP.
         return;
@@ -215,11 +254,12 @@
     var socket = null, surface = null, ready = false, inputAllowed = false, frame = null;
     var queue = [], inflight = null, sequence = 0, ackTimer = null, heartbeat = null;
     var renderPromise = Promise.resolve(), renderPending = 0, lastSequence = 0, mode = '', renderEpoch = 0;
-    var clipboardTimer = null;
+    var clipboardTimer = null, localClipboardRead = null;
     var capabilities = {}, needFullFrame = true, hasObserved = false;
     var releaseBarrier = '', pendingIntent = null;
     var availability = null, setupValue = null, candidates = [], candidateId = '', detecting = false, savingSetup = false;
     var settingsRead = null, opening = null, sessionStage = '', seatRetry = null, seatRetried = false, reconnecting = false;
+    var stageTimer = null, handoverAttempts = 0;
     var suggestedGdmUser = false;
     var statusValue = '点击画面后控制桌面', overlayValue = '连接后显示远程桌面';
     var ackTimeout = options.ackTimeout || 8000;
@@ -235,7 +275,7 @@
         'lxqt-greeter':'Bianbu 登录界面。请使用板上的账号登录。',
         'lxqt-unavailable':'未找到可共享的 Bianbu Wayland 桌面。请核对板上的图形登录服务和 wayvnc。',
         initial:'首次设置：按画面提示创建普通用户，完成后用新账号登录 Debian。',
-        finishing:'普通用户已创建。请在首次设置向导中完成最后一步，再重新打开桌面。',
+        finishing:'普通用户已创建。请完成向导最后一步，画面将自动切换到 Debian 登录界面。',
         'no-user':'板上尚无普通用户，未检测到活动的首次设置向导。请在板上显示器完成初始化，或检查 GDM 服务。'}[stage];
       $('desktop-login-stage').textContent = text ? translate(text) : '';
       $('desktop-move-wizard').hidden = stage !== 'initial' && stage !== 'finishing';
@@ -266,6 +306,7 @@
       try { socket.send(JSON.stringify(message)); return true; } catch (_) { return false; }
     }
     function clearTimers() {
+      clearTimeout(stageTimer); stageTimer = null;
       if (ackTimer) clearTimeout(ackTimer); ackTimer = null;
       if (heartbeat) clearInterval(heartbeat); heartbeat = null;
       if (clipboardTimer) clearTimeout(clipboardTimer); clipboardTimer = null;
@@ -276,6 +317,7 @@
       overlay(reason || '显示模式已变化，正在重新观察…');
     }
     function detach() {
+      $('desktop-drag-copy').checked = false;
       if (surface) { surface.dispose(); surface = null; }
       var old = socket; socket = null; ready = false; inputAllowed = false; frame = null;
       clearTimers(); queue = []; inflight = null;
@@ -332,7 +374,8 @@
       pump(); return true;
     }
     function dispatchIntent(intent) {
-      if (intent.codes) { if (surface) surface.combination(intent.codes); }
+      if (typeof intent.paste === 'string') pasteFromBrowser(intent.paste, ['ControlLeft','KeyV']);
+      else if (intent.codes) { if (surface) surface.combination(intent.codes); }
       else enqueue(intent.event);
     }
     function pasteFromBrowser(text, codes) {
@@ -361,15 +404,17 @@
       if (focus) { $('desktop-text').focus(); $('desktop-text').select(); }
     }
     function closeClipboard() {
+      localClipboardRead = null;
       $('desktop-clipboard').hidden = true;
       $('desktop-clipboard-toggle').setAttribute('aria-expanded', 'false');
-      $('desktop-text').value = '';
+      $('desktop-text').value = ''; $('desktop-paste-text').value = '';
+      $('desktop-copy-local').disabled = true;
     }
     function copyToBrowser(text, ctx, generation, connection) {
       function stillCurrent() { return current(ctx, generation) && socket === connection && panelVisible(); }
       function fallback() {
         if (!stillCurrent()) return;
-        if (options.copyText && options.copyText(text, true)) {
+        if (options.copyText && options.copyText(text, true, $('desktop-panel'))) {
           if (surface) surface.focus();
           status('文本已复制到本机剪贴板');
         } else {
@@ -395,7 +440,7 @@
       $('detail').classList.add('desktop-active'); $('b-desktop').setAttribute('aria-selected', 'true');
     }
     function hidePanel() {
-      clearTimeout(seatRetry); seatRetry = null;
+      clearTimeout(seatRetry); seatRetry = null; handoverAttempts = 0;
       if (settingsRead) { settingsRead.abort(); settingsRead = null; }
       var wasVisible = visible;
       visible = false; pendingIntent = null;
@@ -447,7 +492,11 @@
       if (!panelVisible() || !frame || releaseBarrier || needFullFrame || !socket || socket.readyState !== 1) return;
       if (!send({type: 'observed', frame_id: frame.id, sequence: frame.sequence})) throw new Error('画面观察确认未送达');
       inputAllowed = true; surface.setWritable(true); overlay('');
-      if (!hasObserved) { hasObserved = true; status('已连接 · 点击画面后控制桌面'); }
+      if (!hasObserved) {
+        hasObserved = true; handoverAttempts = 0;
+        status('已连接 · 点击画面后控制桌面');
+        if (wizardStage()) watchWizard(target, version, socket);
+      }
       var pending = pendingIntent; pendingIntent = null;
       if (pending && pending.version === version && pending.socket === socket) dispatchIntent(pending.intent);
     }
@@ -523,6 +572,7 @@
         pump();
       } else if (message.type === 'clipboard') {
         if (!panelVisible() || !inflight || !inflight.event || inflight.event.type !== 'clipboard-read') return;
+        $('desktop-copy-local').disabled = !message.text || message.available === false;
         if (message.available === false) {
           $('desktop-text').value = ''; status('暂无可读的远端文本剪贴板'); return;
         }
@@ -547,7 +597,14 @@
         var old = $('desktop-image'), canvas = old.cloneNode(false);
         old.replaceWith(canvas);
         surface = createSurface({canvas: canvas, viewport: $('desktop-screen'), Display: lib.Display, Keyboard: lib.Keyboard,
-          onKeyLockUnavailable: function (value) { $('desktop-system-key-hint').hidden = !value; },
+          onKeyLockUnavailable: function (value) {
+            var hint = $('desktop-system-key-hint');
+            var insecure = global.isSecureContext === false;
+            hint.textContent = translate(insecure ? 'HTTP 无法锁定实体 Win 键，可点 Win / Super。' : '当前无法独占 Win 键。可点 Win / Super 发送到远端。');
+            hint.hidden = !(value || insecure && global.document.fullscreenElement === $('desktop-panel'));
+          },
+          useF8: function () { return $('desktop-f8-super').checked; },
+          copyDragEnabled: function () { return $('desktop-drag-copy').checked && (capabilities.clipboard || {}).read; },
           paste:pasteFromBrowser, copy:function () {
             if ((capabilities.clipboard || {}).read) enqueue({type:'clipboard-read'}, false, true);
           },
@@ -576,7 +633,7 @@
             receive(JSON.parse(event.data), ctx, generation, connection);
           } catch (error) { if (current(ctx, generation) && socket === connection) stop(error.message); }
         };
-        connection.onerror = function () { if (current(ctx, generation) && socket === connection) stop('远程桌面已建立，但网页未连上画面通道。请点击「重新连接画面」重试。'); };
+        connection.onerror = function () { if (current(ctx, generation) && socket === connection) streamEnded('远程桌面已建立，但网页未连上画面通道。请点击「重新连接画面」重试。'); };
         connection.onclose = function () { if (current(ctx, generation) && socket === connection) streamEnded('桌面连接已断开，请手动重新连接画面。'); };
       }).catch(function (error) { if (current(ctx, generation)) stop('桌面连接失败：' + error.message); });
     }
@@ -745,7 +802,8 @@
         {key: ctx.key, serial: ctx.serial, client_id: options.clientId || ''}).then(function (data) {
         if (!current(ctx, generation)) return;
         if (data.manual) {
-          showSetup(true);
+          if (handoverAttempts && scheduleHandover()) return;
+          handoverAttempts = 0; showSetup(true);
           connectionMessage(loginGuide(data.login_stage) || '暂未能自动取得桌面入口，请选择服务并填写入口凭据。');
           return;
         }
@@ -757,7 +815,10 @@
         return connect(target, generation);
       }).catch(function (error) {
         if (!current(ctx, generation)) return;
-        connectionError(error);
+        var transient = ['desktop-connection-failed', 'desktop-connection-timeout', 'desktop-connection-refused',
+          'desktop-network-failed', 'desktop-tls-failed'];
+        if (handoverAttempts && transient.includes((error.result || {}).code) && scheduleHandover()) return;
+        handoverAttempts = 0; connectionError(error);
         return client.request(query(ctx, 'sessions')).then(function (data) {
           if (!current(ctx, generation)) return;
           previousSession = data.sessions && data.sessions[0]; $('desktop-replace').hidden = !previousSession;
@@ -835,10 +896,41 @@
         }).catch(function (error) { if (current(ctx, generation)) stop(error.message); })
         .finally(function () { if (selected === ctx.serial) reconnecting = false; });
     }
+    function wizardStage() { return sessionStage === 'initial' || sessionStage === 'finishing'; }
+    function watchWizard(ctx, generation, connection) {
+      if (!current(ctx, generation) || socket !== connection || !wizardStage()) return;
+      stageTimer = setTimeout(async function () {
+        if (!current(ctx, generation) || socket !== connection) return;
+        if (panelVisible()) {
+          try {
+            var data = await client.request('/api/desktop/login-stage',
+              {key:ctx.key, serial:ctx.serial, sid:sid, client_id:options.clientId || ''});
+            if (!current(ctx, generation) || socket !== connection) return;
+            if (data.login_stage === 'login' && panelVisible()) {
+              streamEnded('正在从登录界面切换到桌面…'); return;
+            }
+            if (data.login_stage === 'finishing') { sessionStage = 'finishing'; loginGuide(sessionStage); }
+          } catch (_) { /* The display can keep working while USB is unavailable. */ }
+        }
+        watchWizard(ctx, generation, connection);
+      }, options.stageCheckDelay || 5000);
+    }
+    function scheduleHandover() {
+      if (!panelVisible() || handoverAttempts >= 5) return false;
+      var ctx = target, generation = version;
+      clearTimeout(seatRetry);
+      seatRetry = setTimeout(function () {
+        if (current(ctx, generation) && panelVisible() && !socket) reconnect();
+      }, (options.seatRetryDelay || 1800) * ++handoverAttempts);
+      overlay('正在从登录界面切换到桌面…'); status('');
+      return true;
+    }
     function streamEnded(message) {
+      var wizard = wizardStage() && (hasObserved || handoverAttempts > 0) && panelVisible();
       var handover = sessionStage === 'lxqt-greeter' && hasObserved && panelVisible() && !inflight && !seatRetried;
       var ctx = target, generation = version;
       stop(handover ? '正在从登录界面切换到桌面…' : message);
+      if (wizard && scheduleHandover()) return;
       if (handover) {
         seatRetried = true;
         seatRetry = setTimeout(function () {
@@ -847,9 +939,10 @@
       }
     }
     $('desktop-refresh').addEventListener('click', function () {
-      seatRetried = false; reconnect();
+      seatRetried = false; handoverAttempts = 0; reconnect();
     });
     $('desktop-disconnect').addEventListener('click', function () {
+      clearTimeout(seatRetry); seatRetry = null; handoverAttempts = 0;
       if (!target || !sid) return;
       var ctx = target, generation = version, closing = sid;
       detach();
@@ -903,12 +996,31 @@
     $('desktop-clipboard-toggle').addEventListener('click', function () {
       if (!$('desktop-clipboard').hidden) {
         closeClipboard();
-        if (surface) surface.resize();
+        if (surface) { surface.resize(); surface.focus(); }
         return;
       }
-      if (!(capabilities.clipboard || {}).read) { status('此桌面不支持读取文本剪贴板'); return; }
       revealClipboard(false);
-      toolbarIntent({event: {type: 'clipboard-read'}});
+      $('desktop-paste-submit').disabled = !((capabilities.clipboard || {}).write || capabilities.text);
+      if ((capabilities.clipboard || {}).read) toolbarIntent({event: {type: 'clipboard-read'}});
+    });
+    $('desktop-copy-local').addEventListener('click', function () {
+      var text = $('desktop-text').value;
+      if (text && target && socket) copyToBrowser(text, target, version, socket);
+    });
+    $('desktop-paste-submit').addEventListener('click', async function () {
+      if (!panelVisible() || !socket || !target) return;
+      var ctx = target, generation = version, connection = socket, field = $('desktop-paste-text');
+      var text = field.value;
+      if (!text) {
+        if (localClipboardRead) return;
+        var reading = {}; localClipboardRead = reading;
+        try { text = await global.navigator.clipboard.readText(); } catch (_) { /* Native paste works on HTTP. */ }
+        if (localClipboardRead !== reading) return;
+        localClipboardRead = null;
+        if (!current(ctx, generation) || socket !== connection || !panelVisible() || $('desktop-clipboard').hidden) return;
+        if (!text) { field.focus(); status('请在文本框粘贴，再点「粘贴到远端」'); return; }
+      }
+      toolbarIntent({paste:text});
     });
     return {refresh: refresh, close: closePanel, showTerminal: function () {
       dismissSetup(); if (visible) hidePanel();

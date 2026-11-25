@@ -19,7 +19,7 @@
       },
       "uboot": {
         "file": "k3/u-boot.itb",
-        "sha256": "3d2632744c9114eec446e885fb5ba2a227bb2c82edf8c1fadda587abe8b9ffa1"
+        "sha256": "287bb2f7adc31a236d65790e923cbe1e0d664c4b2149d46bba3489e87da4ef3a"
       },
       "ram_boot": {
         "protocol": "spacemit-k3-ramboot-v1",

@@ -340,6 +340,7 @@ class ShortLineScriptTests(unittest.TestCase):
 
 class ShellLoginTests(DeviceFixture):
     def login(self, tail, replies, newline='\r', write_ok=True):
+        self.device.terminal.observe(tail.encode())
         self.device.console_tail = tail
         self.device.newline = newline
         pending = iter(replies)
@@ -382,6 +383,29 @@ class ShellLoginTests(DeviceFixture):
         self.assertTrue(ok)
         self.assertEqual(writes, ['root\r', 'debian\r'])
 
+    def test_explicit_serial_password_matching_another_stock_os_takes_precedence(self):
+        with mock.patch.dict(os.environ, {'SERIALD_CONSOLE_PASSWORD': 'bianbu'}):
+            (ok, _), writes, _ = self.login('Debian GNU/Linux 13 board ttyS0\r\nboard login: ',
+                                            ['Password:', 'root@board:#'])
+        self.assertTrue(ok)
+        self.assertEqual(writes, ['root\r', 'bianbu\r'])
+
+    def test_login_after_banner_scrolled_out_or_board_rebooted(self):
+        state = self.device.terminal
+        for data in (b'Debi', b'an GNU/Linux 13 board ttyS0\r\n', b'kernel message\r\n' * 600):
+            state.observe(data)
+        (ok, _), writes, _ = self.login('board login: ', ['Password:', 'root@board:#'])
+        self.assertTrue(ok)
+        self.assertEqual(writes, ['root\r', 'debian\r'])
+        state.observe(b'\r\nLinux version 6.10\r\n')
+        self.assertEqual(self.device.login_os_family(), '')
+        for banner, family in [('Bianbu 4.0.8 board ttyS0', 'bianbu'), ('Welcome to Buildroot', 'buildroot')]:
+            state.observe(('\r' + banner + '\r').encode())
+            self.assertEqual(self.device.login_os_family(), family)
+            self.assertEqual(self.device.console_login(), ('root', 'bianbu'))
+        state.reset_input()
+        self.assertEqual(self.device.login_os_family(), '')
+
     def test_login_rejection_does_not_send_default_password(self):
         for failure in ('Login incorrect', '登录错误', '认证失败', 'Authentication failure'):
             with self.subTest(failure=failure):
@@ -393,6 +417,12 @@ class ShellLoginTests(DeviceFixture):
         (ok, _), writes, _ = self.login('board login: ', ['Password: ', 'Login incorrect'])
         self.assertFalse(ok)
         self.assertEqual(writes, ['root\r', 'bianbu\r'])
+
+    def test_existing_password_prompt_belongs_to_previous_login(self):
+        (ok, _), writes, _ = self.login('Password: ', [])
+        self.assertFalse(ok)
+        self.assertEqual(writes, [])
+        self.assertIn('完成当前登录', self.device.console.login_error)
 
     def test_failed_username_write_does_not_wait_for_password(self):
         (ok, _), writes, wait = self.login('board login: ', [], write_ok=False)

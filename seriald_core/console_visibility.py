@@ -102,6 +102,14 @@ class ConsoleVisibility:
         self.tail = joined[-128:]
         match = SYSTEM_OUTPUT.search(joined)
         if match:
+            if self.kind == 'terminal-setup':
+                # The current read has not reached the receive buffer yet. A
+                # split kernel header is restored separately below.
+                d = self.device
+                header_bytes = max(0, len(previous) - match.start())
+                with d.cv:
+                    output = bytes(d.buf[max(0, self.start - d.base):len(d.buf) - header_bytes])
+                self.report(output.decode('utf-8', 'replace'), self.command)
             self.finish(self.token, discard=True)
             if match.start() < len(previous):
                 # A kernel/boot header can straddle two collector reads. Its

@@ -112,6 +112,7 @@ class WindowsManager(Manager):
                         return
                     with device.cv:
                         device.console_tail = ''
+                        device.terminal.reset_input()
                         device.newline = device.profile.line_ending
                     settings = device.profile.serial
                     device.fd = serial.Serial(device.dev, timeout=0.25, write_timeout=5,

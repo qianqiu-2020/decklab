@@ -6,6 +6,27 @@
 
 ## [Unreleased]
 
+## [1.18.7] - 2026-11-25
+
+### Added
+
+- Web 服务同时提供 HTTP 和 HTTPS。支持控制机本地证书或管理员提供的证书。
+- 设备「历史日志 → 操作记录」显示远程桌面通过 ADB 查询登录状态、读取连接设置和打开 USB 桌面的结果。
+- 普通刷机列出板上各存储介质和可读取的 EC 运行版本。固件包带有适用的 EC 时默认选中更新，预览前可取消。
+- 镜像详情显示固件组件版本，并按载荷摘要关联已核验的 CAB。
+- 远程桌面可开启 GNOME 终端拖选复制，也可用 F8 向板上发送 Win 键及其组合键。
+- 系统配置可保存团队用例平台地址和令牌，保存后即可浏览目录。
+
+### Fixed
+
+- 串口识别保留本次启动的系统类型，登录时显示系统和账号。后续启动日志滚出系统横幅后仍可使用对应镜像的默认密码。
+- 终端允许在共享会话和固件界面使用指定字号，超出窗口时可滚动查看，也可切回自动适应窗口。
+- 桌面画面编码队列已满时合并后续更新，避免因此中断鼠标拖选。全屏页面会提示 HTTP 对系统键的限制。
+- 串口自动设置期间收到内核或启动消息时，日归档会保留在它之前收到的业务输出。
+- 远程桌面支持从剪贴板面板双向复制粘贴文本，长按粘贴快捷键不会误触发复制。
+- 全屏获得键盘锁后可向远端发送实体 Win 键。窗口模式提供直接发送 Win / Super 的按钮，避免两端同时响应。
+- Debian 首次设置完成后，远程桌面自动切换到登录入口。服务启动过程中会短暂等待并重连。
+
 ## [1.18.0] - 2026-11-25
 
 ### Added
@@ -355,7 +376,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.18.0...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.18.7...HEAD
+[1.18.7]: https://github.com/qianqiu-2020/decklab/compare/v1.18.0...v1.18.7
 [1.18.0]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.18.0
 [1.17.74]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.74
 [1.17.54]: https://github.com/qianqiu-2020/decklab/compare/v1.17.53...v1.17.54

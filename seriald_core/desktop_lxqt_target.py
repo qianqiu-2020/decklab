@@ -14,7 +14,11 @@ import tempfile
 import time
 
 
+queried = []
+
+
 def property_value(kind, identity, *properties):
+    queried.append('show-' + kind)
     result = subprocess.check_output(
         ['loginctl', 'show-' + kind, identity, *['--property=' + key for key in properties]],
         text=True, timeout=4)
@@ -128,4 +132,4 @@ def report_lxqt():
                     stage = 'lxqt-finishing'
     except (OSError, ValueError, KeyError, configparser.Error, subprocess.SubprocessError):
         pass
-    print(json.dumps({'stage': stage}))
+    print(json.dumps({'stage': stage, 'queries': queried}))

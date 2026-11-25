@@ -7,11 +7,15 @@
     var view = null, term = null, loopGen = 0;
     var DEFAULT_TERMINAL_FONT_SIZE = 14.5;
     var fontSizes = [10, 12, 14.5, 16, 18, 20, 22, 24];
+    var autoFontSize = true;
     var preferredFontSize = DEFAULT_TERMINAL_FONT_SIZE;
     var fontPreferenceKey = 'decklab-terminal-font-size';
     try {
       var storedFont = Number(global.localStorage.getItem(fontPreferenceKey));
-      if (fontSizes.includes(storedFont)) preferredFontSize = storedFont;
+      if (fontSizes.includes(storedFont)) {
+        preferredFontSize = storedFont;
+        autoFontSize = false;
+      }
     } catch (_) {}
     function isCurrent(ctx) {
       return !!ctx && view === ctx && ctx.gen === loopGen;
@@ -49,6 +53,7 @@
       if (old.refreshFrame && window.cancelAnimationFrame) window.cancelAnimationFrame(old.refreshFrame);
       // reset() 不会清空 xterm 的异步解析队列；旧 CSI 6n 还可能触发 onData，
       // 把上一台的终端应答写到新设备。销毁实例，并让所有旧回调检查所属视图。
+      $('d-term').classList.remove('terminal-fixed-zoom');
       old.term.dispose();
     }
 
@@ -56,7 +61,9 @@
       if (!global.PointerEvent || ctx.sid !== 'serial' && ctx.kind !== 'log') return;
       var host = $('d-term'), gesture = null, suppressTap = false;
       function canScroll() {
-        return isCurrent(ctx) && ctx.term.buffer.active.type === 'normal'
+        return isCurrent(ctx) && !(host.classList.contains('terminal-fixed-zoom')
+          && (host.scrollHeight > host.clientHeight || host.scrollWidth > host.clientWidth))
+          && ctx.term.buffer.active.type === 'normal'
           && ctx.term.modes.mouseTrackingMode === 'none';
       }
       function down(event) {
@@ -420,9 +427,11 @@
       options.scheduleCommandNav(ctx);
     }
     function setFontSize(value) {
-      value = Number(value);
-      if (!fontSizes.includes(value) || value === preferredFontSize) return;
-      preferredFontSize = value;
+      var auto = value === 'auto';
+      var size = auto ? DEFAULT_TERMINAL_FONT_SIZE : Number(value);
+      if (!fontSizes.includes(size) || (autoFontSize === auto && preferredFontSize === size)) return;
+      autoFontSize = auto;
+      preferredFontSize = size;
       try { global.localStorage.setItem(fontPreferenceKey, String(value)); } catch (_) {}
       resizeTerm();
       if (view) syncSerialPresentation(view);
@@ -438,8 +447,7 @@
       return viewport && viewport.clientHeight && cellHeight > 0
         ? Math.min(proposed, Math.floor(viewport.clientHeight / cellHeight)) : proposed;
     }
-    function serialCapacity(ctx, dimensions) {
-      var viewport = ctx.term.element && ctx.term.element.querySelector('.xterm-viewport');
+    function cellDimensions(ctx) {
       var render = ctx.term._core && ctx.term._core._renderService;
       var cell = render && render.dimensions.css && render.dimensions.css.cell;
       // CharSizeService measures synchronously when fontSize changes. Renderer
@@ -451,6 +459,12 @@
         cell = {width: chars.width + Math.round(ctx.term.options.letterSpacing || 0) / dpr,
           height: Math.floor(Math.ceil(chars.height * dpr) * (ctx.term.options.lineHeight || 1)) / dpr};
       }
+      return cell;
+    }
+    function serialCapacity(ctx, dimensions) {
+      var viewport = $('d-term').classList.contains('terminal-fixed-zoom') ? $('d-term')
+        : ctx.term.element && ctx.term.element.querySelector('.xterm-viewport');
+      var cell = cellDimensions(ctx);
       if (viewport && cell && cell.width && cell.height) return {
         cols: Math.floor((viewport.clientWidth - 17) / cell.width),
         rows: Math.floor((viewport.clientHeight - 2) / cell.height)
@@ -464,7 +478,7 @@
       }
       if (!host || !host.clientWidth || !host.clientHeight) return '';
       return [host.clientWidth, host.clientHeight, font.fontFamily, font.lineHeight, font.letterSpacing,
-        preferredFontSize, window.devicePixelRatio || 1].join(':');
+        preferredFontSize, autoFontSize, window.devicePixelRatio || 1].join(':');
     }
     function preferredGrid(ctx) {
       var viewSize = viewSizeKey(ctx);
@@ -487,11 +501,31 @@
       // readline, EDK2 and GRUB normally lay out against 80 columns; fitting
       // xterm to a wide browser makes wrapped input and cursor-left disagree
       // about the visual row. Use 80 columns until explicit shell size sync.
-      if (ctx.screenManaged || ctx.sid === 'serial' && ctx.serialMode !== 'text') {
+      var fixedGrid = ctx.screenManaged || ctx.sid === 'serial' && ctx.serialMode !== 'text';
+      if ((autoFontSize || !fixedGrid) && $('d-term').classList.contains('terminal-fixed-zoom')) {
+        $('d-term').classList.remove('terminal-fixed-zoom');
+        ctx.term.element.style.minWidth = '';
+        ctx.term.element.style.minHeight = '';
+      }
+      if (fixedGrid) {
         var required = ctx.screenManaged ? ctx.screenGeometry.rows : ctx.serialRows || 24;
         var cap = !ctx.linuxConsole && required >= 40 && document.body.classList.contains('terminal-max')
           ? Math.min(preferredFontSize, 10) : preferredFontSize;
         var requiredCols = ctx.screenManaged ? ctx.screenGeometry.cols : ctx.serialCols || 80;
+        if (!autoFontSize) {
+          if (ctx.term.options.fontSize !== preferredFontSize) ctx.term.options.fontSize = preferredFontSize;
+          if (ctx.term.cols !== requiredCols || ctx.term.rows !== required) ctx.term.resize(requiredCols, required);
+          // Observers and firmware retain the shared grid. Let the browser pan
+          // across it at the requested font size when it exceeds the viewport.
+          var cell = cellDimensions(ctx), element = ctx.term.element;
+          if (cell && cell.width && cell.height && element) {
+            element.style.minWidth = Math.ceil(requiredCols * cell.width + 17) + 'px';
+            element.style.minHeight = Math.ceil(required * cell.height) + 'px';
+            $('d-term').classList.toggle('terminal-fixed-zoom', true);
+          }
+          ctx.fixedFitSignature = '';
+          return;
+        }
         var viewSize = viewSizeKey(ctx);
         var signature = viewSize ? [viewSize, requiredCols, required, cap].join(':') : '';
         if (signature && signature === ctx.fixedFitSignature) {
@@ -926,7 +960,7 @@
       write: writeTerminalPayload, start: startStream, send: send, updateState: updateTerminalState
     };
     Object.defineProperty(controller, 'current', { get: function () { return view; } });
-    Object.defineProperty(controller, 'fontSize', { get: function () { return preferredFontSize; } });
+    Object.defineProperty(controller, 'fontSize', { get: function () { return autoFontSize ? 'auto' : preferredFontSize; } });
     return controller;
   }
   global.SerialdTerminalView = { create: create };

@@ -115,6 +115,7 @@ class BoardProfile:
         return cls(serial=SerialSettings.from_env(environment), ssh_user=user, ssh_password=password,
                    console_user=environment.get('SERIALD_CONSOLE_USER', user),
                    console_password=environment.get('SERIALD_CONSOLE_PASSWORD', password),
+                   console_login_override='SERIALD_CONSOLE_PASSWORD' in environment,
                    newline=environment.get('SERIALD_NEWLINE', 'auto'), probe=probe,
                    probe_command=environment.get('SERIALD_PROBE_COMMAND', ''),
                    auto_configure_ssh=automatic)

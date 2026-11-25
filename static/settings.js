@@ -4,6 +4,7 @@
   var groups = [
     ['access', '访问与共享', [
       ['网页登录', ['PORT', 'BIND', 'AUTH_TOKEN', 'UI_LANGUAGE', 'SHARE_SECONDS']],
+      ['团队用例（TitanX）', ['TEAM_CATALOGUE_URL', 'TEAM_CATALOGUE_TOKEN']],
       ['AI 接入（MCP）', ['MCP_ENABLED']],
       ['高级访问设置', ['TRUST_LOOPBACK', 'MCP_PYTHON', 'MCP_ALLOWED_HOSTS', 'AGENT_TOKENS_FILE'], true, ['agent_tokens']]
     ]],
@@ -28,6 +29,7 @@
   ];
   var labels = {
     IMAGE_INTERNAL_BROWSE: '组织 Nexus 地址', IMAGE_INTERNAL_DOWNLOAD: '自定义下载地址（可选）',
+    TEAM_CATALOGUE_URL: '平台 HTTPS 地址', TEAM_CATALOGUE_TOKEN: '平台访问令牌',
     DESKTOP: '图形接入配置文件',
     BACKEND_URL: '后端 HTTPS 地址', BACKEND_TOKEN: '节点间访问密钥', BACKEND_CA: '后端 CA 证书文件',
     BACKEND_BIND: '后端监听地址', BACKEND_PORT: '后端监听端口', BACKEND_CERT: '后端 TLS 证书文件', BACKEND_KEY: '后端 TLS 私钥文件',

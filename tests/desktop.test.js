@@ -84,6 +84,11 @@ function fixture(configuration = {}) {
     }
     else if (url === '/api/desktop/close' && configuration.closeFailure)
       return {ok:false,status:configuration.closeFailure,json:async()=>({error:'desktop session not found'})};
+    else if (url === '/api/desktop/login-stage') data = {login_stage:configuration.liveStage || 'initial'};
+    else if (url === '/api/desktop/quick-open' && configuration.failNextOpen) {
+      configuration.failNextOpen = false;
+      return {ok:false,status:502,json:async()=>({code:'desktop-connection-refused',error:'starting'})};
+    }
     else if (url === '/api/desktop/quick-open') data = {session:{id:'session-'+serial, serial, login_stage:configuration.stage || 'initial'}};
     else if (url === '/api/desktop/open') {
       if (configuration.connectionFailure && connection.certificate_policy !== 'accept') return {ok:false,status:502,json:async()=>configuration.connectionFailure};
@@ -101,7 +106,7 @@ function fixture(configuration = {}) {
   for (const file of ['static/ui-common.js', 'static/tasks.js', 'static/desktop.js']) vm.runInContext(fs.readFileSync(file, 'utf8'), context);
   const desktop = window.SerialdDesktop.create({byId: $, fetch: window.SerialdUI.fetch,
     getView: () => view, canQuickConnect: () => !!configuration.quick, clientId: window.SerialdUI.clientId, copyText:text=>{copied=text;return true;}, websocketFactory: (url, protocol) => new Socket(url, protocol), libraryLoader: async () => ({Display, Keyboard}),
-    seatRetryDelay: 10, ackTimeout: configuration.ackTimeout, settingsTimeout: configuration.settingsTimeout,
+    stageCheckDelay: configuration.stageCheckDelay, seatRetryDelay: 10, ackTimeout: configuration.ackTimeout, settingsTimeout: configuration.settingsTimeout,
     requestAnimationFrame: window.requestAnimationFrame, cancelAnimationFrame: clearImmediate});
   cleanup.push(() => desktop.close());
   const frame = (sequence = 1, extra = {}) => Object.assign({type: 'frame', sequence, generation: 'display-1',
@@ -143,6 +148,24 @@ function fixture(configuration = {}) {
     assert.equal(greeter.calls.filter(x => x.url === '/api/desktop/quick-open').length, switchBoard ? 1 : 2);
     assert.equal(login.inputs().length, 0);
     greeter.desktop.close();
+  }
+  for (const end of ['disconnect', 'still-connected', 'leave']) {
+    const settings = {setup:true, quick:true, stage:'initial', stageCheckDelay:10};
+    const wizard = fixture(settings), old = await wizard.open();
+    settings.stage = 'login';
+    if (end === 'disconnect') {
+      settings.failNextOpen = true;
+      old.server({type:'error', code:'desktop-stream-stopped', error:'closed'});
+    } else {
+      settings.liveStage = 'login';
+      if (end === 'leave') wizard.switchBoard();
+    }
+    await pause(110);
+    assert.equal(wizard.calls.filter(x => x.url === '/api/desktop/close').length, end === 'leave' ? 0 : 1);
+    assert.equal(wizard.calls.filter(x => x.url === '/api/desktop/quick-open').length,
+      end === 'leave' ? 1 : end === 'disconnect' ? 3 : 2);
+    assert.equal(old.inputs().length, 0);
+    wizard.desktop.close();
   }
   const firstBoot = fixture({setup:true,quick:true});
   const wizardSocket = await firstBoot.open();
@@ -217,7 +240,25 @@ function fixture(configuration = {}) {
   $('desktop-fullscreen').fire('click'); await tick(); assert.strictEqual(f.document.fullscreenElement, $('desktop-panel'));
   f.fireGlobal('fullscreenchange'); assert.strictEqual($('desktop-fullscreen').textContent, '退出全屏');
   assert.deepEqual(locks, [['MetaLeft', 'MetaRight', 'Tab']]);
+  const beforeF8 = ws.inputs().length;
+  $('desktop-f8-super').checked = true;
+  canvas.fire('keydown',{code:'F8'});
+  canvas.fire('keydown',{code:'F8',repeat:true});
+  f.keyboards.at(-1).press(0x65,'KeyE',true);
+  f.keyboards.at(-1).press(0x65,'KeyE',false);
+  canvas.fire('keyup',{code:'F8'});
+  ws.ackAll();
+  assert.deepEqual(ws.inputs().slice(beforeF8).map(m=>[m.event.code,m.event.down]), [
+    ['MetaLeft',true],['KeyE',true],['KeyE',false],['MetaLeft',false]]);
+  $('desktop-f8-super').checked = false;
+  const metaCount = () => ws.inputs().filter(m => m.event.code === 'MetaRight').length;
+  const originalMeta = metaCount();
+  const metaPress = () => { for (const type of ['keydown','keyup']) canvas.fire(type,{code:'MetaRight'}); ws.ackAll(); };
+  metaPress();
+  assert.equal(metaCount(), originalMeta + 2, 'the locked physical key is delivered once');
   f.document.fullscreenElement = null; f.fireGlobal('fullscreenchange');
+  metaPress();
+  assert.equal(metaCount(), originalMeta + 2, 'a local system key is not duplicated remotely');
   assert.strictEqual(locks.at(-1), 'released');
   assert.deepStrictEqual(f.clipboard(), {reads: 0, writes: 0, copied: ''});
   $('desktop-clipboard-toggle').fire('click'); ws.server({type:'clipboard',text:'REMOTE'}); ws.ackAll();
@@ -249,6 +290,15 @@ function fixture(configuration = {}) {
   paste('中文'); ws.ackAll();
   assert.strictEqual(ws.inputs().at(-1).event.type,'text','Unicode VNC input falls back to typing');
   assert.strictEqual(ws.inputs().at(-1).event.text,'中文');
+  $('desktop-paste-text').value = '手动粘贴';
+  $('desktop-paste-submit').fire('click'); ws.ackAll();
+  assert.strictEqual(ws.inputs().at(-1).event.text,'手动粘贴');
+  $('desktop-paste-text').value = '';
+  $('desktop-paste-submit').fire('click'); await tick(); ws.ackAll();
+  assert(ws.inputs().some(m=>m.event.type==='clipboard' && m.event.text==='LOCAL'));
+  const beforeRepeat = ws.inputs().length;
+  canvas.fire('keydown',{ctrlKey:true,code:'KeyV',repeat:true}); ws.ackAll();
+  assert.equal(ws.inputs().length,beforeRepeat);
   const beforeInvalid = ws.inputs().length;
   for (const invalid of ['a\0b','\ud800','\udc00','中'.repeat(1025),'a'.repeat(32769)]) {
     paste(invalid); ws.ackAll();

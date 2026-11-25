@@ -104,6 +104,7 @@ def read_inventory(document, fetch, check=lambda: None, progress=lambda done, to
                 raise TaskError('invalid system storage partition', 502)
             previous_end = part['offset'] + part['size']
             if fetch is None:
+                parts.append({key: part[key] for key in ('name', 'offset', 'size')})
                 continue
             source = MetadataReader(fetch, disk, part['offset'], part['size'], budget, check)
             try:
@@ -127,6 +128,14 @@ def read_inventory(document, fetch, check=lambda: None, progress=lambda done, to
             'priority_source': document.get('priority_source', ''), 'metadata_bytes_read': MAX_READ - budget[0],
             'read_only': True, 'full_backup': False,
             'boot_priority_editable': document.get('boot_priority_editable') is True}
+    ec = document.get('ec')
+    if isinstance(ec, dict) and ec.get('state') in ('ready', 'unavailable', 'not-applicable'):
+        result['ec'] = {'state': ec['state']}
+        if ec['state'] == 'ready':
+            version = ec.get('version')
+            if not isinstance(version, str) or not 0 < len(version) <= 64 or not version.isprintable() or ec.get('copy') not in ('RO', 'RW'):
+                raise TaskError('invalid running EC version', 502)
+            result['ec'].update(version=version, copy=ec['copy'])
     if len(json.dumps(result, ensure_ascii=False).encode()) > 48 * 1024:
         raise TaskError('system storage metadata exceeds display limit', 502)
     return result

@@ -171,6 +171,21 @@ class ConsoleVisibilityTests(unittest.TestCase):
         self.assertIn('real kernel failure', self.screen())
         self.assertIn('real kernel failure', self.archive())
 
+    def test_kernel_interrupt_archives_prior_setup_output_once(self):
+        for previous, current in [(b'', b'[    2.123456]'), (b'[    2.12', b'3456]')]:
+            with self.subTest(split=bool(previous)):
+                self.device.visibility.begin('terminal-setup', 'stty size')
+                self.device.append(b'stty size\r\n')
+                message = '任务完成' + str(len(previous))
+                payload = (message + '\r\n').encode()
+                self.device.append(payload[:2])
+                self.device.append(payload[2:] + previous)
+                self.device.append(current + b' driver message\r\n')
+                archive = self.archive()
+                self.assertEqual(archive.count(message), 1)
+                self.assertLess(archive.index(message), archive.rindex('[    2.123456] driver message'))
+                self.assertNotIn('stty size', archive)
+
     def test_fragmented_kernel_header_is_restored_in_the_archive(self):
         self.device.visibility.begin('file-transfer')
         self.device.append(b'private protocol\r\n[    0.123')

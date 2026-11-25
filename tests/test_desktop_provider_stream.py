@@ -122,7 +122,7 @@ class LiveFramesTests(unittest.TestCase):
         self.assertEqual(self.image(current).getpixel((0, 0)), (0, 0, 255))
         self.assertIsNone(frames.next_event(timeout=.02))
 
-    def test_frame_queue_overflow_discards_patches_and_recovers_with_current_full_image(self):
+    def test_slow_consumer_receives_coalesced_paints_without_releasing_drag(self):
         from PIL import Image
         frames = self.frames(capacity=1)
         image = Image.new('RGB', (8, 6), 'black')
@@ -132,17 +132,27 @@ class LiveFramesTests(unittest.TestCase):
         image.putpixel((1, 1), (255, 0, 0))
         frames.update(image, [(1, 1, 1, 1)])
         self.wait_for(lambda: frames.events.qsize() == 1)
-        image.putpixel((6, 4), (0, 255, 0))
-        frames.update(image, [(6, 4, 1, 1)])
-        # The overflowing patch is not consumable; wait until its replacement
-        # reset has been encoded before accepting another event.
-        self.wait_for(lambda: frames.sequence >= first['sequence'] + 3)
-        recovered = frames.next_event(timeout=2)
-        self.assertTrue(recovered['reset'])
-        self.assertEqual((recovered['x'], recovered['y'], recovered['rect_width'], recovered['rect_height']), (0, 0, 8, 6))
-        snapshot = self.image(recovered)
-        self.assertEqual(snapshot.getpixel((1, 1)), (255, 0, 0))
-        self.assertEqual(snapshot.getpixel((6, 4)), (0, 255, 0))
+        encoded = threading.Event()
+        save = Image.Image.save
+        def record_encode(frame, *args, **kwargs):
+            encoded.set()
+            return save(frame, *args, **kwargs)
+        with mock.patch.object(Image.Image, 'save', record_encode):
+            image.putpixel((6, 4), (0, 255, 0))
+            frames.update(image, [(6, 4, 1, 1)])
+            image.putpixel((4, 2), (0, 0, 255))
+            frames.update(image, [(4, 2, 1, 1)])
+            self.assertFalse(encoded.wait(.1), 'a full queue must keep accumulating dirty pixels')
+        queued = frames.next_event(timeout=2)
+        coalesced = frames.next_event(timeout=2)
+        self.assertEqual([queued['sequence'], coalesced['sequence']],
+                         [first['sequence'] + 1, first['sequence'] + 2])
+        for event in (queued, coalesced):
+            self.assertFalse(event['reset'])
+        snapshot = self.image(first)
+        for event in (queued, coalesced):
+            snapshot.paste(self.image(event), (event['x'], event['y']))
+        self.assertEqual(snapshot.tobytes(), image.tobytes())
         self.assertIsNone(frames.next_event(timeout=.03))
 
 

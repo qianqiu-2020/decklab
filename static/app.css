@@ -280,6 +280,8 @@
   .info .v{font-family:var(--font-mono);font-size:12.5px;overflow-wrap:anywhere}
   .info .v.hi{color:var(--accent);font-weight:500}
   .termhost .xterm{height:100%}
+  .termhost.terminal-fixed-zoom{overflow:auto}
+  .termhost.terminal-touch-scroll.terminal-fixed-zoom{touch-action:pan-x pan-y pinch-zoom}
   .termhost.terminal-touch-scroll{touch-action:pinch-zoom}
   .termhost .xterm,.termhost .xterm-viewport{overscroll-behavior:contain}
   .termhost .xterm-viewport{background:transparent!important;color-scheme:dark}
@@ -903,6 +905,7 @@
 .desktop-input-tools{padding:8px 12px;flex:none;border-top:1px solid var(--line)}
 #desktop-status{flex:1;min-width:200px;font-size:12px;color:var(--ink-2);overflow-wrap:anywhere}
 .desktop-clipboard{display:grid;gap:6px;padding:10px 12px;border-top:1px solid var(--line);flex:none}
+.desktop-clipboard>button{justify-self:start}
 .desktop-clipboard>label{font-size:12px;color:var(--ink-2)}
 .desktop-clipboard textarea{width:100%;min-width:0;resize:vertical;max-height:160px;padding:8px;background:var(--ground);color:var(--ink);border:1px solid var(--line-strong);border-radius:6px;font:12px/1.5 var(--font-mono)}
 .desktop-key-tools{position:relative}
@@ -1110,3 +1113,7 @@ dialog :is(button,input,textarea,select){max-width:100%}
 .adb-command-dialog pre { margin: .35rem 0 .75rem; padding: .65rem .8rem; max-height: 15rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; }
 .adb-command-actions { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
 .adb-command-actions input { width: 6rem; }
+
+.fl-board-media .fl-disk { margin: 0; padding: .65rem .75rem; border-bottom: 1px solid var(--border); }
+.fl-ec-medium { font-weight: 600; }
+.fl-firmware-version { overflow-wrap: anywhere; }

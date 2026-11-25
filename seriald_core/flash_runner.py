@@ -44,7 +44,7 @@ def safe_outcome(value):
     if not isinstance(value, dict):
         return {}
     result = {}
-    values = {'write_result': {'not-started', 'completed', 'partial', 'failed', 'unknown'},
+    values = {'ec_result': {'unknown', 'completed', 'not-applicable'}, 'write_result': {'not-started', 'completed', 'partial', 'failed', 'unknown'},
               'verify_result': {'not-started', 'verified', 'failed', 'unavailable', 'not-requested', 'skipped'},
               'boot_result': {'not-requested', 'not-observed', 'observed', 'failed', 'unknown', 'reset-command-acknowledged'}}
     for field, allowed in values.items():
@@ -924,13 +924,13 @@ class LocalFlashExecutor:
                     self._active_workspaces.discard(str(workspace))
 
     def plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
-             target_storage=None, inspection_scope=None, on_event=None, loader_source=None, package_scope=None):
+             target_storage=None, inspection_scope=None, on_event=None, loader_source=None, package_scope=None, skip_ec=False):
         with self.image_guard(artifact, check):
             return self._plan(binding, artifact, input_mode, selections, verify, check,
-                              target_storage, inspection_scope, on_event, loader_source, package_scope)
+                              target_storage, inspection_scope, on_event, loader_source, package_scope, skip_ec)
 
     def _plan(self, binding, artifact, input_mode, selections=None, verify='if-supported', check=lambda: None,
-              target_storage=None, inspection_scope=None, on_event=None, loader_source=None, package_scope=None):
+              target_storage=None, inspection_scope=None, on_event=None, loader_source=None, package_scope=None, skip_ec=False):
         if input_mode not in ('full', 'partitions') or verify not in ('none', 'if-supported', 'optional', 'required'):
             raise TaskError('invalid flash mode or verification policy')
         if not isinstance(artifact, dict) or not re.fullmatch(r'[0-9a-f]{64}', str(artifact.get('sha256', ''))):
@@ -968,6 +968,10 @@ class LocalFlashExecutor:
                             for p in t.get('partitions', [])) for t in tables)):
                 # NOR is opt-in. A mixed OS archive without a companion targets only its GPT.
                 package_scope = 'system'
+        nor_catalogue = any(t.get('format') == 'mtd' and (t.get('selected') or t.get('name') == package_scope)
+                            for t in preparation.get('catalogue') or [])
+        if preparation.get('ec') and not skip_ec and nor_catalogue and package_scope != 'system':
+            request['ec'] = preparation['ec']
         if package_scope:
             request['package_scope'] = package_scope
         if target_storage is not None:

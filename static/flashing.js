@@ -73,6 +73,7 @@
       return value.startsWith('table:') ? value.slice(6) : '';
     }
     function setCompanionIntent(payload) {
+      if (!$('fl-ec-field').hidden && !$('fl-write-ec').checked) payload.skip_ec = true;
       if (payload.mode !== 'full') return;
       if (embeddedTable()) payload.firmware_table = embeddedTable();
       else if ($('fl-firmware').value) payload.firmware_artifact_id = $('fl-firmware').value;
@@ -149,6 +150,26 @@
       sources.forEach(function (id) {
         var job = imagePreparations[id], prepared = job && job.result && job.result.preparation;
         if (!prepared) return;
+        if ((prepared.firmware_versions || []).length) {
+          var versions = text('details', '', info);
+          text('summary', '固件组件与 CAB 版本', versions);
+          var table = text('table', '', versions); table.className = 'fl-scope-table';
+          var heading = text('tr', '', table);
+          ['组件', '包内文件', '固件自报版本', '发布版本号', '对应 CAB'].forEach(label => text('th', label, heading));
+          prepared.firmware_versions.forEach(function (row) {
+            var tr = text('tr', '', table);
+            text('td', row.name, tr); text('td', row.member, tr);
+            var payload = (prepared.payload_metadata || []).find(item => item.sha256 === row.sha256);
+            var versionText = row.name === 'EC' ? prepared.ec?.version_text : payload?.content?.version;
+            text('td', versionText || '—', tr);
+            text('td', row.version == null ? '未知' : String(row.version), tr);
+            var cell = text('td', '', tr);
+            if (row.cab_digests?.length) {
+              var hashes = text('details', '', cell); text('summary', '已匹配', hashes);
+              row.cab_digests.forEach(sha => { text('code', sha, hashes).className = 'fl-firmware-version'; });
+            } else cell.textContent = '暂无已核实记录';
+          });
+        }
         var metadata = prepared.payload_metadata || [], tables = prepared.catalogue || [];
         tables.forEach(function (table) {
           if (groups[table.format] && table.name !== 'partition_flash.json') {
@@ -302,7 +323,7 @@
       renderPreparation(); updateControls();
       try {
         var suppliedInfo = supplied && supplied.result && supplied.result.preparation;
-        if (suppliedInfo && (suppliedInfo.catalogue || []).length && !suppliedInfo.layout_version) supplied = null;
+        if (suppliedInfo && (suppliedInfo.catalogue || []).length && (!suppliedInfo.layout_version || suppliedInfo.layout_version < 2 && suppliedInfo.catalogue.some(t => t.format === 'mtd'))) supplied = null;
         var current = supplied || (await client.request('/api/image-prepare', Object.assign({id:artifact.id},
           retry ? {request_id:id()} : {}))).task;
         if (imagePreparations[artifact.id] !== marker) return;
@@ -797,6 +818,14 @@
       $('fl-firmware-only-note').hidden = !onlyNOR;
       $('fl-firmware-field').hidden = $('fl-mode').value !== 'full' || !packageFile(primary) || onlyNOR;
       var companion = artifacts.find(function (item) { return item.id === selectedFirmware; });
+      var ecId = companion ? companion.id : primary && primary.id;
+      var ecInfo = imagePreparations[ecId]?.result?.preparation;
+      var ec = ecInfo && ecInfo.ec && (onlyNOR || companion || embeddedTable() || $('fl-mode').value === 'partitions');
+      var ecField = $('fl-ec-field'), ecChoice = $('fl-write-ec');
+      ecField.hidden = flow !== 'normal' || !ec;
+      if (ec && ecChoice.dataset.source !== ecId) { ecChoice.dataset.source = ecId; ecChoice.checked = true; }
+      if (ec) $('fl-ec-label').textContent = '更新 EC 固件 · ' + ecInfo.ec.version_text;
+      ecChoice.disabled = busy || preparingBoard || uploading || submissionUnknown || !!(active && !selecting);
       var firmwareLocked = $('fl-firmware-field').hidden || busy || preparingBoard || uploading || submissionUnknown || !!(!workspace && (active || board && board.observingTask));
       $('fl-firmware-local').disabled = $('fl-firmware').disabled = firmwareLocked;
       $('fl-firmware-choose').disabled = firmwareLocked || !options.openImageStore;
@@ -1015,6 +1044,8 @@
       var box=$('fl-nor-current'), backup=task && task.flash && (task.flash.nor_after || task.flash.nor_before);
       var readback = task && task.flash && task.flash.nor_after;
       box.hidden = !backup;
+      $('fl-nor-medium').hidden = !backup;
+      if (backup) $('fl-nor-summary').textContent = ['NOR', '启动固件', backup.artifact && format(backup.artifact.size)].filter(Boolean).join(' · ');
       var signature = JSON.stringify([!!readback, backup && backup.artifact && backup.artifact.id]);
       if (box.dataset.signature === signature) return;
       box.dataset.signature = signature; box.textContent = '';
@@ -1040,49 +1071,43 @@
           drawStorageMap(live, disk, [], [], '板上已有布局');
       });
       live.hidden = !live.children.length;
-      var box = $('fl-system'), select = $('fl-system-storage');
+      var box = $('fl-system');
       box.hidden = !inventory;
-      if (!inventory) return;
+      if (!inventory) { box.dataset.signature = ''; $('fl-system-parts').textContent = ''; $('fl-ec-running').hidden = true; return; }
       var disks = inventory.storages || [], signature = JSON.stringify(inventory);
       var kind = {'eeprom:UFS':'scsi', 'eeprom:SSD':'nvme', 'eeprom:MMC':'mmc', 'eeprom:USB':'usb'}[inventory.priority_source];
-      var matches = disks.filter(function (disk) { return kind && disk.id.split(':')[0] === kind; });
-      // Older saved tasks cleared the association after a verified EEPROM edit.
-      // This fallback selects only the information view, never a write target.
-      var defaultStorage = inventory.default_storage || (matches.length === 1 ? matches[0].id : '');
-      var unmatched = !kind ? '未能确认默认介质，请选择查看。'
-        : matches.length > 1 ? '有多个匹配的系统盘，请选择查看。'
-        : '未发现与优先启动介质匹配的系统盘，请选择查看。';
-      if (box.dataset.signature !== signature) {
-        $('fl-boot-priority').value = (inventory.priority_source || '').indexOf('eeprom:') === 0 ? inventory.priority_source.slice(7) : '';
-        var previous = select.value; select.textContent = ''; box.dataset.signature = signature;
-        text('option', '请选择系统盘', select).value = '';
-        disks.forEach(function (disk) {
-          var kind = disk.id.split(':')[0], names = {nvme:'NVMe',scsi:'UFS / SCSI',mmc:'eMMC / SD',usb:'USB'};
-          var node = text('option', (names[kind] || kind) + ' · ' + disk.id + ' · '
-            + (disk.size ? format(disk.size) : translate('未能读取容量')), select);
-          node.value = disk.id; node.dataset.i18nIgnore = '';
-        });
-        select.value = disks.some(function (disk) { return disk.id === previous; }) ? previous : defaultStorage;
-      }
-      $('fl-system-origin').textContent = !disks.length ? '未发现可读取的系统盘。'
-        : !defaultStorage ? unmatched
-        : inventory.priority_source && inventory.priority_source.indexOf('eeprom:') === 0 ? translate('EEPROM 优先启动介质') + ' · ' + inventory.priority_source.slice(7) : '';
+      var matches = disks.filter(disk => kind && disk.id.split(':')[0] === kind);
+      var preferred = inventory.default_storage || (matches.length === 1 ? matches[0].id : '');
+      if (signature === box.dataset.signature) { updateBootControls(); return; }
+      box.dataset.signature = signature;
+      $('fl-boot-priority').value = (inventory.priority_source || '').startsWith('eeprom:') ? inventory.priority_source.slice(7) : '';
       updateBootControls();
-      var parts = $('fl-system-parts'); parts.textContent = '';
-      var disk = disks.find(function (item) { return item.id === select.value; });
-      if (!disk) return;
-      if (!disk.size) { text('p', disk.error || '未能读取容量', parts); return; }
-      drawStorageMap(parts, disk, [], [], '板上已有布局');
-      (disk.partitions || []).forEach(function (part) {
-        var row = document.createElement('div'); row.className = 'fl-system-part';
-        var title = document.createElement('div');
-        text('strong', part.name, title).dataset.i18nIgnore = '';
-        text('small', format(part.size) + ' · ' + translate('偏移') + ' ' + part.offset, title).dataset.i18nIgnore = '';
-        row.appendChild(title);
-        var content = document.createElement('div'); content.className = 'fl-content';
-        renderContent(content, part.content, '尚未读取', true); row.appendChild(content); parts.appendChild(row);
+      $('fl-system-origin').textContent = !disks.length ? '未发现可读取的系统盘。'
+        : preferred && kind ? translate('EEPROM 优先启动介质') + ' · ' + inventory.priority_source.slice(7)
+        : !kind ? '未能确认默认介质。' : matches.length > 1 ? '有多个匹配的系统盘。' : '未发现与优先启动介质匹配的系统盘。';
+      var ec = inventory.ec;
+      $('fl-ec-running').hidden = !ec || ec.state === 'not-applicable';
+      $('fl-ec-running').textContent = ec && ec.state === 'ready' ? 'EC · 控制器固件 · ' + ec.version + ' · ' + ec.copy : 'EC · 控制器固件 · 版本未知';
+      var list = $('fl-system-parts'); list.textContent = '';
+      disks.forEach(function (disk) {
+        var parts = text('details', '', list); parts.className = 'fl-details fl-disk';
+        parts.open = preferred === disk.id;
+        var medium = disk.id.split(':')[0], names = {nvme:'SSD / NVMe',scsi:'UFS / SCSI',mmc:'eMMC / SD',usb:'USB'};
+        text('summary', [names[medium] || medium, disk.id, disk.size ? format(disk.size) : '容量未知',
+          preferred === disk.id && matches.length === 1 && matches[0].id === disk.id ? '优先启动' : ''].filter(Boolean).join(' · '), parts);
+        if (!disk.size) { text('p', disk.error || '未能读取容量', parts); return; }
+        drawStorageMap(parts, disk, [], [], '板上已有布局');
+        (disk.partitions || []).forEach(function (part) {
+          var row = document.createElement('div'); row.className = 'fl-system-part';
+          var title = document.createElement('div');
+          text('strong', part.name, title).dataset.i18nIgnore = '';
+          text('small', format(part.size) + ' · ' + translate('偏移') + ' ' + part.offset, title).dataset.i18nIgnore = '';
+          row.appendChild(title);
+          var content = document.createElement('div'); content.className = 'fl-content';
+          renderContent(content, part.content, '尚未读取', true); row.appendChild(content); parts.appendChild(row);
+        });
+        if (!(disk.partitions || []).length) text('p', disk.error || '未读取到有效的系统盘分区表。', parts);
       });
-      if (!(disk.partitions || []).length) text('p', disk.error || '未读取到有效的系统盘分区表。', parts);
     }
     function updateBootControls() {
       var inventory = task && task.flash && task.flash.storage_inventory;
@@ -1567,7 +1592,7 @@
       auto.value = 'auto'; auto.disabled = !!inventory && disks.length !== 1;
       if (auto.disabled) text('option', '请选择要覆盖的磁盘', select).value = '';
       disks.forEach(function (disk) {
-        var names = {nvme:'NVMe',scsi:'UFS / SCSI',mmc:'eMMC / SD',usb:'USB'};
+        var names = {nvme:'SSD / NVMe',scsi:'UFS / SCSI',mmc:'eMMC / SD',usb:'USB'};
         var option = text('option', names[disk.id.split(':')[0]] + ' · ' + disk.id + ' · '
           + (disk.size ? format(disk.size) : translate('未能读取容量')), select);
         option.value = disk.id; option.disabled = !usable.includes(disk);
@@ -2004,7 +2029,7 @@
       (value.writes || []).forEach(function (write) { group(write.storage || write.storage_id, write.component).writes.push(write); });
       (value.erase_ranges || []).forEach(function (range) { group(range.storage, range.component).erases.push(range); });
       var observed = task && task.flash || {};
-      var touchesNOR = false, touchesDisk = false;
+      var touchesNOR = false, touchesDisk = false, writtenDisks = new Set();
       groups.forEach(function (entry) {
         if (!entry.writes.length && !entry.erases.length) return;
         var storage = entry.storage, writes = entry.writes;
@@ -2023,7 +2048,7 @@
           || groups.size === 1 && tableFormats.includes('gpt');
         var medium = storage.id === 'active' ? translate('目标介质') : storage.label || storage.id;
         if (isNOR) { medium = 'NOR'; touchesNOR = true; }
-        else if (isDisk) { medium = [translate('系统盘'),disk].filter(Boolean).join(' · '); touchesDisk = true; }
+        else if (isDisk) { medium = [translate('系统盘'),disk].filter(Boolean).join(' · '); touchesDisk = true; if (disk) writtenDisks.add(disk); }
         var section = text('section', '', box); section.className = 'fl-projection';
         var oldDisk = (observed.storage_inventory && observed.storage_inventory.storages || []).find(function (item) { return item.id === disk; });
         if (!oldDisk && isDisk && !isNOR && capabilities) {
@@ -2078,6 +2103,9 @@
           if (preserved.length) text('p', translate('保留') + ' · ' + preserved.join('、'), section);
         }
       });
+      if (writtenDisks.size) (observed.storage_inventory?.storages || []).forEach(function (disk) {
+        if (!writtenDisks.has(disk.id)) text('p', disk.id + ' · 本次保留', box);
+      });
       if (touchesDisk && !touchesNOR && groups.size === 1)
         text('p', 'NOR · 本次不写入', box);
       if (touchesNOR && !touchesDisk && groups.size === 1)
@@ -2087,6 +2115,9 @@
       if (value.reset_after) status('本次写入和所选校验成功后，将自动复位；复位请求不自动重发。');
       renderReplacementInfo(value);
       var box = $('fl-preview'); box.textContent = '';
+      if (value.ec) text('p', 'EC · 控制器固件 · ' + (task?.flash?.storage_inventory?.ec?.version ? task.flash.storage_inventory.ec.version + ' → ' : '') + value.ec.version_text + ' · ' +
+        ({selected:'将更新', 'not-applicable':'板型不适用，本次跳过', pending:'等待核对板型'}[value.ec.state] || '等待核对板型'), box);
+      else if (value.skip_ec || task?.flash?.storage_inventory?.ec?.state === 'ready') text('p', 'EC · 本次保留', box);
       if (!(value.writes || []).length) (value.components || []).forEach(function (component) {
         text('p', component.label + ' · ' + component.name, box).dataset.i18nIgnore = '';
       });
@@ -2237,7 +2268,7 @@
     function outcome(value) {
       if (value === undefined || value === null) return '未执行';
       var names = { 'not-started': '未开始', 'not-completed': '未完成', pending: '等待执行',
-        skipped: '用户跳过，校验未完成',
+        skipped: '用户跳过，校验未完成', 'not-applicable': '板型不适用，本次跳过',
         writing: '正在写入', written: '写入完成', completed: '已完成', verified: '校验通过',
         unsupported: '不支持回读校验', 'not-supported': '不支持回读校验',
         'not-requested': '未请求', 'reset-command-acknowledged': '复位已应答', unknown: '结果待确认', failed: '失败', 'partial-or-unknown': '可能部分写入，结果待确认',
@@ -2307,7 +2338,7 @@
         text('dt', '本次内存启动限制', box);
         text('dd', '此 Bianbu 镜像在内存启动期间停用 RCPU（远程处理器）及依赖它的功能。', box);
       }
-      [['写入结果', result.write_result || details.write_result], ['校验结果', result.verify_result || details.verify_result],
+      [['EC 更新', result.ec_result || details.ec_result], ['写入结果', result.write_result || details.write_result], ['校验结果', result.verify_result || details.verify_result],
        ['启动结果', result.boot_result || details.boot_result]].forEach(function (item) {
         var state = typeof item[1] === 'string' ? item[1] : item[1] && item[1].status;
         if (item[0] === '校验结果' && state === 'not-requested' && current.kind === 'flash' && current.state === 'completed') {
@@ -2680,13 +2711,14 @@
           layout_digest: workspaceSelection() && sourceCatalogue ? current.flash.inspection.layout_digest : inspection.layout_digest || current.flash.layout_digest });
         if (!selectionPlan || previewOnly === true) {
           payload.selections = chosen; payload.preview = true;
+          if (!$('fl-ec-field').hidden) payload.skip_ec = !$('fl-write-ec').checked;
           if (workspaceSelection() || capabilities && capabilities.reset_after_supported)
             payload.reset_after = !!(capabilities && capabilities.reset_after_supported && $('fl-reset-after').checked);
           payload.verify = $('fl-verify').value;
           if (workspaceSelection() && sourceCatalogue) {
             payload.artifact_id = $('fl-artifact').value; payload.mode = $('fl-mode').value; payload.verify = $('fl-verify').value;
-            if (fullPackage) setCompanionIntent(payload);
-            if (sourceCatalogue.firmware_table === payload.firmware_table && sourceCatalogue.firmware_artifact_id === payload.firmware_artifact_id && (!sourceCatalogue.verify || sourceCatalogue.verify === payload.verify))
+            setCompanionIntent(payload);
+            if (!!sourceCatalogue.skip_ec === !!payload.skip_ec && sourceCatalogue.firmware_table === payload.firmware_table && sourceCatalogue.firmware_artifact_id === payload.firmware_artifact_id && (!sourceCatalogue.verify || sourceCatalogue.verify === payload.verify))
               payload.plan_id = sourceCatalogue.id || sourceCatalogue.plan_id;
             if (sourceCatalogue.target_storage) payload.target_storage = sourceCatalogue.target_storage;
           }
@@ -2920,7 +2952,7 @@
       bootPriorityRequest = null; $('fl-boot-config').hidden = true;
       $('fl-storage-details').open = false;
       $('fl-live-gpt').hidden = true; $('fl-live-gpt').textContent = '';
-      $('fl-system').hidden = true; $('fl-system').dataset.signature = ''; $('fl-system-storage').value = ''; $('fl-system-parts').textContent = '';
+      $('fl-system').hidden = true; $('fl-system').dataset.signature = ''; $('fl-system-parts').textContent = '';
       $('fl-connections').textContent = ''; $('fl-partitions').textContent = '';
       $('fl-board').textContent = selected.target_id ? targetName(selected)
         : selected.key ? (selected.label || selected.key) + ' · SN ' + (selected.serial || '未知') : translate('尚未选择刷机设备');
@@ -3056,7 +3088,10 @@
     $('fl-directory').addEventListener('click',function(){openWorkspace(true);});
     $('fl-workspace').addEventListener('click',function(){openWorkspace(false);});
     $('fl-read-nor').addEventListener('click', readNOR);
-    $('fl-system-storage').addEventListener('change', renderSystemInventory);
+    $('fl-write-ec').addEventListener('change', function () {
+      invalidatePlan();
+      if (workspaceSelection()) inspectSource();
+    });
     $('fl-boot-priority').addEventListener('change', updateBootControls);
     $('fl-boot-save').addEventListener('click', saveBootPriority);
     function closeDownloadConfirmation() {
@@ -3168,7 +3203,7 @@
     // The automatic inspection clears the target disk and renderStorages may
     // refill its default on every poll, so the disk is not part of this key;
     // otherwise a failed inspection would be retried every second.
-    function sourceIdentity() { return [task && task.id, $('fl-artifact').value, $('fl-firmware').value, $('fl-mode').value, $('fl-verify').value].join('/'); }
+    function sourceIdentity() { return [task && task.id, $('fl-artifact').value, $('fl-firmware').value, $('fl-mode').value, $('fl-verify').value, $('fl-write-ec').checked].join('/'); }
     async function inspectSource() {
       var artifact = artifacts.find(function (item) { return item.id === $('fl-artifact').value; });
       if (!workspaceSelection() || busy || uploading || !packageFile(artifact) || !imageReady()) return;
@@ -3194,6 +3229,7 @@
           selections: [], layout_digest: current.flash.inspection.layout_digest, reset_after: !!(capabilities && capabilities.reset_after_supported && $('fl-reset-after').checked)});
         if (targetStorage) payload.target_storage = targetStorage;
         if (embeddedTable()) setCompanionIntent(payload);
+        if (!$('fl-ec-field').hidden && !$('fl-write-ec').checked) payload.skip_ec = true;
         var result = await client.request('/api/flash-selection', payload);
         if (!same(selected, seq) || !workspaceSelection() || task.id !== current.id
             || $('fl-artifact').value !== artifactId) return;

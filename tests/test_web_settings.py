@@ -31,6 +31,27 @@ class SettingsTests(unittest.TestCase):
     def save(self, document, preview=False):
         return self.settings.save(document, self.settings.snapshot()['revision'], preview)
 
+    def test_team_catalogue_is_live_and_token_stays_private(self):
+        from seriald_core.team_cases import TeamCases
+        origin = 'https://platform.example.test'
+        before = self.settings.snapshot()
+        self.save(self.patch(TEAM_CATALOGUE_URL=origin, TEAM_CATALOGUE_TOKEN='dummy-key'))
+        after = self.settings.snapshot()
+        self.assertEqual(after['restart_revision'], before['restart_revision'])
+        self.assertNotEqual(after['revision'], before['revision'])
+        self.assertEqual(after['configuration']['environment']['TEAM_CATALOGUE_TOKEN'], REDACTED)
+        with mock.patch('seriald_core.config.SETTINGS', self.settings):
+            self.assertEqual(TeamCases.configured().host, 'platform.example.test')
+        with mock.patch.dict(os.environ, {}, clear=True):
+            load_environment(self.path)
+            self.assertNotIn('SERIALD_TEAM_CATALOGUE_TOKEN', os.environ)
+        with self.assertRaises(SettingsError):
+            self.save(self.patch(TEAM_CATALOGUE_URL='https://other.example.test'))
+        with self.assertRaises(SettingsError):
+            self.save(self.patch(TEAM_CATALOGUE_URL='http://other.example.test', TEAM_CATALOGUE_TOKEN='dummy'))
+        self.save(self.patch(BAUD='9600'))
+        self.assertNotEqual(after['restart_revision'], self.settings.snapshot()['restart_revision'])
+
     def test_browser_groups_render_every_field_offered_by_server(self):
         source = (Path(__file__).parents[1] / 'static/settings.js').read_text(encoding='utf-8')
         groups = source.split('var groups =', 1)[1].split('var labels =', 1)[0]

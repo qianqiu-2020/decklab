@@ -19,12 +19,17 @@ class TeamCases:
         if (address.scheme != 'https' or not address.hostname or address.username is not None
                 or address.query or address.fragment or address.path.rstrip('/')):
             raise TaskError('测试平台地址须为 HTTPS 站点', 503)
-        if not token or not token.isascii() or not token.isprintable():
+        if not token or len(token) > 4096 or not token.isascii() or not token.isprintable():
             raise TaskError('测试平台令牌无效', 503)
         self.host, self.port, self.token = address.hostname, port, token
 
     @classmethod
     def configured(cls):
+        from .config import SETTINGS
+        saved = SETTINGS.read().get('environment', {})
+        if 'TEAM_CATALOGUE_URL' in saved or 'TEAM_CATALOGUE_TOKEN' in saved:
+            origin, token = saved.get('TEAM_CATALOGUE_URL'), saved.get('TEAM_CATALOGUE_TOKEN')
+            return cls(origin, token) if origin or token else None
         origin = os.environ.get('SERIALD_TEST_PLATFORM_URL', '')
         path = os.environ.get('SERIALD_TEST_PLATFORM_TOKEN_FILE', '')
         if not origin and not path:

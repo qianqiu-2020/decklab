@@ -43,7 +43,9 @@ def reexecute(environment, role=None):
 
 
 def configure_collector(server, settings):
-    server.settings_revision = settings.snapshot()['revision']
+    snapshot = settings.snapshot()
+    server.settings_revision = snapshot['revision']
+    server.settings_restart_revision = snapshot['restart_revision']
     slots = getattr(server.manager, 'control_slots', None)
     if slots is not None:
         slots.settings = settings
@@ -96,7 +98,9 @@ def configure_collector(server, settings):
 
 
 def configure_control(server, settings, collector_socket, connection_factory):
-    server.settings_revision = settings.snapshot()['revision']
+    snapshot = settings.snapshot()
+    server.settings_revision = snapshot['revision']
+    server.settings_restart_revision = snapshot['restart_revision']
     active = settings.effective()
     server.settings_activation = {'state': 'idle'}
     server.restart_requested = False

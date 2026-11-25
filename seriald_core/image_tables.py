@@ -10,7 +10,7 @@ from .tasks import TaskError
 
 def table_bytes(root, file):
     path = root / file['name']
-    if (path.parent != root or path.resolve(strict=True) != path or file['size'] > 1024 ** 2):
+    if (not path.is_relative_to(root) or path.resolve(strict=True) != path or file['size'] > 1024 ** 2):
         raise TaskError('无效的镜像配置文件', 409)
     with open_archive(path) as stream:
         data = stream.read(1024 ** 2 + 1)
@@ -57,4 +57,6 @@ def describe(result):
             payload = files.get(result.get('expanded_files', {}).get(part.get('payload'), part.get('payload')))
             if payload:
                 part.update(payload_size=payload['size'], sha256=payload['sha256'])
-    result['layout_version'] = 1
+    from .firmware_versions import describe_firmware
+    describe_firmware(result, files)
+    result['layout_version'] = 2

@@ -236,7 +236,7 @@ class DesktopSessions:
             previous = self.book.boards.get(device.serial)
             connection_id = device.connection_id
             check_reservation(previous or {})
-            config, stage = self.setup.quick_config(device, previous)
+            config, stage = self.setup.quick_config(device, previous, actor=actor)
             if config is None:
                 if previous is None or stage in ('no-user', 'initial', 'finishing', 'lxqt-unavailable'):
                     if actor != 'web':
@@ -269,8 +269,12 @@ class DesktopSessions:
         try:
             with session['lock']:
                 session['provider'] = self.provider_factory(config)
+            if 'usb_vnc_argv' in config:
+                self.setup.log_adb(session['serial'], actor, 'adb shell · wayvnc · USB 桌面已连接')
             return {'session': self.public(session)}
         except Exception as error:
+            if 'usb_vnc_argv' in config:
+                self.setup.log_adb(session['serial'], actor, 'adb shell · wayvnc · USB 桌面连接失败')
             with self.lock:
                 self.sessions.pop(session['id'], None)
             from .desktop_errors import connection_error
@@ -409,6 +413,7 @@ class DesktopSessions:
 
     def close_session(self, session):
         with session['lock']:
+            already_closed = session['closed']
             session['closed'] = True
             live = session.get('live_channel')
         if live is not None:
@@ -419,6 +424,8 @@ class DesktopSessions:
             try:
                 if session['provider'] is not None:
                     session['provider'].close()
+                    if not already_closed and 'usb_vnc_argv' in session['config']:
+                        self.setup.log_adb(session['serial'], session['actor'], 'USB 桌面通道已关闭')
             finally:
                 self.release_input(session)
                 with self.lock:
@@ -453,6 +460,13 @@ class DesktopSessions:
                 if actor != 'web':
                     raise TaskError('只有网页操作者可以配置桌面连接', 403)
                 result = self.setup.configure(device, payload)
+            elif route == 'login-stage':
+                session = self.get(device, payload.get('sid'), actor, client_id)
+                if (actor != 'web' or session['actor'] != 'web' or session['client_id'] != client_id
+                        or session['login_stage'] not in ('initial', 'finishing')):
+                    raise TaskError('仅首次设置的当前操作者可以查询登录状态', 403)
+                _, stage = self.setup.quick_config(device, self.book.boards.get(device.serial), stage_only=True)
+                result = {'login_stage': stage}
             elif route == 'quick-open':
                 if actor != 'web':
                     raise TaskError('自动连接仅限网页主操作者', 403)

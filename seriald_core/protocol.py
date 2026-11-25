@@ -67,7 +67,8 @@ RE_IDLE_SHELL_PROMPT = (
 
 STOCK_OS_IDS = frozenset(('buildroot', 'bianbu', 'debian'))
 _OS_CONSOLE_BANNER = re.compile(
-    r'(?im)^(Debian) GNU/Linux [0-9][^\r\n]*|^(Bianbu) [0-9][^\r\n]*|^Welcome to (Buildroot)[ \t]*\r?$')
+    r'(?im)(?:^|(?<=\r))(?:Welcome to )?(?:(Debian) GNU/Linux [0-9][^\r\n]*|'
+    r'(Bianbu) [0-9][^\r\n]*|(Buildroot)(?: [0-9][^\r\n]*)?[ \t]*(?=[\r\n]|$))')
 
 
 def stock_os_id(value):

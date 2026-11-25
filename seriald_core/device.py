@@ -18,7 +18,7 @@ from .terminal_backend import control_session
 from .console_visibility import ConsoleVisibility
 from .serial_health import SerialHealth
 from .serial_log import SerialLog
-from .protocol import PROBE_CMD, RE_LOGIN, RE_PROMPT, SSH_CMD, console_os_id, parse_probe, stock_os_id
+from .protocol import PROBE_CMD, RE_LOGIN, RE_PROMPT, SSH_CMD, parse_probe, stock_os_id
 if sys.platform == 'win32':
     from serial import SerialException
     from .sessions_windows import SshSession, check_password_login
@@ -201,18 +201,18 @@ class Device:
         learned, written = load(self.serial) if self.serial and callable(load) else ('', 0)
         info = self.probe_info
         with self.cv:
-            banner = console_os_id(ANSI.sub('', self.console_tail)) if self.last_rx >= written else ''
-        if banner:
+            banner, observed = self.terminal.os_banner
+        if banner and observed >= written:
             return banner
         timestamp = info.get('ts')
         if info.get('os_id') and isinstance(timestamp, (float, int)) and timestamp >= written:
             return stock_os_id(info['os_id'])
         return stock_os_id(learned)
 
-    def console_login(self):
+    def console_login(self, family=None):
         profile = self.profile
         if (not profile.console_login_override and (profile.console_user, profile.console_password) == ('root', 'bianbu')
-                and self.login_os_family() == 'debian'):
+                and (self.login_os_family() if family is None else family) == 'debian'):
             return 'root', 'debian'
         return profile.console_user, profile.console_password
 

@@ -62,6 +62,7 @@ from seriald_core.control_server import (ControlHandler, configured_agent_tokens
 from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
 from seriald_core.collector_lock import CollectorLock
 from seriald_core.handoff import consume as consume_handoff, write as write_handoff
+from seriald_core.web_tls import https_listener
 from seriald_core.httpd import BoundedThreadingTCPServer
 from seriald_core.storage import Store
 from seriald_core.windows_manager import WindowsManager
@@ -145,7 +146,8 @@ def main():
                 if not args.no_browser:
                     webbrowser.open(url)
                 try:
-                    control.serve_forever()
+                    with https_listener(control, BASE):
+                        control.serve_forever()
                 except KeyboardInterrupt:
                     pass
                 finally:

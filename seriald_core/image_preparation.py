@@ -80,7 +80,7 @@ class ImagePreparations:
             summary = (previous or {}).get('result') or {}
             catalogue = summary.get('preparation', {})
             if (previous and previous['state'] == 'completed' and valid(source)
-                    and (not catalogue.get('catalogue') or catalogue.get('layout_version'))):
+                    and (not catalogue.get('catalogue') or catalogue.get('layout_version') == 2)):
                 return previous
             request_id = 'image-prepare-' + secrets.token_hex(12)
         from .board_maintenance import maintenance_for

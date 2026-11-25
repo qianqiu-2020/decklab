@@ -57,6 +57,8 @@ class BackendHandler(web.Handler):
                     result = node_snapshot(settings, 'backend')
                     result.update(active_revision=self.server.settings_revision, restart_available=True,
                                   activation={'state': 'restarting' if self.server.restart_requested else 'idle'})
+                    if result['restart_revision'] == self.server.settings_restart_revision:
+                        result['active_revision'] = result['revision']
                     return self._json(200, result)
                 if self.headers.get('Content-Type', '').split(';')[0].lower() != 'application/json':
                     raise SettingsError('需要 application/json 请求')

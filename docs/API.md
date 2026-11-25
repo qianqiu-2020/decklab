@@ -120,6 +120,8 @@ of 1–180 seconds. A stale revision returns 409. Both routes require owner acce
 Start a saved case through `/api/task-start` using `kind:"board-test"`, the
 case ID in `case`, and its revision in `case_revision`.
 
+`POST /api/desktop/login-stage` lets the owner of an active Debian setup viewer check whether the greeter has finished, using the same device, session and client identifiers. It returns only the login stage.
+
 `GET /api/team-test-cases` lets the owner browse the team catalogue. Use
 `view=cases` for the paginated list, `view=groups` for groups, and
 `view=members&id=…` or `view=detail&id=…` for group members or case steps.

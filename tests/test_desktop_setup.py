@@ -145,12 +145,46 @@ class SetupTests(unittest.TestCase):
             self.assertNotIn(secret, json.dumps(data))
             self.assertNotIn(device.serial, desktop.book.boards)
             self.assertIs(desktop.get(device, data['session']['id'], 'web')['config'], ephemeral)
+            session = dict(body, sid=data['session']['id'])
+            with mock.patch.object(desktop.setup, 'quick_config', return_value=(None, 'login')) as probe:
+                self.assertEqual(self.request(f, '/api/desktop/login-stage', session), (200, {'login_stage': 'login', 'key': device.key}))
+                probe.assert_called_once_with(device, None, stage_only=True)
+                status, _ = self.request(f, '/api/desktop/login-stage', dict(session, client_id='other'))
+                self.assertEqual(status, 403)
+                self.assertEqual(probe.call_count, 1)
             desktop.close_actor()
             self.assertFalse(desktop.list(device, 'web')['supported'])
             with mock.patch.object(desktop.setup, 'quick_config', return_value=(None, 'no-user')):
                 status, data = self.request(f, '/api/desktop/quick-open', body)
             self.assertTrue(data['manual'])
             self.assertEqual(data['login_stage'], 'no-user')
+
+    def test_desktop_adb_receipts_visible_in_device_history_without_credentials(self):
+        with self.setup() as (f, device, settings, screen):
+            device.present = True
+            device.board.attach(device)
+            desktop = f.manager.desktop
+            body = dict(key=device.key, serial=device.serial)
+            secret = secrets.token_hex(16)
+            data = dict(stage='login', username='rdp', password=secret, pin='a' * 64, port=3389,
+                        queries=['show-seat', 'grdctl', secret])
+            reply = SimpleNamespace(stdout=json.dumps(data), returncode=0)
+            with mock.patch.object(desktop.setup, 'quick_eligible', return_value=True), mock.patch(
+                    'seriald_core.board_cases.find_transport', return_value=('usb', '5', {'boot_id':'boot'})), mock.patch(
+                    'seriald_core.board_cases.adb_command', return_value=reply):
+                status, result = self.request(f, '/api/desktop/quick-open', body)
+                self.assertEqual(status, 200, result)
+                reply.returncode = 3
+                desktop.setup.quick_config(device, None, actor='test-agent', stage_only=True)
+            status, activity = self.request(f, '/api/activity?key=' + device.key)
+            self.assertEqual(status, 200)
+            rows = [e for e in activity['events'] if e['action'] == 'desktop-adb']
+            self.assertEqual([e['actor'] for e in rows], ['test-agent', 'web'])
+            self.assertIn('退出码 3', rows[0]['detail'])
+            self.assertIn('grdctl --system status', rows[1]['detail'])
+            self.assertIn('GNOME 登录', rows[1]['detail'])
+            self.assertNotIn(secret, json.dumps(rows))
+            desktop.close_actor()
 
     def test_web_can_set_up_an_unconfigured_board_without_restart_or_secret_response(self):
         with self.setup() as (f, device, settings, screen):

@@ -2183,26 +2183,28 @@ test('unified storage read starts once from full mode and requests system metada
 });
 
 test('system storage metadata uses the proven default and changing views never changes write selections', async () => {
-  const h=harness(),inventory={default_storage:'scsi:0',priority_source:'eeprom:UFS',storages:[
+  const h=harness(),inventory={ec:{state:'ready',copy:'RW',version:'V00.24'},default_storage:'scsi:0',priority_source:'eeprom:UFS',storages:[
     {id:'nvme:0',size:64*1024**3,partitions:[{name:'rootfs',offset:1048576,size:4096,content:{version:'Debian 13',version_state:'identified'}}]},
-    {id:'scsi:0',size:128*1024**3,partitions:[{name:'rootfs',offset:1048576,size:4096,content:{version:'Bianbu 2.3.5',version_state:'identified'}}]}]};
+    {id:'scsi:0',size:128*1024**3,partitions:[{name:'rootfs',offset:1048576,size:4096,content:{version:'Bianbu 2.3.5',version_state:'identified'}}]}, {id:'mmc:0',size:0}]};
   h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:inventory}});await drain();
-  assert.equal(h.get('fl-system').hidden,false);assert.equal(h.get('fl-system-storage').value,'scsi:0');
+  assert.equal(h.get('fl-system').hidden,false);assert.match(h.get('fl-system-parts').children.find(el=>el.open).textContent,/scsi:0/);
   assert.match(h.get('fl-system-parts').textContent,/Bianbu 2.3.5/);
   assert.match(h.get('fl-system-origin').textContent,/EEPROM.*UFS/);
-  h.get('fl-system-storage').value='nvme:0';h.get('fl-system-storage').emit('change');
+  assert.equal(h.get('fl-system-parts').children.length,3);
+  assert.match(h.get('fl-ec-running').textContent,/V00.24.*RW/);
+  h.get('fl-system-parts').children[0].open = true;
   assert.match(h.get('fl-system-parts').textContent,/Debian 13/);
   assert.ok(h.get('fl-partitions').children.every(row=>!row.checkbox.checked));
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'||r.url==='/api/flash-selection'),false);
   h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:{...inventory,default_storage:'',priority_source:'ram-policy'}}});await drain();
-  assert.equal(h.get('fl-system-storage').value,'');assert.match(h.get('fl-system-origin').textContent,/未能确认默认介质/);
+  assert.ok(!h.get('fl-system-parts').children.some(el=>el.open));assert.match(h.get('fl-system-origin').textContent,/未能确认默认介质/);
 });
 
 test('old EEPROM edit records resolve UFS to the unique SCSI disk for viewing only', async () => {
   const h=harness(), inventory={default_storage:'',default_candidate:'',priority_source:'eeprom:UFS',storages:[
     {id:'scsi:0',size:128*1024**3,partitions:[{name:'rootfs',size:4096,offset:1048576,content:{version:'Debian 13'}}]}]};
   h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:inventory}});await drain();
-  assert.equal(h.get('fl-system-storage').value,'scsi:0');
+  assert.match(h.get('fl-system-parts').children.find(el=>el.open).textContent,/scsi:0/);
   assert.match(h.get('fl-system-origin').textContent,/EEPROM.*UFS/);
   assert.match(h.get('fl-system-parts').textContent,/Debian 13/);
   assert.ok(h.get('fl-partitions').children.every(row=>!row.checkbox.checked));
@@ -2211,7 +2213,7 @@ test('old EEPROM edit records resolve UFS to the unique SCSI disk for viewing on
     [[...inventory.storages,{id:'scsi:1',size:128*1024**3,partitions:[]}],/多个匹配/],
     [[{id:'nvme:0',size:64*1024**3,partitions:[]}],/未发现与优先启动介质匹配/]]) {
     h.api.open(norTarget,{...norReady,flash:{...norReady.flash,storage_inventory:{...inventory,storages:disks}}});await drain();
-    assert.equal(h.get('fl-system-storage').value,'');assert.match(h.get('fl-system-origin').textContent,message);
+    assert.ok(!h.get('fl-system-parts').children.some(el=>el.open));assert.match(h.get('fl-system-origin').textContent,message);
   }
 });
 

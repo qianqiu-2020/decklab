@@ -33,11 +33,24 @@
     if (seconds < 3600) return Math.floor(seconds / 60) + ' 分钟前';
     return Math.floor(seconds / 3600) + ' 小时前';
   }
-  function copyText(text, silent) {
+  function copyText(text, silent, container) {
+    if (container) {
+      // Copy the supplied text without moving focus off the remote canvas.
+      var handled = false;
+      function copy(event) {
+        if (!event.clipboardData) return;
+        event.clipboardData.setData('text/plain', text);
+        event.preventDefault(); handled = true;
+      }
+      document.addEventListener('copy', copy, true);
+      try { if (document.execCommand('copy') && handled) return true; }
+      catch (_) { /* Try a selectable field inside the fullscreen element. */ }
+      finally { document.removeEventListener('copy', copy, true); }
+    }
     var area = document.createElement('textarea');
     area.value = text;
     area.style.position = 'fixed'; area.style.opacity = '0';
-    document.body.appendChild(area);
+    (container || document.body).appendChild(area);
     area.select();
     var ok = false;
     try { ok = document.execCommand('copy'); } catch (error) { ok = false; }
