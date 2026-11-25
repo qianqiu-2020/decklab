@@ -222,6 +222,7 @@ print('NOT COVERED: systemd activation, real UART, privileged USB recovery', flu
 
 LEGACY_UPGRADE = r'''
 from pathlib import Path
+import json
 import os
 import pwd
 import subprocess
@@ -236,11 +237,23 @@ file = legacy / 'rename-check.txt'
 file.write_text('legacy file still referenced by its old path')
 os.chown(file, account.pw_uid, account.pw_gid)
 file.chmod(0o600)
+saved_path = legacy / 'web-settings.json'
+saved_path.write_text(json.dumps({'version': 1, 'environment': {
+    'BASE': str(legacy), 'SOCKET': '/run/seriald/collector.sock',
+    'STATIC': '/usr/lib/seriald', 'BIND': '127.0.0.1',
+}, 'documents': {}}))
+os.chown(saved_path, account.pw_uid, account.pw_gid)
+saved_path.chmod(0o600)
 subprocess.run(['apt-get', 'install', '-y', '/tmp/decklab.deb'], check=True)
 new_config = Path('/etc/decklab/decklab.env').read_text()
 assert '# legacy config retained by the rename' in new_config and 'DECKLAB_PORT=19088' in new_config
 assert Path('/data/decklab-data/rename-check.txt').read_bytes() == file.read_bytes()
 assert pwd.getpwnam('decklab').pw_uid == account.pw_uid
+assert json.loads(saved_path.read_text())['environment'] == {
+    'BASE': '/data/decklab-data', 'SOCKET': '/run/decklab/collector.sock',
+    'STATIC': '/usr/lib/decklab', 'BIND': '127.0.0.1',
+}
+assert saved_path.stat().st_uid == account.pw_uid and saved_path.stat().st_mode & 0o777 == 0o600
 stat_result = file.stat()
 assert stat_result.st_uid == account.pw_uid and stat_result.st_mode & 0o777 == 0o600
 print(f'PASS: legacy package {previous} migrated with config, ownership and both data paths readable')

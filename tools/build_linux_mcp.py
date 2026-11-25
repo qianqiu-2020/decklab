@@ -291,6 +291,7 @@ def build_docker(output, architecture, image, desktop_runtime=None):
     with tempfile.TemporaryDirectory(prefix='decklab-linux-builder-') as context:
         shutil.copyfile(LOCK, Path(context) / LOCK.name)
         shutil.copyfile(ROOT / 'tools/linux_mcp_builder.Dockerfile', Path(context) / 'Dockerfile')
+        shutil.copyfile(ROOT / 'tools/prepare_linux_python.sh', Path(context) / 'prepare_linux_python.sh')
         image_id = Path(context) / 'image-id'
         subprocess.run(['docker', 'build', '--progress=plain', '--network=host', '--platform', 'linux/' + architecture,
                         '--iidfile', str(image_id), '--build-arg', 'BASE_IMAGE=' + image, context], check=True)

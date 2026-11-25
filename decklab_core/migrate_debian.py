@@ -1,5 +1,6 @@
 """Adopt the previous Debian package's configuration, identity and data path."""
 import grp
+import json
 import os
 from pathlib import Path
 import pwd
@@ -62,6 +63,45 @@ def converted_config(text, adopt_default):
     return '\n'.join(result) + '\n'
 
 
+def configured_base(text, fallback):
+    base = fallback
+    for name, value in re.findall(r'(?m)^[\t ]*(\w+)=(.*)$', text):
+        if name in ('SERIALD_BASE', 'DECKLAB_BASE'):
+            base = value.strip().strip('"\'')
+    return Path(base)
+
+
+def migrate_saved_paths(base, adopt_default):
+    path = base / 'web-settings.json'
+    if not path.is_file() or path.is_symlink():
+        return
+    with path.open('rb') as source:
+        metadata = os.fstat(source.fileno())
+        if metadata.st_size > 2 * 1024 ** 2:
+            return
+        settings = json.load(source)
+    values = settings.get('environment', {})
+    changes = {}
+    for name, (old, new) in DEFAULT_PATHS.items():
+        key = name.removeprefix('DECKLAB_')
+        if values.get(key) == old and (key != 'BASE' or adopt_default):
+            changes[key] = new
+    if not changes:
+        return
+    values.update(changes)
+    with tempfile.NamedTemporaryFile(dir=base, mode='w', encoding='utf-8', delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            json.dump(settings, output, ensure_ascii=False, indent=2)
+            output.write('\n')
+            os.fchown(output.fileno(), metadata.st_uid, metadata.st_gid)
+            os.fchmod(output.fileno(), metadata.st_mode & 0o777)
+            output.close()
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 def migrate_account():
     try:
         previous = pwd.getpwnam('seriald')
@@ -83,15 +123,17 @@ def migrate_account():
 
 def main():
     marker = NEW_CONFIG.parent / '.migration-complete'
-    if marker.exists() or not OLD_CONFIG.is_file():
+    if marker.exists():
+        base = configured_base(NEW_CONFIG.read_text(encoding='utf-8'), NEW_DATA)
+        migrate_saved_paths(base, OLD_DATA.is_symlink() and OLD_DATA.resolve() == NEW_DATA)
+        return
+    if not OLD_CONFIG.is_file():
         return
     source = OLD_CONFIG.read_text(encoding='utf-8')
-    configured_base = str(OLD_DATA)
-    for name, value in re.findall(r'(?m)^[\t ]*(\w+)=(.*)$', source):
-        if name in ('SERIALD_BASE', 'DECKLAB_BASE'):
-            configured_base = value
-    adopt_default = configured_base.strip().strip('"\'') == str(OLD_DATA) and migrate_data(OLD_DATA, NEW_DATA)
+    base = configured_base(source, OLD_DATA)
+    adopt_default = base == OLD_DATA and migrate_data(OLD_DATA, NEW_DATA)
     migrate_account()
+    migrate_saved_paths(NEW_DATA if adopt_default else base, adopt_default)
     # An interrupted upgrade may leave either the generated config or the
     # previous package's file. The migration is safe to run again in both cases.
     with tempfile.NamedTemporaryFile(dir=NEW_CONFIG.parent, delete=False) as output:

@@ -10,7 +10,9 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && rm /tmp/deadsnakes.asc \
     && echo 'deb [signed-by=/usr/share/keyrings/deadsnakes.gpg] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu jammy main' > /etc/apt/sources.list.d/deadsnakes.list \
     && apt-get update -qq
+COPY prepare_linux_python.sh /tmp/prepare_linux_python.sh
 RUN export DEBIAN_FRONTEND=noninteractive \
+    && sh /tmp/prepare_linux_python.sh \
     && apt-get -o Acquire::Retries=2 install -y --no-install-recommends python3.12 python3.12-venv libpython3.12 \
     && rm -rf /var/lib/apt/lists/*
 COPY linux-mcp-requirements.lock /tmp/linux-mcp-requirements.lock
