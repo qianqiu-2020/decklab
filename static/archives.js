@@ -247,5 +247,5 @@
       }
     };
   }
-  global.SerialdArchives = { create: create };
+  global.DeckLabArchives = { create: create };
 })(window);

@@ -9,9 +9,9 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core.board_control import control_actions
-from seriald_core.hardware import HardwareBook
-from seriald_core.tasks import TaskCancelled, TaskError
+from decklab_core.board_control import control_actions
+from decklab_core.hardware import HardwareBook
+from decklab_core.tasks import TaskCancelled, TaskError
 
 
 @contextmanager
@@ -111,7 +111,7 @@ class BoardControlTests(unittest.TestCase):
                     ('power-off', 'reset', {'reset_type': 'PowerOff'}),
                     ('enter-download', 'firmware-update', {})]:
                 state['requests'].clear()
-                with mock.patch('seriald_core.hardware.helper_process', side_effect=AssertionError('no UART helper')):
+                with mock.patch('decklab_core.hardware.helper_process', side_effect=AssertionError('no UART helper')):
                     result = actions[action].bind(mock.Mock()).run(lambda: None)
                 self.assertEqual(result['control_result'], 'acknowledged')
                 self.assertEqual(len(state['requests']), 3)

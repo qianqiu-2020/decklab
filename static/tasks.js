@@ -361,5 +361,5 @@
     });
     return {open: open};
   }
-  global.SerialdTasks = { create: create, createClient: createClient, createAdb: createAdb };
+  global.DeckLabTasks = { create: create, createClient: createClient, createAdb: createAdb };
 })(window);

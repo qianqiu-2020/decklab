@@ -5,11 +5,11 @@ import time
 import unittest
 from unittest.mock import patch
 
-from seriald_core.board_maintenance import maintenance_for
-from seriald_core.device import Device
-from seriald_core.devices import Manager
-from seriald_core.storage import Store
-from seriald_core.task_actions import TaskActions
+from decklab_core.board_maintenance import maintenance_for
+from decklab_core.device import Device
+from decklab_core.devices import Manager
+from decklab_core.storage import Store
+from decklab_core.task_actions import TaskActions
 
 
 @unittest.skipUnless(os.name == 'posix' and Path('/proc/sys/kernel/random/boot_id').exists(), 'uses a local shell fixture')
@@ -65,8 +65,8 @@ else:
     raise SystemExit(subprocess.run(['/bin/sh', '-c', args[4]], env=env).returncode)
 """)
         executable.chmod(0o700)
-        for override in (patch('seriald_core.adb_tasks.shutil.which', return_value=str(executable)),
-                         patch('seriald_core.adb_tasks.READ_IDENTITY', 'serial=$TEST_BOARD\n')):
+        for override in (patch('decklab_core.adb_tasks.shutil.which', return_value=str(executable)),
+                         patch('decklab_core.adb_tasks.READ_IDENTITY', 'serial=$TEST_BOARD\n')):
             override.start()
             self.addCleanup(override.stop)
         self.payload = {'kind': 'adb-command', 'serial': self.device.serial,
@@ -88,8 +88,8 @@ else:
 
     def test_interactive_task_registers_closes_and_deduplicates_session(self):
         import socket
-        from seriald_core.actions import DeviceActions
-        from seriald_core.adb_session import AdbSession
+        from decklab_core.actions import DeviceActions
+        from decklab_core.adb_session import AdbSession
 
         local, peer = socket.socketpair()
         self.addCleanup(peer.close)

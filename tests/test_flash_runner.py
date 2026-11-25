@@ -12,9 +12,9 @@ import time
 import unittest
 from unittest import mock
 
-from seriald_core.flash_runner import (FlashBook, FlashRunnerError, LocalFlashExecutor,
+from decklab_core.flash_runner import (FlashBook, FlashRunnerError, LocalFlashExecutor,
                                        public_plan, safe_event)
-from seriald_core.tasks import TaskCancelled, TaskError
+from decklab_core.tasks import TaskCancelled, TaskError
 
 
 def configuration(argv=None):
@@ -62,7 +62,7 @@ class FlashBookTests(unittest.TestCase):
             self.assertNotIn(directory, json.dumps(result))
             executable = Path(missing)
             executable.write_text('fixture')
-            with mock.patch('seriald_core.flash_runner.os.access', return_value=False):
+            with mock.patch('decklab_core.flash_runner.os.access', return_value=False):
                 result = FlashBook(config).available('board-a')
             self.assertFalse(result['supported'])
             self.assertIn('not executable', result['reason'])
@@ -92,7 +92,7 @@ class FlashBookTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / 'flash.json'
             config.write_text('{"boards":{},"boards":{}}')
-            with mock.patch.dict(os.environ, {'SERIALD_FLASH': str(config)}), self.assertRaises(ValueError):
+            with mock.patch.dict(os.environ, {'DECKLAB_FLASH': str(config)}), self.assertRaises(ValueError):
                 FlashBook.from_env()
 
     def test_preview_removes_all_host_path_fields_and_executor_configuration(self):
@@ -210,7 +210,7 @@ class FlashRunnerTests(unittest.TestCase):
                 result[key] = dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                                    size=path.stat().st_size, name=path.name, id=key)
             return result
-        with mock.patch('seriald_core.flash_loaders.prepare_materials', side_effect=materials):
+        with mock.patch('decklab_core.flash_loaders.prepare_materials', side_effect=materials):
             result = self.runner.nor_workspace(binding)
         self.assertEqual(result['execution_profile']['ram_loader_protocol'], 'spacemit-ram-v1')
         self.assertEqual(len(result['execution_profile']['prepare']), 4)
@@ -508,7 +508,7 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertNotIn('/private', str(error.exception))
 
     def test_loader_failure_discards_the_embedded_training_result_of_that_port(self):
-        from seriald_core import flash_loaders
+        from decklab_core import flash_loaders
         binding = self.binding("print(json.dumps({'event':'error','code':'device-ram-unstable',"
                                "'message':'device RAM is unreliable: 2 of 6 on-board checks of 16 MiB random data failed'}))")
         port = tuple(binding.device['port_path'])
@@ -541,7 +541,7 @@ class FlashRunnerTests(unittest.TestCase):
                                "'message':'RAM U-Boot did not start after the FSBL loaded it'}))")
         for embedded in (False, True):
             with self.subTest(embedded=embedded), mock.patch(
-                    'seriald_core.flash_loaders.discard_training', return_value=embedded) as discard:
+                    'decklab_core.flash_loaders.discard_training', return_value=embedded) as discard:
                 with self.assertRaises(FlashRunnerError) as error:
                     self.runner.inspect(binding)
                 discard.assert_called_once()
@@ -570,7 +570,7 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertIn('此前的分段可能已写入', str(error.exception))
 
     def test_training_result_events_are_kept_and_not_forwarded(self):
-        from seriald_core import flash_loaders
+        from decklab_core import flash_loaders
         events = []
         binding = self.binding("print(json.dumps({'event':'ddr-training','result':{'data':'AAAA'}}))\n"
                                "print(json.dumps({'event':'result','result':{'ok':True}}))")
@@ -758,13 +758,13 @@ class FlashRunnerTests(unittest.TestCase):
 
     def test_process_cleanup_failure_retains_recovery_requirement(self):
         binding = self.binding("print(json.dumps({'event':'result','result':{'write_result':'completed'}}))")
-        from seriald_core.flash_runner import stream_process
+        from decklab_core.flash_runner import stream_process
         process = stream_process([sys.executable, str(self.helper), '--request', self._request_fixture()])
         original = process.close
         def close():
             original()
             raise OSError('cannot confirm cleanup')
-        with mock.patch('seriald_core.flash_runner.stream_process', return_value=process), \
+        with mock.patch('decklab_core.flash_runner.stream_process', return_value=process), \
                 mock.patch.object(process, 'close', side_effect=close), self.assertRaises(FlashRunnerError) as error:
             self.runner.execute(binding, {})
         self.assertFalse(error.exception.cleanup_confirmed)
@@ -776,7 +776,7 @@ class FlashRunnerTests(unittest.TestCase):
         binding = self.binding('import subprocess\nsubprocess.Popen([sys.executable,"-c",%r])\n'
             'while not Path(%r).exists():time.sleep(.01)\n'
             'print(json.dumps({"event":"result","result":{"write_result":"completed"}}),flush=True)' % (child, str(marker)))
-        from seriald_core.flash_runner import stream_process
+        from decklab_core.flash_runner import stream_process
         closed = []
         def create(argv):
             process = stream_process(argv)
@@ -787,7 +787,7 @@ class FlashRunnerTests(unittest.TestCase):
             process.close = close
             return process
         started = time.monotonic()
-        with mock.patch('seriald_core.flash_runner.stream_process', side_effect=create):
+        with mock.patch('decklab_core.flash_runner.stream_process', side_effect=create):
             self.runner.execute(binding, {})
         self.assertEqual(closed, [1])
         self.assertLess(time.monotonic() - started, 5)
@@ -802,7 +802,7 @@ class FlashRunnerTests(unittest.TestCase):
 
     def test_oversized_output_is_bounded_and_stopped(self):
         binding = self.binding("print('x' * 3000,flush=True);time.sleep(30)")
-        with mock.patch('seriald_core.flash_runner.MAX_LINE', 1024), self.assertRaisesRegex(FlashRunnerError, 'limit'):
+        with mock.patch('decklab_core.flash_runner.MAX_LINE', 1024), self.assertRaisesRegex(FlashRunnerError, 'limit'):
             self.runner.inspect(binding)
 
 

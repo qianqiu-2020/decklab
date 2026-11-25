@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from seriald_core.adb_session import AdbSession, packet, read_exact, usb_endpoints
+from decklab_core.adb_session import AdbSession, packet, read_exact, usb_endpoints
 
 
 class AdbTerminalTests(unittest.TestCase):

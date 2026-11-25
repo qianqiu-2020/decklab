@@ -10,9 +10,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core import schema
-from seriald_core.agent_grants import AgentGrantStore
-from seriald_core.storage import Store
+from decklab_core import schema
+from decklab_core.agent_grants import AgentGrantStore
+from decklab_core.storage import Store
 
 
 class SchemaTests(unittest.TestCase):
@@ -262,7 +262,7 @@ class SchemaTests(unittest.TestCase):
     def test_grant_upgrade_preserves_token_hash_scope_and_revocation(self):
         db = sqlite3.connect(self.path)
         schema._grants_initial(db)
-        token = 'seriald-ag-test'
+        token = 'decklab-ag-test'
         db.execute('INSERT INTO grants VALUES (?,?,?,?,?,?,?,?)',
                    ('grant1', hashlib.sha256(token.encode()).hexdigest(), 'agent', 'device', 'SN1', 1, None, None))
         db.commit()
@@ -279,7 +279,7 @@ class SchemaTests(unittest.TestCase):
     def test_version_one_grants_upgrade_preserves_credentials_and_adds_connection_scope(self):
         db = sqlite3.connect(self.path)
         schema._grants_initial(db)
-        token = 'seriald-ag-legacy'
+        token = 'decklab-ag-legacy'
         db.execute('INSERT INTO grants VALUES (?,?,?,?,?,?,?,?)',
                    ('legacy', hashlib.sha256(token.encode()).hexdigest(), 'agent', 'device', 'SN1', 1, None, None))
         db.execute('PRAGMA user_version=1')

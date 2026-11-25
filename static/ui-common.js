@@ -83,6 +83,6 @@
       });
     });
   }
-  global.SerialdUI = { byId: byId, formatBytes: formatBytes, age: age, copyText: copyText,
+  global.DeckLabUI = { byId: byId, formatBytes: formatBytes, age: age, copyText: copyText,
                       fetch: clientFetch, clientId: clientId };
 })(window);

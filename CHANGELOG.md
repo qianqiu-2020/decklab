@@ -1,20 +1,26 @@
 # Changelog
 
-记录 DeckLab 公开发布版本的重要变化。[历史构建记录](docs/CHANGELOG_ARCHIVE.md)保留其余版本的原说明。
+记录 DeckLab 公开发布版本的重要变化。[历史构建记录](docs/history/changelog-archive.md)保留其余版本的原说明。
 
 本文件遵循 [Keep a Changelog 1.1.0](https://keepachangelog.com/zh-CN/1.1.0/)，公开版本使用[语义化版本](https://semver.org/lang/zh-CN/)。
 
 ## [Unreleased]
 
-## [1.18.23] - 2026-11-26
+## [1.19.0] - 2026-11-26
 
 ### Added
 
 - 本地 Debian 和 Windows 构建增加快速打包选项。Windows 可复用同一工作目录的打包依赖。
 - 刷机工作区可按时间查看控制机的刷机记录和执行命令，设备离线时也能查看。
 
+### Removed
+
+- Windows 发布改为提供安装器。
+
 ### Changed
 
+- 统一 DeckLab 的程序、命令、配置和服务命名。Linux 覆盖安装迁移原有配置和数据，Windows 继续使用已有安装目录。
+- 按模块重写安装、运维、开发和接口文档。
 - 本地 Windows 打包可复用已核对的冻结运行时。GitHub 并行运行 Debian 安装验收，标签出包沿用同一提交在 main 的应用回归结果。
 - 刷机准备页自动跟随 USB 下载设备的插拔和重新连接。从设备页打开时匹配当前开发板，多板连接时保留已选目标。手动刷新收在连接详情中。
 - 普通刷机在宽屏并排显示开发板和镜像。默认收起镜像布局、文件管理和较少使用的镜像来源，刷写方式在性能配置之前显示。
@@ -159,7 +165,7 @@
 ### Added
 
 - 新增「刷写配置」：在 K3 板上实测 USB 下载、板上解压、写盘、命令开销和控制机压缩速度，约 10 秒。按耗时模型选出编码、压缩级别、段大小和是否后台写盘，保存为该 USB 口的配置。之后经此 USB 口的普通刷写和极速刷写都使用这套配置；没有自己配置的 USB 口沿用同型号最近一次实测。写盘测速读出 128 MiB 后原样写回，盘上内容不变。配置只影响速度，不改变写入内容。
-- 刷写结果记录本次使用的配置。[刷写耗时模型](docs/FLASH_PERFORMANCE.md#实测生成刷写配置) 说明测量方法、选择规则和 K3 实测结果。
+- 刷写结果记录本次使用的配置。[刷写耗时模型](docs/reference/flash-performance.md#实测生成刷写配置) 说明测量方法、选择规则和 K3 实测结果。
 
 ### Fixed
 
@@ -170,7 +176,7 @@
 ### Added
 
 - 内置 K3 临时 U-Boot 由供应商 OpenSBI 启动、以 S 模式运行，新增 `unzstd` 与 `bgblk` 两条命令（补丁随包附带）。旧加载器或自定义加载器自动退回 gzip 与同步写盘。
-- [刷写耗时模型](docs/FLASH_PERFORMANCE.md) 加入并行解压、写盘重叠和 K1 实测参数（解压与 eMMC 速率），可按 USB、介质和 CPU 条件选择编码和段大小。
+- [刷写耗时模型](docs/reference/flash-performance.md) 加入并行解压、写盘重叠和 K1 实测参数（解压与 eMMC 速率），可按 USB、介质和 CPU 条件选择编码和段大小。
 
 ### Changed
 
@@ -184,7 +190,7 @@
 
 ### Added
 
-- 新增[刷写耗时模型](docs/FLASH_PERFORMANCE.md)：列出 USB 速率、压缩比、板上解压、介质写入和命令开销等变量，可按新条件估算耗时并选择参数。
+- 新增[刷写耗时模型](docs/reference/flash-performance.md)：列出 USB 速率、压缩比、板上解压、介质写入和命令开销等变量，可按新条件估算耗时并选择参数。
 
 ### Changed
 
@@ -409,8 +415,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.18.23...HEAD
-[1.18.23]: https://github.com/qianqiu-2020/decklab/compare/v1.18.7...v1.18.23
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/qianqiu-2020/decklab/compare/v1.18.7...v1.19.0
 [1.18.7]: https://github.com/qianqiu-2020/decklab/compare/v1.18.0...v1.18.7
 [1.18.0]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.18.0
 [1.17.74]: https://github.com/qianqiu-2020/decklab/compare/v1.17.54...v1.17.74

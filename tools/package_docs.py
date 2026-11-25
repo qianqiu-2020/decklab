@@ -7,11 +7,6 @@ import shutil
 from urllib.parse import quote, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
-GUIDES = ('COMPLETE_INSTALL', 'IMAGE_STORE', 'DISTRIBUTED', 'RELEASING', 'AGENT_ACCESS', 'MCP', 'DESKTOP', 'API', 'ARCHITECTURE', 'INSTALL',
-          'HARDWARE_ID', 'DEVICE_IDENTITY_MATRIX', 'CONFIGURATION', 'DEMO',
-          'CONSOLE_TRANSACTIONS', 'STORAGE_UPGRADES', 'LOG_OPERATIONS', 'TASKS', 'INTEGRATION',
-          'TRANSFER_ARTIFACTS', 'HARDWARE_EXTENSIONS', 'FLASH_WORKSPACE', 'WINDOWS',
-          'TRANSFER_PERFORMANCE', 'FLASH_PERFORMANCE', 'WINDOWS_NATIVE_NOTICES', 'WINDOWS_REBUILD', 'CHANGELOG_ARCHIVE')
 LINK = re.compile(r'(!?\[[^\]\n]*\]\()([^\s)]+)(\))')
 
 
@@ -24,19 +19,15 @@ def document_map(platform):
              'CONTRIBUTING.md': 'CONTRIBUTING.md', 'SECURITY.md': 'SECURITY.md',
              'CHANGELOG.md': 'CHANGELOG.md'}
     prefix = '' if platform == 'linux' else 'docs/'
-    pairs['docs/README.md'] = prefix + 'index.md'
-    pairs.update({'docs/' + name + '.md': prefix + name + '.md' for name in GUIDES})
-    for name in ('seriald-architecture.png', 'seriald-architecture.svg',
-                 'seriald-architecture-en.png', 'seriald-architecture-en.svg',
-                 'decklab-demo.png', 'decklab-demo-zh.png'):
-        pairs['docs/' + name] = prefix + name
-    pairs['docs/windows-wheel-observation.json'] = prefix + 'windows-wheel-observation.json'
+    for source in sorted((ROOT / 'docs').rglob('*')):
+        if source.is_file() and source.suffix in ('.md', '.json', '.svg', '.png', '.dot'):
+            pairs[source.relative_to(ROOT).as_posix()] = prefix + source.relative_to(ROOT / 'docs').as_posix()
     # Keep platform examples usable without adding an SDK dependency. This is
     # the same standard-library client served by the application, not a fork.
-    pairs['serialctl.py'] = 'examples/serialctl.py'
+    pairs['decklabctl.py'] = 'examples/decklabctl.py'
     for path in ('examples/profiles.json', 'examples/hardware.json', 'examples/hardware-bmc.json', 'examples/home_assistant_control.py', 'examples/flash.json',
-                 'examples/platform_executor.py', 'examples/platform-device.json', 'examples/edge_task_lookup.go', 'skills/seriald-board/SKILL.md',
-                 'skills/seriald-board/SKILL.zh-CN.md'):
+                 'examples/platform_executor.py', 'examples/platform-device.json', 'examples/edge_task_lookup.go', 'skills/decklab-board/SKILL.md',
+                 'skills/decklab-board/SKILL.zh-CN.md'):
         pairs[path] = path
     if platform == 'windows':
         pairs['README.md'] = 'README-project.md'
@@ -70,7 +61,7 @@ def publish(destination, platform):
     mapping = {(ROOT / source).resolve(): destination / target for source, target in pairs.items()}
     outputs = [(ROOT / source, destination / target) for source, target in pairs.items()]
     if platform == 'windows':
-        outputs.append((ROOT / 'docs/WINDOWS.md', destination / 'README.md'))
+        outputs.append((ROOT / 'docs/operations/install-windows.md', destination / 'README.md'))
     if any(not source.is_file() for source, _ in outputs):
         raise ValueError('release documentation source is missing')
     # Validate all links before changing any documentation files.

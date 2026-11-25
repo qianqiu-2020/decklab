@@ -7,10 +7,10 @@ import sys
 import unittest
 from unittest import mock
 
-from seriald_core.desktop import DesktopBook, DesktopSessions
-from seriald_core.desktop_errors import DesktopConnectionError, connection_error, redact
-from seriald_core import desktop_providers as providers
-from serialctl import ClientError
+from decklab_core.desktop import DesktopBook, DesktopSessions
+from decklab_core.desktop_errors import DesktopConnectionError, connection_error, redact
+from decklab_core import desktop_providers as providers
+from decklabctl import ClientError
 import test_desktop
 
 

@@ -10,13 +10,13 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from seriald_core import control_server, device as device_module, web
-from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
-from seriald_core.devices import Manager
-from seriald_core.httpd import BoundedThreadingTCPServer
-from seriald_core.profiles import ProfileBook
-from seriald_core.models import Board
-from seriald_core.storage import Store
+from decklab_core import control_server, device as device_module, web
+from decklab_core.agent_grants import AgentGrantStore, attach_agent_grants
+from decklab_core.devices import Manager
+from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.profiles import ProfileBook
+from decklab_core.models import Board
+from decklab_core.storage import Store
 
 
 def api_request(url, route, token, payload=None, query=None):
@@ -94,7 +94,7 @@ class ConnectionAccessTests(unittest.TestCase):
             token, _ = fixture.grant_store.issue('device', device.serial)
             query = {'key': device.key, 'serial': device.serial,
                      'connection_id': device.connection_id, 'adb_binding': '1'}
-            with mock.patch('seriald_core.board_cases.adb_binding', return_value={'serial': device.serial}) as read:
+            with mock.patch('decklab_core.board_cases.adb_binding', return_value={'serial': device.serial}) as read:
                 status, data = api_request(fixture.url, '/api/hardware', token, query=query)
                 self.assertEqual(status, 200, data)
                 self.assertEqual(data['adb_binding']['serial'], device.serial)

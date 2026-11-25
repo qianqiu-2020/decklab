@@ -8,10 +8,10 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from seriald_core.admin import confirm_serial, correct_serial, main, resolve_conflict
-from seriald_core.identity import select_identity
-from seriald_core.protocol import parse_onie_serial, parse_probe
-from seriald_core.storage import IdentityError, Store
+from decklab_core.admin import confirm_serial, correct_serial, main, resolve_conflict
+from decklab_core.identity import select_identity
+from decklab_core.protocol import parse_onie_serial, parse_probe
+from decklab_core.storage import IdentityError, Store
 
 
 def info(serial='0123456789ABCDEF', soc='0061020304050607'):
@@ -226,7 +226,7 @@ class ConflictResolutionTests(unittest.TestCase):
         original = self.store.get(self.serial)
         sessions = self.store.sessions(self.serial)
         before = list(self.store.db.iterdump())
-        with mock.patch('seriald_core.admin.Store', side_effect=AssertionError('preview wrote storage')):
+        with mock.patch('decklab_core.admin.Store', side_effect=AssertionError('preview wrote storage')):
             preview = resolve_conflict(self.base, self.serial, self.reason)
         self.assertFalse(preview['applied'])
         self.assertFalse(preview['resolved'])
@@ -279,7 +279,7 @@ class ConflictResolutionTests(unittest.TestCase):
         self.assertEqual(self.store.events(self.serial), [])
 
     def test_cli_requires_reason_and_defaults_to_preview(self):
-        args = ['seriald-admin', '--base', str(self.base), 'resolve-conflict',
+        args = ['decklab-admin', '--base', str(self.base), 'resolve-conflict',
                 '--serial', self.serial]
         with mock.patch('sys.argv', args), redirect_stdout(io.StringIO()), \
                 mock.patch('sys.stderr', new_callable=io.StringIO), self.assertRaises(SystemExit) as error:

@@ -2,7 +2,7 @@
 (function(global){
   'use strict';
   function create(options){
-    var $=options.byId,client=global.SerialdTasks.createClient(options.fetch),artifact=null,choose=null,member='',revision='',generation=0,busy=false,activeTask=null,pendingEdit=null,pendingImport=null,archiveOnly=false;
+    var $=options.byId,client=global.DeckLabTasks.createClient(options.fetch),artifact=null,choose=null,member='',revision='',generation=0,busy=false,activeTask=null,pendingEdit=null,pendingImport=null,archiveOnly=false;
     var phases={'copying-image-directory':'创建可编辑副本','importing-image':'正在导入镜像包'};
     var codeEditor = null, editorLoad = null, reading = false;
     function status(value){$('iw-status').textContent=value;}
@@ -30,7 +30,7 @@
           codeEditor=global.ace.edit($('iw-code'),{fontSize:13,showPrintMargin:false,tabSize:2,
             useWorker:false,wrap:true});
           codeEditor.textInput.getElement().setAttribute('aria-label',
-            global.SerialdI18n ? global.SerialdI18n.translate('文件内容') : '文件内容');
+            global.DeckLabI18n ? global.DeckLabI18n.translate('文件内容') : '文件内容');
           codeEditor.session.on('change',function(){$('iw-text').value=codeEditor.getValue();});
           return codeEditor;
         }).catch(function(){return null;});
@@ -173,5 +173,5 @@
       if(artifact)load();
     }};
   }
-  global.SerialdImageWorkspaces={create:create};
+  global.DeckLabImageWorkspaces={create:create};
 })(window);

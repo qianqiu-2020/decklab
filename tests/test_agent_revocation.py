@@ -9,14 +9,14 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core.agent_grants import (AgentGrantStore, ActorRequests, GrantRevoked,
+from decklab_core.agent_grants import (AgentGrantStore, ActorRequests, GrantRevoked,
                                       actor_request, revoke_backend_actor)
-from seriald_core.control_server import RevocationReconciler, deliver_revocation
-from seriald_core.session_base import SessionBase
-from seriald_core import schema
-from seriald_core import device as device_module
-from seriald_core.devices import Manager
-from seriald_core.storage import Store
+from decklab_core.control_server import RevocationReconciler, deliver_revocation
+from decklab_core.session_base import SessionBase
+from decklab_core import schema
+from decklab_core import device as device_module
+from decklab_core.devices import Manager
+from decklab_core.storage import Store
 
 
 class ReplyConnection:
@@ -168,7 +168,7 @@ class RevocationTests(unittest.TestCase):
         device = SimpleNamespace(sessions_lock=threading.RLock(), ssh_sessions={'session': session}, serial='')
         device.close_session = lambda sid: device.ssh_sessions.pop(sid, None) is not None
         manager = SimpleNamespace(agent_grants=backend, all_devices=lambda: [device])
-        with mock.patch('seriald_core.transactions.transactions_for', return_value=transactions):
+        with mock.patch('decklab_core.transactions.transactions_for', return_value=transactions):
             self.assertFalse(revoke_backend_actor(manager, actor, 1)['sessions_closed'])
             transactions.cancel.assert_called_once_with('transaction', actor)
             state['active'] = None

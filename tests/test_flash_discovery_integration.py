@@ -19,13 +19,13 @@ import unittest
 from unittest import mock
 import zipfile
 
-from seriald_core import control_server, web
-from seriald_core.agent_grants import AgentGrantStore
-from seriald_core.board_maintenance import maintenance_for
-from seriald_core.devices import Manager
-from seriald_core.flash_runner import FlashBook, FlashRunnerError, LocalFlashExecutor
-from seriald_core.httpd import BoundedThreadingTCPServer
-from seriald_core.storage import Store
+from decklab_core import control_server, web
+from decklab_core.agent_grants import AgentGrantStore
+from decklab_core.board_maintenance import maintenance_for
+from decklab_core.devices import Manager
+from decklab_core.flash_runner import FlashBook, FlashRunnerError, LocalFlashExecutor
+from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.storage import Store
 from test_connection_access import api_request
 from test_flash_integration import FakeFlashExecutor
 
@@ -228,7 +228,7 @@ def automatic_flashing(known=None):
             agent_tokens = {}
         with BoundedThreadingTCPServer(('127.0.0.1', 0), web.Handler) as collector, \
                 BoundedThreadingTCPServer(('127.0.0.1', 0), Control) as control, \
-                mock.patch('seriald_core.devices.open_serial', side_effect=AssertionError('unexpected UART open')):
+                mock.patch('decklab_core.devices.open_serial', side_effect=AssertionError('unexpected UART open')):
             collector.manager = manager
             Control.collector_socket = collector.server_address
             workers = [threading.Thread(target=server.serve_forever, daemon=True)
@@ -253,7 +253,7 @@ def automatic_flashing(known=None):
 
 class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
     def test_loader_relocation_takes_over_endpoint_without_removing_historical_tasks(self):
-        from seriald_core.flash_tasks import _discovery
+        from decklab_core.flash_tasks import _discovery
         with automatic_flashing() as fixture:
             executor = fixture.executor
             executor.candidates = [usb_candidate(port=(2, 3, 3))]
@@ -300,7 +300,7 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(fixture.manager.tasks.store.get(first['id'])['flash_targets'][0]['target_id'], old['target_id'])
 
     def test_first_usb_only_board_can_be_registered_after_a_verified_loader_transition(self):
-        from seriald_core.flash_tasks import _discovery
+        from decklab_core.flash_tasks import _discovery
         with automatic_flashing() as fixture:
             discovery = _discovery(fixture.manager)
             target = discovery.refresh()['targets'][0]

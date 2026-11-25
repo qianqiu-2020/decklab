@@ -26,7 +26,7 @@ there are no DeckLab firmware opcodes or getvars. EEPROM write confirmation
 requires fresh physical readback, not the native command's OKAY alone.
 NOR partition writes retain whole-chip backup, explicit erase/write scope,
 and whole-chip readback checking bytes outside selected partitions.
-See [storage workspace design](docs/FLASH_WORKSPACE.md) for the native protocol,
+See [storage workspace design](docs/modules/flashing.md) for the native protocol,
 source/build constraints and hardware validation limits.
 
 Single-host deployments support Linux and Windows. Split deployments use a
@@ -41,7 +41,7 @@ configured board/module/USB mapping before one HTTP mutation. Lost receipts
 remain unknown and are never retried. The control provider does not own UART,
 loaders or flash writes. See the hardware extension guide for configuration.
 
-Current behavior and module ownership: [architecture](docs/ARCHITECTURE.md).
+Current behavior and module ownership: [architecture](docs/modules/architecture.md).
 Release changes: [CHANGELOG.md](CHANGELOG.md).
 Contributor checks and conventions: [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -50,16 +50,16 @@ This entry point is retained for existing contributor instructions.
 
 Debian 1.7.1+ packages include a private frozen MCP/Python runtime, built on the
 native Ubuntu 22.04 baseline for amd64 and arm64. Installation must not download
-Python packages or require `SERIALD_MCP_PYTHON`. The package builder requires a
+Python packages or require `DECKLAB_MCP_PYTHON`. The package builder requires a
 validated runtime; it must not silently produce a thin package. An explicit
 Python override remains available for source/advanced deployments. See
-[installation](docs/INSTALL.md), [MCP](docs/MCP.md) and
-[release acceptance](docs/RELEASING.md).
+[installation](docs/operations/install-linux.md), [MCP](docs/modules/mcp.md) and
+[release acceptance](docs/operations/release.md).
 
 The MCP worker remains a control-owned private loopback process and uses the
 existing authenticated API; it never becomes a second serial reader. Startup
 diagnostics are bounded, credential-redacted and private under
-`SERIALD_BASE/mcp-worker.log`, with one `.1` backup. A failed worker leaves the
+`DECKLAB_BASE/mcp-worker.log`, with one `.1` backup. A failed worker leaves the
 terminal and log APIs available.
 
 SSH connections first use credentials saved on the server for the identified
@@ -77,7 +77,7 @@ or COM/tty for unidentified targets. Exhausted authentication returns
 manual root SSH instructions without sending them to the serial port.
 Normal SSH opens must not reset root passwords or edit sshd policy.
 The separate authorized `ssh-enable` operation only installs/starts SSH from an
-already-root shell. See [configuration](docs/CONFIGURATION.md#manual-root-ssh-setup).
+already-root shell. See [configuration](docs/reference/environment.md#manual-root-ssh-setup).
 
 Serial terminal setup recognizes complete BusyBox ash path prompts (`~ #`,
 `/ #`, `/etc #`, `~/work $`) as well as user/host prompts. Both frontend and

@@ -25,9 +25,9 @@ const tree = {
 };
 const visited = [], errors = [];
 const bootstrap = `
-SerialdI18n.setLocale('zh-CN');
+DeckLabI18n.setLocale('zh-CN');
 const $ = id => document.getElementById(id);
-window.store = SerialdImageStore.create({byId:$,fetch:window.fetch,formatBytes:SerialdUI.formatBytes});
+window.store = DeckLabImageStore.create({byId:$,fetch:window.fetch,formatBytes:DeckLabUI.formatBytes});
 store.open(); window.fixtureReady=true;
 `;
 const scripts = ['static/i18n.js','static/ui-common.js','static/tasks.js','static/image-store.js'];
@@ -114,7 +114,7 @@ let chrome,ws;
   await evaluate('document.getElementById("is-version").value="day:20261116";document.getElementById("is-version").dispatchEvent(new Event("change"))');
   await until('!document.getElementById("is-refresh").disabled');
   assert.equal(await evaluate('document.querySelectorAll("#is-list .is-row").length'),0);
-  await evaluate('SerialdI18n.setLocale("en")');
+  await evaluate('DeckLabI18n.setLocale("en")');
   assert.equal(await evaluate('document.getElementById("is-os").getAttribute("aria-label")'),'Operating system');
   assert.deepEqual(errors,[]);
   console.log('Image-store Chromium passed: OS/channel/history/variants, nested cloud navigation/return, numeric ordering, unsupported formats, no historical crawl, desktop/mobile and i18n.');

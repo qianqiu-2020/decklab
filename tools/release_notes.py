@@ -7,7 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from seriald_core.version import __version__
+from decklab_core.version import __version__
 
 
 RELEASE_HEADING = re.compile(r'^\[([^\]\r\n]+)\] - (\d{4}-\d{2}-\d{2})$')

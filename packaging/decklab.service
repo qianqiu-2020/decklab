@@ -1,0 +1,24 @@
+[Unit]
+Description=Serial board web and agent control plane
+After=network.target decklab-collector.service
+Requires=decklab-collector.service
+
+[Service]
+Type=simple
+User=decklab
+Group=decklab
+EnvironmentFile=/etc/decklab/decklab.env
+Environment=HOME=/data/decklab-data
+WorkingDirectory=/usr/lib/decklab
+ExecStart=/usr/bin/decklab-control
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0007
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from seriald_core.config import read_ui_language
+from decklab_core.config import read_ui_language
 
 
 class UiLanguageTests(unittest.TestCase):

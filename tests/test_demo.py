@@ -14,10 +14,10 @@ import unittest
 from unittest import mock
 from urllib.request import Request, urlopen
 
-from seriald_core.demo import DemoManager
-from seriald_core.storage import Store
-from seriald_core.file_transfer import BATCH_SIZE
-import serialctl
+from decklab_core.demo import DemoManager
+from decklab_core.storage import Store
+from decklab_core.file_transfer import BATCH_SIZE
+import decklabctl
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +27,7 @@ class DemoTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        for module in ('seriald_core.device', 'seriald_core.devices'):
+        for module in ('decklab_core.device', 'decklab_core.devices'):
             patcher = mock.patch(module + '.LOG_ROOT', self.temporary.name)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -38,8 +38,8 @@ class DemoTests(unittest.TestCase):
         self.device = self.manager.resolve('demo-k1')
 
     def test_demo_never_discovers_opens_hardware_or_executes_host_commands(self):
-        with mock.patch('seriald_core.devices.os.scandir', side_effect=AssertionError('discovery')), \
-                mock.patch('seriald_core.devices.open_serial', side_effect=AssertionError('hardware')), \
+        with mock.patch('decklab_core.devices.os.scandir', side_effect=AssertionError('discovery')), \
+                mock.patch('decklab_core.devices.open_serial', side_effect=AssertionError('hardware')), \
                 mock.patch('subprocess.Popen', side_effect=AssertionError('command execution')):
             self.assertEqual(self.manager.scan(), {})
             self.assertFalse(self.manager._matches(self.device))
@@ -54,7 +54,7 @@ class DemoTests(unittest.TestCase):
             self.assertFalse(session.write('echo closed\r'))
 
     def test_agent_command_frame_and_boot_archives(self):
-        frame = serialctl.frame_command('echo hello-agent', 'abc123')
+        frame = decklabctl.frame_command('echo hello-agent', 'abc123')
         self.assertTrue(self.device.send(frame)[0])
         raw = self.device.read(0)[1].decode().replace('\r\n', '\n')
         self.assertIn('__SD_AGENT_B_abc123__\nhello-agent\n', raw)
@@ -112,9 +112,9 @@ class DemoTests(unittest.TestCase):
 class DemoHttpTests(unittest.TestCase):
     def test_launcher_http_cli_and_production_path_isolation(self):
         with tempfile.TemporaryDirectory() as forbidden:
-            env = dict(os.environ, SERIALD_BASE=forbidden,
-                       SERIALD_PROFILES='/does/not/exist', SERIALD_AUTH_TOKEN='production-token')
-            process = subprocess.Popen([sys.executable, str(ROOT / 'seriald_demo.py'), '--port', '0'],
+            env = dict(os.environ, DECKLAB_BASE=forbidden,
+                       DECKLAB_PROFILES='/does/not/exist', DECKLAB_AUTH_TOKEN='production-token')
+            process = subprocess.Popen([sys.executable, str(ROOT / 'decklab_demo.py'), '--port', '0'],
                                        cwd=ROOT, env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True)
             try:
@@ -151,12 +151,12 @@ class DemoHttpTests(unittest.TestCase):
                 self.assertTrue(session['ok'])
                 logs = request('/api/logs?key=demo-k1')
                 self.assertEqual(len(logs['boots']), 2)
-                cli = subprocess.run([sys.executable, str(ROOT / 'serialctl.py'), '--url', url, 'devices'],
+                cli = subprocess.run([sys.executable, str(ROOT / 'decklabctl.py'), '--url', url, 'devices'],
                                      capture_output=True, text=True, timeout=10)
                 self.assertEqual(cli.returncode, 0, cli.stderr)
                 self.assertIn('demo-k1', cli.stdout)
                 def run_cli(device, *arguments):
-                    result = subprocess.run([sys.executable, str(ROOT / 'serialctl.py'),
+                    result = subprocess.run([sys.executable, str(ROOT / 'decklabctl.py'),
                                              '--url', url, '--device', device, *arguments],
                                             capture_output=True, text=True, timeout=15)
                     self.assertEqual(result.returncode, 0, result.stderr + result.stdout)

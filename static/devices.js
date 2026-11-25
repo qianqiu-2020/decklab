@@ -635,5 +635,5 @@
       if (!event.repeat) jump(direction, position);
     }, true);
   }
-  global.SerialdDevices = { create: create, bindShortcuts: bindShortcuts };
+  global.DeckLabDevices = { create: create, bindShortcuts: bindShortcuts };
 })(window);

@@ -131,7 +131,7 @@ def publish_windows(bundle, components):
     publish_loaders(components['loaders'], bundle / '_internal/flash-loaders')
     shutil.copytree(components['notices'], bundle / 'flash-third-party')
     shutil.copytree(components['driver'], bundle / 'usb-driver')
-    for name in ('Install-seriald-USB-Driver.cmd', 'Install-seriald-USB-Driver.ps1'):
+    for name in ('Install-decklab-USB-Driver.cmd', 'Install-decklab-USB-Driver.ps1'):
         shutil.copyfile(ROOT / 'tools/windows-launchers' / name, bundle / name)
     info.update(profile='complete', flash_executor='_internal/decklab-flash.exe',
                 ram_loaders='_internal/flash-loaders/manifest.json', usb_driver='usb-driver/spacemit_usb.inf',

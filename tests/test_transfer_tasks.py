@@ -5,10 +5,10 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core.demo import DemoManager
-from seriald_core.storage import Store
-from seriald_core.task_actions import TaskActions
-from seriald_core.tasks import TaskError
+from decklab_core.demo import DemoManager
+from decklab_core.storage import Store
+from decklab_core.task_actions import TaskActions
+from decklab_core.tasks import TaskError
 
 
 class CopyTaskTests(unittest.TestCase):
@@ -17,7 +17,7 @@ class CopyTaskTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.store = Store(self.tmp.name + '/registry.sqlite3')
         self.addCleanup(self.store.close)
-        with mock.patch('seriald_core.device.LOG_ROOT', self.tmp.name + '/logs'):
+        with mock.patch('decklab_core.device.LOG_ROOT', self.tmp.name + '/logs'):
             self.manager = DemoManager(self.store)
         self.addCleanup(self.manager.close)
         self.source = self.manager.resolve('demo-k1')
@@ -107,7 +107,7 @@ class CopyTaskTests(unittest.TestCase):
             task = self.result(response)
         self.assertEqual(task['state'], 'cancelled', task)
         self.assertNotIn('/destination', self.destination.files)
-        self.assertFalse(any('.seriald-' in path for path in self.destination.files))
+        self.assertFalse(any('.decklab-' in path for path in self.destination.files))
         self.assertFalse(self.source.file_transfer.active)
         self.assertFalse(self.destination.file_transfer.active)
         self.assertIsNone(self.manager.resolve('demo-offline').transactions.snapshot())

@@ -5,13 +5,13 @@ import json
 import unittest
 from unittest import mock
 
-from serialctl import ClientError
-from seriald_mcp import Adapter, Settings
-import seriald_mcp
+from decklabctl import ClientError
+from decklab_mcp import Adapter, Settings
+import decklab_mcp
 
 
-TOKEN_A = 'seriald-ag-' + 'A' * 32
-TOKEN_B = 'seriald-ag-' + 'B' * 32
+TOKEN_A = 'decklab-ag-' + 'A' * 32
+TOKEN_B = 'decklab-ag-' + 'B' * 32
 
 
 class FakeClientFactory:
@@ -131,16 +131,16 @@ class FakeClient:
 class MCPLeaseCacheTests(unittest.TestCase):
     def setUp(self):
         self.factory = FakeClientFactory()
-        self.clock = mock.patch('seriald_mcp.time.time', side_effect=lambda: self.factory.now)
+        self.clock = mock.patch('decklab_mcp.time.time', side_effect=lambda: self.factory.now)
         self.clock.start()
         self.addCleanup(self.clock.stop)
         self.adapter = self.make_adapter()
 
-    @unittest.skipUnless(seriald_mcp.MCPServer is not None, 'optional MCP SDK is not installed')
+    @unittest.skipUnless(decklab_mcp.MCPServer is not None, 'optional MCP SDK is not installed')
     def test_mcp_tools_claim_renew_write_and_release_without_returning_proof(self):
         from mcp import Client
         async def check():
-            server = seriald_mcp.create_server(self.adapter.settings, self.adapter)
+            server = decklab_mcp.create_server(self.adapter.settings, self.adapter)
             async with Client(server) as client:
                 async def call(name, **arguments):
                     result = await client.call_tool(name, arguments)

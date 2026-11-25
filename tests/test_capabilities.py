@@ -5,11 +5,11 @@ import os
 import unittest
 from unittest import mock
 
-from seriald_core.actions import capabilities
-from seriald_core.api_contract import API_VERSION, CONTRACT_NAME, CONTRACT_REVISION, OUTCOMES
-from seriald_core.hardware import ACTIONS
-from seriald_core.task_actions import TaskActions
-from seriald_core import web
+from decklab_core.actions import capabilities
+from decklab_core.api_contract import API_VERSION, CONTRACT_NAME, CONTRACT_REVISION, OUTCOMES
+from decklab_core.hardware import ACTIONS
+from decklab_core.task_actions import TaskActions
+from decklab_core import web
 
 
 class CapabilitiesTests(unittest.TestCase):
@@ -92,8 +92,8 @@ class CapabilitiesTests(unittest.TestCase):
         self.assertIs(tasks['cancel']['rollback'], False)
 
     def test_each_response_is_independent_and_contains_no_host_configuration(self):
-        with mock.patch.dict(os.environ, {'SERIALD_TOKEN': 'private-token-fixture',
-                                         'SERIALD_DESKTOP': 'private-desktop-fixture'}):
+        with mock.patch.dict(os.environ, {'DECKLAB_TOKEN': 'private-token-fixture',
+                                         'DECKLAB_DESKTOP': 'private-desktop-fixture'}):
             first = capabilities().payload
         first['tasks']['kinds'].append('unsupported-task')
         first['tasks']['outcome']['values'].clear()

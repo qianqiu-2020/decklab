@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core.flash_bundle import assemble, check_bundle, plan_bundle, execute_bundle
-from seriald_core.flash_runner import LocalFlashExecutor, FlashRunnerError
+from decklab_core.flash_bundle import assemble, check_bundle, plan_bundle, execute_bundle
+from decklab_core.flash_runner import LocalFlashExecutor, FlashRunnerError
 
 
 class BundleTests(unittest.TestCase):

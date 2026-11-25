@@ -12,11 +12,11 @@ import unittest
 from unittest import mock
 import zlib
 
-from seriald_core.agent_grants import GrantRevoked
-from seriald_core.desktop import DesktopBook, DesktopSessions
-from seriald_core.tasks import TaskError
-from seriald_core.transactions import transactions_for
-from seriald_core.websocket_io import WSTimeout
+from decklab_core.agent_grants import GrantRevoked
+from decklab_core.desktop import DesktopBook, DesktopSessions
+from decklab_core.tasks import TaskError
+from decklab_core.transactions import transactions_for
+from decklab_core.websocket_io import WSTimeout
 
 
 def _png(width=20, height=12):
@@ -175,7 +175,7 @@ class NativeScreen:
 
 class DesktopStreamTests(unittest.TestCase):
     def setUp(self):
-        self.module = importlib.import_module('seriald_core.desktop_stream')
+        self.module = importlib.import_module('decklab_core.desktop_stream')
         self.screen, self.ws = NativeScreen(), FakeWS()
         self.manager = SimpleNamespace(store=mock.Mock(), boards={}, agent_grants=None)
         self.manager.store.has_conflict.return_value = False
@@ -191,7 +191,7 @@ class DesktopStreamTests(unittest.TestCase):
         self.sid = self.desktop.open(self.device, self.actor, self.client)['session']['id']
         headers = Message()
         headers['Host'] = 'desktop.test'
-        headers['X-Seriald-Desktop-Origin'] = 'http://desktop.test'
+        headers['X-DeckLab-Desktop-Origin'] = 'http://desktop.test'
         self.handler = SimpleNamespace(manager=self.manager, headers=headers,
             connection=SimpleNamespace(), command='GET', request_version='HTTP/1.1',
             path='/api/desktop/stream', close_connection=False, _json=mock.Mock(), send_error=mock.Mock())
@@ -857,11 +857,11 @@ class DesktopStreamTests(unittest.TestCase):
 
 class NativeLiveTextValidationTests(unittest.TestCase):
     def test_1024_unicode_characters_are_accepted_at_native_boundary(self):
-        from seriald_core.desktop_providers import validate_live_input
+        from decklab_core.desktop_providers import validate_live_input
         validate_live_input({'type': 'text', 'text': '中' * 1024})
 
     def test_invalid_text_is_rejected_at_native_boundary(self):
-        from seriald_core.desktop_providers import validate_live_input
+        from decklab_core.desktop_providers import validate_live_input
         for value in ('x' * 1025, 'before\x00after', '\ud800', '\udfff', None, ['text']):
             with self.subTest(value=repr(value)), self.assertRaises(ValueError):
                 validate_live_input({'type': 'text', 'text': value})

@@ -41,13 +41,13 @@ def install(path):
     print(result, flush=True)
     return result
 def credentials(phase):
-    subprocess.run(['sudo', '-u', 'seriald', 'python3', '/tmp/installed_ssh_credentials_check.py',
+    subprocess.run(['sudo', '-u', 'decklab', 'python3', '/tmp/installed_ssh_credentials_check.py',
                     '--phase', phase, '--database', str(base / 'ssh-credentials-fixture.sqlite3')],
                    check=True, timeout=20)
 
 subprocess.run(['apt-get', 'update', '-qq'], check=True)
-previous = pathlib.Path('/tmp/seriald-previous.deb').is_file()
-initial = '/tmp/seriald-previous.deb' if previous else '/tmp/seriald.deb'
+previous = pathlib.Path('/tmp/decklab-previous.deb').is_file()
+initial = '/tmp/decklab-previous.deb' if previous else '/tmp/decklab.deb'
 subprocess.run(['apt-get', 'install', '-y', initial], check=True)
 # Keep the connected SSH path on the local virtual subnet, but remove Internet
 # routing before MCP acceptance and upgrades. No pip or SDK is installed here.
@@ -56,21 +56,21 @@ for family in ('-4', '-6'):
         subprocess.run(['ip', family, 'route', 'del', 'default'], check=True)
     assert not command('ip', family, 'route', 'show', 'default').strip()
 assert importlib.util.find_spec('mcp') is None
-assert not os.environ.get('SERIALD_MCP_PYTHON')
+assert not os.environ.get('DECKLAB_MCP_PYTHON')
 first = ready()
-fingerprint = pathlib.Path('/usr/lib/seriald/.collector-build-id')
+fingerprint = pathlib.Path('/usr/lib/decklab/.collector-build-id')
 installed_id = fingerprint.read_bytes()
-base = pathlib.Path('/data/seriald-data')
+base = pathlib.Path('/data/decklab-data')
 marker = base / 'vm-preserve.log'
 marker.write_text('preserve runtime across service upgrades')
 os.chmod(marker, 0o660)
-config = pathlib.Path('/etc/seriald/seriald.env')
+config = pathlib.Path('/etc/decklab/decklab.env')
 saved = config.read_bytes() + b'\n# VM conffile preservation\n'
 config.write_bytes(saved)
 if previous:
     with urlopen('http://127.0.0.1:8898/api/access', timeout=3) as response:
         assert not json.load(response)['mcp_enabled']
-    upgrade = install('/tmp/seriald.deb')
+    upgrade = install('/tmp/decklab.deb')
     collector_changed = fingerprint.read_bytes() != installed_id
     upgraded = ready()
     if collector_changed:
@@ -83,44 +83,44 @@ if previous:
         print('PASS: real systemd upgrade retains collector when its fingerprint is unchanged', flush=True)
     assert config.read_bytes() == saved
     assert marker.read_text() == 'preserve runtime across service upgrades'
-    assert not pathlib.Path('/run/seriald-collector-restart-required').exists()
+    assert not pathlib.Path('/run/decklab-collector-restart-required').exists()
     first = upgraded
     print('PASS: published 1.7.0 thin package upgrade preserves configuration and runtime data', flush=True)
 subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:8898'],
                check=True, timeout=30)
-account = pwd.getpwnam('seriald')
-control_pid = command('systemctl', 'show', '-p', 'MainPID', '--value', 'seriald.service').strip()
+account = pwd.getpwnam('decklab')
+control_pid = command('systemctl', 'show', '-p', 'MainPID', '--value', 'decklab.service').strip()
 assert pathlib.Path('/proc/' + control_pid).stat().st_uid == account.pw_uid
-for unit in ('seriald.service', 'seriald-collector.service'):
+for unit in ('decklab.service', 'decklab-collector.service'):
     assert command('systemctl', 'is-active', unit).strip() == 'active'
-subprocess.run(['serialctl', 'devices'], check=True)
+subprocess.run(['decklabctl', 'devices'], check=True)
 credentials('seed')
-unchanged = install('/tmp/seriald.deb')
+unchanged = install('/tmp/decklab.deb')
 assert 'collector kept running (collector code unchanged)' in unchanged
 assert ready() == first
 credentials('check')
 subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:8898'],
                check=True, timeout=30)
-subprocess.run(['systemctl', 'restart', 'seriald.service'], check=True)
+subprocess.run(['systemctl', 'restart', 'decklab.service'], check=True)
 assert ready() == first
 credentials('check')
 subprocess.run(['python3', '/tmp/installed_mcp_check.py', '--url', 'http://127.0.0.1:8898'],
                check=True, timeout=30)
-changed = install('/tmp/seriald-changed.deb')
+changed = install('/tmp/decklab-changed.deb')
 assert 'collector restarted (collector code changed)' in changed
 second = ready()
 assert second != first
 assert config.read_bytes() == saved
 assert marker.read_text() == 'preserve runtime across service upgrades'
-assert not pathlib.Path('/run/seriald-collector-restart-required').exists()
+assert not pathlib.Path('/run/decklab-collector-restart-required').exists()
 credentials('check')
-reinstall = install('/tmp/seriald-changed.deb')
+reinstall = install('/tmp/decklab-changed.deb')
 assert 'collector kept running (collector code unchanged)' in reinstall
 assert ready() == second
 credentials('check')
 print('PASS: real systemd startup, unchanged/changed collector decisions and conffile/data preservation', flush=True)
-subprocess.run(['dpkg', '--purge', 'seriald'], check=True)
-for unit in ('seriald.service', 'seriald-collector.service'):
+subprocess.run(['dpkg', '--purge', 'decklab'], check=True)
+for unit in ('decklab.service', 'decklab-collector.service'):
     assert subprocess.run(['systemctl', 'is-active', '--quiet', unit]).returncode != 0
 assert marker.is_file() and (base / 'registry.sqlite3').is_file()
 credentials('purged')
@@ -129,14 +129,14 @@ assert stat.S_IMODE(registry.stat().st_mode) == 0o600
 os.chmod(registry, 0o660)
 for snapshot in (base / 'backups').glob('*.sqlite3'):
     os.chmod(snapshot, 0o660)
-install('/tmp/seriald.deb')
+install('/tmp/decklab.deb')
 ready()
 assert stat.S_IMODE(registry.stat().st_mode) == 0o600
 credentials('check')
 assert marker.read_text() == 'preserve runtime across service upgrades'
 assert stat.S_IMODE(marker.stat().st_mode) == 0o660
-subprocess.run(['dpkg', '--purge', 'seriald'], check=True)
-for unit in ('seriald.service', 'seriald-collector.service'):
+subprocess.run(['dpkg', '--purge', 'decklab'], check=True)
+for unit in ('decklab.service', 'decklab-collector.service'):
     assert subprocess.run(['systemctl', 'is-active', '--quiet', unit]).returncode != 0
 assert stat.S_IMODE(registry.stat().st_mode) == 0o600
 credentials('purged')
@@ -148,13 +148,13 @@ print('NOT COVERED: physical UART/USB recovery or Windows behavior', flush=True)
 def changed_package(package, root):
     stage = root / 'changed-package'
     subprocess.run(['dpkg-deb', '-R', str(package), str(stage)], check=True)
-    code = stage / 'usr/lib/seriald'
+    code = stage / 'usr/lib/decklab'
     original_id = (code / '.collector-build-id').read_text().strip()
-    with (code / 'seriald_core/device.py').open('a') as target:
+    with (code / 'decklab_core/device.py').open('a') as target:
         target.write('\n# Isolated VM fixture: exercise a collector-code upgrade.\n')
     policy = code / 'packaging'
     policy.mkdir()
-    shutil.copyfile(stage / 'lib/systemd/system/seriald-collector.service', policy / 'seriald-collector.service')
+    shutil.copyfile(stage / 'lib/systemd/system/decklab-collector.service', policy / 'decklab-collector.service')
     new_id = collector_build_id(code)
     shutil.rmtree(policy)
     (code / '.collector-build-id').write_text(new_id + '\n')
@@ -169,7 +169,7 @@ def changed_package(package, root):
                    if line.startswith('Version: '))
     control.write_text(control_text.replace('Version: ' + version + '\n',
                                            'Version: ' + version + '+vmcheck1\n'))
-    result = root / 'seriald-changed.deb'
+    result = root / 'decklab-changed.deb'
     subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(stage), str(result)], check=True)
     return result
 
@@ -210,8 +210,8 @@ def main():
         (root / 'user-data').write_text('#cloud-config\nusers:\n  - name: decklab\n'
             '    sudo: ALL=(ALL) NOPASSWD:ALL\n    shell: /bin/bash\n    ssh_authorized_keys:\n'
             '      - ' + key.with_suffix('.pub').read_text().strip() + '\n'
-            'write_files:\n  - path: /etc/systemd/system/seriald-collector.service.d/check.conf\n'
-            '    content: |\n      [Service]\n      Environment=SERIALD_BY_PATH=/tmp/no-serial-devices\n'
+            'write_files:\n  - path: /etc/systemd/system/decklab-collector.service.d/check.conf\n'
+            '    content: |\n      [Service]\n      Environment=DECKLAB_BY_PATH=/tmp/no-serial-devices\n'
             'runcmd:\n  - [mkdir, -p, /tmp/no-serial-devices]\n')
         subprocess.run(['genisoimage', '-quiet', '-output', str(root / 'seed.iso'), '-volid', 'cidata',
                         '-joliet', '-rock', str(root / 'user-data'), str(root / 'meta-data')], check=True)
@@ -248,12 +248,12 @@ def main():
                 scp = ['scp', '-F', '/dev/null', '-i', str(key), '-P', str(port), '-o', 'BatchMode=yes',
                        '-o', 'IdentitiesOnly=yes', '-o', 'PasswordAuthentication=no',
                        '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + str(root / 'known_hosts')]
-                files = [(package, 'seriald.deb'), (changed, 'seriald-changed.deb'), (check, 'check.py'),
+                files = [(package, 'decklab.deb'), (changed, 'decklab-changed.deb'), (check, 'check.py'),
                          (Path(__file__).with_name('installed_mcp_check.py'), 'installed_mcp_check.py'),
                          (Path(__file__).with_name('installed_ssh_credentials_check.py'),
                           'installed_ssh_credentials_check.py')]
                 if args.upgrade_from:
-                    files.append((args.upgrade_from.resolve(), 'seriald-previous.deb'))
+                    files.append((args.upgrade_from.resolve(), 'decklab-previous.deb'))
                 for source, destination in files:
                     subprocess.run(scp + [str(source), 'decklab@127.0.0.1:/tmp/' + destination], check=True)
                 subprocess.run(ssh + ['sudo env DEBIAN_FRONTEND=noninteractive python3 /tmp/check.py'], check=True, timeout=600)

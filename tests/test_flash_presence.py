@@ -4,8 +4,8 @@ import tempfile
 import time
 import unittest
 
-from seriald_core.devices import Manager
-from seriald_core.storage import Store
+from decklab_core.devices import Manager
+from decklab_core.storage import Store
 
 
 class FlashPresenceTests(unittest.TestCase):

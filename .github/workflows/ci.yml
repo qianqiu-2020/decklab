@@ -58,25 +58,20 @@ jobs:
           DECKLAB_COMPONENTS_URL: ${{ vars.COMPONENTS_LINUX_AMD64_URL || secrets.COMPONENTS_LINUX_AMD64_URL || 'https://github.com/qianqiu-2020/decklab/releases/download/components-1.14.0/decklab-components-1.14.0-linux-amd64.zip' }}
           DECKLAB_COMPONENTS_SHA256: ${{ vars.COMPONENTS_LINUX_AMD64_SHA256 || secrets.COMPONENTS_LINUX_AMD64_SHA256 || '804be4bc200ddefbc99a614e676ba829670100556d6da405bb3597cfb667127c' }}
         run: python tools/fetch_install_components.py --platform linux-amd64
-      - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
-        run: |
-          python -m venv build/linux-mcp-venv
-          worker_python=build/linux-mcp-venv/bin/python
-          "$worker_python" -m pip download --disable-pip-version-check --only-binary=:all: --require-hashes -r packaging/linux-mcp-requirements.lock -d build/linux-mcp-wheels
-          "$worker_python" -m pip install --disable-pip-version-check --no-index --find-links build/linux-mcp-wheels --only-binary=:all: --require-hashes -r packaging/linux-mcp-requirements.lock
-          "$worker_python" tools/build_linux_mcp.py --local --wheelhouse build/linux-mcp-wheels --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
+      - name: Freeze the included MCP worker in the Ubuntu 22.04 build container
+        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
       - name: Build the matching Debian architecture package
         run: python tools/build_deb.py --local-fast --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
       - name: Check fresh installs and upgrades on Ubuntu 22.04 and 24.04 in parallel
         run: |
-          curl --fail --location --retry 3 https://github.com/qianqiu-2020/decklab/releases/download/v1.7.0/seriald_1.7.0_all.deb --output build/seriald_1.7.0_all.deb
-          echo 'b0020684d469cec4db2fa36f5e967f81c860deb236fbdd1d25da4831857cb1a9  build/seriald_1.7.0_all.deb' | sha256sum --check
+          curl --fail --location --retry 3 https://github.com/qianqiu-2020/decklab/releases/download/v1.7.0/seriald_1.7.0_all.deb --output build/decklab_1.7.0_all.deb
+          echo 'b0020684d469cec4db2fa36f5e967f81c860deb236fbdd1d25da4831857cb1a9  build/decklab_1.7.0_all.deb' | sha256sum --check
           pids=()
           for ubuntu in 22.04 24.04; do
             for mode in fresh upgrade; do
               args=()
-              if [[ $mode == upgrade ]]; then args+=(--upgrade-from build/seriald_1.7.0_all.deb); fi
-              python tools/test_deb_container.py --image "ubuntu:$ubuntu" --package dist/seriald_*_amd64.deb "${args[@]}" >"build/install-$ubuntu-$mode.log" 2>&1 &
+              if [[ $mode == upgrade ]]; then args+=(--upgrade-from build/decklab_1.7.0_all.deb); fi
+              python tools/test_deb_container.py --image "ubuntu:$ubuntu" --package dist/decklab_*_amd64.deb "${args[@]}" >"build/install-$ubuntu-$mode.log" 2>&1 &
               pids+=("$!")
             done
           done
@@ -86,7 +81,7 @@ jobs:
           exit "$result"
       - uses: actions/upload-artifact@v4
         with:
-          name: seriald-linux-${{ matrix.arch }}
+          name: decklab-linux-${{ matrix.arch }}
           path: dist/*.deb
           compression-level: 0
   test:
@@ -157,7 +152,7 @@ jobs:
       - run: node tests/frontend.test.js && node tests/image-store.test.js
       - run: node tests/share.test.js && node tests/flashing.test.js && node tests/desktop.test.js
       - run: node tests/browser-process.test.js
-      - run: python -m compileall -q seriald_core serialctl.py seriald_mcp.py seriald.py seriald_demo.py
+      - run: python -m compileall -q decklab_core decklabctl.py decklab_mcp.py decklab.py decklab_demo.py
       - run: bash -n rescue.sh
       - run: git diff --check
       - name: Real browser with hardware-free fixtures

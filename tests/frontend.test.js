@@ -192,9 +192,9 @@ function harness(options = {}) {
   vm.runInNewContext(script, sandbox, { filename: 'index.html' });
   const flashCalls = []; let taskOptions;
   if (options.flashCapture) {
-    const createTasks = sandbox.SerialdTasks.create;
-    sandbox.SerialdTasks.create = captured => { taskOptions = captured; return createTasks(captured); };
-    sandbox.SerialdFlashing = {create: () => ({open: (...args) => flashCalls.push(args), discover() {}})};
+    const createTasks = sandbox.DeckLabTasks.create;
+    sandbox.DeckLabTasks.create = captured => { taskOptions = captured; return createTasks(captured); };
+    sandbox.DeckLabFlashing = {create: () => ({open: (...args) => flashCalls.push(args), discover() {}})};
   }
   vm.runInNewContext(appScript, sandbox, { filename: 'app.js' });
   if (options.transfer) vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'static', 'file-transfer.js'), 'utf8'), sandbox);
@@ -213,7 +213,7 @@ function harness(options = {}) {
   const timer = delay => [...timers.entries()].find(([, t]) => t.delay === delay);
   const fire = id => { const t = timers.get(id); timers.delete(id); assert.ok(t); t.fn(); };
   return { get, document, requests, terminals, streams, timers, intervals, dialogs, take, sends, select, timer, fire,
-    clientId: sandbox.SerialdUI.clientId, transfer: sandbox.SerialdFileTransfer, taskOptions, flashCalls };
+    clientId: sandbox.DeckLabUI.clientId, transfer: sandbox.DeckLabFileTransfer, taskOptions, flashCalls };
 }
 
 async function drain() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
@@ -2397,9 +2397,9 @@ test('archive confirmation copy is translated while board metadata remains liter
     MutationObserver: class {observe() {}}, CustomEvent: class {}, dispatchEvent() {}};
   translated.window = translated;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'static/i18n.js'), 'utf8'), translated);
-  assert.equal(translated.SerialdI18n.translate('关联已有设备档案'), 'Link existing board archive');
-  assert.equal(translated.SerialdI18n.translate('确认关联并重新识别'), 'Confirm link and identify again');
-  assert.equal(translated.SerialdI18n.translate('核实说明'), 'Verification details');
+  assert.equal(translated.DeckLabI18n.translate('关联已有设备档案'), 'Link existing board archive');
+  assert.equal(translated.DeckLabI18n.translate('确认关联并重新识别'), 'Confirm link and identify again');
+  assert.equal(translated.DeckLabI18n.translate('核实说明'), 'Verification details');
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   for (const id of ['ia-port', 'ia-board', 'ia-serial', 'ia-last'])
     assert.match(html, new RegExp('id="' + id + '" data-i18n-ignore'));

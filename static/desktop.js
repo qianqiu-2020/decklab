@@ -249,7 +249,7 @@
   }
 
   function create(options) {
-    var $ = options.byId, client = global.SerialdTasks.createClient(options.fetch);
+    var $ = options.byId, client = global.DeckLabTasks.createClient(options.fetch);
     var selected = '', version = 0, target = null, sid = '', visible = false, previousSession = null;
     var socket = null, surface = null, ready = false, inputAllowed = false, frame = null;
     var queue = [], inflight = null, sequence = 0, ackTimer = null, heartbeat = null;
@@ -266,7 +266,7 @@
     function scope(ctx) { return ctx && ctx.serial || ''; }
     function current(ctx, generation) { return version === generation && scope(options.getView()) === scope(ctx); }
     function panelVisible() { return visible && !(global.document && global.document.hidden); }
-    function translate(text) { return global.SerialdI18n ? global.SerialdI18n.translate(text) : text; }
+    function translate(text) { return global.DeckLabI18n ? global.DeckLabI18n.translate(text) : text; }
     function status(text) { statusValue = text; $('desktop-status').textContent = translate(text); }
     function overlay(text) { overlayValue = text || ''; $('desktop-overlay').textContent = translate(overlayValue); $('desktop-overlay').hidden = !text; }
     function loginGuide(stage) {
@@ -1026,5 +1026,5 @@
       dismissSetup(); if (visible) hidePanel();
     }};
   }
-  global.SerialdDesktop = {create: create, createSurface: createSurface};
+  global.DeckLabDesktop = {create: create, createSurface: createSurface};
 })(window);

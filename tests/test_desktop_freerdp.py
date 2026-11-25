@@ -12,9 +12,9 @@ try:
 except ImportError:
     Image = None
 
-from seriald_core.desktop_freerdp import (ABI_VERSION, MAX_CLIPBOARD_UNITS,
+from decklab_core.desktop_freerdp import (ABI_VERSION, MAX_CLIPBOARD_UNITS,
     FreeRDPDesktop, _Options, _P32, _library_path)
-from seriald_core.desktop_errors import DesktopConnectionError
+from decklab_core.desktop_errors import DesktopConnectionError
 
 
 CONFIG = {'provider': 'rdp', 'engine': 'freerdp',
@@ -177,11 +177,11 @@ class FreeRDPTests(unittest.TestCase):
             provider.input({'action': 'key', 'keys': ['Return', 'not-a-key']})
         self.assertEqual(len(library.calls), before)
         provider.start_live()
-        with mock.patch('seriald_core.desktop_freerdp.RDPDesktop._live_key', return_value=('scancode', 0xe04b)):
+        with mock.patch('decklab_core.desktop_freerdp.RDPDesktop._live_key', return_value=('scancode', 0xe04b)):
             provider.live_input({'type': 'key', 'keysym': 0xff51, 'code': 'ArrowLeft', 'down': True})
         self.assertEqual(library.calls[-1], ('key', 0x14b, 0, 1))
         before = len(library.calls)
-        with mock.patch('seriald_core.desktop_freerdp.RDPDesktop._live_key', return_value=('char', '\ud800')):
+        with mock.patch('decklab_core.desktop_freerdp.RDPDesktop._live_key', return_value=('char', '\ud800')):
             with self.assertRaises(ValueError):
                 provider.live_input({'type': 'key', 'keysym': 0x0100d800, 'code': '', 'down': True})
         self.assertEqual(len(library.calls), before)
@@ -257,8 +257,8 @@ class FreeRDPTests(unittest.TestCase):
         self.assertEqual(library.free_count, 0)
 
     def test_loader_uses_only_fixed_private_resource_directory(self):
-        with mock.patch('seriald_core.desktop_freerdp.sys._MEIPASS', '/private/bundle', create=True), \
-                mock.patch('seriald_core.desktop_freerdp.sys.platform', 'win32'):
+        with mock.patch('decklab_core.desktop_freerdp.sys._MEIPASS', '/private/bundle', create=True), \
+                mock.patch('decklab_core.desktop_freerdp.sys.platform', 'win32'):
             self.assertEqual(_library_path(), Path('/private/bundle/desktop-runtime/freerdp/decklab-freerdp.dll'))
 
 

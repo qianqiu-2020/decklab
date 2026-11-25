@@ -47,7 +47,7 @@ async function main() {
         serial: request.serial, key: request.key, connection_id: request.connection_id,
         created: 1, expires: null, revoked: null };
       active.push(grant);
-      body = { token: 'seriald-ag-secret', grant };
+      body = { token: 'decklab-ag-secret', grant };
     } else if (route === '/api/agent-revoke') {
       active[0].revoked = 2;
       body = { ok: true };
@@ -61,8 +61,8 @@ async function main() {
   const context = {
     document: { getElementById: byId, createElement: () => new Element(), body: new Element(),
       execCommand: command => { assert.equal(command, 'copy'); legacyCopies++; return true; } },
-    window: { SerialdShareSelection: () => selected,
-      SerialdI18n: {locale: 'zh-CN', setDefaultLocale() {}},
+    window: { DeckLabShareSelection: () => selected,
+      DeckLabI18n: {locale: 'zh-CN', setDefaultLocale() {}},
       addEventListener(name, fn) { this.events ||= {}; this.events[name] = fn; },
       prompt: () => { throw new Error('LAN IP should be discovered without prompting'); } },
     navigator: { clipboard: { writeText: async text => {
@@ -103,7 +103,7 @@ async function main() {
   assert.deepEqual(JSON.parse(request.options.body), { scope: 'device', serial: 'SN1' });
   const mcp = JSON.parse(byId('agent-share-text').value);
   assert.deepEqual(mcp, {mcpServers: {decklab: {url: 'http://192.0.2.161:8898/mcp',
-    headers: {Authorization: 'Bearer seriald-ag-secret'}}}});
+    headers: {Authorization: 'Bearer decklab-ag-secret'}}}});
   assert.match(byId('agent-share-setup').textContent, /无需安装/);
   assert.equal(byId('agent-share-mcp-options').hidden, true);
   assert.equal(byId('agent-share-endpoint').value, 'http://192.0.2.161:8898/mcp');
@@ -125,21 +125,21 @@ async function main() {
   byId('agent-share-format').change();
   assert.equal(byId('agent-share-mcp-options').hidden, false);
   const originalStdioConfig = byId('agent-share-text').value;
-  assert.deepEqual(JSON.parse(originalStdioConfig), {mcpServers: {decklab: {command: 'seriald-mcp', args: [], env: {
-    SERIALD_URL: 'http://192.0.2.161:8898', SERIALD_TOKEN: 'seriald-ag-secret'}}}});
-  byId('agent-share-command').value = '/home/ai/.local/share/decklab-mcp/bin/seriald-mcp';
+  assert.deepEqual(JSON.parse(originalStdioConfig), {mcpServers: {decklab: {command: 'decklab-mcp', args: [], env: {
+    DECKLAB_URL: 'http://192.0.2.161:8898', DECKLAB_TOKEN: 'decklab-ag-secret'}}}});
+  byId('agent-share-command').value = '/home/ai/.local/share/decklab-mcp/bin/decklab-mcp';
   byId('agent-share-command').events.input();
   assert.equal(JSON.parse(byId('agent-share-text').value).mcpServers.decklab.command,
-    '/home/ai/.local/share/decklab-mcp/bin/seriald-mcp');
+    '/home/ai/.local/share/decklab-mcp/bin/decklab-mcp');
   assert.equal(active.length, grantsBeforeCommandChange, 'editing launch path must reuse the grant');
-  byId('agent-share-command').value = 'seriald-mcp'; byId('agent-share-command').events.input();
+  byId('agent-share-command').value = 'decklab-mcp'; byId('agent-share-command').events.input();
   assert.equal(byId('agent-share-text').value, originalStdioConfig);
   byId('agent-share-format').value = 'cli';
   byId('agent-share-format').change();
   const text = byId('agent-share-text').value;
-  assert.match(text, /seriald-ag-secret/);
-  assert.match(text, /\nexport SERIALD_URL='http:\/\/192\.0\.2\.161:8898'\n/);
-  assert.match(text, /skills\/seriald-board\/SKILL\.md/);
+  assert.match(text, /decklab-ag-secret/);
+  assert.match(text, /\nexport DECKLAB_URL='http:\/\/192\.0\.2\.161:8898'\n/);
+  assert.match(text, /skills\/decklab-board\/SKILL\.md/);
   assert.match(text, /SKILL\.md\?lang=zh-CN/);
   assert.ok(text.indexOf(' exec --command ') < text.indexOf(' read --sid serial'));
   assert.doesNotMatch(text, /其他客户端仍可无令牌访问/);
@@ -150,17 +150,17 @@ async function main() {
   await byId('agent-share-copy').click();
   assert.equal(clipboard.at(-1), text);
   const grantsBeforeSwitch = active.length;
-  context.window.SerialdI18n.locale = 'en';
+  context.window.DeckLabI18n.locale = 'en';
   context.window.events['decklab-language-change']();
   const english = byId('agent-share-text').value;
   assert.doesNotMatch(english, /[\u4e00-\u9fff]/);
   assert.match(english, /SKILL\.md\?lang=en/);
-  assert.match(english, /seriald-ag-secret/);
+  assert.match(english, /decklab-ag-secret/);
   assert.ok(english.indexOf(' exec --command ') < english.indexOf(' read --sid serial'));
   assert.equal(active.length, grantsBeforeSwitch, 'language changes must reuse the existing grant');
   await byId('agent-share-copy').click();
   assert.equal(clipboard.at(-1), english);
-  context.window.SerialdI18n.locale = 'zh-CN';
+  context.window.DeckLabI18n.locale = 'zh-CN';
   context.window.events['decklab-language-change']();
   assert.equal(byId('agent-share-text').value, text);
   await byId('b-share').click();
@@ -183,7 +183,7 @@ async function main() {
   await byId('agent-share-create').click();
   assert.deepEqual(JSON.parse(calls.filter(call => call.route === '/api/agent-share').at(-1).options.body),
     {scope: 'connection', key: 'unprovisioned-usb', connection_id: 'fresh-connection'});
-  assert.equal(JSON.parse(byId('agent-share-text').value).mcpServers.decklab.headers.Authorization, 'Bearer seriald-ag-secret');
+  assert.equal(JSON.parse(byId('agent-share-text').value).mcpServers.decklab.headers.Authorization, 'Bearer decklab-ag-secret');
   const grantCount = active.length;
   byId('agent-share-format').value = 'cli'; byId('agent-share-format').change();
   assert.match(byId('agent-share-text').value, /当前串口连接/);

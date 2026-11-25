@@ -49,7 +49,7 @@ class PackageDocsTests(unittest.TestCase):
         self.assertEqual(visited, {name for name in source['files'] if name.endswith('.js')})
 
     def test_websocket_wheels_match_runtime_pins_and_unmodified_license_notices(self):
-        from seriald_core.websocket_io import _WHEELS
+        from decklab_core.websocket_io import _WHEELS
         directory = Path(__file__).resolve().parents[1] / 'vendor/python'
         source = json.loads((directory / 'websocket-sources.json').read_text())
         self.assertEqual({(row['name'], row['version'], row['filename'], row['sha256']) for row in source['packages']},
@@ -95,12 +95,12 @@ class PackageDocsTests(unittest.TestCase):
                         count += 1
                 self.assertGreater(count, 25)
                 if platform == 'linux':
-                    self.assertTrue((root / 'API.md').is_file())
-                    self.assertIn('(INSTALL.md)', (root / 'README.md').read_text(encoding='utf-8'))
-                    self.assertIn('(examples/hardware.json)', (root / 'HARDWARE_EXTENSIONS.md').read_text(encoding='utf-8'))
+                    self.assertTrue((root / 'reference/http-api.md').is_file())
+                    self.assertIn('(operations/install-linux.md#upgrade-an-existing-installation)', (root / 'README.md').read_text(encoding='utf-8'))
+                    self.assertIn('(../examples/hardware.json)', (root / 'modules/hardware-control.md').read_text(encoding='utf-8'))
                 else:
-                    self.assertTrue((root / 'docs/API.md').is_file())
-                    self.assertIn('(docs/HARDWARE_EXTENSIONS.md)', (root / 'README.md').read_text(encoding='utf-8'))
+                    self.assertTrue((root / 'docs/reference/http-api.md').is_file())
+                    self.assertIn('(docs/index.md)', (root / 'README.md').read_text(encoding='utf-8'))
                     self.assertIn('(README-project.md)', (root / 'README.zh-CN.md').read_text(encoding='utf-8'))
 
     def test_link_render_preserves_fragments_queries_and_external_links(self):

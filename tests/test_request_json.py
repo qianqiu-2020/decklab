@@ -4,8 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from seriald_core.request_json import load_object, MAX_DEPTH
-from seriald_core.artifact_actions import ArtifactActions
+from decklab_core.request_json import load_object, MAX_DEPTH
+from decklab_core.artifact_actions import ArtifactActions
 
 
 class RequestJsonTests(unittest.TestCase):

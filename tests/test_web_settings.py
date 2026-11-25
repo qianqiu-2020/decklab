@@ -13,9 +13,9 @@ import unittest
 from unittest import mock
 from types import SimpleNamespace
 
-from seriald_core.web_settings import WebSettings, SettingsError, REDACTED, DEFAULTS, load_environment
-from seriald_core.control_server import ControlHandler
-from seriald_core.agent_grants import AgentGrantStore
+from decklab_core.web_settings import WebSettings, SettingsError, REDACTED, DEFAULTS, load_environment
+from decklab_core.control_server import ControlHandler
+from decklab_core.agent_grants import AgentGrantStore
 
 
 class SettingsTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class SettingsTests(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         self.path = Path(self.folder.name) / 'web-settings.json'
-        self.settings = WebSettings(self.path, {'SERIALD_BASE': self.folder.name})
+        self.settings = WebSettings(self.path, {'DECKLAB_BASE': self.folder.name})
 
     def patch(self, **environment):
         return {'version': 1, 'environment': environment}
@@ -32,7 +32,7 @@ class SettingsTests(unittest.TestCase):
         return self.settings.save(document, self.settings.snapshot()['revision'], preview)
 
     def test_team_catalogue_is_live_and_token_stays_private(self):
-        from seriald_core.team_cases import TeamCases
+        from decklab_core.team_cases import TeamCases
         origin = 'https://platform.example.test'
         before = self.settings.snapshot()
         self.save(self.patch(TEAM_CATALOGUE_URL=origin, TEAM_CATALOGUE_TOKEN='dummy-key'))
@@ -40,11 +40,11 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(after['restart_revision'], before['restart_revision'])
         self.assertNotEqual(after['revision'], before['revision'])
         self.assertEqual(after['configuration']['environment']['TEAM_CATALOGUE_TOKEN'], REDACTED)
-        with mock.patch('seriald_core.config.SETTINGS', self.settings):
+        with mock.patch('decklab_core.config.SETTINGS', self.settings):
             self.assertEqual(TeamCases.configured().host, 'platform.example.test')
         with mock.patch.dict(os.environ, {}, clear=True):
             load_environment(self.path)
-            self.assertNotIn('SERIALD_TEAM_CATALOGUE_TOKEN', os.environ)
+            self.assertNotIn('DECKLAB_TEAM_CATALOGUE_TOKEN', os.environ)
         with self.assertRaises(SettingsError):
             self.save(self.patch(TEAM_CATALOGUE_URL='https://other.example.test'))
         with self.assertRaises(SettingsError):
@@ -89,12 +89,12 @@ class SettingsTests(unittest.TestCase):
     def test_save_preserves_environment_defaults_and_external_documents(self):
         path = self.path.parent / 'profiles.json'
         path.write_text('{"profiles":{"original":{}}}', encoding='utf-8')
-        self.settings.environment.update(SERIALD_PROFILES=str(path), SERIALD_SHARE_SECONDS='7200')
+        self.settings.environment.update(DECKLAB_PROFILES=str(path), DECKLAB_SHARE_SECONDS='7200')
         self.save(self.patch(BAUD='9600'))
         self.assertEqual(self.settings.read(), {
             'version': 1, 'environment': {'BAUD': '9600'}, 'documents': {},
         })
-        self.settings.environment['SERIALD_SHARE_SECONDS'] = '3600'
+        self.settings.environment['DECKLAB_SHARE_SECONDS'] = '3600'
         path.write_text('{"profiles":{"updated":{}}}', encoding='utf-8')
         effective = self.settings.effective()
         self.assertEqual(effective['environment']['SHARE_SECONDS'], '3600')
@@ -118,8 +118,8 @@ class SettingsTests(unittest.TestCase):
             'provider': 'bmc', 'url': 'https://bmc.example', 'board': 'test-board-b',
             'module_index': 47, 'usb_port': '1-8.3',
             'credentials_file': str(self.path.parent / 'missing-credentials.json'), 'actions': ['reset']}}}}}}
-        with mock.patch('seriald_core.board_control._credentials', side_effect=AssertionError('must not execute')), \
-                mock.patch('seriald_core.board_control.build_opener', side_effect=AssertionError('must not connect')):
+        with mock.patch('decklab_core.board_control._credentials', side_effect=AssertionError('must not execute')), \
+                mock.patch('decklab_core.board_control.build_opener', side_effect=AssertionError('must not connect')):
             self.save(document, preview=True)
             self.save(document)
         self.assertEqual(self.settings.effective()['documents']['hardware'], document['documents']['hardware'])
@@ -143,13 +143,13 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_proposed_environment_validates_profiles_without_mutating_process(self):
-        with mock.patch.dict(os.environ, {'SERIALD_PROBE': 'linux', 'SERIALD_BAUD': '115200'}):
+        with mock.patch.dict(os.environ, {'DECKLAB_PROBE': 'linux', 'DECKLAB_BAUD': '115200'}):
             with self.assertRaises(ValueError):
                 self.save({'version': 1, 'environment': {'PROBE': 'manual', 'AUTO_CONFIGURE_SSH': '0'},
                            'documents': {'profiles': {'profiles': {'automatic': {'auto_configure_ssh': True}}}}})
             self.save(self.patch(PROBE='manual', AUTO_CONFIGURE_SSH='0'))
-            self.assertEqual(os.environ['SERIALD_PROBE'], 'linux')
-            self.assertEqual(os.environ['SERIALD_BAUD'], '115200')
+            self.assertEqual(os.environ['DECKLAB_PROBE'], 'linux')
+            self.assertEqual(os.environ['DECKLAB_BAUD'], '115200')
 
     def test_stale_revision_cannot_overwrite_newer_configuration(self):
         revision = self.settings.snapshot()['revision']
@@ -162,7 +162,7 @@ class SettingsTests(unittest.TestCase):
     def test_external_document_changes_invalidate_preview_revision(self):
         profile = Path(self.folder.name) / 'profiles.json'
         profile.write_text('{}')
-        settings = WebSettings(self.path, {'SERIALD_BASE': self.folder.name, 'SERIALD_PROFILES': str(profile)})
+        settings = WebSettings(self.path, {'DECKLAB_BASE': self.folder.name, 'DECKLAB_PROFILES': str(profile)})
         revision = settings.snapshot()['revision']
         profile.write_text('{"profiles":{"new":{}}}')
         with self.assertRaises(SettingsError) as context:
@@ -172,12 +172,12 @@ class SettingsTests(unittest.TestCase):
     def test_parallel_processes_cannot_both_commit_the_same_revision(self):
         revision = self.settings.snapshot()['revision']
         source = '''import sys,time
-from seriald_core.web_settings import WebSettings,SettingsError
+from decklab_core.web_settings import WebSettings,SettingsError
 class DelayedSettings(WebSettings):
     def _validate_effective(self, document):
         time.sleep(0.2)
         return super()._validate_effective(document)
-settings=DelayedSettings(sys.argv[1], {'SERIALD_BASE':sys.argv[2]})
+settings=DelayedSettings(sys.argv[1], {'DECKLAB_BASE':sys.argv[2]})
 sys.stdin.read(1)
 try:
     settings.save({'version':1,'environment':{'PORT':sys.argv[4]}},sys.argv[3])
@@ -205,7 +205,7 @@ except SettingsError as error:
         self.save({'version': 1, 'documents': {'profiles': {'profiles': {'demo': {'ssh_password': 'keep-private'}}}}})
         with mock.patch.dict(os.environ, {}, clear=True):
             load_environment(self.path)
-            target = Path(os.environ['SERIALD_PROFILES'])
+            target = Path(os.environ['DECKLAB_PROFILES'])
             self.assertEqual(json.loads(target.read_bytes())['profiles']['demo']['ssh_password'], 'keep-private')
             if os.name == 'posix':
                 self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
@@ -213,10 +213,10 @@ except SettingsError as error:
     def test_duplicate_keys_and_corrupt_record_fail_closed(self):
         for value in ('{"version":1,"version":1}', '{"version":2}', '{"version":true}', '{"version":1,"environment":{"UNKNOWN":"x"}}', '{"version":1,"environment":{"AUTH_TOKEN":null}}'):
             self.path.write_text(value)
-            with mock.patch.dict(os.environ, {'SERIALD_AUTH_TOKEN': 'existing'}):
+            with mock.patch.dict(os.environ, {'DECKLAB_AUTH_TOKEN': 'existing'}):
                 with self.assertRaises(ValueError):
                     load_environment(self.path)
-                self.assertEqual(os.environ['SERIALD_AUTH_TOKEN'], 'existing')
+                self.assertEqual(os.environ['DECKLAB_AUTH_TOKEN'], 'existing')
 
     def test_new_redacted_secret_has_to_be_supplied(self):
         with self.assertRaises(SettingsError):
@@ -224,10 +224,10 @@ except SettingsError as error:
 
     def test_startup_overlay_applies_before_config_constants(self):
         self.save(self.patch(PORT='9123', BASE=str(Path(self.folder.name) / 'new-data'), BAUD='9600'))
-        environment = dict(os.environ, SERIALD_BASE=self.folder.name)
-        source = ('from seriald_core.config import BASE, SETTINGS_PATH; '
-                  'from seriald_core.profiles import SerialSettings; import os,json; '
-                  'print(json.dumps([BASE,SETTINGS_PATH,os.environ["SERIALD_PORT"],SerialSettings.from_env().baud]))')
+        environment = dict(os.environ, DECKLAB_BASE=self.folder.name)
+        source = ('from decklab_core.config import BASE, SETTINGS_PATH; '
+                  'from decklab_core.profiles import SerialSettings; import os,json; '
+                  'print(json.dumps([BASE,SETTINGS_PATH,os.environ["DECKLAB_PORT"],SerialSettings.from_env().baud]))')
         result = subprocess.run([sys.executable, '-c', source], env=environment, text=True, capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout), [str(Path(self.folder.name) / 'new-data'), str(self.path), '9123', 9600])
 

@@ -9,9 +9,9 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core.queries import ArchiveQueries, ArchiveDownload, SessionQueries
-from seriald_core.archive_io import open_archive
-from seriald_core import web
+from decklab_core.queries import ArchiveQueries, ArchiveDownload, SessionQueries
+from decklab_core.archive_io import open_archive
+from decklab_core import web
 
 
 class QueryTests(unittest.TestCase):
@@ -96,7 +96,7 @@ class QueryTests(unittest.TestCase):
     def test_nonregular_archive_is_rejected_before_opening(self):
         fifo = self.root / 'fifo.log'
         os.mkfifo(fifo)
-        with mock.patch('seriald_core.archive_io.os.open') as opener:
+        with mock.patch('decklab_core.archive_io.os.open') as opener:
             with self.assertRaises(OSError):
                 open_archive(str(fifo))
         opener.assert_not_called()
@@ -104,8 +104,8 @@ class QueryTests(unittest.TestCase):
     def test_replaced_file_identity_closes_descriptor(self):
         before = os.lstat(self.file)
         changed = types.SimpleNamespace(st_mode=before.st_mode, st_dev=before.st_dev, st_ino=before.st_ino + 1)
-        with mock.patch('seriald_core.archive_io.os.fstat', return_value=changed), \
-                mock.patch('seriald_core.archive_io.os.close', wraps=os.close) as close:
+        with mock.patch('decklab_core.archive_io.os.fstat', return_value=changed), \
+                mock.patch('decklab_core.archive_io.os.close', wraps=os.close) as close:
             with self.assertRaisesRegex(OSError, 'changed'):
                 open_archive(str(self.file))
         close.assert_called_once()

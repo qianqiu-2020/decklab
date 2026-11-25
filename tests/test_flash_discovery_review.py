@@ -6,11 +6,11 @@ import tempfile
 import threading
 import unittest
 
-from seriald_core.board_maintenance import maintenance_for
-from seriald_core.devices import Manager
-from seriald_core.flash_discovery import FlashDiscovery, _profile, _strong_serial
-from seriald_core.storage import Store
-from seriald_core.tasks import TaskError, TaskStore
+from decklab_core.board_maintenance import maintenance_for
+from decklab_core.devices import Manager
+from decklab_core.flash_discovery import FlashDiscovery, _profile, _strong_serial
+from decklab_core.storage import Store
+from decklab_core.tasks import TaskError, TaskStore
 from test_flash_discovery_integration import FakeDiscoveryExecutor, usb_candidate
 
 

@@ -9,9 +9,9 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core.profiles import BoardProfile, ProfileBook, SerialSettings, validate_probe_settings
-from seriald_core.device import Device
-from seriald_core import transport
+from decklab_core.profiles import BoardProfile, ProfileBook, SerialSettings, validate_probe_settings
+from decklab_core.device import Device
+from decklab_core import transport
 
 
 class ProfileTests(unittest.TestCase):
@@ -28,14 +28,14 @@ class ProfileTests(unittest.TestCase):
         self.assertIsNone(profile.line_ending)
 
     def test_environment_settings_and_credentials(self):
-        with mock.patch.dict(os.environ, {'SERIALD_BAUD': '9600', 'SERIALD_DATA_BITS': '7',
-                                         'SERIALD_PARITY': 'E', 'SERIALD_STOP_BITS': '2',
-                                         'SERIALD_FLOW_CONTROL': 'xonxoff',
-                                         'SERIALD_CONSOLE_USER': 'ubuntu',
-                                         'SERIALD_CONSOLE_PASSWORD': 'console-secret',
-                                         'SERIALD_SSH_PASSWORD': 'ssh-secret',
-                                         'SERIALD_AUTO_CONFIGURE_SSH': '0',
-                                         'SERIALD_NEWLINE': 'crlf'}):
+        with mock.patch.dict(os.environ, {'DECKLAB_BAUD': '9600', 'DECKLAB_DATA_BITS': '7',
+                                         'DECKLAB_PARITY': 'E', 'DECKLAB_STOP_BITS': '2',
+                                         'DECKLAB_FLOW_CONTROL': 'xonxoff',
+                                         'DECKLAB_CONSOLE_USER': 'ubuntu',
+                                         'DECKLAB_CONSOLE_PASSWORD': 'console-secret',
+                                         'DECKLAB_SSH_PASSWORD': 'ssh-secret',
+                                         'DECKLAB_AUTO_CONFIGURE_SSH': '0',
+                                         'DECKLAB_NEWLINE': 'crlf'}):
             profile = ProfileBook().resolve()
         self.assertEqual(profile.serial, SerialSettings(9600, 7, 'E', 2, 'xonxoff'))
         self.assertEqual(profile.line_ending, '\r\n')
@@ -57,12 +57,12 @@ class ProfileTests(unittest.TestCase):
         self.assertFalse(selected.auto_configure_ssh)
 
     def test_environment_defaults_are_snapshotted_once(self):
-        with mock.patch.dict(os.environ, {'SERIALD_SSH_PASSWORD': 'startup-secret',
-                                         'SERIALD_BAUD': '9600'}):
+        with mock.patch.dict(os.environ, {'DECKLAB_SSH_PASSWORD': 'startup-secret',
+                                         'DECKLAB_BAUD': '9600'}):
             book = ProfileBook({'profiles': {'board': {}}, 'boards': {'SN': 'board'}})
-        with mock.patch.dict(os.environ, {'SERIALD_SSH_PASSWORD': 'changed-secret',
-                                         'SERIALD_BAUD': 'invalid',
-                                         'SERIALD_PROBE': 'manual'}):
+        with mock.patch.dict(os.environ, {'DECKLAB_SSH_PASSWORD': 'changed-secret',
+                                         'DECKLAB_BAUD': 'invalid',
+                                         'DECKLAB_PROBE': 'manual'}):
             for profile in (book.resolve(), book.resolve('SN')):
                 self.assertEqual(profile.ssh_password, 'startup-secret')
                 self.assertEqual(profile.console_password, 'startup-secret')
@@ -82,7 +82,7 @@ class ProfileTests(unittest.TestCase):
 
     def test_recreating_profile_book_applies_changed_environment(self):
         original = ProfileBook()
-        with mock.patch.dict(os.environ, {'SERIALD_BAUD': '57600'}):
+        with mock.patch.dict(os.environ, {'DECKLAB_BAUD': '57600'}):
             replacement = ProfileBook()
         self.assertEqual(original.resolve().serial.baud, 115200)
         self.assertEqual(replacement.resolve().serial.baud, 57600)
@@ -103,7 +103,7 @@ class ProfileTests(unittest.TestCase):
     def test_file_accepts_windows_utf8_bom_and_rejects_duplicates_and_size(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'profiles.json'
-            with mock.patch.dict(os.environ, {'SERIALD_PROFILES': str(path)}):
+            with mock.patch.dict(os.environ, {'DECKLAB_PROFILES': str(path)}):
                 path.write_bytes(codecs.BOM_UTF8 + json.dumps({'profiles': {'raw': {'probe': 'manual'}},
                                                               'default': 'raw'}).encode())
                 self.assertEqual(ProfileBook.from_env().resolve().probe, 'manual')
@@ -120,7 +120,7 @@ class ProfileTests(unittest.TestCase):
         device.auto_identify = True
         device.auto_identify_until = float('inf')
         with mock.patch.object(device, '_run_cmd') as run, mock.patch.object(device, '_write') as write, \
-                mock.patch('seriald_core.device.threading.Thread') as thread:
+                mock.patch('decklab_core.device.threading.Thread') as thread:
             self.assertFalse(device.run_probe()['ok'])
             self.assertFalse(device.configure_root_ssh()[0])
             self.assertFalse(device.ensure_shell(0)[0])
@@ -174,7 +174,7 @@ class ProfileTests(unittest.TestCase):
                                   'rtscts': True, 'xonxoff': False, 'dsrdtr': False})
 
     def test_windows_collector_passes_profile_to_its_only_reader(self):
-        from seriald_core import windows_manager
+        from decklab_core import windows_manager
         book = ProfileBook({'default': 'raw', 'profiles': {
             'raw': {'probe': 'manual', 'newline': 'crlf', 'serial': {'baud': 57600}}}})
         manager = windows_manager.WindowsManager(profiles=book)
@@ -201,12 +201,12 @@ class ProfileTests(unittest.TestCase):
     def test_profile_credentials_reach_ssh_without_implicit_provisioning(self):
         device = Device('fake', '/fake')
         device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
-        with mock.patch.dict(os.environ, {'SERIALD_SSH_USER': 'ubuntu',
-                                         'SERIALD_SSH_PASSWORD': 'private-password',
-                                         'SERIALD_AUTO_CONFIGURE_SSH': '0'}), \
+        with mock.patch.dict(os.environ, {'DECKLAB_SSH_USER': 'ubuntu',
+                                         'DECKLAB_SSH_PASSWORD': 'private-password',
+                                         'DECKLAB_AUTO_CONFIGURE_SSH': '0'}), \
                 mock.patch.object(device, 'stable_dir', return_value='/unused'), \
-                mock.patch('seriald_core.device.SshSession') as session_class, \
-                mock.patch('seriald_core.device.check_password_login', return_value=(True, False, '')) as check, \
+                mock.patch('decklab_core.device.SshSession') as session_class, \
+                mock.patch('decklab_core.device.check_password_login', return_value=(True, False, '')) as check, \
                 mock.patch.object(device, 'configure_root_ssh') as provision:
             session_class.return_value.ensure.return_value = True
             session, error = device.ssh_connect()
@@ -222,11 +222,11 @@ class ProfileTests(unittest.TestCase):
         with mock.patch.object(Device, 'preload'):
             device = Device('fake', '/fake')
         device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
-        with mock.patch.dict(os.environ, {'SERIALD_SSH_USER': 'root',
-                                         'SERIALD_SSH_PASSWORD': 'configured-root'}), \
+        with mock.patch.dict(os.environ, {'DECKLAB_SSH_USER': 'root',
+                                         'DECKLAB_SSH_PASSWORD': 'configured-root'}), \
                 mock.patch.object(device, 'stable_dir', return_value='/unused'), \
-                mock.patch('seriald_core.device.SshSession') as session_class, \
-                mock.patch('seriald_core.device.check_password_login',
+                mock.patch('decklab_core.device.SshSession') as session_class, \
+                mock.patch('decklab_core.device.check_password_login',
                            side_effect=[(False, True, 'denied'), (True, False, '')]) as check, \
                 mock.patch.object(device, 'configure_root_ssh',
                                   return_value=(True, '')) as provision, \

@@ -11,13 +11,13 @@ import unittest
 from unittest import mock
 import zlib
 
-from seriald_core.desktop import DesktopBook, DesktopSessions, check_reservation, reservation_activity
-from seriald_core.tasks import TaskError
-from seriald_mcp import Adapter, Settings, MCPServer
-from serialctl import ClientError
-from seriald_core.device import Device
-from seriald_core.agent_grants import attach_agent_grants
-from seriald_core.transactions import transactions_for
+from decklab_core.desktop import DesktopBook, DesktopSessions, check_reservation, reservation_activity
+from decklab_core.tasks import TaskError
+from decklab_mcp import Adapter, Settings, MCPServer
+from decklabctl import ClientError
+from decklab_core.device import Device
+from decklab_core.agent_grants import attach_agent_grants
+from decklab_core.transactions import transactions_for
 import test_flash_discovery_integration as fixture
 
 
@@ -298,8 +298,8 @@ class DesktopTests(unittest.TestCase):
             screen, adapter, _ = setup(f)
             async def check():
                 params = StdioServerParameters(command=sys.executable,
-                    args=[str(Path(__file__).resolve().parents[1] / 'seriald_mcp.py')],
-                    env=dict(os.environ, SERIALD_URL=f.url, SERIALD_TOKEN=adapter.settings.token))
+                    args=[str(Path(__file__).resolve().parents[1] / 'decklab_mcp.py')],
+                    env=dict(os.environ, DECKLAB_URL=f.url, DECKLAB_TOKEN=adapter.settings.token))
                 async with Client(params) as client:
                     opened = await client.call_tool('open_desktop', {'device': 'GRAPHICS-SN'})
                     self.assertFalse(opened.is_error, str(opened))
@@ -339,8 +339,8 @@ class ReservationTests(unittest.TestCase):
         opener = mock.MagicMock()
         opener.open.return_value.__enter__.return_value.read.return_value = json.dumps({'data': {
             'id': 'original-lease', 'task': 'current-session', 'requester': 'tester', 'activity': 'running'}}).encode()
-        with mock.patch('seriald_core.desktop.Path.read_text', return_value=json.dumps(credential)), \
-                mock.patch('seriald_core.desktop.build_opener', return_value=opener):
+        with mock.patch('decklab_core.desktop.Path.read_text', return_value=json.dumps(credential)), \
+                mock.patch('decklab_core.desktop.build_opener', return_value=opener):
             reservation_activity({'reservation': expected}, 'running')
             request = opener.open.call_args.args[0]
             self.assertEqual(request.full_url, 'https://console.example/api/ops/v1/devices/test-board-a/reservations/original-lease')
@@ -359,8 +359,8 @@ class ReservationTests(unittest.TestCase):
                  'actions': ['desktop'], 'activity': 'idle', 'overdue': True}
         opener = mock.MagicMock()
         incoming = opener.open.return_value.__enter__.return_value
-        with mock.patch('seriald_core.desktop.Path.read_text', return_value=json.dumps(credential)), \
-                mock.patch('seriald_core.desktop.build_opener', return_value=opener):
+        with mock.patch('decklab_core.desktop.Path.read_text', return_value=json.dumps(credential)), \
+                mock.patch('decklab_core.desktop.build_opener', return_value=opener):
             incoming.read.return_value = json.dumps({'data': [{'id': 'test-board-a', 'lease': lease}]}).encode()
             self.assertEqual(check_reservation(config)['source'], 'console')
             self.assertEqual(opener.open.call_count, 1)

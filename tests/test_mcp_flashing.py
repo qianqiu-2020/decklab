@@ -11,12 +11,12 @@ import unittest
 from unittest import mock
 from urllib.request import Request, urlopen
 
-import seriald_mcp
-from serialctl import ClientError
-from seriald_mcp import Adapter, FlashTarget, Settings
-from seriald_core.board_maintenance import maintenance_for
-from seriald_core.flash_runner import FlashRunnerError
-from seriald_core.tasks import TaskError
+import decklab_mcp
+from decklabctl import ClientError
+from decklab_mcp import Adapter, FlashTarget, Settings
+from decklab_core.board_maintenance import maintenance_for
+from decklab_core.flash_runner import FlashRunnerError
+from decklab_core.tasks import TaskError
 import test_flash_discovery_integration as usb
 import test_image_download as downloads
 import test_nor_workspace as nor
@@ -45,14 +45,14 @@ class MCPFlashTests(unittest.TestCase):
         self.assertEqual(sealed['sha256'], hashlib.sha256(data).hexdigest())
         return sealed['id']
 
-    @unittest.skipUnless(seriald_mcp.MCPServer, 'optional MCP SDK not installed')
+    @unittest.skipUnless(decklab_mcp.MCPServer, 'optional MCP SDK not installed')
     def test_k1_k3_common_mcp_workflows(self):
         from mcp import Client, StdioServerParameters
-        from seriald_core.ramboot_tasks import K1_MUSE_PI_PRO_MODEL, K3_PICO_MODEL
+        from decklab_core.ramboot_tasks import K1_MUSE_PI_PRO_MODEL, K3_PICO_MODEL
 
         async def exercise(fixture, chip, flow, token):
-            params = StdioServerParameters(command=sys.executable, args=[str(Path(seriald_mcp.__file__))],
-                env=dict(os.environ, SERIALD_URL=fixture.url, SERIALD_TOKEN=token))
+            params = StdioServerParameters(command=sys.executable, args=[str(Path(decklab_mcp.__file__))],
+                env=dict(os.environ, DECKLAB_URL=fixture.url, DECKLAB_TOKEN=token))
             async with Client(params) as client:
                 async def call(tool_name, **arguments):
                     result = await client.call_tool(tool_name, arguments)
@@ -153,11 +153,11 @@ class MCPFlashTests(unittest.TestCase):
                         executor.ram_boot = ram_boot
                         executor.cleanup_plan = lambda _: None
                     _, token = self.adapter(fixture)
-                    with mock.patch('seriald_core.ramboot_tasks.availability', return_value=''), \
-                         mock.patch('seriald_core.ramboot_tasks._prepare', return_value={'files': {'Image': {}}, 'test': True}):
+                    with mock.patch('decklab_core.ramboot_tasks.availability', return_value=''), \
+                         mock.patch('decklab_core.ramboot_tasks._prepare', return_value={'files': {'Image': {}}, 'test': True}):
                         asyncio.run(exercise(fixture, chip, flow, token))
 
-    @unittest.skipUnless(seriald_mcp.MCPServer, 'optional MCP SDK not installed')
+    @unittest.skipUnless(decklab_mcp.MCPServer, 'optional MCP SDK not installed')
     def test_official_stdio_tools_full_and_partition_flashing_use_real_authorization(self):
         from mcp import Client, StdioServerParameters
         with usb.automatic_flashing() as fixture:
@@ -166,8 +166,8 @@ class MCPFlashTests(unittest.TestCase):
 
             async def check():
                 params = StdioServerParameters(command=sys.executable,
-                    args=[str(Path(seriald_mcp.__file__))],
-                    env=dict(os.environ, SERIALD_URL=fixture.url, SERIALD_TOKEN=token))
+                    args=[str(Path(decklab_mcp.__file__))],
+                    env=dict(os.environ, DECKLAB_URL=fixture.url, DECKLAB_TOKEN=token))
                 async with Client(params) as client:
                     tools = (await client.list_tools()).tools
                     names = {tool.name for tool in tools}
@@ -392,7 +392,7 @@ class MCPFlashTests(unittest.TestCase):
             other, _ = self.adapter(fixture)
             found = adapter.probe_flash(FlashTarget(**self.scope(adapter.flash_targets()['targets'][0])))['target']
             target = FlashTarget(**self.scope(found))
-            with mock.patch('seriald_core.image_catalog.catalog', return_value={'entries': [{'name': 'fixture'}]}):
+            with mock.patch('decklab_core.image_catalog.catalog', return_value={'entries': [{'name': 'fixture'}]}):
                 self.assertEqual(adapter.images()['entries'][0]['name'], 'fixture')
             task = adapter.download_image(target, url + '/image', 'mcp-image-download-001', name='opensbi.itb')['task']
             final = self.terminal(fixture, task['id'])

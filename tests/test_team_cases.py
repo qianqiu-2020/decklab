@@ -5,9 +5,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import MagicMock, patch
 
-from seriald_core import team_run
-from seriald_core.team_cases import TeamCases
-from seriald_core.tasks import TaskError
+from decklab_core import team_run
+from decklab_core.team_cases import TeamCases
+from decklab_core.tasks import TaskError
 
 
 class CatalogueTests(unittest.TestCase):
@@ -39,7 +39,7 @@ class CatalogueTests(unittest.TestCase):
             p = Path(tmp) / 'slots.json'
             p.write_text(json.dumps({'A':{'code':'A','device_id':'edge:0'},
                                      'B':{'code':'B','device_id':'edge:0'}}))
-            with patch.dict(os.environ, SERIALD_TEST_PLATFORM_BOARDS_FILE=str(p)), self.assertRaises(TaskError):
+            with patch.dict(os.environ, DECKLAB_TEST_PLATFORM_BOARDS_FILE=str(p)), self.assertRaises(TaskError):
                 team_run.mapping('A')
 
 

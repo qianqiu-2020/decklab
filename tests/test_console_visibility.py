@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.console_visibility import human_output
-from seriald_core.device import Device
-from seriald_core.terminal_backend import ENGINE, node_binary
+from decklab_core.console_visibility import human_output
+from decklab_core.device import Device
+from decklab_core.terminal_backend import ENGINE, node_binary
 
 
 @unittest.skipUnless(node_binary(), 'requires the packaged terminal runtime')
@@ -19,7 +19,7 @@ class ConsoleVisibilityTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        logs = mock.patch('seriald_core.device.LOG_ROOT', str(self.root / 'logs'))
+        logs = mock.patch('decklab_core.device.LOG_ROOT', str(self.root / 'logs'))
         logs.start()
         self.addCleanup(logs.stop)
         self.device = self.make_device('one')

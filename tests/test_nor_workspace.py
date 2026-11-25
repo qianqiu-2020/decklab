@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.flash_runner import LocalFlashExecutor
-from seriald_core.tasks import TaskError
+from decklab_core.flash_runner import LocalFlashExecutor
+from decklab_core.tasks import TaskError
 import test_flash_discovery_integration as usb_fixture
 import test_nor_workflow as nor_fixture
 
@@ -274,7 +274,7 @@ class NORWorkspaceTests(unittest.TestCase):
                 self.assertEqual(executor.executions, [])
 
     def test_eeprom_identity_after_ram_prepare_reuses_offline_board_and_extends_lease(self):
-        from seriald_core.board_maintenance import maintenance_for
+        from decklab_core.board_maintenance import maintenance_for
         serial = 'BOARD-SAMPLE-01'
         with usb_fixture.automatic_flashing(known=[(serial, 'cloud-board')]) as fixture, tempfile.TemporaryDirectory() as root:
             executor, target = self.setup_workspace(fixture, root, bootrom=True)
@@ -303,8 +303,8 @@ class NORWorkspaceTests(unittest.TestCase):
             self.assertEqual(maintenance_for(fixture.manager).holds(serial), [])
 
     def test_bootrom_paired_console_is_bound_when_ram_loader_reads_eeprom(self):
-        from seriald_core import device as device_module, devices
-        from seriald_core.console_link import LINK_PREFIX
+        from decklab_core import device as device_module, devices
+        from decklab_core.console_link import LINK_PREFIX
         serial = 'BOARD-LINKED-01'
         with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root, \
                 mock.patch.object(devices, 'LOG_ROOT', str(Path(root) / 'logs')), \
@@ -420,7 +420,7 @@ class NORWorkspaceTests(unittest.TestCase):
             executor, target, ready, calls = self.priority_workspace(fixture, root)
             inventory = dict(ready['flash']['storage_inventory'], storages=[
                 {'id': 'nvme:0'}, {'id': 'scsi:0'}])
-            from seriald_core.flash_store import FlashStore
+            from decklab_core.flash_store import FlashStore
             FlashStore(fixture.store).update_details(ready['id'], {'storage_inventory': inventory})
             body = dict(self.scope(target), action='boot-priority', id=ready['id'],
                         expected='UFS', value='SSD', request_id='priority-associate-001')
@@ -452,7 +452,7 @@ class NORWorkspaceTests(unittest.TestCase):
             executor.set_boot_priority = save
             body = dict(self.scope(target), action='boot-priority', id=ready['id'],
                         expected='UFS', value='SSD', request_id='priority-concurrent-001')
-            from seriald_core.flash_store import FlashStore
+            from decklab_core.flash_store import FlashStore
             details = FlashStore.details
             def observed(store, task_id):
                 value = details(store, task_id)
@@ -514,7 +514,7 @@ class NORWorkspaceTests(unittest.TestCase):
         return artifact_id
 
     def test_preview_compares_uploaded_file_with_existing_backup_without_reading_or_writing_again(self):
-        from seriald_core.flash_store import FlashStore
+        from decklab_core.flash_store import FlashStore
         with usb_fixture.automatic_flashing() as fixture, tempfile.TemporaryDirectory() as root:
             executor, target = self.setup_workspace(fixture, root)
             task, _ = self.begin(fixture, target)
@@ -671,7 +671,7 @@ class NORWorkspaceTests(unittest.TestCase):
                 row = artifacts.create('upload', name or 'opensbi.itb', 4, actor, serial)
                 artifacts.append(row['id'], 0, b'test', actor, serial)
                 return {'artifact': artifacts.seal(row['id'], actor, serial)}
-            with mock.patch('seriald_core.image_download.fetch_image', side_effect=download):
+            with mock.patch('decklab_core.image_download.fetch_image', side_effect=download):
                 body = dict(self.scope(target), task_id=task['id'], url='https://firmware.example/opensbi.itb',
                             request_id='nor-url-import-001')
                 code, result = self.request(fixture, '/api/image-download', body)

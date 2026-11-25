@@ -40,7 +40,7 @@ function fixture(saved, browser = 'en-US') {
     MutationObserver: class {constructor(fn) { observe = fn; } observe() {}}};
   sandbox.window = sandbox;
   vm.runInNewContext(source, sandbox);
-  return {api: sandbox.SerialdI18n, heading, button, output, commandText, labelText, diffText,
+  return {api: sandbox.DeckLabI18n, heading, button, output, commandText, labelText, diffText,
     root, select, storage, mutate: node => observe([{type: 'characterData', target: node}])};
 }
 

@@ -1,7 +1,7 @@
 """Boot comparison uses saved logs only, never a live serial connection."""
 import unittest
 
-from seriald_core.boot_compare import MAX_BOOT_BYTES, compare_boots
+from decklab_core.boot_compare import MAX_BOOT_BYTES, compare_boots
 
 
 class BootComparisonTests(unittest.TestCase):

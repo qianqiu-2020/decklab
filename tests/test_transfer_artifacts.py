@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core.storage import Store
-from seriald_core.tasks import TaskStore, TaskError
-from seriald_core.transfer_artifacts import TransferArtifacts, ArtifactPolicy
+from decklab_core.storage import Store
+from decklab_core.tasks import TaskStore, TaskError
+from decklab_core.transfer_artifacts import TransferArtifacts, ArtifactPolicy
 
 
 class ArtifactTests(unittest.TestCase):
@@ -137,7 +137,7 @@ class ArtifactTests(unittest.TestCase):
         for name in ('../secret', 'windows\\secret', 'bad\nname', ''):
             with self.assertRaises(TaskError):
                 self.spool.create('upload', name, 10)
-        with mock.patch('seriald_core.transfer_artifacts.shutil.disk_usage', return_value=SimpleNamespace(free=0)):
+        with mock.patch('decklab_core.transfer_artifacts.shutil.disk_usage', return_value=SimpleNamespace(free=0)):
             with self.assertRaises(TaskError) as error:
                 self.spool.create('upload', 'file', 10)
         self.assertEqual(error.exception.status, 503)
@@ -214,7 +214,7 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(self.spool.create('upload', 'new', 100)['size'], 100)
 
     def test_manager_uses_registry_directory_and_recovers_without_creating_idle_spool(self):
-        from seriald_core.devices import Manager
+        from decklab_core.devices import Manager
         manager = Manager(self.store)
         self.addCleanup(manager.close)
         self.assertEqual(manager.artifacts.root, (self.path / 'transfers').resolve())
@@ -254,13 +254,13 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(self.spool.seal(ready['id'], expected_sha256=ready['sha256'])['state'], 'ready')
 
     def test_open_metadata_failure_closes_source_and_leaves_no_reader_reservation(self):
-        from seriald_core.archive_io import open_archive
+        from decklab_core.archive_io import open_archive
         row, opened = self.ready(), []
         def capture(path):
             source = open_archive(path)
             opened.append(source)
             return source
-        with mock.patch('seriald_core.transfer_artifacts.open_archive', side_effect=capture), \
+        with mock.patch('decklab_core.transfer_artifacts.open_archive', side_effect=capture), \
              mock.patch.object(self.spool, '_update', side_effect=OSError('database unavailable')):
             with self.assertRaises(OSError):
                 self.spool.open(row['id'])
@@ -294,21 +294,21 @@ class ArtifactTests(unittest.TestCase):
 
     def test_publish_failure_cleans_files_and_metadata_instead_of_leaving_sealing(self):
         row = self.spool.create('upload', 'empty', 0)
-        with mock.patch('seriald_core.transfer_artifacts.os.link', side_effect=OSError('disk error')):
+        with mock.patch('decklab_core.transfer_artifacts.os.link', side_effect=OSError('disk error')):
             with self.assertRaises(OSError):
                 self.spool.seal(row['id'])
         self.assertEqual(self.spool.get(row['id'])['state'], 'failed')
         self.assertEqual(list(self.spool.root.iterdir()), [])
 
     def test_environment_limits_are_validated_and_override_defaults(self):
-        policy = ArtifactPolicy.from_env({'SERIALD_TRANSFER_MAX_FILE_BYTES': '100',
-            'SERIALD_TRANSFER_MAX_TOTAL_BYTES': '200', 'SERIALD_TRANSFER_MIN_FREE_BYTES': '0',
-            'SERIALD_TRANSFER_IDLE_SECONDS': '5', 'SERIALD_TRANSFER_RETENTION_SECONDS': '10'})
+        policy = ArtifactPolicy.from_env({'DECKLAB_TRANSFER_MAX_FILE_BYTES': '100',
+            'DECKLAB_TRANSFER_MAX_TOTAL_BYTES': '200', 'DECKLAB_TRANSFER_MIN_FREE_BYTES': '0',
+            'DECKLAB_TRANSFER_IDLE_SECONDS': '5', 'DECKLAB_TRANSFER_RETENTION_SECONDS': '10'})
         self.assertEqual((policy.max_file, policy.max_total, policy.reserve_free,
                           policy.idle_seconds, policy.ready_seconds), (100, 200, 0, 5, 10))
         for value in ('-1', '1.5', 'bad', '', True):
             with self.assertRaises(ValueError):
-                ArtifactPolicy.from_env({'SERIALD_TRANSFER_MAX_FILE_BYTES': value})
+                ArtifactPolicy.from_env({'DECKLAB_TRANSFER_MAX_FILE_BYTES': value})
         self.assertEqual(ArtifactPolicy.from_env({}), ArtifactPolicy())
 
     def test_invalid_policy_and_path_identifiers_are_rejected(self):

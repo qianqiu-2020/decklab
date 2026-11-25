@@ -5,11 +5,11 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core.actions import DeviceActions, capabilities
-from seriald_core.device import Device
-from seriald_core.session_base import SSHAuthenticationError
-from seriald_core.transactions import TransactionError
-from seriald_core import web
+from decklab_core.actions import DeviceActions, capabilities
+from decklab_core.device import Device
+from decklab_core.session_base import SSHAuthenticationError
+from decklab_core.transactions import TransactionError
+from decklab_core import web
 
 
 class ActionTests(unittest.TestCase):

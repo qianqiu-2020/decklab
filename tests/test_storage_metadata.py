@@ -1,8 +1,8 @@
 import base64
 import unittest
-from seriald_core.storage_metadata import MetadataReader, read_inventory, MAX_READ, default_storage_for_priority
-from seriald_core.tasks import TaskError
-from seriald_core.os_contents import ImageError
+from decklab_core.storage_metadata import MetadataReader, read_inventory, MAX_READ, default_storage_for_priority
+from decklab_core.tasks import TaskError
+from decklab_core.os_contents import ImageError
 from test_os_contents import ROOTFS
 
 

@@ -8,7 +8,7 @@ library Python. The worker only accesses the authenticated HTTP API; its entry
 point never imports the serial collector.
 
 For the 1.14.0 amd64 release, first prepare the fixed public component inputs
-from [the complete-build guide](../docs/COMPLETE_INSTALL.md), then build:
+from [the complete-build guide](../docs/development/complete-build.md), then build:
 
 ```sh
 python3 tools/build_linux_mcp.py --arch amd64 \
@@ -18,7 +18,7 @@ python3 tools/build_linux_mcp.py --arch amd64 \
 
 Build each architecture on its native runner. The default command creates an
 Ubuntu 22.04 container, downloads hash-locked build inputs and freezes a
-`seriald-mcp-worker` directory. Cross-architecture Docker execution additionally
+`decklab-mcp-worker` directory. Cross-architecture Docker execution additionally
 needs host emulation; it is not required by the native CI jobs. Container network
 access is needed during the build, and is not needed by package installation.
 The output directory must not already exist.

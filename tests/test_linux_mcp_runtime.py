@@ -140,7 +140,7 @@ class LinuxMCPRuntimeTests(unittest.TestCase):
                 patch.object(builder, 'smoke_worker'):
             builder.build_local(output, 'amd64', wheels, sdk)
         manifest = json.loads((output / 'runtime-manifest.json').read_text())
-        self.assertIn('seriald_core/desktop_freerdp.py', manifest['source_files'])
+        self.assertIn('decklab_core/desktop_freerdp.py', manifest['source_files'])
         self.assertIn((builder.DESKTOP_RUNTIME / 'runtime-manifest.json').as_posix(), manifest['files'])
         self.assertEqual(len(commands), 2)
 
@@ -157,7 +157,11 @@ class LinuxMCPRuntimeTests(unittest.TestCase):
     def test_docker_only_mounts_an_existing_prepared_sdk_read_only(self):
         sdk = self.root / 'sdk'
         prepare_desktop_runtime_fixture(sdk)
-        with patch.object(builder.subprocess, 'run') as run, \
+        def build_image(command, **options):
+            if command[1] == 'build':
+                Path(command[command.index('--iidfile') + 1]).write_text('sha256:fixture')
+
+        with patch.object(builder.subprocess, 'run', side_effect=build_image) as run, \
                 patch.object(builder, 'validate_runtime', return_value=self.manifest):
             builder.build_docker(self.root / 'frozen', 'amd64', 'fixture-image', sdk)
         command = run.call_args.args[0]

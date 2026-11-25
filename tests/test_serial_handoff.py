@@ -5,11 +5,11 @@ import unittest
 from unittest import mock
 from contextlib import ExitStack
 
-from seriald_core.device import Device
-from seriald_core.devices import Manager
-from seriald_core.hardware import HardwareBook, run_command
-from seriald_core.tasks import TaskCancelled
-from seriald_core.windows_manager import WindowsManager
+from decklab_core.device import Device
+from decklab_core.devices import Manager
+from decklab_core.hardware import HardwareBook, run_command
+from decklab_core.tasks import TaskCancelled
+from decklab_core.windows_manager import WindowsManager
 
 
 class HandoffTests(unittest.TestCase):
@@ -38,18 +38,18 @@ class HandoffTests(unittest.TestCase):
                 value = Handle()
                 opened.append(value)
                 return value
-            stack.enter_context(mock.patch('seriald_core.windows_manager.serial.Serial', side_effect=open_handle))
+            stack.enter_context(mock.patch('decklab_core.windows_manager.serial.Serial', side_effect=open_handle))
         else:
             def open_handle(*args, **kwargs):
                 value = 100 + len(opened)
                 opened.append(value)
                 return value
-            stack.enter_context(mock.patch('seriald_core.devices.open_serial', side_effect=open_handle))
-            stack.enter_context(mock.patch('seriald_core.devices.os.close', side_effect=closed.append))
+            stack.enter_context(mock.patch('decklab_core.devices.open_serial', side_effect=open_handle))
+            stack.enter_context(mock.patch('decklab_core.devices.os.close', side_effect=closed.append))
             def select(*args):
                 time.sleep(0.01)
                 return [], [], []
-            stack.enter_context(mock.patch('seriald_core.devices.select.select', side_effect=select))
+            stack.enter_context(mock.patch('decklab_core.devices.select.select', side_effect=select))
         device.last_health_check = time.time()
         device.thread = threading.Thread(target=manager._capture, args=(device,))
         device.thread.start()
@@ -93,7 +93,7 @@ class HandoffTests(unittest.TestCase):
         process.poll.return_value = None
         with self.assertRaises(TaskCancelled):
             with manager.exclusive_serial(device, lambda: None):
-                with mock.patch('seriald_core.hardware.helper_process', return_value=process):
+                with mock.patch('decklab_core.hardware.helper_process', return_value=process):
                     calls = iter([None, TaskCancelled('cancel')])
                     def check():
                         value = next(calls)
@@ -110,7 +110,7 @@ class HandoffTests(unittest.TestCase):
         process.close.side_effect = OSError('cleanup failed')
         with self.assertRaises(OSError):
             with manager.exclusive_serial(device, lambda: None) as permit:
-                with mock.patch('seriald_core.hardware.helper_process', return_value=process):
+                with mock.patch('decklab_core.hardware.helper_process', return_value=process):
                     run_command(['fake'], 1, lambda: None, lambda: permit.update(resume=False))
         self.assertTrue(device.capture_paused.is_set())
         self.assertIsNone(device.fd)

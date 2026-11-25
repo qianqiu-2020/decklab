@@ -1,5 +1,5 @@
 // Query an unconfirmed edge submission with the standard library; never resubmit.
-// Usage: SERIALD_URL=... SERIALD_TOKEN=... go run examples/edge_task_lookup.go REQUEST_ID
+// Usage: DECKLAB_URL=... DECKLAB_TOKEN=... go run examples/edge_task_lookup.go REQUEST_ID
 package main
 
 import (
@@ -34,20 +34,20 @@ func get(client *http.Client, base, token, path string, value any) error {
 }
 
 func run(requestID string) error {
-	base := strings.TrimRight(os.Getenv("SERIALD_URL"), "/")
+	base := strings.TrimRight(os.Getenv("DECKLAB_URL"), "/")
 	if base == "" {
 		base = "http://127.0.0.1:8898"
 	}
 	endpoint, err := url.Parse(base)
 	if err != nil || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
-		return errors.New("SERIALD_URL must be an HTTP(S) service URL without credentials/query/fragment")
+		return errors.New("DECKLAB_URL must be an HTTP(S) service URL without credentials/query/fragment")
 	}
 	// A redirect is not part of this fixed control URL's contract. In particular,
 	// do not redirect credentials or add an application-level retry around writes.
 	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	token := os.Getenv("SERIALD_TOKEN")
+	token := os.Getenv("DECKLAB_TOKEN")
 	var capability struct {
 		APIVersion int `json:"api_version"`
 		Contract   struct {
@@ -76,7 +76,7 @@ func run(requestID string) error {
 			Outcome   string `json:"outcome"`
 		} `json:"task"`
 	}
-	actor := os.Getenv("SERIALD_ACTOR")
+	actor := os.Getenv("DECKLAB_ACTOR")
 	if actor == "" {
 		actor = "agent"
 	}

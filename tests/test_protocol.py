@@ -14,10 +14,10 @@ from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-from seriald_core import device as sd
-from seriald_core.protocol import SSH_STATE_CMD
-from seriald_core.console_protocol import frame_command
-from seriald_core.profiles import BoardProfile
+from decklab_core import device as sd
+from decklab_core.protocol import SSH_STATE_CMD
+from decklab_core.console_protocol import frame_command
+from decklab_core.profiles import BoardProfile
 
 NONCE = '0123456789abcdef01234567'
 BEGIN = '__SD_B_' + NONCE + '__'
@@ -48,7 +48,7 @@ class DeviceFixture(unittest.TestCase):
                 mock.patch.object(self.device, '_wait', side_effect=wait) as wait_mock, \
                 mock.patch.object(self.device, '_since', return_value=response), \
                 mock.patch.object(sd.secrets, 'token_hex', return_value=NONCE), \
-                mock.patch('seriald_core.transactions.time.monotonic', return_value=100.0):
+                mock.patch('decklab_core.transactions.time.monotonic', return_value=100.0):
             # Framing is fully mocked IO; runner scheduling must not consume
             # its artificial 10 ms deadline. Real deadline tests are separate.
             result = self.device._run_cmd(command, timeout=0.01)
@@ -384,7 +384,7 @@ class ShellLoginTests(DeviceFixture):
         self.assertEqual(writes, ['root\r', 'debian\r'])
 
     def test_explicit_serial_password_matching_another_stock_os_takes_precedence(self):
-        with mock.patch.dict(os.environ, {'SERIALD_CONSOLE_PASSWORD': 'bianbu'}):
+        with mock.patch.dict(os.environ, {'DECKLAB_CONSOLE_PASSWORD': 'bianbu'}):
             (ok, _), writes, _ = self.login('Debian GNU/Linux 13 board ttyS0\r\nboard login: ',
                                             ['Password:', 'root@board:#'])
         self.assertTrue(ok)
@@ -474,7 +474,7 @@ class ShellLoginTests(DeviceFixture):
 
 class RootSshSetupTests(DeviceFixture):
     def test_custom_root_password_is_written_only_at_password_prompts(self):
-        from seriald_core.profiles import BoardProfile
+        from decklab_core.profiles import BoardProfile
         profile = BoardProfile(ssh_password='custom-root-password')
         with mock.patch.object(sd.Device, 'profile', new_callable=mock.PropertyMock,
                                return_value=profile), \
@@ -491,7 +491,7 @@ class RootSshSetupTests(DeviceFixture):
         self.assertNotIn(profile.ssh_password, str(say.call_args_list))
 
     def test_non_root_or_empty_password_profile_never_starts_provisioning(self):
-        from seriald_core.profiles import BoardProfile
+        from decklab_core.profiles import BoardProfile
         for profile in (BoardProfile(ssh_user='ubuntu'), BoardProfile(ssh_password='')):
             with self.subTest(user=profile.ssh_user), \
                     mock.patch.object(sd.Device, 'profile', new_callable=mock.PropertyMock,

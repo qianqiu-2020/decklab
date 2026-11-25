@@ -10,10 +10,10 @@ import unittest
 from unittest import mock
 from types import SimpleNamespace
 
-from seriald_core.image_download import ImageDownloads, _addresses, fetch_image, image_url
-from seriald_core.storage import Store
-from seriald_core.tasks import TaskError, TaskManager
-from seriald_core.transfer_artifacts import ArtifactPolicy, TransferArtifacts
+from decklab_core.image_download import ImageDownloads, _addresses, fetch_image, image_url
+from decklab_core.storage import Store
+from decklab_core.tasks import TaskError, TaskManager
+from decklab_core.transfer_artifacts import ArtifactPolicy, TransferArtifacts
 
 DATA = b'opensbi-test-payload' * 100
 
@@ -49,7 +49,7 @@ def fixture():
             manager = SimpleNamespace(store=store, artifacts=artifacts, tasks=TaskManager(store),
                                       flash_executor=SimpleNamespace(supports_image_preparation=False))
             address = server.server_address
-            with mock.patch('seriald_core.image_download._addresses', return_value=[
+            with mock.patch('decklab_core.image_download._addresses', return_value=[
                     (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, address)]):
                 try:
                     yield manager, 'http://127.0.0.1:%d' % address[1]
@@ -100,7 +100,7 @@ class ImageDownloadTests(unittest.TestCase):
             self.assertEqual((row['size'], row['received'], row['task_id']), (len(DATA), len(DATA), None))
 
     def test_catalog_and_new_request_reuse_exact_cached_url_until_deleted(self):
-        from seriald_core.image_catalog import mark_downloads
+        from decklab_core.image_catalog import mark_downloads
         with fixture() as (manager, url):
             url += '/opensbi.itb'
             response = ImageDownloads(manager).start({'url': url, 'request_id': 'legacy-plain-url'})
@@ -110,7 +110,7 @@ class ImageDownloadTests(unittest.TestCase):
             mark_downloads(manager, {'entries': [same, other]})
             self.assertEqual(same['download_state'], 'cached')
             self.assertNotIn('download_state', other)
-            with mock.patch('seriald_core.image_download.fetch_image', side_effect=AssertionError('cache fetched again')):
+            with mock.patch('decklab_core.image_download.fetch_image', side_effect=AssertionError('cache fetched again')):
                 reused = self.start(manager, url, 'use-another-request')
             self.assertEqual(reused['id'], original['id'])
             self.assertEqual(reused['result']['artifact']['id'], artifact['id'])
@@ -130,7 +130,7 @@ class ImageDownloadTests(unittest.TestCase):
                 return fetch_image(*args, **kwargs)
             def start(request):
                 return ImageDownloads(manager).start({'url': url, 'request_id': request}).payload
-            with mock.patch('seriald_core.image_download.fetch_image', side_effect=delayed) as fetch:
+            with mock.patch('decklab_core.image_download.fetch_image', side_effect=delayed) as fetch:
                 try:
                     first, second = start('parallel-download-a'), start('parallel-download-b')
                     self.assertEqual(first['task']['id'], second['task']['id'])
@@ -157,7 +157,7 @@ class ImageDownloadTests(unittest.TestCase):
 
     def test_cancel_discards_partial_file_and_restart_never_replays_download(self):
         with fixture() as (manager, url):
-            from seriald_core.tasks import TaskContext
+            from decklab_core.tasks import TaskContext
             task_id = manager.tasks.store.create('image-download', 'web', '', [{'serial': '', 'connection_id': 'images'}])
             context = TaskContext(task_id, manager.tasks.store)
             original = manager.artifacts.append
@@ -166,7 +166,7 @@ class ImageDownloadTests(unittest.TestCase):
                 context.cancel()
                 return result
             with mock.patch.object(manager.artifacts, 'append', side_effect=cancel_after_chunk):
-                from seriald_core.tasks import TaskCancelled
+                from decklab_core.tasks import TaskCancelled
                 with self.assertRaises(TaskCancelled):
                     fetch_image(manager.artifacts, context, url + '/image', '', 'opensbi.itb')
             self.assertEqual(list(manager.artifacts.root.glob('*.part')), [])
@@ -194,14 +194,14 @@ class ImageDownloadTests(unittest.TestCase):
 
     def test_windows_tls_uses_native_store_without_global_ssl_injection(self):
         import ssl
-        from seriald_core.image_download import image_ssl_context
+        from decklab_core.image_download import image_ssl_context
         native=mock.Mock()
-        with mock.patch('seriald_core.image_download.sys.platform','win32'), \
+        with mock.patch('decklab_core.image_download.sys.platform','win32'), \
                 mock.patch.dict('sys.modules',{'truststore':SimpleNamespace(SSLContext=native)}), \
-                mock.patch('seriald_core.image_download.ssl.create_default_context') as default:
+                mock.patch('decklab_core.image_download.ssl.create_default_context') as default:
             self.assertIs(image_ssl_context(),native.return_value)
             native.assert_called_once_with(ssl.PROTOCOL_TLS_CLIENT)
             default.assert_not_called()
-        with mock.patch('seriald_core.image_download.sys.platform','linux'), \
-                mock.patch('seriald_core.image_download.ssl.create_default_context') as default:
+        with mock.patch('decklab_core.image_download.sys.platform','linux'), \
+                mock.patch('decklab_core.image_download.ssl.create_default_context') as default:
             self.assertIs(image_ssl_context(),default.return_value)

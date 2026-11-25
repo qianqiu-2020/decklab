@@ -84,9 +84,9 @@ def purged(database):
 
 def installed(database, code_root, seed):
     sys.path.insert(0, str(code_root))
-    from seriald_core import device as device_module
-    from seriald_core.profiles import ProfileBook
-    from seriald_core.storage import Store
+    from decklab_core import device as device_module
+    from decklab_core.profiles import ProfileBook
+    from decklab_core.storage import Store
 
     assert Path(device_module.__file__).resolve().is_relative_to(code_root), 'wrong code root imported'
     profiles = ProfileBook({'profiles': {'fixture': {
@@ -145,7 +145,7 @@ def installed(database, code_root, seed):
             assert PASSWORD not in json.dumps(store.boards()), 'public board data disclosed the password'
             device.close_session(session.sid)
             if seed:
-                from seriald_core.schema import _backup
+                from decklab_core.schema import _backup
                 version = store.db.execute('PRAGMA user_version').fetchone()[0]
                 _backup(str(database), version, version + 1)
             private_files(database)
@@ -174,7 +174,7 @@ def installed(database, code_root, seed):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database', required=True, type=Path)
-    parser.add_argument('--code-root', default='/usr/lib/seriald', type=Path)
+    parser.add_argument('--code-root', default='/usr/lib/decklab', type=Path)
     parser.add_argument('--phase', required=True, choices=('seed', 'check', 'purged'))
     args = parser.parse_args()
     database = args.database.resolve()

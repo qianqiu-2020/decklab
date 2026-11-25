@@ -14,7 +14,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from seriald_core import __version__
+from decklab_core import __version__
 from tools.package_docs import publish as publish_docs
 from tools.package_flash_loaders import publish as publish_flash_loaders
 from tools.build_linux_mcp import DESKTOP_RUNTIME, MACHINES, validate_runtime
@@ -23,10 +23,10 @@ from tools.build_linux_mcp import DESKTOP_RUNTIME, MACHINES, validate_runtime
 def collector_build_id(root=ROOT):
     """Hash code and service policy that require replacing the live collector."""
     excluded = {'admin.py', 'control_server.py', 'web_tls.py', 'desktop_proxy.py', 'mcp_host.py', 'version.py'}
-    sources = [path for path in (root / 'seriald_core').glob('*.py')
+    sources = [path for path in (root / 'decklab_core').glob('*.py')
                if path.name not in excluded]
-    sources.append(root / 'packaging/seriald-collector.service')
-    for source in (root / 'seriald_core/terminal_worker.js', root / 'seriald_core/terminal_snapshot.js',
+    sources.append(root / 'packaging/decklab-collector.service')
+    for source in (root / 'decklab_core/terminal_worker.js', root / 'decklab_core/terminal_snapshot.js',
                    root / 'static/serial-progress.js'):
         if source.is_file():
             sources.append(source)
@@ -60,7 +60,7 @@ def flash_executor_metadata(path, architecture):
             digest.update(chunk)
             size += len(chunk)
     return {'schema': 1, 'architecture': architecture,
-            'installed_path': '/usr/libexec/seriald/decklab-flash',
+            'installed_path': '/usr/libexec/decklab/decklab-flash',
             'sha256': digest.hexdigest(), 'size': size,
             'origin': 'explicit-local-build-input'}
 
@@ -121,8 +121,8 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
         raise ValueError('flash notices require an explicit flash executor')
     notices = flash_notice_files(flash_notices) if flash_notices is not None else None
     output.mkdir(parents=True, exist_ok=True)
-    artifact = output.resolve() / ('seriald_%s_%s.deb' % (version, architecture))
-    with tempfile.TemporaryDirectory(prefix='seriald-deb-') as folder:
+    artifact = output.resolve() / ('decklab_%s_%s.deb' % (version, architecture))
+    with tempfile.TemporaryDirectory(prefix='decklab-deb-') as folder:
         stage = Path(folder)
         def put(source, target, mode=0o644):
             destination = stage / target
@@ -135,54 +135,54 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             destination.write_text(text)
             destination.chmod(mode)
         if lz4 is not None:
-            put(lz4 / 'lz4', 'usr/lib/seriald/ramboot-tools/lz4', 0o755)
-            (stage / 'usr/lib/seriald/ramboot-tools/lz4cat').symlink_to('lz4')
+            put(lz4 / 'lz4', 'usr/lib/decklab/ramboot-tools/lz4', 0o755)
+            (stage / 'usr/lib/decklab/ramboot-tools/lz4cat').symlink_to('lz4')
             for name in ('copyright', 'source.json'):
-                put(lz4 / name, 'usr/share/doc/seriald/ramboot-lz4/' + name)
+                put(lz4 / name, 'usr/share/doc/decklab/ramboot-lz4/' + name)
         build_id = collector_build_id()
-        for name in ('seriald.py', 'seriald_demo.py', 'serialctl.py', 'seriald_mcp.py',
+        for name in ('decklab.py', 'decklab_demo.py', 'decklabctl.py', 'decklab_mcp.py',
                      'requirements-mcp.txt', 'pyproject.toml', 'index.html'):
-            put(name, 'usr/lib/seriald/' + name)
-        write('usr/lib/seriald/.collector-build-id', build_id + '\n')
-        for name in ('seriald_core', 'static', 'vendor'):
+            put(name, 'usr/lib/decklab/' + name)
+        write('usr/lib/decklab/.collector-build-id', build_id + '\n')
+        for name in ('decklab_core', 'static', 'vendor'):
             for path in (ROOT / name).rglob('*'):
                 if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':
-                    put(path.relative_to(ROOT), 'usr/lib/seriald/' + str(path.relative_to(ROOT)))
+                    put(path.relative_to(ROOT), 'usr/lib/decklab/' + str(path.relative_to(ROOT)))
         for path in sorted(runtime.rglob('*')):
             if path.is_file():
-                destination = stage / 'usr/lib/seriald/mcp-runtime' / path.relative_to(runtime)
+                destination = stage / 'usr/lib/decklab/mcp-runtime' / path.relative_to(runtime)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, destination)
                 destination.chmod(0o755 if path.stat().st_mode & 0o111 else 0o644)
         for name in ('SKILL.md', 'SKILL.zh-CN.md'):
-            put('skills/seriald-board/' + name, 'usr/lib/seriald/skills/seriald-board/' + name)
-        for command, invocation in [('serialctl', '/usr/lib/seriald/serialctl.py'),
-                                    ('seriald-access', '-m seriald_core.access_info'),
-                                    ('seriald-admin', '-m seriald_core.admin'),
-                                    ('seriald-collector', '-m seriald_core.collector_server'),
-                                    ('seriald-control', '-m seriald_core.control_server'),
-                                    ('seriald-backend', '-m seriald_core.backend_server')]:
-            write('usr/bin/' + command, '#!/bin/sh\nexport PYTHONPATH=/usr/lib/seriald\nexec /usr/bin/python3 ' + invocation + ' "$@"\n', 0o755)
-        put('rescue.sh', 'usr/libexec/seriald/rescue.sh', 0o755)
-        put('packaging/seriald.service', 'lib/systemd/system/seriald.service')
-        put('packaging/seriald-collector.service', 'lib/systemd/system/seriald-collector.service')
-        put('packaging/seriald-web.service', 'lib/systemd/system/seriald-web.service')
-        put('packaging/seriald-backend.service', 'lib/systemd/system/seriald-backend.service')
-        put('packaging/seriald.env', 'etc/seriald/seriald.env', 0o640)
-        write('etc/sudoers.d/seriald-rescue', 'seriald ALL=(root) NOPASSWD: /usr/libexec/seriald/rescue.sh\n', 0o440)
-        for path in (ROOT / 'skills/seriald-board').rglob('*'):
+            put('skills/decklab-board/' + name, 'usr/lib/decklab/skills/decklab-board/' + name)
+        for command, invocation in [('decklabctl', '/usr/lib/decklab/decklabctl.py'),
+                                    ('decklab-access', '-m decklab_core.access_info'),
+                                    ('decklab-admin', '-m decklab_core.admin'),
+                                    ('decklab-collector', '-m decklab_core.collector_server'),
+                                    ('decklab-control', '-m decklab_core.control_server'),
+                                    ('decklab-backend', '-m decklab_core.backend_server')]:
+            write('usr/bin/' + command, '#!/bin/sh\nexport PYTHONPATH=/usr/lib/decklab\nexec /usr/bin/python3 ' + invocation + ' "$@"\n', 0o755)
+        put('rescue.sh', 'usr/libexec/decklab/rescue.sh', 0o755)
+        put('packaging/decklab.service', 'lib/systemd/system/decklab.service')
+        put('packaging/decklab-collector.service', 'lib/systemd/system/decklab-collector.service')
+        put('packaging/decklab-web.service', 'lib/systemd/system/decklab-web.service')
+        put('packaging/decklab-backend.service', 'lib/systemd/system/decklab-backend.service')
+        put('packaging/decklab.env', 'etc/decklab/decklab.env', 0o640)
+        write('etc/sudoers.d/decklab-rescue', 'decklab ALL=(root) NOPASSWD: /usr/libexec/decklab/rescue.sh\n', 0o440)
+        for path in (ROOT / 'skills/decklab-board').rglob('*'):
             if path.is_file():
-                text = path.read_text().replace('/data/seriald/serialctl.py', '/usr/lib/seriald/serialctl.py').replace('/data/seriald/docs/AGENT_ACCESS.md', '/usr/share/doc/seriald/AGENT_ACCESS.md')
-                write('usr/share/seriald/skills/seriald-board/' + str(path.relative_to(ROOT / 'skills/seriald-board')), text)
-        publish_docs(stage / 'usr/share/doc/seriald', 'linux')
-        write('usr/lib/seriald/installation.json', json.dumps({
+                text = path.read_text().replace('/data/decklab/decklabctl.py', '/usr/lib/decklab/decklabctl.py').replace('/data/decklab/docs/modules/agent-access.md', '/usr/share/doc/decklab/modules/agent-access.md')
+                write('usr/share/decklab/skills/decklab-board/' + str(path.relative_to(ROOT / 'skills/decklab-board')), text)
+        publish_docs(stage / 'usr/share/doc/decklab', 'linux')
+        write('usr/lib/decklab/installation.json', json.dumps({
             'profile': 'complete' if complete else 'core', 'version': version,
-            'flash_executor': '/usr/libexec/seriald/decklab-flash' if flash_executor else '',
-            'ram_loaders': '/usr/lib/seriald/flash-loaders/manifest.json' if flash_loaders else ''}, indent=2) + '\n')
+            'flash_executor': '/usr/libexec/decklab/decklab-flash' if flash_executor else '',
+            'ram_loaders': '/usr/lib/decklab/flash-loaders/manifest.json' if flash_loaders else ''}, indent=2) + '\n')
         if flash_loaders is not None:
-            publish_flash_loaders(flash_loaders, stage / 'usr/lib/seriald/flash-loaders')
+            publish_flash_loaders(flash_loaders, stage / 'usr/lib/decklab/flash-loaders')
         if executor_metadata is not None:
-            put('packaging/70-seriald-fastboot.rules', 'lib/udev/rules.d/70-seriald-fastboot.rules')
+            put('packaging/70-decklab-fastboot.rules', 'lib/udev/rules.d/70-decklab-fastboot.rules')
             target = stage / executor_metadata['installed_path'].lstrip('/')
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(flash_executor, target)
@@ -190,15 +190,15 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             if flash_executor_metadata(target, architecture) != executor_metadata:
                 raise ValueError('flash executor changed while preparing the package')
             if notices is not None:
-                notice_target = stage / 'usr/share/doc/seriald/flash-third-party'
+                notice_target = stage / 'usr/share/doc/decklab/flash-third-party'
                 for name in notices:
-                    put(Path(flash_notices) / name, 'usr/share/doc/seriald/flash-third-party/' + name)
+                    put(Path(flash_notices) / name, 'usr/share/doc/decklab/flash-third-party/' + name)
                 if flash_notice_files(notice_target) != notices:
                     raise ValueError('flash notices changed while preparing the package')
                 executor_metadata['notices'] = notices
-            write('usr/share/doc/seriald/flash-executor.json',
+            write('usr/share/doc/decklab/flash-executor.json',
                   json.dumps(executor_metadata, sort_keys=True, indent=2) + '\n')
-            example = stage / 'usr/share/doc/seriald/examples/flash.json'
+            example = stage / 'usr/share/doc/decklab/examples/flash.json'
             configuration = json.loads(example.read_text())
             for board in configuration['boards'].values():
                 board['flash']['argv'] = [executor_metadata['installed_path']]
@@ -207,14 +207,14 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
         write('DEBIAN/preinst', preinst, 0o755)
         for name in ('postinst', 'prerm', 'postrm'):
             put('packaging/' + name, 'DEBIAN/' + name, 0o755)
-        write('DEBIAN/conffiles', '/etc/seriald/seriald.env\n/etc/sudoers.d/seriald-rescue\n')
+        write('DEBIAN/conffiles', '/etc/decklab/decklab.env\n/etc/sudoers.d/decklab-rescue\n')
         flash_dependency = ''
         if executor_metadata is not None:
             flash_dependency = ', libusb-1.0-0, udev, e2fsprogs, device-tree-compiler, initramfs-tools-core, zstd'
             if lz4 is None:
                 flash_dependency += ', lz4'
         desktop_dependency = ', libstdc++6, libgcc-s1' if desktop_runtime.is_dir() else ''
-        write('DEBIAN/control', 'Package: seriald\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nMaintainer: seriald contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), python3-cryptography, nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s%s\nRecommends: adb\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
+        write('DEBIAN/control', 'Package: decklab\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nConflicts: seriald\nReplaces: seriald\nMaintainer: DeckLab contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), python3-cryptography, nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s%s\nRecommends: adb\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
         compression = ['-Zgzip', '-z1'] if local_fast else []
         with tempfile.TemporaryDirectory(dir=output) as package_dir:
             candidate = Path(package_dir) / artifact.name

@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from seriald_core.agent_grants import AgentGrantStore
+from decklab_core.agent_grants import AgentGrantStore
 
 
 class AgentGrantTests(unittest.TestCase):

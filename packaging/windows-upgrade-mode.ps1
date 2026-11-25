@@ -2,10 +2,10 @@
 # before Restart Manager closes it. Return only a known mode and numeric port.
 param([Parameter(Mandatory=$true)][string]$InstallDir)
 $ErrorActionPreference = 'Stop'
-$exe = Join-Path $InstallDir 'seriald.exe'
+$executables = @('decklab.exe','seriald.exe') | ForEach-Object { Join-Path $InstallDir $_ }
 $session = (Get-Process -Id $PID).SessionId
-$hostsFound = @(Get-CimInstance Win32_Process -Filter "Name='seriald.exe' AND SessionId=$session" |
-    Where-Object { $_.ExecutablePath -eq $exe })
+$hostsFound = @(Get-CimInstance Win32_Process -Filter "SessionId=$session AND (Name='decklab.exe' OR Name='seriald.exe')" |
+    Where-Object { $_.ExecutablePath -in $executables })
 $launches = @()
 foreach ($proc in $hostsFound) {
     $argsText = $proc.CommandLine -replace '^\s*(?:"[^"]+"|\S+)\s*', ''
@@ -17,7 +17,7 @@ foreach ($proc in $hostsFound) {
     if ($bind -eq '0.0.0.0') {
         $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.ParentProcessId)"
         if (!$parent -or $parent.Name -ne 'powershell.exe' -or $parent.CreationDate -gt $proc.CreationDate) { continue }
-        $prefix = [regex]::Escape((Join-Path $InstallDir 'Start-seriald-LAN'))
+        $prefix = [regex]::Escape((Join-Path $InstallDir 'Start-')) + '(?:decklab|seriald)-LAN'
         if ($parent.CommandLine -notmatch ('(?i)\s-File\s+"?' + $prefix + '(-Open)?\.ps1"?(?:\s|$)')) { continue }
         $mode = if ($Matches[1]) { 3 } else { 2 }
     }

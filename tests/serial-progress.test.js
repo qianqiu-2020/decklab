@@ -11,18 +11,18 @@ const expected = raw.replace('[0;23r', '[0;41r').replace('[24;0f', '[42;0f').rep
 // Every possible split of the real APT sequence must produce identical bytes.
 for (let split = 0; split <= raw.length; split++) {
   let starts = 0;
-  const mapper = window.SerialdSerialProgress.create({rows: () => 42, onStart: () => starts++});
+  const mapper = window.DeckLabSerialProgress.create({rows: () => 42, onStart: () => starts++});
   assert.equal(mapper.rewrite(raw.slice(0, split)) + mapper.rewrite(raw.slice(split)), expected);
   assert.equal(starts, 1);
 }
-const bytewise = window.SerialdSerialProgress.create({rows: () => 42});
+const bytewise = window.DeckLabSerialProgress.create({rows: () => 42});
 assert.equal(Array.from(raw, c => bytewise.rewrite(c)).join(''), expected);
 for (const untouched of ['\x1b[50;1Hfirmware\x1b[24;0f', '\x1b7\x1b[1;23r\x1b8\x1b[1A', '\x1b]0;title ' + begin + '\x07text', '\x1bP' + begin + '\x1b\\text']) {
-  const mapper = window.SerialdSerialProgress.create({rows: () => 42});
+  const mapper = window.DeckLabSerialProgress.create({rows: () => 42});
   assert.equal(Array.from(untouched, c => mapper.rewrite(c)).join(''), untouched);
 }
 let rows = 42;
-const resize = window.SerialdSerialProgress.create({rows: () => rows});
+const resize = window.DeckLabSerialProgress.create({rows: () => rows});
 resize.rewrite(begin);
 rows = 55;
 assert.equal(resize.rewrite('\x1b[24;0fbar'), '\x1b7\x1b[0;54r\x1b8\x1b[55;0fbar');
@@ -32,15 +32,15 @@ console.log('Serial progress stream tests passed');
 
 const canonicalExpected = raw.replace(begin, '\x1b[>24z' + begin);
 for (let split = 0; split <= raw.length; split++) {
-  const mapper = window.SerialdSerialProgress.create({rows: () => 54, canonical: true});
+  const mapper = window.DeckLabSerialProgress.create({rows: () => 54, canonical: true});
   assert.equal(mapper.rewrite(raw.slice(0, split)) + mapper.rewrite(raw.slice(split)), canonicalExpected,
     'canonical replay must preserve source coordinates across all frame boundaries');
 }
 
-const partial = window.SerialdSerialProgress.create({canonical: true, sourceRows: () => 54});
+const partial = window.DeckLabSerialProgress.create({canonical: true, sourceRows: () => 54});
 const finishOnly = '\x1b7\x1b[0;54r\x1b8\x1b[1A\x1b[Jroot@ubuntu:~# ';
 assert.equal(partial.rewrite(finishOnly), finishOnly, 'an evicted APT start must not turn its end into a new 55-row progress region');
 assert.equal(partial.active(), false);
-const transition = window.SerialdSerialProgress.create({canonical: true, sourceRows: () => 24});
+const transition = window.DeckLabSerialProgress.create({canonical: true, sourceRows: () => 24});
 assert.equal(transition.rewrite('\x1b[8;54;208t' + finishOnly), '\x1b[8;54;208t' + finishOnly);
 assert.equal(transition.active(), false);

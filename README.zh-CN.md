@@ -1,140 +1,26 @@
-# DeckLab
+# DeckLab 开发板工作台
 
-[English](README.md) · [文档目录](docs/README.md) · [贡献指南](CONTRIBUTING.md) · [HTTP 接口](docs/API.md)
+DeckLab 运行在接有开发板的控制机上。串口日志由控制机持续采集，网页关闭后仍会记录。团队成员可以通过浏览器使用串口、SSH、ADB 和远程桌面，检查历史日志，刷写镜像或运行用例。自动化可通过命令行、HTTP API 或 MCP 使用同一套设备和任务。
 
-DeckLab 是面向人和 AI 的开发板设备管理器：持续采集串口，统一提供网页终端、SSH、连续远程桌面、历史日志、刷机和 Agent 接口。既可独立使用，也可通过[执行接口接入现有平台](docs/INTEGRATION.md)。支持 Ubuntu 服务安装及 Windows 上位机。底层项目、命令与服务名保留 `seriald`。
+[English](README.md) · [完整文档](docs/index.md) · [下载最新版](https://github.com/qianqiu-2020/decklab/releases/latest)
 
-推荐在 Linux 控制机安装完整 DeckLab，其他电脑直接通过浏览器使用，无需客户端和节点配对。Windows 也支持完整单机使用；有明确需求时可采用[高级分离部署](docs/DISTRIBUTED.md)。
+## 从一块板开始
 
-[最新发布](https://github.com/qianqiu-2020/decklab/releases/latest) ·
-[Windows 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald-windows-x64-setup.exe) ·
-[Ubuntu amd64 安装包](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb)
+1. 在接有开发板的电脑上安装 [Windows x64 安装器](https://github.com/qianqiu-2020/decklab/releases/latest/download/decklab-windows-x64-setup.exe)，或用 `sudo apt install ./decklab_latest_amd64.deb` 安装 [Ubuntu amd64 包](https://github.com/qianqiu-2020/decklab/releases/latest/download/decklab_latest_amd64.deb)。
+2. 接上串口线，在控制机打开 `http://127.0.0.1:8898/`。设备进入列表后，点开它即可看启动输出。需要从其他电脑访问时，使用控制机提供的带访问权限的局域网链接。
+3. 需要刷机时，再接 USB 刷机线。在板卡页打开「刷机与启动」，按操作选择普通刷机、URL 极速刷机或内存启动。普通刷机先预览目标盘和实际写入范围，再确认。
 
-![DeckLab Demo：共享终端、设备列表与启动日志归档](docs/decklab-demo-zh.png?v=ui-1.5.2)
+安装升级、端口和历史数据的处理见 [Linux 安装](docs/operations/install-linux.md) 或 [Windows 安装](docs/operations/install-windows.md)。串口、刷机 USB 和 ADB 如何识别同一板卡，见 [设备身份](docs/modules/device-identity.md)。
 
-真实应用界面，使用模拟设备，无需接入硬件。Demo 中的设备不代表对应版型已经实测支持。
+## 按任务查文档
 
-1.10.0 起默认构建[完整安装包](docs/COMPLETE_INSTALL.md)，包含主程序、终端运行时、MCP、刷机执行器和 RAM 材料；Windows 同时提供 USB 驱动安装入口。历史 1.9.0 精简包仍需另装刷机组件。新增[镜像商店](docs/IMAGE_STORE.md)，默认从公开站选择镜像，也可由管理员配置组织镜像源，下载保存在控制机。
-
-## 为什么使用 DeckLab
-
-按日常排障的影响排序，它解决了单独使用 minicom 时的这些问题：
-
-1. **多板身份和日志不再跟着 tty 编号漂移。** `/dev/ttyUSB*` 重枚举后可能换号；seriald 将用户标签绑定到板卡序列号，再关联当前串口位置，按序列号保存连续档案，设备列表能直接找到目标板和当前串口。
-2. **启动记录可追溯。** 串口输出自动归档，按日期和启动次数浏览；板子跨天运行或一天重启多次，也能定位某一次启动，不必依赖手动保存终端滚屏。
-3. **BSP 升级失败时快速找差异。** 对比同一块板升级前后，或两块板的启动日志，突出新增、缺失和变化的内容，帮助定位启动停在哪一步。
-4. **人、同事和 Agent 可同时看同一块板。** 服务独占串口采集，再把实时终端、SSH 会话和操作记录共享到网页与 CLI；可生成访问链接或限定设备的 Agent 授权，无需让多个 minicom 抢同一个设备节点。
-5. **板子没有网络也能传文件。** 板端有可用 shell 时，通过已有串口连接上传、下载或在两块板间中转文件，并校验大小和哈希。
-6. **USB 串口断连可尝试软件恢复。** Ubuntu 上位机可执行 USB 软解绑/重绑定，减少反复手动拔插。
-
-设备身份优先使用 EEPROM ONIE 序列号，并兼容 vendor/upstream 内核的不同暴露方式；有效 DT `serial-number` 也直接作为正式编号；`key` 是用户标签（如 `riscv-118`、`musepi2`）。待确认的 SoC/eFuse 与 `/boot` 身份保存在 `logs/_provisional/`；没有编号时按 USB 连接隔离。标签、USB 插口和 tty 节点可改变。
-
-## 支持版型与默认配置
-
-当前实机验证范围以 **SpacemiT K3** 为准。串口和 Linux 接口可配置，不代表
-已经在其他板型验证完整功能。
-
-| 版型 | 验证状态 |
+| 要做的事情 | 文档 |
 | --- | --- |
-| SpacemiT K3（Deb1、Pico ITX / Com260） | 当前实机测试范围；不代表每种板型、系统和内核组合均已验证。 |
-| SpacemiT K1 / Milk-V Jupiter / MUSE-Pi | 仅保留历史身份探测记录，不列为完整功能已验证的支持版型。 |
-| 其他开发板 | 尚未验证；接入后需确认串口参数、身份识别、登录、SSH 和文件传输。 |
+| 看启动日志、使用 SSH、查当天串口记录 | [串口与 SSH](docs/modules/serial-and-ssh.md)、[日志与归档](docs/operations/log-operations.md) |
+| 选镜像、刷系统盘、更新固件或从内存启动 | [刷机工作区](docs/modules/flashing.md)、[镜像商店](docs/modules/image-store.md)、[内存启动](docs/modules/ram-boot.md) |
+| 给板卡绑控制槽位，远程复位或进入下载模式 | [硬件控制](docs/modules/hardware-control.md) |
+| 打开远程桌面或使用 ADB | [远程桌面](docs/modules/remote-desktop.md)、[ADB](docs/modules/adb.md) |
+| 管理任务、用例和 AI 访问范围 | [后台任务](docs/modules/tasks.md)、[Agent 接入](docs/modules/agent-access.md)、[MCP](docs/modules/mcp.md) |
+| 构建安装包或维护接口 | [模块架构](docs/modules/architecture.md)、[完整包构建](docs/development/complete-build.md)、[发布流程](docs/operations/release.md) |
 
-内置默认值沿用 K3/Bianbu 使用习惯：**115200、8N1、无流控，串口及 SSH
-初始账号为 `root/bianbu`，启用 Linux 身份探测**。这是通用配置，
-不会根据型号自动选择预设；其他系统镜像需修改账号、密码或串口参数。
-网页 SSH 连接成功后，服务端按设备记住已验证的账号密码，需更改时使用“SSH 设置”。
-普通建连不会自动设置 root 密码或修改 sshd；需要 root 访问时，由用户按串口指引分步配置。
-详见 [配置说明](docs/CONFIGURATION.md)。
-[身份矩阵](docs/DEVICE_IDENTITY_MATRIX.md) 记录的是具体历史观测，不代表完整功能认证。
-
-## 安装到 Ubuntu 上位机
-
-无需开发板即可体验：运行 `python3 seriald_demo.py`，打开
-`http://127.0.0.1:8899/`。模拟设备支持串口、SSH、跨天启动归档和文件传输；
-不会访问真实硬件或执行主机命令。Windows 安装包可运行 `seriald.exe demo`。
-详见 [Demo 使用说明](docs/DEMO.md)。
-
-从上方固定地址下载与上位机架构匹配的安装包，1.14.0 完整包支持 Ubuntu 22.04 / 24.04 amd64 和 Windows x64。
-1.7.1 起，deb 内置 MCP 服务所需的私有 Python 和依赖；安装时无需执行 pip 或配置
-`SERIALD_MCP_PYTHON`。从源码构建 amd64 包时，先按[完整包说明](docs/COMPLETE_INSTALL.md)准备组件输入，再冻结 Ubuntu 22.04 基线的运行时：
-
-```sh
-python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime
-python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dist/seriald_1.14.0_amd64.deb
-```
-
-默认运行时构建需要 Docker 和构建时下载；运行时准备后，deb 组装不访问网络。
-历史 ARM 构建代码保留，本轮不构建或验收 ARM 包。旧链接
-`seriald_latest_all.deb` 保留为 amd64 兼容别名，包内架构并非 `all`；
-其他上位机架构请参考源码运行说明，目前不提供对应的预编译 deb。
-
-包包含独立的 collector/control systemd 服务、CLI、网页与 skill，默认监听 `0.0.0.0:8898`，
-生产数据保存在 `/data/seriald-data`。安装输出会打印本机和可用的局域网访问地址。
-更新或重启 control 不会关闭 collector 持有的串口和 SSH 会话；`serialctl health` 可核对 collector PID。
-在同一 USB-UART 后更换板子前，先在网页点击“准备换板”；新板日志会先隔离，出现登录提示后自动识别一次。
-[安装、配置和旧数据迁移](docs/INSTALL.md) · [架构与模块边界](docs/ARCHITECTURE.md)
-· [硬件身份、/boot 兜底标记与重复编号处理](docs/HARDWARE_ID.md)
-· [版型与内核唯一编号矩阵](docs/DEVICE_IDENTITY_MATRIX.md)
-
-Windows 电脑可直接接管本机 COM 串口并提供相同网页与 agent API。安装构建依赖后，
-双击 `Build-seriald.cmd` 生成 Setup 安装包和便携 ZIP。推荐运行 `dist/seriald-1.14.0-windows-x64-setup.exe`：
-首次选择安装目录，后续升级记住原目录，保留 `data/`，无需手动解压覆盖。首次从便携版迁移时选中原目录。
-开始菜单提供本机、局域网无密码、局域网有密码三个入口。详见 [Windows 构建与安装](docs/WINDOWS.md)。
-也支持 Windows Docker 容器构建；IT 可按 EXE SHA-256 审批防火墙规则，升级后需重新审批。
-
-![DeckLab 架构图](docs/seriald-architecture.png?v=30ea099)
-
-## Agent 使用
-
-支持远程 MCP 的 AI 客户端只需配置上位机的 `/mcp` 地址和网页生成的 Agent 令牌，
-无需在客户端安装脚本或 Python。Windows 安装包和 1.7.1 起的 Debian 包均内置服务端
-MCP 运行依赖，正常启动即可使用。源码环境与兼容方式见 [MCP 接入](docs/MCP.md)。
-网页同时保留 CLI 和本地 stdio 兼容方式。
-
-```sh
-serialctl devices
-serialctl --device riscv-118 read
-serialctl --actor claude-code/debug-session --device riscv-118 exec --command 'uname -a'
-serialctl --device riscv-118 activity
-serialctl --device riscv-118 file-get --remote /tmp/boot.log --local ./boot.log
-```
-
-源码环境用 `python3 serialctl.py` 替代 `serialctl`。远程访问设置 `SERIALD_URL`。
-`exec` 使用当前 `--actor` 在每块板上的持久 SSH 会话：同一 agent 的后续命令复用同一个 shell，
-返回 JSON 输出和退出码，网页会一直显示可旁观的标签。会话只在显式 `ssh-close` 或网页关闭时结束；
-网页自己创建的 `web` 会话仍按独立会话处理。
-
-[Agent 接入指南](docs/AGENT_ACCESS.md) · [seriald-board skill](skills/seriald-board/SKILL.zh-CN.md)
-
-网页的“启动对比”可比较同板两次或跨板的历史启动日志，突出新增异常线索与行内变化字符；
-“文件传输”通过现有串口连接上传、下载或跨板复制，无需板子联网。
-日志面板打开时会刷新启动索引，此后每 15 秒更新；打开日期或启动归档时保留侧栏，方便连续切换，终端显示全文。
-采集器每 30 秒被动检查无输出的串口句柄，失效后自动等待重新枚举；页面同时显示最近收包与采集检查时间。
-每小时还会在已确认空闲的 Linux shell 执行无副作用命令，验证串口收发；失败时设备列表显示“探测异常”。
-在启动菜单、Vim、输入占用或文件传输期间延后一分钟重试，不盲发回车、登录或重启设备。
-没有空闲 shell 时，主机检查只能证明串口句柄有效，不能证明板子仍在响应。
-自动尺寸配置、保活探测和文件传输协议回显不进入网页终端或串口归档；传输摘要、错误与内核输出继续记录。
-
-[传输速率基线与排查方法](docs/TRANSFER_PERFORMANCE.md)
-
-## 开发与检查
-
-```sh
-python3 -m unittest discover -s tests
-node tests/frontend.test.js
-node tools/browser_smoke.js
-python3 -m compileall -q seriald_core seriald.py serialctl.py
-bash -n rescue.sh
-python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime
-python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-```
-
-`seriald.py` 是 control 薄入口，collector 入口为 `python3 -m seriald_core.collector_server`；后端在
-`seriald_core/`，布局、样式和交互分属 `index.html`、`static/app.css`、`static/app.js`。
-核心 Python 后端使用标准库，SSH 需要系统 `ssh` 与 `sshpass`；前端依赖本地 `vendor/`。
-MCP 使用独立进程及官方 SDK；源码运行的依赖安装见 [MCP 接入](docs/MCP.md)。
-浏览器检查需要 Node.js 22+ 和 Chrome（可用 `CHROME_BIN` 指定），使用隔离模拟设备验证真实 xterm，截图输出到 `dist/`。
-源码运行必须先启动 collector，再运行 `python3 seriald.py 8898 127.0.0.1`；只有 collector 打开串口。
-隔离开发可设置 `SERIALD_BASE` 为临时目录、`SERIALD_BY_PATH` 为空测试目录；不要打开真实串口验证改动。
+没有开发板时可以运行 `python3 decklab_demo.py`，再打开 `http://127.0.0.1:8899/` 体验设备列表、日志和终端。[演示环境](docs/operations/demo.md)

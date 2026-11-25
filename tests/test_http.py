@@ -9,15 +9,15 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core import __version__
+from decklab_core import __version__
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-from seriald_core import web as sd
-from seriald_core.devices import Manager
-from seriald_core import control_server as control
-from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
-from seriald_core import transport as tr
-from seriald_core.models import Board
+from decklab_core import web as sd
+from decklab_core.devices import Manager
+from decklab_core import control_server as control
+from decklab_core.agent_grants import AgentGrantStore, attach_agent_grants
+from decklab_core import transport as tr
+from decklab_core.models import Board
 
 
 class HandlerTests(unittest.TestCase):
@@ -178,13 +178,13 @@ class HandlerTests(unittest.TestCase):
             for route in ('/api/artifact', '/api/artifact-download'):
                 handler = self.control_handler(route + '?id=opaque&key=A&serial=SN2')
                 handler.command, handler.auth_token, handler.grant_store = 'GET', 'owner', store
-                handler.headers = {'Authorization': 'Bearer ' + token, 'X-Seriald-Actor': 'web'}
+                handler.headers = {'Authorization': 'Bearer ' + token, 'X-DeckLab-Actor': 'web'}
                 reply.read.side_effect = [b'{}', b'']
                 with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
                     handler.do_GET()
                 forwarded = connection.request.call_args
                 self.assertIn('serial=SN1', forwarded.args[1])
-                self.assertEqual(forwarded.kwargs['headers']['X-Seriald-Actor'], grant['actor'])
+                self.assertEqual(forwarded.kwargs['headers']['X-DeckLab-Actor'], grant['actor'])
             body = json.dumps({'id': 'opaque', 'key': 'A', 'serial': 'SN2',
                                'offset': 0, 'actor': 'web', 'data_b64': 'x' * 100000}).encode()
             append = self.control_handler('/api/artifact-append')
@@ -233,7 +233,7 @@ class HandlerTests(unittest.TestCase):
     def test_optional_control_token_supports_browser_basic_and_cli_bearer(self):
         import base64 as b64
         for authorization in ('Bearer secret',
-                              'Basic ' + b64.b64encode(b'seriald:secret').decode()):
+                              'Basic ' + b64.b64encode(b'decklab:secret').decode()):
             with self.subTest(authorization=authorization):
                 handler = self.control_handler('/healthz')
                 handler.auth_token = 'secret'
@@ -245,7 +245,7 @@ class HandlerTests(unittest.TestCase):
         denied.do_GET()
         self.assertEqual(denied.send_response.call_args.args[0], 401)
         headers = dict(call.args for call in denied.send_header.call_args_list)
-        self.assertIn('Basic realm="seriald"', headers['WWW-Authenticate'])
+        self.assertIn('Basic realm="decklab"', headers['WWW-Authenticate'])
 
     def test_connection_grant_exposes_only_live_attachment_even_after_identity_key_changes(self):
         store = AgentGrantStore(':memory:')
@@ -267,8 +267,8 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(self.result(handler)[1]['devices'][0]['key'], 'new-board-label')
         self.assertEqual(len(self.result(handler)[1]['devices']), 1)
         self.assertNotIn('storage', self.result(handler)[1])
-        self.assertEqual(connection.request.call_args.kwargs['headers']['X-Seriald-Connection'], 'attachment-1')
-        self.assertEqual(connection.request.call_args.kwargs['headers']['X-Seriald-Actor'], grant['actor'])
+        self.assertEqual(connection.request.call_args.kwargs['headers']['X-DeckLab-Connection'], 'attachment-1')
+        self.assertEqual(connection.request.call_args.kwargs['headers']['X-DeckLab-Actor'], grant['actor'])
 
     def test_scoped_device_list_omits_unrelated_controller_usb_warnings(self):
         store = AgentGrantStore(':memory:')
@@ -304,14 +304,14 @@ class HandlerTests(unittest.TestCase):
                 handler.command, handler.auth_token, handler.grant_store = 'POST' if payload else 'GET', 'owner', store
                 raw = json.dumps(payload).encode() if payload else b''
                 handler.headers = {'Authorization': 'Bearer ' + token, 'Content-Length': str(len(raw)),
-                                   'X-Seriald-Connection': 'replacement', 'X-Seriald-Actor': 'web'}
+                                   'X-DeckLab-Connection': 'replacement', 'X-DeckLab-Actor': 'web'}
                 handler.rfile = io.BytesIO(raw)
                 reply.read.side_effect = [b'{}', b'']
                 with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
                     handler.do_POST() if payload else handler.do_GET()
                 forwarded = connection.request.call_args
-                self.assertEqual(forwarded.kwargs['headers']['X-Seriald-Connection'], 'attachment-1')
-                self.assertEqual(forwarded.kwargs['headers']['X-Seriald-Actor'], grant['actor'])
+                self.assertEqual(forwarded.kwargs['headers']['X-DeckLab-Connection'], 'attachment-1')
+                self.assertEqual(forwarded.kwargs['headers']['X-DeckLab-Actor'], grant['actor'])
                 if payload:
                     target = json.loads(forwarded.kwargs['body'])
                     self.assertEqual(target['connection_id'], 'attachment-1')
@@ -353,7 +353,7 @@ class HandlerTests(unittest.TestCase):
             with self.subTest(current=current, alive=alive):
                 self.device.connection_id, self.device.fd = current, 1 if alive else None
                 handler = self.handler('/api/send', body, {'Content-Length': str(len(body)),
-                                       'X-Seriald-Connection': 'attachment-1'})
+                                       'X-DeckLab-Connection': 'attachment-1'})
                 handler.do_POST()
                 self.assertEqual(self.result(handler)[0], 404)
                 self.device.send.assert_not_called()
@@ -365,7 +365,7 @@ class HandlerTests(unittest.TestCase):
         self.device.send.return_value = (True, '')
         body = json.dumps({'key': 'board-key', 'connection_id': 'attachment-1', 'data': 'help\r'}).encode()
         handler = self.handler('/api/send', body, {'Content-Length': str(len(body)),
-                               'X-Seriald-Connection': 'attachment-1', 'X-Seriald-Actor': 'shared-agent/test'})
+                               'X-DeckLab-Connection': 'attachment-1', 'X-DeckLab-Actor': 'shared-agent/test'})
         handler.do_POST()
         self.assertEqual(self.result(handler)[0], 200)
         self.device.send.assert_called_once_with('help\r')
@@ -544,13 +544,13 @@ class HandlerTests(unittest.TestCase):
 
             task_query = self.control_handler('/api/task?key=A&serial=SN2&id=task-id&actor=web')
             task_query.auth_token, task_query.grant_store = 'owner', store
-            task_query.headers = dict(headers, **{'X-Seriald-Actor': 'web'})
+            task_query.headers = dict(headers, **{'X-DeckLab-Actor': 'web'})
             task_query.command = 'GET'
             with mock.patch.object(control, 'UnixHTTPConnection', return_value=connection):
                 task_query.do_GET()
             forwarded = connection.request.call_args
             self.assertIn('serial=SN1', forwarded.args[1])
-            self.assertEqual(forwarded.kwargs['headers']['X-Seriald-Actor'], grant['actor'])
+            self.assertEqual(forwarded.kwargs['headers']['X-DeckLab-Actor'], grant['actor'])
             body = json.dumps({'key': 'A', 'kind': 'ssh-enable'}).encode()
             privileged = self.control_handler('/api/task-start')
             privileged.auth_token, privileged.grant_store = 'owner', store
@@ -602,7 +602,7 @@ class HandlerTests(unittest.TestCase):
             owner = self.control_handler('/api/access')
             owner.auth_token = 'secret'
             share = owner._new_share()
-            headers = {'Cookie': 'seriald_share=' + share}
+            headers = {'Cookie': 'decklab_share=' + share}
             access = self.control_handler('/api/access')
             access.auth_token, access.grant_store, access.headers = 'secret', store, headers
             access.do_GET()
@@ -671,9 +671,9 @@ class HandlerTests(unittest.TestCase):
         self.device.close_session.assert_called_once_with('ssh1')
 
     def test_agent_skill_and_cli_are_self_hosted_without_login(self):
-        for route in ('/serialctl.py', '/skills/seriald-board/SKILL.md',
-                      '/skills/seriald-board/SKILL.md?lang=en',
-                      '/skills/seriald-board/SKILL.md?lang=zh-CN'):
+        for route in ('/decklabctl.py', '/skills/decklab-board/SKILL.md',
+                      '/skills/decklab-board/SKILL.md?lang=en',
+                      '/skills/decklab-board/SKILL.md?lang=zh-CN'):
             with self.subTest(route=route):
                 handler = self.control_handler(route)
                 handler.auth_token = 'owner-secret'
@@ -684,7 +684,7 @@ class HandlerTests(unittest.TestCase):
                                 if call.args[0].lower() == 'content-type']
                 self.assertEqual(len(content_type), 1)
                 self.assertIn('charset=utf-8', content_type[0])
-                source = ('skills/seriald-board/SKILL.zh-CN.md' if 'lang=zh-CN' in route
+                source = ('skills/decklab-board/SKILL.zh-CN.md' if 'lang=zh-CN' in route
                           else route.split('?', 1)[0].lstrip('/'))
                 self.assertEqual(handler.wfile.getvalue(), (ROOT / source).read_bytes())
                 if '/SKILL.md' in route:
@@ -693,7 +693,7 @@ class HandlerTests(unittest.TestCase):
 
     def test_mcp_source_downloads_are_explicit_utf8_public_routes(self):
         with tempfile.TemporaryDirectory() as directory:
-            for name in ('seriald_mcp.py', 'requirements-mcp.txt', 'pyproject.toml'):
+            for name in ('decklab_mcp.py', 'requirements-mcp.txt', 'pyproject.toml'):
                 payload = ('# fixture ' + name + ' 中文\n').encode()
                 pathlib.Path(directory, name).write_bytes(payload)
                 handler = self.control_handler('/' + name)

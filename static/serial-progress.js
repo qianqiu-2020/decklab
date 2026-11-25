@@ -89,5 +89,5 @@
       }
     };
   }
-  global.SerialdSerialProgress = { create: create };
+  global.DeckLabSerialProgress = { create: create };
 })(window);

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core import handoff
+from decklab_core import handoff
 
 
 class HandoffTests(unittest.TestCase):

@@ -1,140 +1,49 @@
 # DeckLab
 
-[简体中文](README.zh-CN.md) · [Documentation](docs/README.md) · [Installation](docs/INSTALL.md) · [Windows](docs/WINDOWS.md) · [Agent access](docs/AGENT_ACCESS.md)
+DeckLab is a development-board workbench. A control host connects to boards over
+serial and USB, keeps logs while browsers are closed, and exposes terminals,
+flashing, desktop sessions and automation to the people who use those boards.
 
-A development-board device manager for people and AI agents, usable on its own
-or through an existing platform's [execution interfaces](docs/INTEGRATION.md). Capture serial
-output continuously, access boards through a browser or agent, and keep boot
-history attached to a stable board identity rather than a changing tty number.
+[简体中文](README.zh-CN.md) · [Documentation](docs/index.md) · [Releases](https://github.com/qianqiu-2020/decklab/releases/latest)
 
-[Latest release](https://github.com/qianqiu-2020/decklab/releases/latest) ·
-[Windows installer](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald-windows-x64-setup.exe) ·
-[Ubuntu amd64](https://github.com/qianqiu-2020/decklab/releases/latest/download/seriald_latest_amd64.deb)
+## Install and open a board
 
-![DeckLab demo: shared terminal, board list and boot archives](docs/decklab-demo.png?v=ui-1.5.2)
+Download the [Windows x64 installer](https://github.com/qianqiu-2020/decklab/releases/latest/download/decklab-windows-x64-setup.exe)
+or the [Ubuntu amd64 package](https://github.com/qianqiu-2020/decklab/releases/latest/download/decklab_latest_amd64.deb).
+Install it on the computer that is physically connected to the boards. On Ubuntu,
+run `sudo apt install ./decklab_latest_amd64.deb`. On Windows, run the installer
+and start DeckLab from the Start menu. Open `http://127.0.0.1:8898/` on that
+computer. For access from another computer, use the authenticated LAN address
+shown by DeckLab.
 
-Actual UI with simulated boards; no physical hardware is required. Demo devices
-illustrate the workflow and do not establish hardware support.
+Connect a board's serial adapter to capture its console. Connect its USB flashing
+cable as well if you need to load an image. The two links are independently
+identified because they can appear at different times and serve different
+purposes. The [device identity guide](docs/modules/device-identity.md) explains
+how to confirm that both belong to the same board.
 
-Install the complete application on a Linux board controller; other computers only
-need a browser. Windows standalone hosts are also supported. Starting with 1.10.0,
-complete builds include flashing tools and RAM loaders, plus the Windows USB driver.
-Historical 1.9.0 packages require separately installed flashing components.
-See [installation](docs/INSTALL.md), [complete builds](docs/COMPLETE_INSTALL.md),
-and the [image store](docs/IMAGE_STORE.md).
+For existing installations, use the [Linux upgrade instructions](docs/operations/install-linux.md#upgrade-an-existing-installation)
+or the [Windows upgrade instructions](docs/operations/install-windows.md#upgrade-an-existing-installation).
 
-## Why DeckLab
+## Choose the operation
 
-- Share serial and SSH terminals with colleagues and agents, with visible session history.
-- Use a continuous VNC/RDP desktop beside board sessions, with server-held credentials and the same input ownership as agent tools.
-- Keep per-board logs across reconnects and USB serial renumbering.
-- Browse logs by date or boot and compare boots to investigate BSP regressions.
-- Transfer files over serial when networking is unavailable, including board-to-board copies.
-- Recover a stuck USB serial connection without physically visiting the host where supported.
-- Install an Ubuntu service or a native Windows host with three simple access modes.
-
-Ordinary commands should use SSH; use serial for bootloader, kernel and networking
-failures. Agent grants are revocable and can be scoped to one board. Runtime
-service names, command names and installation paths retain the `seriald` name.
-
-Remote MCP clients connect to the host's `/mcp` URL with a web-issued Agent token;
-no client-side Python or adapter installation is required. Windows and Debian
-packages include the MCP server runtime. Debian 1.7.1 includes a private Python
-runtime and SDK, so installation needs no pip command or `SERIALD_MCP_PYTHON`
-setting. Source setup and optional compatibility modes are documented in the
-[MCP guide](docs/MCP.md).
-
-## Install and use
-
-![DeckLab architecture](docs/seriald-architecture-en.png?v=english-1)
-
-Try without hardware: `python3 seriald_demo.py`, then open
-**http://127.0.0.1:8899/**. See the [demo guide](docs/DEMO.md) for simulated
-boot comparison, SSH and file transfers.
-
-Download the package matching the host architecture from the links above.
-The 1.14.0 complete packages support Ubuntu 22.04 / 24.04 amd64 and Windows x64. To build an
-amd64 package from source, prepare its MCP runtime on the Ubuntu 22.04 baseline
-first. Prepare the [reviewed component inputs](docs/COMPLETE_INSTALL.md) before these commands (Docker and build-time downloads are required):
-
-```sh
-python3 tools/build_linux_mcp.py --arch amd64 --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output build/linux-mcp/amd64/runtime
-python3 tools/build_deb.py --runtime build/linux-mcp/amd64/runtime
-sudo apt install ./dist/seriald_1.14.0_amd64.deb
-```
-
-Historical ARM build code remains, but ARM packages are not built or validated for 1.14.0. Debian assembly is offline once the
-runtime is prepared; a missing or invalid runtime stops the build. See the
-[installation guide](docs/INSTALL.md) for details and source use on other
-architectures. The legacy `seriald_latest_all.deb` download remains an amd64
-compatibility alias; its package architecture is no longer `all`.
-
-On Windows, build with Python 3.12 x64 and Inno Setup 6.5+ using
-`Build-seriald.cmd`, then run the generated Setup EXE. Upgrades retain runtime
-`data/`. Installed users do not need Python. See the Windows guide for download,
-LAN access, firewall approval and portable ZIP alternatives.
-
-```sh
-python3 serialctl.py --url http://127.0.0.1:8898 devices
-```
-
-The web UI can generate agent access instructions with hosted client and skill
-links. Serial input is shared; coordinate interactive work with other users.
-
-The collector checks host serial handles every 30 seconds and verifies idle
-Linux consoles with an hourly round trip. Busy or owned input defers verification;
-failed probes remain visible on device cards. Automatic setup and transfer
-protocol echoes stay out of shared screens and archives; errors and kernel
-messages remain visible.
-
-## Board support and defaults
-
-Physical-board validation currently focuses on **SpacemiT K3**. Configurable
-serial and Linux interfaces do not imply validation on other board families.
-
-| Board family | Validation status |
+| I need to… | Where to start |
 | --- | --- |
-| SpacemiT K3 (Deb1, Pico ITX / Com260) | Current physical-board test scope; not every board/OS/kernel combination has been validated. |
-| SpacemiT K1 / Milk-V Jupiter / MUSE-Pi | Historical identity-probe observations only; not a validated full-function support claim. |
-| Other boards | Not validated; test serial framing, identity, login, SSH and file transfer before relying on them. |
+| Follow a boot, recover a console or compare two runs | [Serial sessions and archives](docs/modules/serial-and-ssh.md) |
+| Write an image, select a disk or recover NOR | [Flashing](docs/modules/flashing.md) |
+| Select an image from a shared repository | [Image store](docs/modules/image-store.md) |
+| Open a board's graphical session | [Remote desktop](docs/modules/remote-desktop.md) |
+| Run a test or give an agent access to one board | [Tasks](docs/modules/tasks.md) and [agent access](docs/modules/agent-access.md) |
+| Put the browser service and hardware controller on different hosts | [Distributed nodes](docs/modules/distributed-nodes.md) |
 
-Built-in defaults follow the K3/Bianbu workflow: **115200 baud, 8N1, no flow
-control, `root` / `bianbu` for console and initial SSH login, and Linux identity
-probing**. These are generic settings, not automatic model detection. Override
-credentials and framing for other OS images. Successful web SSH connections
-remember verified credentials on the server for that device; use **SSH settings**
-to change them. Normal connections do not set root passwords or edit sshd policy;
-root access can be configured by the user with the separate serial-console guide.
-See [configuration](docs/CONFIGURATION.md) and the
-[historical identity matrix](docs/DEVICE_IDENTITY_MATRIX.md). The identity matrix
-records specific observations, not full-function certification.
+## Try it or build it
 
-## Scope
+Run `python3 decklab_demo.py` to open a hardware-free workspace at
+`http://127.0.0.1:8899/`. It provides simulated boards and logs for exploring
+the interface. [Demo guide](docs/operations/demo.md)
 
-Ubuntu service installation and native Windows hosting are available. CI and
-simulated transports are separate from physical-board validation. Firmware-only
-targets can use manual mode without Linux shell probes; unconfirmed identities
-remain provisional.
-
-Two deployment modes are supported: a Linux/Windows single-machine workbench,
-or a Linux/Windows Web host connected to a dedicated Linux hardware controller.
-The controller owns board operations and data. Windows hardware acceptance focuses
-on local serial and flashing; reset integration is validated on the Linux controller.
-
-The service is intended for local or trusted-LAN development. Authentication is
-optional. Explicit SSH setup and manual root configuration can modify a
-development board, and SSH host keys can change after flashing. See
-[deployment scope](SECURITY.md).
-
-## Contribute
-
-[CONTRIBUTING.md](CONTRIBUTING.md) describes hardware-free tests, module
-boundaries and release maintenance. Do not start a second collector on active
-devices.
-
-## License
-
-Application code and original branding: [Apache-2.0](LICENSE).
-Bundled and build dependencies retain their licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
-
-[部署模式](docs/DISTRIBUTED.md)：Linux/Windows 单机，或 Linux/Windows 上位机与专用 Linux 控制机。
+See the [architecture](docs/modules/architecture.md) for code ownership and the
+[complete build guide](docs/development/complete-build.md) for Linux and Windows
+build inputs. The [contribution guide](CONTRIBUTING.md) lists the checks for
+application changes. Review the [license](LICENSE) and
+[third-party notices](THIRD_PARTY.md) before redistributing packages.

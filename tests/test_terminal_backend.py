@@ -7,10 +7,10 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core.terminal_backend import ENGINE, SharedTerminal, node_binary, terminal_payload
-from seriald_core.sessions_windows import SshSession
-from seriald_core.config import SCROLLBACK
-from seriald_core.device import Device
+from decklab_core.terminal_backend import ENGINE, SharedTerminal, node_binary, terminal_payload
+from decklab_core.sessions_windows import SshSession
+from decklab_core.config import SCROLLBACK
+from decklab_core.device import Device
 
 
 @unittest.skipUnless(node_binary(), 'requires the packaged Node terminal runtime')
@@ -210,7 +210,7 @@ class SharedTerminalTests(unittest.TestCase):
     @unittest.skipIf(sys.platform == 'win32', 'Linux sshpass wrapper signaling')
     def test_linux_resize_explicitly_notifies_the_sshpass_wrapper(self):
         import signal
-        from seriald_core.sessions import SshSession as LinuxSession
+        from decklab_core.sessions import SshSession as LinuxSession
         session = self.session(LinuxSession)
         session.proc = mock.Mock()
         session.proc.poll.return_value = None
@@ -234,7 +234,7 @@ class SharedTerminalTests(unittest.TestCase):
         if sys.platform == 'win32':
             device.fd.write.side_effect = len
         self.addCleanup(device.terminal.screen.close)
-        with mock.patch('seriald_core.device.write_serial', return_value=(True, '')) as write, \
+        with mock.patch('decklab_core.device.write_serial', return_value=(True, '')) as write, \
                 mock.patch.object(device, 'record_input') as record:
             self.assertFalse(device._protocol_reply('\x1b[2;1R', 'old-connection'))
             write.assert_not_called()
@@ -245,7 +245,7 @@ class SharedTerminalTests(unittest.TestCase):
     def test_both_transport_adapters_use_the_same_response_and_snapshot_contract(self):
         adapters = [SshSession]
         try:
-            from seriald_core.sessions import SshSession as LinuxSession
+            from decklab_core.sessions import SshSession as LinuxSession
             adapters.append(LinuxSession)
         except ImportError:
             pass

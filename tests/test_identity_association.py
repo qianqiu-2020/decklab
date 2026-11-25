@@ -5,10 +5,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core import device as device_module
-from seriald_core import devices
-from seriald_core.storage import IdentityConfirmationRequired, IdentityError, Store
-from seriald_core.task_actions import TaskActions
+from decklab_core import device as device_module
+from decklab_core import devices
+from decklab_core.storage import IdentityConfirmationRequired, IdentityError, Store
+from decklab_core.task_actions import TaskActions
 
 
 class IdentityAssociationTests(unittest.TestCase):

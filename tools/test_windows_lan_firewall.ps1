@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'windows-launchers\Get-seriald-LANFirewall.ps1')
-$exe = 'C:\Example\seriald.exe'
+. (Join-Path $PSScriptRoot 'windows-launchers\Get-decklab-LANFirewall.ps1')
+$exe = 'C:\Example\decklab.exe'
 $allow = @{Action=1; Protocol=6; Profiles=3; ApplicationName=$exe; InterfaceTypes='All';
            LocalAddresses='*'; RemoteAddresses='LocalSubnet'; LocalPorts='8897-8899'; RemotePorts='*'}
 function Expect($Expected,$Rules,[int]$Port=8898) {
@@ -10,7 +10,7 @@ function Expect($Expected,$Rules,[int]$Port=8898) {
 }
 Expect Allowed @($allow)
 Expect Missing @($allow) 8443
-foreach ($change in @(@{ApplicationName='C:\Old\seriald.exe'},@{Profiles=4},@{Protocol=17})) {
+foreach ($change in @(@{ApplicationName='C:\Old\decklab.exe'},@{Profiles=4},@{Protocol=17})) {
     $other = $allow.Clone()
     foreach ($key in $change.Keys) { $other[$key] = $change[$key] }
     Expect Missing @($other)

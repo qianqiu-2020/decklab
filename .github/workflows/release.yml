@@ -28,24 +28,19 @@ jobs:
           DECKLAB_COMPONENTS_URL: ${{ vars.COMPONENTS_LINUX_AMD64_URL || secrets.COMPONENTS_LINUX_AMD64_URL || 'https://github.com/qianqiu-2020/decklab/releases/download/components-1.14.0/decklab-components-1.14.0-linux-amd64.zip' }}
           DECKLAB_COMPONENTS_SHA256: ${{ vars.COMPONENTS_LINUX_AMD64_SHA256 || secrets.COMPONENTS_LINUX_AMD64_SHA256 || '804be4bc200ddefbc99a614e676ba829670100556d6da405bb3597cfb667127c' }}
         run: python tools/fetch_install_components.py --platform linux-amd64
-      - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
-        run: |
-          python -m venv build/linux-mcp-venv
-          worker_python=build/linux-mcp-venv/bin/python
-          "$worker_python" -m pip download --disable-pip-version-check --only-binary=:all: --require-hashes -r packaging/linux-mcp-requirements.lock -d build/linux-mcp-wheels
-          "$worker_python" -m pip install --disable-pip-version-check --no-index --find-links build/linux-mcp-wheels --only-binary=:all: --require-hashes -r packaging/linux-mcp-requirements.lock
-          "$worker_python" tools/build_linux_mcp.py --local --wheelhouse build/linux-mcp-wheels --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
+      - name: Freeze the included MCP worker in the Ubuntu 22.04 build container
+        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
       - run: python tools/build_deb.py --local-fast --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
       - name: Check fresh installs and upgrades on Ubuntu 22.04 and 24.04 in parallel
         run: |
-          curl --fail --location --retry 3 https://github.com/qianqiu-2020/decklab/releases/download/v1.7.0/seriald_1.7.0_all.deb --output build/seriald_1.7.0_all.deb
-          echo 'b0020684d469cec4db2fa36f5e967f81c860deb236fbdd1d25da4831857cb1a9  build/seriald_1.7.0_all.deb' | sha256sum --check
+          curl --fail --location --retry 3 https://github.com/qianqiu-2020/decklab/releases/download/v1.7.0/seriald_1.7.0_all.deb --output build/decklab_1.7.0_all.deb
+          echo 'b0020684d469cec4db2fa36f5e967f81c860deb236fbdd1d25da4831857cb1a9  build/decklab_1.7.0_all.deb' | sha256sum --check
           pids=()
           for ubuntu in 22.04 24.04; do
             for mode in fresh upgrade; do
               args=()
-              if [[ $mode == upgrade ]]; then args+=(--upgrade-from build/seriald_1.7.0_all.deb); fi
-              python tools/test_deb_container.py --image "ubuntu:$ubuntu" --package dist/seriald_*_amd64.deb "${args[@]}" >"build/install-$ubuntu-$mode.log" 2>&1 &
+              if [[ $mode == upgrade ]]; then args+=(--upgrade-from build/decklab_1.7.0_all.deb); fi
+              python tools/test_deb_container.py --image "ubuntu:$ubuntu" --package dist/decklab_*_amd64.deb "${args[@]}" >"build/install-$ubuntu-$mode.log" 2>&1 &
               pids+=("$!")
             done
           done
@@ -55,11 +50,11 @@ jobs:
           exit "$result"
       - uses: actions/upload-artifact@v4
         with:
-          name: seriald-linux-${{ matrix.arch }}
+          name: decklab-linux-${{ matrix.arch }}
           path: dist/*.deb
           compression-level: 0
   windows:
-    uses: ./.github/workflows/windows-portable.yml
+    uses: ./.github/workflows/windows-installer.yml
     secrets: inherit
   publish:
     needs: [linux, windows]
@@ -72,7 +67,7 @@ jobs:
         run: python3 tools/release_notes.py release-notes.md
       - uses: actions/download-artifact@v4
         with:
-          pattern: seriald-*
+          pattern: decklab-*
           merge-multiple: true
           path: packages
       - name: Create reviewable release
@@ -81,11 +76,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cd packages
-          cp "seriald_${GITHUB_REF_NAME#v}_amd64.deb" seriald_latest_amd64.deb
+          cp "decklab_${GITHUB_REF_NAME#v}_amd64.deb" decklab_latest_amd64.deb
           # Keep existing x86 download links usable; the package metadata is amd64.
-          cp "seriald_${GITHUB_REF_NAME#v}_amd64.deb" seriald_latest_all.deb
-          sha256sum "seriald_${GITHUB_REF_NAME#v}_amd64.deb" > linux-SHA256SUMS.txt
-          cp "seriald-${GITHUB_REF_NAME#v}-windows-x64-setup.exe" seriald-windows-x64-setup.exe
-          sha256sum *.deb *.exe *.zip > SHA256SUMS.txt
+          cp "decklab_${GITHUB_REF_NAME#v}_amd64.deb" decklab_latest_all.deb
+          sha256sum "decklab_${GITHUB_REF_NAME#v}_amd64.deb" > linux-SHA256SUMS.txt
+          cp "decklab-${GITHUB_REF_NAME#v}-windows-x64-setup.exe" decklab-windows-x64-setup.exe
+          sha256sum *.deb *.exe windows-install-verification.json > SHA256SUMS.txt
           python3 ../tools/verify_release.py . --version "${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft --notes-file ../release-notes.md --title "DeckLab $GITHUB_REF_NAME" ./*

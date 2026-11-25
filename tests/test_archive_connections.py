@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core import device as device_module
-from seriald_core.queries import ArchiveDownload, ArchiveQueries
+from decklab_core import device as device_module
+from decklab_core.queries import ArchiveDownload, ArchiveQueries
 from test_connection_access import api_request, protected_connection
 
 

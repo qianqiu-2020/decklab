@@ -8,8 +8,8 @@ from unittest import mock
 import zipfile
 
 import test_flash_integration as integration
-from seriald_core.image_workspaces import ImageWorkspaces, origin_path
-from seriald_core.flash_runner import LocalFlashExecutor
+from decklab_core.image_workspaces import ImageWorkspaces, origin_path
+from decklab_core.flash_runner import LocalFlashExecutor
 
 
 class WorkspaceTests(unittest.TestCase):
@@ -111,8 +111,8 @@ class WorkspaceTests(unittest.TestCase):
             self.assertTrue((directory/'SHA256SUMS').read_text().startswith(hashlib.sha256(content.encode()).hexdigest()))
 
     def test_choose_table_uses_sealed_geometry_and_keeps_original_directory(self):
-        from seriald_core.image_tables import describe
-        from seriald_core.image_preparation import for_manager
+        from decklab_core.image_tables import describe
+        from decklab_core.image_preparation import for_manager
         with integration.protected_flashing() as f, tempfile.TemporaryDirectory() as tmp:
             root = self.directory(tmp)
             (root / 'fastboot.yaml').write_text(json.dumps({'support':['k1x','k1pro']}))

@@ -7,10 +7,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.actions import DeviceActions
-from seriald_core.device import Device
-from seriald_core.devices import Manager
-from seriald_core.storage import IdentityError, Store
+from decklab_core.actions import DeviceActions
+from decklab_core.device import Device
+from decklab_core.devices import Manager
+from decklab_core.storage import IdentityError, Store
 
 
 class PendingLabelTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class PendingLabelTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.store = Store(self.root / 'registry.sqlite3')
         self.addCleanup(self.store.close)
-        for module in ('seriald_core.device', 'seriald_core.devices'):
+        for module in ('decklab_core.device', 'decklab_core.devices'):
             patcher = mock.patch(module + '.LOG_ROOT', str(self.root / 'logs'))
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -123,7 +123,7 @@ class PendingLabelTests(unittest.TestCase):
 
 class PendingLabelMigrationTests(unittest.TestCase):
     def test_schema_eight_upgrade_keeps_existing_board_and_private_snapshot(self):
-        from seriald_core.schema import _SCHEMAS, REGISTRY_MIGRATIONS
+        from decklab_core.schema import _SCHEMAS, REGISTRY_MIGRATIONS
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'registry.sqlite3'
             db = sqlite3.connect(path)

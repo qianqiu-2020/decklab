@@ -9,7 +9,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from seriald_core.desktop_providers import RDPDesktop, VNCDesktop, LiveFrames, validate_live_input
+from decklab_core.desktop_providers import RDPDesktop, VNCDesktop, LiveFrames, validate_live_input
 
 
 @unittest.skipUnless(importlib.util.find_spec('PIL'), 'optional desktop image dependency not installed')

@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from seriald_core.ramboot_tasks import K3_PICO_MODEL, _run, start
-from seriald_core.tasks import TaskError
+from decklab_core.ramboot_tasks import K3_PICO_MODEL, _run, start
+from decklab_core.tasks import TaskError
 
 
 class RAMBootTaskTests(unittest.TestCase):
@@ -16,7 +16,7 @@ class RAMBootTaskTests(unittest.TestCase):
         actions = SimpleNamespace(manager=manager, store=Mock(), _device=Mock(return_value=SimpleNamespace(serial='')),
                                   _target=Mock(return_value=(SimpleNamespace(profile_data={}), Mock())))
         actions.store.find_request.return_value = None
-        with patch('seriald_core.ramboot_tasks._services'):
+        with patch('decklab_core.ramboot_tasks._services'):
             result = start(actions, {'target_id': 'target'}, 'agent:external')
         self.assertEqual(result.status, 403)
         manager.artifacts.get.assert_not_called()
@@ -41,7 +41,7 @@ class RAMBootTaskTests(unittest.TestCase):
             manager.store.has_conflict.return_value = False
             error = TaskError('helper is still running')
             error.cleanup_confirmed = False
-            with patch('seriald_core.ramboot_tasks._discovery', return_value=discovery),                  patch('seriald_core.board_ownership.ownership_for'),                  patch('seriald_core.ramboot_tasks._prepare', side_effect=error):
+            with patch('decklab_core.ramboot_tasks._discovery', return_value=discovery),                  patch('decklab_core.board_ownership.ownership_for'),                  patch('decklab_core.ramboot_tasks._prepare', side_effect=error):
                 with self.assertRaisesRegex(TaskError, 'helper is still running'):
                     _run(actions, executor, binding, serial, row, context, 'attempt', maintenance)
             manager.artifacts.claim.assert_called_once_with(row['id'], context.id, 'web', None)

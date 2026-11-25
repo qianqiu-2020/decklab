@@ -16,18 +16,18 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core import control_server, web
-from seriald_core.agent_grants import AgentGrantStore
-from seriald_core.board_maintenance import maintenance_for
-from seriald_core.devices import Manager
-from seriald_core.device import Device
-from seriald_core.flash_runner import FlashBook, FlashRunnerError, LocalFlashExecutor
-from seriald_core.flash_store import FlashStore, MAX_EVENTS
-from seriald_core.flash_tasks import FlashActions, _system_os
-from seriald_core.httpd import BoundedThreadingTCPServer
-from seriald_core.storage import Store
-from seriald_core.tasks import TaskError
-from seriald_core.transactions import transactions_for
+from decklab_core import control_server, web
+from decklab_core.agent_grants import AgentGrantStore
+from decklab_core.board_maintenance import maintenance_for
+from decklab_core.devices import Manager
+from decklab_core.device import Device
+from decklab_core.flash_runner import FlashBook, FlashRunnerError, LocalFlashExecutor
+from decklab_core.flash_store import FlashStore, MAX_EVENTS
+from decklab_core.flash_tasks import FlashActions, _system_os
+from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.storage import Store
+from decklab_core.tasks import TaskError
+from decklab_core.transactions import transactions_for
 from test_connection_access import api_request
 
 
@@ -161,7 +161,7 @@ def protected_flashing():
             agent_tokens = {}
         with BoundedThreadingTCPServer(('127.0.0.1', 0), web.Handler) as collector, \
                 BoundedThreadingTCPServer(('127.0.0.1', 0), Control) as control, \
-                mock.patch('seriald_core.devices.open_serial', side_effect=AssertionError('must not open UART')):
+                mock.patch('decklab_core.devices.open_serial', side_effect=AssertionError('must not open UART')):
             collector.manager, Control.collector_socket = manager, collector.server_address
             workers = [threading.Thread(target=server.serve_forever, daemon=True)
                        for server in (collector, control)]
@@ -280,7 +280,7 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(repeated['task']['id'], payload['id'])
 
     def test_cached_nor_catalogue_uses_its_sealed_execution_profile(self):
-        from seriald_core.flash_tasks import FlashActions
+        from decklab_core.flash_tasks import FlashActions
         with protected_flashing() as fixture:
             actions = FlashActions(fixture.manager)
             binding = SimpleNamespace(target_id='')
@@ -736,7 +736,7 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
                 self.assertEqual(flashes.get_plan(receipt['plan_id'])['digest'], receipt['digest'])
 
     def test_image_preparation_reclaims_only_idle_derived_cache_and_retries_original_upload(self):
-        from seriald_core.image_workspaces import origin_path
+        from decklab_core.image_workspaces import origin_path
 
         with protected_flashing() as fixture:
             root = Path(fixture.manager.artifacts.root).parent / 'flashing'
@@ -772,7 +772,7 @@ class FlashHTTPIntegrationTests(unittest.TestCase):
                 return {'artifact_sha256':artifact['sha256'], 'root_path':request['workspace'],
                         'files':[{'name':'fastboot.yaml', 'size':1}]}
 
-            with mock.patch('seriald_core.flash_discovery.executor_command', return_value=('fixture',)), \
+            with mock.patch('decklab_core.flash_discovery.executor_command', return_value=('fixture',)), \
                     mock.patch.object(executor, '_run', side_effect=run) as executed, \
                     mock.patch.object(executor, 'prepare_image', side_effect=lambda *args: prepare(
                         *args, max_cache_bytes=14, max_expanded_bytes=3)) as attempted:

@@ -5,10 +5,10 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core.device import Device
-from seriald_core.devices import Manager
-from seriald_core.models import Board, SessionRegistry
-from seriald_core.storage import IdentityError, Store
+from decklab_core.device import Device
+from decklab_core.devices import Manager
+from decklab_core.models import Board, SessionRegistry
+from decklab_core.storage import IdentityError, Store
 
 
 class ModelTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class ModelTests(unittest.TestCase):
         self.root = temporary.name
         self.store = Store(':memory:')
         self.addCleanup(self.store.close)
-        for module in ('seriald_core.device', 'seriald_core.devices'):
+        for module in ('decklab_core.device', 'decklab_core.devices'):
             patcher = mock.patch(module + '.LOG_ROOT', os.path.join(self.root, 'logs'))
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -156,8 +156,8 @@ class ModelTests(unittest.TestCase):
 
         session.ensure.side_effect = ensure
         result = []
-        with mock.patch('seriald_core.device.SshSession', return_value=session), \
-                mock.patch('seriald_core.device.check_password_login', return_value=(True, False, '')):
+        with mock.patch('decklab_core.device.SshSession', return_value=session), \
+                mock.patch('decklab_core.device.check_password_login', return_value=(True, False, '')):
             worker = threading.Thread(target=lambda: result.append(connection.ssh_connect()))
             worker.start()
             try:

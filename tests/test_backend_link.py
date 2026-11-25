@@ -16,20 +16,20 @@ import unittest
 from unittest import mock
 from urllib.parse import urlencode
 
-from seriald_core import control_server, device as device_module
-from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
-from seriald_core.backend_link import BackendConfigurationError, BackendLink, server_context
-from seriald_core.backend_server import BackendServer
-from seriald_core.devices import Manager
-from seriald_core.httpd import BoundedThreadingTCPServer
-from seriald_core.profiles import ProfileBook
-from seriald_core.remote_settings import configure_remote_control, node_snapshot
-from seriald_core.settings_restart import configure_collector
-from seriald_core.storage import Store
-from seriald_core.web_settings import WebSettings
+from decklab_core import control_server, device as device_module
+from decklab_core.agent_grants import AgentGrantStore, attach_agent_grants
+from decklab_core.backend_link import BackendConfigurationError, BackendLink, server_context
+from decklab_core.backend_server import BackendServer
+from decklab_core.devices import Manager
+from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.profiles import ProfileBook
+from decklab_core.remote_settings import configure_remote_control, node_snapshot
+from decklab_core.settings_restart import configure_collector
+from decklab_core.storage import Store
+from decklab_core.web_settings import WebSettings
 from test_connection_access import api_request
 from test_flash_discovery_integration import FakeDiscoveryExecutor
-from seriald_core.flash_runner import FlashBook
+from decklab_core.flash_runner import FlashBook
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = 'backend-fixture-' + 'b' * 40
@@ -53,8 +53,8 @@ def split_nodes(certificate, key):
         manager.flash_book, manager.flash_executor = FlashBook(), FakeDiscoveryExecutor()
         manager.flash_discovery_argv = ('fake-never-executed',)
         backend_settings = WebSettings(base / 'backend/web-settings.json', {
-            'SERIALD_BASE': str(base / 'backend'), 'SERIALD_BACKEND_CERT': str(certificate),
-            'SERIALD_BACKEND_KEY': str(key), 'SERIALD_BACKEND_TOKEN': TOKEN})
+            'DECKLAB_BASE': str(base / 'backend'), 'DECKLAB_BACKEND_CERT': str(certificate),
+            'DECKLAB_BACKEND_KEY': str(key), 'DECKLAB_BACKEND_TOKEN': TOKEN})
         device = device_module.Device('fake-port', 'FAKE-COM4', manager)
         device.fd, device.present = 98765, True
         manager.devices[device.by_path] = device
@@ -62,9 +62,9 @@ def split_nodes(certificate, key):
             backend.manager, backend.host_settings = manager, backend_settings
             configure_collector(backend, backend_settings)
             url = 'https://127.0.0.1:%d' % backend.server_address[1]
-            settings = WebSettings(base / 'web/web-settings.json', {'SERIALD_BASE': str(base / 'web'),
-                'SERIALD_BACKEND_URL': url, 'SERIALD_BACKEND_TOKEN': TOKEN,
-                'SERIALD_BACKEND_CA': str(certificate)})
+            settings = WebSettings(base / 'web/web-settings.json', {'DECKLAB_BASE': str(base / 'web'),
+                'DECKLAB_BACKEND_URL': url, 'DECKLAB_BACKEND_TOKEN': TOKEN,
+                'DECKLAB_BACKEND_CA': str(certificate)})
             class Control(control_server.ControlHandler):
                 collector_link = BackendLink(url, TOKEN, str(certificate))
                 collector_socket = str(base / 'web/this-socket-must-not-exist')
@@ -76,7 +76,7 @@ def split_nodes(certificate, key):
             with BoundedThreadingTCPServer(('127.0.0.1', 0), Control) as control, \
                     mock.patch.object(device, 'send', return_value=(True, '')) as send, \
                     mock.patch.object(device_module, 'LOG_ROOT', str(base / 'backend/logs')):
-                settings.environment.update(SERIALD_PORT=str(control.server_address[1]), SERIALD_BIND='127.0.0.1')
+                settings.environment.update(DECKLAB_PORT=str(control.server_address[1]), DECKLAB_BIND='127.0.0.1')
                 configure_remote_control(control, settings)
                 workers = [threading.Thread(target=server.serve_forever, daemon=True) for server in (backend, control)]
                 for worker in workers: worker.start()
@@ -155,7 +155,7 @@ class SplitNodeTests(unittest.TestCase):
                 while reopened.pending_revocations() and time.monotonic() < deadline:
                     time.sleep(.01)
                 self.assertEqual(reopened.pending_revocations(), [])
-                from seriald_core.agent_grants import GrantRevoked
+                from decklab_core.agent_grants import GrantRevoked
                 with self.assertRaises(GrantRevoked):
                     f.manager.agent_grants.check_actor(issued['grant']['actor'], 0)
                 code, confirmed = api_request(f.url, '/api/agent-revoke', f.token, {'id': issued['grant']['id']})
@@ -168,7 +168,7 @@ class SplitNodeTests(unittest.TestCase):
 
     def test_backend_rejects_web_credentials_and_untrusted_or_wrong_host_certificates(self):
         with split_nodes(self.certificate, self.key) as f:
-            for supplied in ('', 'fixture-web-owner', 'seriald-ag-fake'):
+            for supplied in ('', 'fixture-web-owner', 'decklab-ag-fake'):
                 connection = http.client.HTTPSConnection(*f.backend.server_address,
                     context=ssl.create_default_context(cafile=str(self.certificate)), timeout=3)
                 try:
@@ -269,7 +269,7 @@ class SplitNodeTests(unittest.TestCase):
             finally: connection.close()
 
     def test_remote_reset_runs_only_the_fixed_backend_helper(self):
-        from seriald_core.hardware import HardwareBook
+        from decklab_core.hardware import HardwareBook
         with split_nodes(self.certificate,self.key) as f:
             record=f.manager.store.bind({'serial':'REMOTE-BOARD','serial_source':'device-tree'},f.device.by_path,f.device.dev,'remote-board')
             f.device.record=record;f.device.board.attach(f.device);f.manager.boards[f.device.serial]=f.device.board

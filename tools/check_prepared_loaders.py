@@ -14,7 +14,7 @@ import tempfile
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from seriald_core.flash_runner import BoardControl, FlashBinding, LocalFlashExecutor, SerialEndpoint
+from decklab_core.flash_runner import BoardControl, FlashBinding, LocalFlashExecutor, SerialEndpoint
 
 
 def main():
@@ -54,7 +54,7 @@ def main():
             if operation != 'image-plan':
                 raise AssertionError('hardware operation forbidden in offline validation')
             return original(current, operation, request, *values, **keywords)
-        with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(args.manifest.resolve())}), \
+        with mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(args.manifest.resolve())}), \
                 mock.patch.object(executor, '_run', side_effect=run):
             result = executor.plan(binding, {'id': 'offline-image', 'path': str(payload), 'name': payload.name,
                 'size': payload.stat().st_size, 'sha256': sha}, 'partitions')

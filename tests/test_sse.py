@@ -9,10 +9,10 @@ import unittest
 from unittest import mock
 from urllib.parse import quote
 
-from seriald_core import control_server, device as device_module, devices, web
-from seriald_core.httpd import BoundedThreadingTCPServer
-from seriald_core.sessions_windows import SshSession
-from seriald_core.terminal_backend import node_binary
+from decklab_core import control_server, device as device_module, devices, web
+from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.sessions_windows import SshSession
+from decklab_core.terminal_backend import node_binary
 
 
 class SseTests(unittest.TestCase):

@@ -5,10 +5,10 @@ import subprocess
 import tempfile
 import unittest
 
-from seriald_core.boot_marker import init_command, marker_serial, read_command
-from seriald_core.identity import select_identity
-from seriald_core.protocol import PROBE_CMD, parse_probe
-from seriald_core.storage import IdentityError
+from decklab_core.boot_marker import init_command, marker_serial, read_command
+from decklab_core.identity import select_identity
+from decklab_core.protocol import PROBE_CMD, parse_probe
+from decklab_core.storage import IdentityError
 
 MARKER = 'boot-0e9badc5-706a-4421-93a7-50e76cc240a6'
 
@@ -18,7 +18,7 @@ class MarkerTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.path = self.root / 'seriald-id'
+        self.path = self.root / 'decklab-id'
         self.uuid = self.root / 'uuid'
         self.uuid.write_text(MARKER.removeprefix('boot-') + '\n')
 
@@ -57,10 +57,10 @@ class MarkerTests(unittest.TestCase):
         self.assertEqual(result.stdout, b'')
 
     def test_missing_boot_directory_and_random_source_fail_without_marker(self):
-        self.path = self.root / 'missing' / 'seriald-id'
+        self.path = self.root / 'missing' / 'decklab-id'
         self.assertNotEqual(self.initialize().returncode, 0)
         self.assertFalse(self.path.exists())
-        self.path = self.root / 'seriald-id'
+        self.path = self.root / 'decklab-id'
         self.uuid.unlink()
         self.assertNotEqual(self.initialize().returncode, 0)
         self.assertFalse(self.path.exists())

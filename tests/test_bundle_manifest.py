@@ -16,8 +16,8 @@ class BundleManifestTests(unittest.TestCase):
         root = Path(root)
         (root / '_internal').mkdir()
         (root / 'docs').mkdir()
-        for name in ('seriald.exe', '_internal/crypto.dll', '_internal/module.pyd',
-                     'docs/使用说明.md', 'Start-seriald.cmd'):
+        for name in ('decklab.exe', '_internal/crypto.dll', '_internal/module.pyd',
+                     'docs/使用说明.md', 'Start-decklab.cmd'):
             (root / name).write_bytes(('fixture ' + name).encode())
         return root
 
@@ -52,7 +52,7 @@ class BundleManifestTests(unittest.TestCase):
                 verify(root)
 
     def test_same_size_dll_or_resource_modification_is_rejected(self):
-        for name in ('_internal/crypto.dll', 'Start-seriald.cmd'):
+        for name in ('_internal/crypto.dll', 'Start-decklab.cmd'):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = self.fixture(directory)
                 create(root)
@@ -70,7 +70,7 @@ class BundleManifestTests(unittest.TestCase):
                 if change == 'add':
                     (root / '_internal/stale.dll').write_bytes(b'leftover')
                 else:
-                    (root / 'Start-seriald.cmd').unlink()
+                    (root / 'Start-decklab.cmd').unlink()
                 with self.assertRaisesRegex(ValueError, 'file set changed'):
                     verify(root)
 

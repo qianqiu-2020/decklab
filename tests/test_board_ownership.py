@@ -8,19 +8,19 @@ import sys
 import unittest
 from unittest import mock
 
-from seriald_core.actions import DeviceActions
-from seriald_core.board_ownership import ownership_for
-from seriald_core.device import Device
-from seriald_core.devices import Manager
-from seriald_core.storage import Store
-from seriald_core.transactions import TransactionError
+from decklab_core.actions import DeviceActions
+from decklab_core.board_ownership import ownership_for
+from decklab_core.device import Device
+from decklab_core.devices import Manager
+from decklab_core.storage import Store
+from decklab_core.transactions import TransactionError
 
 
 class BoardOwnershipTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        logs = mock.patch('seriald_core.device.LOG_ROOT', directory.name)
+        logs = mock.patch('decklab_core.device.LOG_ROOT', directory.name)
         logs.start()
         self.addCleanup(logs.stop)
         self.path = str(Path(directory.name) / 'registry.sqlite3')
@@ -95,7 +95,7 @@ class BoardOwnershipTests(unittest.TestCase):
         from contextlib import nullcontext
         handle = mock.Mock()
         handle.write.return_value = len('\x1b[2;1R')
-        with mock.patch('seriald_core.device.write_serial', return_value=(True, '')) as write:
+        with mock.patch('decklab_core.device.write_serial', return_value=(True, '')) as write:
             with mock.patch.object(self.device, 'fd', handle) if sys.platform == 'win32' else nullcontext():
                 self.assertTrue(self.device._protocol_reply('\x1b[2;1R', self.device.connection_id))
                 self.claim()
@@ -103,7 +103,7 @@ class BoardOwnershipTests(unittest.TestCase):
                 self.assertEqual(handle.write.call_count if sys.platform == 'win32' else write.call_count, 1)
 
     def test_ssh_parser_replies_remain_passive_during_board_ownership(self):
-        from seriald_core.session_base import SessionBase
+        from decklab_core.session_base import SessionBase
         session = SessionBase('ssh-protocol', '127.0.0.1', 'fixture', str(Path(self.path).parent))
         self.addCleanup(session.close)
         session._board_device = self.device
@@ -191,7 +191,7 @@ class BoardOwnershipTests(unittest.TestCase):
 
     def test_restart_keeps_recovery_and_does_not_renew_old_proof(self):
         proof = self.claim()
-        from seriald_core.board_ownership import BoardInputOwnership
+        from decklab_core.board_ownership import BoardInputOwnership
         restarted = BoardInputOwnership(self.owner.maintenance)
         self.assertEqual(restarted.current('BOARD-A')['state'], 'recovery')
         with self.assertRaises(TransactionError):
@@ -245,7 +245,7 @@ class BoardOwnershipTests(unittest.TestCase):
         maintenance = self.owner.maintenance
         for actor, revision, stopped in [('platform', task['updated'], True),
                 ('web', task['updated'] - 1, True), ('web', task['updated'], False)]:
-            from seriald_core.tasks import TaskError
+            from decklab_core.tasks import TaskError
             with self.assertRaises(TaskError):
                 maintenance.recover_operation(task_id, actor, revision, stopped, 'original process checked')
         result = maintenance.recover_operation(task_id, 'web', task['updated'], True, 'original process checked')

@@ -2,12 +2,12 @@
 
 DeckLab is a shared development-board workbench for OS/BSP developers. Keep
 installation and everyday operation simple. Read `docs/ARCHITECTURE.md` before
-changing ownership or persistence rules. The [documentation index](docs/README.md)
+changing ownership or persistence rules. The [documentation index](docs/index.md)
 lists current guides; Git history retains completed plans and old investigations.
 
 ## Layout
 
-- `seriald_core/`: collector, device identity, sessions, storage and HTTP services.
+- `decklab_core/`: collector, device identity, sessions, storage and HTTP services.
   `console_protocol.py` owns login/framing/provisioning dialogue over existing
   connection buffers and guarded writes; it must not open another serial reader.
   `serial_log.py` owns archive text state and writing; Device retains the live
@@ -17,14 +17,14 @@ lists current guides; Git history retains completed plans and old investigations
   `terminal_snapshot.js` isolates the pinned xterm snapshot adapter.
   HTTP collectors receive their Manager through `server.manager`; importing
   `web.py` must not initialize runtime state or read board profile files.
-- `seriald.py` / `seriald_windows.py`: Linux control and Windows host entry points.
+- `decklab.py` / `decklab_windows.py`: Linux control and Windows host entry points.
 - `index.html`, `static/`: UI layout, behavior and original assets.
   `devices.js`, `terminal-view.js`, `archives.js` and `terminal-navigation.js`
   own directory, terminal lifetime, archive selection and buffer navigation;
   `app.js` connects them through injected callbacks. Keep stale-view/request
   checks when adding asynchronous work.
 - `vendor/`: bundled terminal libraries; do not patch them for application changes.
-- `serialctl.py`, `skills/`: standalone client and agent guidance.
+- `decklabctl.py`, `skills/`: standalone client and agent guidance.
 - `tests/`, `tools/`, `packaging/`: regression checks and release tooling.
 
 ## Development checks
@@ -43,14 +43,14 @@ python -m unittest discover -s tests
 python tools/check_public_docs.py
 node tests/frontend.test.js
 node tests/share.test.js
-python -m compileall -q seriald_core serialctl.py seriald.py
+python -m compileall -q decklab_core decklabctl.py decklab.py
 bash -n rescue.sh
 git diff --check
 ```
 
 `node tools/browser_smoke.js` uses an isolated HTTP fixture and real Chrome;
 `node tools/demo_smoke.js` exercises the real HTTP/SSE service with simulated
-boards. Run `python3 seriald_demo.py` for interactive hardware-free development;
+boards. Run `python3 decklab_demo.py` for interactive hardware-free development;
 see `docs/DEMO.md` for its supported commands and virtual files.
 `node tools/shared_terminal_smoke.js` runs real Vim on disposable local PTYs
 with two differently sized browser tabs. It needs Linux and Vim, and never
@@ -92,11 +92,11 @@ reconnection, stale callbacks, framing and archive ownership.
 ## Pull requests
 
 For version tags, release drafts and dependency updates, follow the
-[release guide](docs/RELEASING.md).
+[release guide](docs/operations/release.md).
 
 Explain the problem, resulting behavior, and validation. Include screenshots for
 UI changes and identify any schema/API migration. Link an issue when available.
-Existing commit subjects use `seriald:` or `FIXES:` followed by an action; English
+Existing commit subjects use `decklab:` or `FIXES:` followed by an action; English
 or Chinese descriptions are welcome. Never attach passwords, bearer tokens,
 private board logs or workplace network details.
 

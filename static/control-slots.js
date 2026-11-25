@@ -25,7 +25,7 @@
     return node;
   }
   async function api(data) {
-    const response = await global.SerialdUI.fetch('/api/control-slots', {method:'POST',
+    const response = await global.DeckLabUI.fetch('/api/control-slots', {method:'POST',
       headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
     const result = await response.json();
     if (!response.ok) throw Object.assign(new Error(result.error || '工位请求失败'), {status:response.status});
@@ -185,7 +185,7 @@
     async function identifyBoard(row) {
       if (busy || !unrecognized || serial || !scanId || row.occupied_online || !row.entities['enter-download']) return;
       if (!global.confirm('确认让 '+row.name+' · 槽位 '+row.key.split('/')[1]+' 进入下载模式？板卡会复位。')) return;
-      const client = global.SerialdTasks.createClient(global.SerialdUI.fetch);
+      const client = global.DeckLabTasks.createClient(global.DeckLabUI.fetch);
       const ids = global.crypto.getRandomValues(new Uint8Array(16));
       const requestId = Array.from(ids, n => n.toString(16).padStart(2, '0')).join('');
       busy=true; save.disabled=true; body.inert=true;
@@ -238,5 +238,5 @@
       if (url.value) await scan('discover');
     } catch(e) { if(current===dialog) status.textContent=e.message; }
   }
-  global.SerialdControlSlots={open};
+  global.DeckLabControlSlots={open};
 })(window);

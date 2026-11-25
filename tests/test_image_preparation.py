@@ -9,9 +9,9 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from seriald_core.flash_runner import LocalFlashExecutor
-from seriald_core.image_preparation import for_manager
-from seriald_core.tasks import TaskCancelled
+from decklab_core.flash_runner import LocalFlashExecutor
+from decklab_core.image_preparation import for_manager
+from decklab_core.tasks import TaskCancelled
 import test_flash_integration as integration
 
 
@@ -97,7 +97,7 @@ class ImagePreparationTests(unittest.TestCase):
             helper = integration.FlashHTTPIntegrationTests()
             artifact = helper.image(fixture)
             service = for_manager(fixture.manager)
-            with mock.patch('seriald_core.flash_discovery.executor_command', return_value=('fixed-executor',)):
+            with mock.patch('decklab_core.flash_discovery.executor_command', return_value=('fixed-executor',)):
                 first = service.after_upload(artifact)
                 self.assertIsNotNone(first)
                 final = helper.terminal(fixture, first['id'])
@@ -118,7 +118,7 @@ class ImagePreparationTests(unittest.TestCase):
             helper = integration.FlashHTTPIntegrationTests()
             artifact = helper.image(fixture)
             service = for_manager(fixture.manager)
-            with mock.patch('seriald_core.flash_discovery.executor_command', return_value=('fixed-executor',)):
+            with mock.patch('decklab_core.flash_discovery.executor_command', return_value=('fixed-executor',)):
                 first = service.start(artifact['id'], request_id='explicit-preparation-001')
                 self.assertEqual(helper.terminal(fixture, first['id'])['state'], 'failed')
                 self.assertEqual(service.start(artifact['id'], request_id='explicit-preparation-001')['id'], first['id'])
@@ -133,8 +133,8 @@ class ImagePreparationTests(unittest.TestCase):
                 self.assertEqual(helper.terminal(fixture, third['id'])['state'], 'completed')
 
     def test_unknown_preparation_keeps_original_task_cache_hold_and_source_until_recovery(self):
-        from seriald_core.flash_runner import FlashRunnerError
-        from seriald_core.board_maintenance import maintenance_for, CACHE_POOL_RESOURCE
+        from decklab_core.flash_runner import FlashRunnerError
+        from decklab_core.board_maintenance import maintenance_for, CACHE_POOL_RESOURCE
         with integration.protected_flashing() as fixture:
             fixture.executor.supports_image_preparation = True
             error = FlashRunnerError('process cleanup not confirmed', cleanup_confirmed=False)
@@ -143,7 +143,7 @@ class ImagePreparationTests(unittest.TestCase):
             helper = integration.FlashHTTPIntegrationTests()
             artifact = helper.image(fixture)
             service = for_manager(fixture.manager)
-            with mock.patch('seriald_core.flash_discovery.executor_command', return_value=('fixed-executor',)):
+            with mock.patch('decklab_core.flash_discovery.executor_command', return_value=('fixed-executor',)):
                 first = service.start(artifact['id'], request_id='unknown-preparation-001')
                 final = helper.terminal(fixture, first['id'])
                 self.assertEqual(final['state'], 'failed')
@@ -163,8 +163,8 @@ class ImagePreparationTests(unittest.TestCase):
                 self.assertEqual(fixture.manager.artifacts.get(artifact['id'])['state'], 'ready')
 
     def test_restart_retains_image_claim_and_requires_explicit_recovery(self):
-        from seriald_core.board_maintenance import BoardMaintenance
-        from seriald_core.tasks import TaskStore
+        from decklab_core.board_maintenance import BoardMaintenance
+        from decklab_core.tasks import TaskStore
         with integration.protected_flashing() as fixture:
             helper = integration.FlashHTTPIntegrationTests()
             artifact = helper.image(fixture)
@@ -205,7 +205,7 @@ class ImagePreparationTests(unittest.TestCase):
 
     def test_image_retention_keeps_fresh_plan_then_reclaims_idle_image(self):
         import os
-        from seriald_core.flash_tasks import FlashActions
+        from decklab_core.flash_tasks import FlashActions
         with integration.protected_flashing() as fixture:
             runner = LocalFlashExecutor(Path(fixture.manager.artifacts.root).parent / 'flashing')
             fixture.manager.flash_executor = runner

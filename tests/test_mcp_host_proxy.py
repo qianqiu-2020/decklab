@@ -8,13 +8,13 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core import control_server as control
-from seriald_core.agent_grants import AgentGrantStore
+from decklab_core import control_server as control
+from decklab_core.agent_grants import AgentGrantStore
 
 
 class MCPProxyTests(unittest.TestCase):
     def setUp(self):
-        environment = mock.patch.dict(os.environ, {'SERIALD_MCP_ALLOWED_HOSTS': ''})
+        environment = mock.patch.dict(os.environ, {'DECKLAB_MCP_ALLOWED_HOSTS': ''})
         environment.start()
         self.addCleanup(environment.stop)
         self.grants = AgentGrantStore(':memory:')
@@ -55,9 +55,9 @@ class MCPProxyTests(unittest.TestCase):
         cookie_handler = self.handler()
         share = cookie_handler._new_share()
         credentials = ({}, {'Authorization': 'Bearer owner-secret'},
-                       {'Authorization': 'Basic ' + base64.b64encode(b'seriald:owner-secret').decode()},
+                       {'Authorization': 'Basic ' + base64.b64encode(b'decklab:owner-secret').decode()},
                        {'Authorization': 'Bearer named-agent-secret'},
-                       {'Authorization': 'Bearer ' + share}, {'Cookie': 'seriald_share=' + share})
+                       {'Authorization': 'Bearer ' + share}, {'Cookie': 'decklab_share=' + share})
         for headers in credentials:
             for open_access in (False, True):
                 with self.subTest(headers=list(headers), open_access=open_access):
@@ -75,7 +75,7 @@ class MCPProxyTests(unittest.TestCase):
         handler = self.handler(body=body)
         handler.headers.update({'Accept': 'application/json, text/event-stream',
             'MCP-Protocol-Version': '2025-06-18', 'Mcp-Session-Id': 'session-id',
-            'X-Seriald-Actor': 'web', 'Cookie': 'seriald_share=secret', 'X-Forwarded-For': 'remote'})
+            'X-DeckLab-Actor': 'web', 'Cookie': 'decklab_share=secret', 'X-Forwarded-For': 'remote'})
         connection = mock.Mock()
         connection.getresponse.return_value = self.reply(headers={'MCP-Protocol-Version': '2025-06-18'})
         with mock.patch.object(control.http.client, 'HTTPConnection', return_value=connection) as factory:
@@ -91,7 +91,7 @@ class MCPProxyTests(unittest.TestCase):
         self.assertEqual(headers['mcp-protocol-version'], '2025-06-18')
         self.assertEqual(headers['mcp-session-id'], 'session-id')
         self.assertNotIn('cookie', headers)
-        self.assertNotIn('x-seriald-actor', headers)
+        self.assertNotIn('x-decklab-actor', headers)
         self.assertNotIn('x-forwarded-for', headers)
         connection.close.assert_called_once()
 
@@ -169,7 +169,7 @@ class MCPProxyTests(unittest.TestCase):
         handler.headers.update({'Host': 'decklab.example:443', 'Origin': 'https://decklab.example:443'})
         connection = mock.Mock()
         connection.getresponse.return_value = self.reply()
-        with mock.patch.dict(os.environ, {'SERIALD_MCP_ALLOWED_HOSTS': 'decklab.example:443'}), \
+        with mock.patch.dict(os.environ, {'DECKLAB_MCP_ALLOWED_HOSTS': 'decklab.example:443'}), \
                 mock.patch.object(control.http.client, 'HTTPConnection', return_value=connection):
             status, _ = self.run_handler(handler)
         self.assertEqual(status, 200)
@@ -187,7 +187,7 @@ class MCPProxyTests(unittest.TestCase):
             with self.subTest(configured=configured):
                 handler = self.handler()
                 handler.headers['Host'] = 'attacker.example:8898'
-                with mock.patch.dict(os.environ, {'SERIALD_MCP_ALLOWED_HOSTS': configured}), \
+                with mock.patch.dict(os.environ, {'DECKLAB_MCP_ALLOWED_HOSTS': configured}), \
                         mock.patch.object(control.http.client, 'HTTPConnection') as upstream:
                     status, _ = self.run_handler(handler)
                 self.assertEqual(status, 403)

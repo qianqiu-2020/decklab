@@ -10,10 +10,10 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core.desktop import DesktopBook, DesktopSessions
-from seriald_core.desktop_stream import serve
-from seriald_core.transactions import transactions_for
-from seriald_core.websocket_io import _protocol_modules
+from decklab_core.desktop import DesktopBook, DesktopSessions
+from decklab_core.desktop_stream import serve
+from decklab_core.transactions import transactions_for
+from decklab_core.websocket_io import _protocol_modules
 import test_desktop_stream as fixtures
 
 
@@ -57,7 +57,7 @@ def stream_peer():
         try:
             method, target, version = reader.readline().decode().strip().split(' ')
             headers = parse_headers(reader)
-            headers['X-Seriald-Desktop-Origin'] = 'http://desktop.test'
+            headers['X-DeckLab-Desktop-Origin'] = 'http://desktop.test'
             handler = SimpleNamespace(manager=manager, command=method, path=target,
                 request_version=version, headers=headers, connection=server, rfile=reader,
                 wfile=writer, close_connection=False)

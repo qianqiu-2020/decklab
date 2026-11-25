@@ -2,7 +2,7 @@
 (function (global) {
   'use strict';
   function create(options) {
-    var $ = options.byId, client = global.SerialdTasks.createClient(options.fetch);
+    var $ = options.byId, client = global.DeckLabTasks.createClient(options.fetch);
     var source = 'public', path = '', generation = 0, entries = [], choose = null;
     var jobs = Object.create(null), followed = Object.create(null), pairingRows = [];
     var active = Object.create(null), downloaded = Object.create(null), unknown = false;
@@ -498,5 +498,5 @@
     $('is-version').addEventListener('change', function () { version = $('is-version').value; folderChoices = Object.create(null); load(); });
     return {open:open};
   }
-  global.SerialdImageStore = {create:create};
+  global.DeckLabImageStore = {create:create};
 })(window);

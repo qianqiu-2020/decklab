@@ -15,7 +15,7 @@ const bootstrap = `
 window.fixture = {sent: [], posts: [], streams: [], sockets: [], configured:true, connection:{}, discovered:[
  {id:'rdp-found',provider:'rdp',host:'10.0.0.88',port:3389,certificate_sha256:'a'.repeat(64)},
  {id:'vnc-found',provider:'vnc',host:'10.0.0.88',port:5901}]};
-SerialdI18n.setLocale('zh-CN');
+DeckLabI18n.setLocale('zh-CN');
 const $ = id => document.getElementById(id), noop = () => {};
 document.body.classList.add('detail-open'); $('workspace').classList.add('selected');
 $('detail').hidden = false; $('d-name').textContent = 'Desktop fixture';
@@ -41,7 +41,7 @@ window.EventSource = class {
   emit(text, extra = {}) { if (!this.closed) this.onmessage({data: JSON.stringify(Object.assign({key: 'fixture', sid: controller.current.sid,
     off: (controller.current.off || 0) + text.length + 1, data_b64: btoa(text), alive: true}, extra))}); }
 };
-const controller = window.SerialdTerminalView.create({byId: $, fetch: window.fetch,
+const controller = window.DeckLabTerminalView.create({byId: $, fetch: window.fetch,
   board: () => ({serial: 'FIXTURE-SN'}), session: sid => ({kind: sid === 'serial' ? 'serial' : 'ssh', actor: 'web'}),
   onSelect: noop, takenOver: () => false, ownsInput: () => true, setInputMode: noop,
   clearCommandDecorations: noop, clearTerminalSearch: noop, renderCommandNav: noop,
@@ -87,8 +87,8 @@ class Stream {
   }
   close() { clearInterval(this.timer); this.readyState = 3; if (this.onclose) this.onclose(); }
 }
-fixture.desktop = SerialdDesktop.create({byId: $, fetch: window.fetch, clientId: 'fixture-page',
-  copyText: SerialdUI.copyText,
+fixture.desktop = DeckLabDesktop.create({byId: $, fetch: window.fetch, clientId: 'fixture-page',
+  copyText: DeckLabUI.copyText,
   getView: () => controller.current, websocketFactory: (url, protocol) => new Stream(url, protocol)});
 fixture.desktop.refresh(controller.current);
 fixture.ready = true;
@@ -200,10 +200,10 @@ let chrome, ws;
   await mouse('mouseReleased', readButton.x+readButton.width/2, readButton.y+readButton.height/2, {button:'left',buttons:0,clickCount:1});
   await until('document.getElementById("desktop-text").value==="Remote fixture text"', 'explicit remote clipboard fallback');
   assert.equal(await evaluate('fixture.sent.filter(m=>m.event?.type==="clipboard-read").length'),beforeRead+1);
-  await evaluate('SerialdI18n.setLocale("en")');
+  await evaluate('DeckLabI18n.setLocale("en")');
   assert.equal(await evaluate('document.getElementById("desktop-status").textContent'), 'Remote clipboard read');
   assert.equal(await evaluate('document.getElementById("desktop-close").textContent'), 'Back to terminal');
-  await evaluate('SerialdI18n.setLocale("zh-CN"); document.getElementById("desktop-clipboard-toggle").click(); document.getElementById("desktop-image").focus()');
+  await evaluate('DeckLabI18n.setLocale("zh-CN"); document.getElementById("desktop-clipboard-toggle").click(); document.getElementById("desktop-image").focus()');
   await until('document.getElementById("desktop-overlay").hidden', 'canvas is writable again');
   const permission = {origin:await evaluate('location.origin'), permissions:['clipboardReadWrite','clipboardSanitizedWrite']};
   await rpc('Browser.grantPermissions',permission);
@@ -265,7 +265,7 @@ let chrome, ws;
   await evaluate('document.getElementById("desktop-scale").value="fit"; document.getElementById("desktop-scale").dispatchEvent(new Event("change"))');
   const output = path.join(root, 'dist', 'desktop-stream-frontend'); fs.mkdirSync(output, {recursive: true});
   for (const [name, width, height, dark] of [['light',1280,900,false],['dark',1280,900,true],['mobile',390,844,false]]) {
-    await evaluate('SerialdI18n.setLocale(' + JSON.stringify(name === 'mobile' ? 'en' : 'zh-CN') + ')');
+    await evaluate('DeckLabI18n.setLocale(' + JSON.stringify(name === 'mobile' ? 'en' : 'zh-CN') + ')');
     await rpc('Emulation.setDeviceMetricsOverride', {width, height, deviceScaleFactor: 1, mobile: false});
     await rpc('Emulation.setEmulatedMedia', {features:[{name:'prefers-color-scheme',value:dark?'dark':'light'}]});
     await delay(150);
@@ -277,7 +277,7 @@ let chrome, ws;
     }
     const shot = await rpc('Page.captureScreenshot', {format: 'png'}); fs.writeFileSync(path.join(output,name+'.png'), Buffer.from(shot.data,'base64'));
   }
-  await evaluate('SerialdI18n.setLocale("zh-CN"); fixture.desktop.close(); fixture.configured=false; fixture.osFamily="debian"; fixture.desktop.refresh(null);fixture.desktop.refresh(fixture.controller.current)');
+  await evaluate('DeckLabI18n.setLocale("zh-CN"); fixture.desktop.close(); fixture.configured=false; fixture.osFamily="debian"; fixture.desktop.refresh(null);fixture.desktop.refresh(fixture.controller.current)');
   await until('!document.getElementById("b-desktop").hidden', 'unconfigured desktop entry remains visible');
   await evaluate('document.getElementById("b-desktop").click()');
   await until('document.getElementById("desktop-services").options.length===3 && !document.getElementById("desktop-detect").disabled', 'automatic VNC and RDP discovery');
@@ -289,10 +289,10 @@ let chrome, ws;
   assert.equal(await evaluate('document.getElementById("desktop-user").value'),'');
   const credentialsCommand = 'sudo grdctl --system status --show-credentials';
   assert.equal(await evaluate('document.querySelector("#desktop-rdp-help code").textContent'),credentialsCommand);
-  await evaluate('SerialdI18n.setLocale("en")');
+  await evaluate('DeckLabI18n.setLocale("en")');
   assert.ok(await evaluate('document.getElementById("desktop-rdp-help").textContent.includes("Current user")'));
   assert.equal(await evaluate('document.querySelector("#desktop-rdp-help code").textContent'),credentialsCommand);
-  await evaluate('SerialdI18n.setLocale("zh-CN")');
+  await evaluate('DeckLabI18n.setLocale("zh-CN")');
   const beforeConfigure=await evaluate('fixture.posts.filter(x=>x.url==="/api/desktop/configure").length');
   await evaluate('document.getElementById("desktop-services").value="rdp-found";document.getElementById("desktop-services").dispatchEvent(new Event("change"));document.getElementById("desktop-password").value="fixture-only-password"');
   assert.equal(await evaluate('document.getElementById("desktop-certificate-policy").value'),'accept');

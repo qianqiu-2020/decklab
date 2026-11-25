@@ -2,7 +2,7 @@
 (function (global) {
   'use strict';
   function create(options) {
-    var $ = options.byId, client = global.SerialdTasks.createClient(options.fetch);
+    var $ = options.byId, client = global.DeckLabTasks.createClient(options.fetch);
     var board = null, capabilities = null, artifacts = [], plan = null, task = null, discovered = [];
     var flow = 'normal';
     var scanningUSB = false, openingView = null, preferredUSB = '';
@@ -435,7 +435,7 @@
       if (workspaceSelection()) inspectSource();
       renderReplacementInfo($('fl-mode').value === 'full' ? sourceCatalogue : null);
     }
-    function translate(value) { return global.SerialdI18n ? global.SerialdI18n.translate(value) : value; }
+    function translate(value) { return global.DeckLabI18n ? global.DeckLabI18n.translate(value) : value; }
     function scope(selected) {
       var value = { actor: 'web' };
       if (selected.target_id) {
@@ -3735,5 +3735,5 @@
         if (pageBoard && $('flash-dialog').open && !task && !preparingBoard && !hasDownloadTarget()) discover();
       } };
   }
-  global.SerialdFlashing = { create: create };
+  global.DeckLabFlashing = { create: create };
 })(window);

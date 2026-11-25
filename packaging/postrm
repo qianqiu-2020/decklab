@@ -4,9 +4,9 @@ if [ -d /run/systemd/system ]; then
   systemctl daemon-reload
 fi
 if [ "$1" = purge ]; then
-  deb-systemd-helper purge seriald.service >/dev/null || true
-  deb-systemd-helper purge seriald-web.service >/dev/null || true
-  deb-systemd-helper purge seriald-backend.service >/dev/null || true
-  deb-systemd-helper purge seriald-collector.service >/dev/null || true
+  deb-systemd-helper purge decklab.service >/dev/null || true
+  deb-systemd-helper purge decklab-web.service >/dev/null || true
+  deb-systemd-helper purge decklab-backend.service >/dev/null || true
+  deb-systemd-helper purge decklab-collector.service >/dev/null || true
 fi
 # Registry and logs deliberately survive remove/purge for operator-controlled retention.

@@ -44,14 +44,14 @@ identification; they do not identify every component in an arbitrary Python buil
 The native source catalog also retains modeled Rust dependency notices, CFFI's
 libffi source headers and observed Rust standard-library release declarations.
 Windows packages include Paramiko's corresponding source archive; the
-[rebuild guide](docs/WINDOWS_REBUILD.md) explains replacing that library before
+[rebuild guide](docs/development/windows-rebuild.md) explains replacing that library before
 freezing and preserving the supplied source in the resulting package.
 
 This inventory does not replace review of native libraries embedded in Python
 or dependency wheels (for example crypto libraries), PyInstaller's frozen output,
 or bundled frontend assets. Such binary attribution remains a release gate;
 this table and Python metadata alone are not a complete native-library SBOM.
-The [native dependency review](docs/WINDOWS_NATIVE_NOTICES.md) records an initial
+The [native dependency review](docs/development/windows-native-notices.md) records an initial
 Windows-wheel observation with exact hashes and component-specific unresolved
 work. It does not replace review of the actual frozen Windows output.
 
@@ -115,7 +115,7 @@ wheel hashes before import. These are vendored application resources, separate
 from the MCP native-dependency inventory and from the Windows packaging
 interpreter's installed-distribution inventory. The existing Linux vendor copy
 and Windows data inclusion ship the source manifests, notices and runtime files
-unchanged. Linux places them under `/usr/lib/seriald/vendor/`; Windows bundles
+unchanged. Linux places them under `/usr/lib/decklab/vendor/`; Windows bundles
 place them under `_internal/vendor/`. Windows `bundle-manifest.json` inventories
 all these actual resource files and rejects later changes.
 

@@ -15,7 +15,7 @@ import time
 import unittest
 from unittest import mock
 
-from seriald_core import desktop_providers as providers
+from decklab_core import desktop_providers as providers
 
 
 REAL_POPEN = subprocess.Popen
@@ -215,7 +215,7 @@ for line in sys.stdin:
 
 class DesktopWorkerTests(unittest.TestCase):
     def worker(self, mode):
-        temporary = tempfile.TemporaryDirectory(prefix='seriald-fake-desktop-')
+        temporary = tempfile.TemporaryDirectory(prefix='decklab-fake-desktop-')
         self.addCleanup(temporary.cleanup)
         record = Path(temporary.name) / 'requests.jsonl'
         source = 'MODE = ' + repr(mode) + '\nRECORD_PATH = ' + repr(str(record)) + '\n' + FAKE_WORKER

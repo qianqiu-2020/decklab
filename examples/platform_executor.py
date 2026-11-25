@@ -8,7 +8,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from serialctl import Client, ClientError, TaskOutcome, TaskReceipt
+from decklabctl import Client, ClientError, TaskOutcome, TaskReceipt
 
 
 TERMINAL = ('completed', 'failed', 'cancelled', 'interrupted')
@@ -47,7 +47,7 @@ def run_attempt(client, mapping, kind, request_id, wait_seconds=30, lease_ttl=30
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--url', default=os.environ.get('SERIALD_URL', 'http://127.0.0.1:8898'))
+    parser.add_argument('--url', default=os.environ.get('DECKLAB_URL', 'http://127.0.0.1:8898'))
     parser.add_argument('--mapping', help='verified platform-device.json; contains no credentials')
     commands = parser.add_subparsers(dest='action', required=True)
     commands.add_parser('inspect', help='read capabilities, mapped identity and public ownership')
@@ -61,7 +61,7 @@ def main(argv=None):
     revoke = commands.add_parser('revoke', help='owner revokes a grant; no board command or lease release')
     revoke.add_argument('--grant-id', required=True)
     args = parser.parse_args(argv)
-    client = Client(args.url, timeout=10, token=os.environ.get('SERIALD_TOKEN', ''))
+    client = Client(args.url, timeout=10, token=os.environ.get('DECKLAB_TOKEN', ''))
     try:
         if args.action == 'query':
             client.negotiate()
@@ -69,9 +69,9 @@ def main(argv=None):
         elif args.action == 'revoke':
             # This command needs the primary credential, supplied separately from
             # the platform executor's grant. It never automatically releases a lease.
-            client.token = os.environ.get('SERIALD_OWNER_TOKEN', '')
+            client.token = os.environ.get('DECKLAB_OWNER_TOKEN', '')
             if not client.token:
-                raise ClientError('Set SERIALD_OWNER_TOKEN for this explicit owner operation')
+                raise ClientError('Set DECKLAB_OWNER_TOKEN for this explicit owner operation')
             result = client.revoke_grant(args.grant_id)
         else:
             if not args.mapping:

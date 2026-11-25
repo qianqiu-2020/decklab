@@ -7,11 +7,11 @@ import time
 import unittest
 from unittest import mock
 
-from seriald_core import device as device_module
-from seriald_core import devices
-from seriald_core.console_link import LINK_PREFIX, ConsoleLinks
-from seriald_core.flash_discovery import FlashDiscovery
-from seriald_core.storage import Store
+from decklab_core import device as device_module
+from decklab_core import devices
+from decklab_core.console_link import LINK_PREFIX, ConsoleLinks
+from decklab_core.flash_discovery import FlashDiscovery
+from decklab_core.storage import Store
 from test_flash_discovery_integration import FakeDiscoveryExecutor, usb_candidate
 
 

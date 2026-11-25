@@ -1,14 +1,14 @@
 (function (global) {
   'use strict';
-  var fetch = global.SerialdUI.fetch;
+  var fetch = global.DeckLabUI.fetch;
   var byId = function (id) { return document.getElementById(id); };
   var dialog = byId('file-transfer-dialog');
   var board = null, devices = [], busy = false, cancelled = false;
   var meter = null, drag = null, activeTask = null, taskStarting = false;
-  var taskClient = global.SerialdTasks.createClient(fetch);
+  var taskClient = global.DeckLabTasks.createClient(fetch);
 
   function status(text) { byId('ft-status').textContent = text; }
-  function rateText(value) { return SerialdUI.formatBytes(Math.round(value)) + '/s'; }
+  function rateText(value) { return DeckLabUI.formatBytes(Math.round(value)) + '/s'; }
   function basename(path) { return path.split('/').filter(Boolean).pop() || 'board-file'; }
   function bytes(raw) {
     var binary = '';
@@ -40,7 +40,7 @@
     var first = meter.samples[0], elapsed = (now - first.time) / 1000;
     var rate = elapsed > 0.05 ? (offset - first.offset) / elapsed : 0;
     var remaining = rate > 0 ? (size - offset) / rate : Infinity;
-    status(SerialdUI.formatBytes(offset) + ' / ' + SerialdUI.formatBytes(size)
+    status(DeckLabUI.formatBytes(offset) + ' / ' + DeckLabUI.formatBytes(size)
       + ' · ' + (rate > 0 ? rateText(rate) : '速率计算中')
       + ' · 预计剩余 ' + duration(remaining) + (detail ? ' · ' + detail : ''));
     meter.shown = now;
@@ -91,7 +91,7 @@
       connection_id: selected.connection_id, path: source }),
       { key: selected.key, serial: selected.serial || '' });
     byId('ft-progress').value = 100;
-    status('下载已校验 · ' + SerialdUI.formatBytes(done.size) + ' · 平均 '
+    status('下载已校验 · ' + DeckLabUI.formatBytes(done.size) + ' · 平均 '
       + rateText(averageRate(done.size)) + ' · SHA-256 ' + done.sha256 + ' · ');
     var link = document.createElement('a'); link.className = 'log-download';
     link.textContent = '保存到本地'; link.download = done.name || basename(source);
@@ -260,5 +260,5 @@
     }
   });
 
-  global.SerialdFileTransfer = { open: open };
+  global.DeckLabFileTransfer = { open: open };
 })(window);

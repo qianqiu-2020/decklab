@@ -7,12 +7,12 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core import device as seriald
-from seriald_core.transactions import TransactionError
-from seriald_core.profiles import BoardProfile, ProfileBook
-from seriald_core.storage import Store
-from seriald_core.models import Board
-from seriald_core.tasks import TaskStore
+from decklab_core import device as decklab
+from decklab_core.transactions import TransactionError
+from decklab_core.profiles import BoardProfile, ProfileBook
+from decklab_core.storage import Store
+from decklab_core.models import Board
+from decklab_core.tasks import TaskStore
 
 
 class FakeSession:
@@ -55,32 +55,32 @@ class FakeSession:
 class SessionRegistryTests(unittest.TestCase):
     def setUp(self):
         self.patches = [
-            mock.patch.object(seriald.Device, 'preload'),
-            mock.patch.object(seriald.Device, 'stable_dir', return_value='/unused'),
-            mock.patch.object(seriald, 'SshSession', side_effect=FakeSession),
-            mock.patch.object(seriald, 'check_password_login', return_value=(True, False, '')),
-            mock.patch.object(seriald.os, 'open', side_effect=AssertionError('hardware forbidden')),
+            mock.patch.object(decklab.Device, 'preload'),
+            mock.patch.object(decklab.Device, 'stable_dir', return_value='/unused'),
+            mock.patch.object(decklab, 'SshSession', side_effect=FakeSession),
+            mock.patch.object(decklab, 'check_password_login', return_value=(True, False, '')),
+            mock.patch.object(decklab.os, 'open', side_effect=AssertionError('hardware forbidden')),
             mock.patch.object(subprocess, 'Popen', side_effect=AssertionError('SSH forbidden')),
         ]
         for patch in self.patches:
             patch.start()
             self.addCleanup(patch.stop)
-        self.device = seriald.Device('test-path', '/dev/test-only')
+        self.device = decklab.Device('test-path', '/dev/test-only')
         self.device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
 
     def test_known_os_uses_only_the_appropriate_stock_ssh_route(self):
         for family in ('buildroot', 'debian'):
             self.device.probe_info.update(os_id=family, ts=time.time())
-            with self.assertRaises(seriald.SSHAuthenticationError) as caught:
+            with self.assertRaises(decklab.SSHAuthenticationError) as caught:
                 self.device.ssh_connect()
             self.assertEqual(caught.exception.code, 'ssh-credentials-required')
             self.assertTrue(self.device.ssh_settings()['needs_credentials'])
-        seriald.check_password_login.assert_not_called()
+        decklab.check_password_login.assert_not_called()
         self.device.probe_info.update(os_id='bianbu', ts=time.time())
-        seriald.check_password_login.return_value = (False, True, '')
-        with self.assertRaises(seriald.SSHAuthenticationError):
+        decklab.check_password_login.return_value = (False, True, '')
+        with self.assertRaises(decklab.SSHAuthenticationError):
             self.device.ssh_connect()
-        seriald.check_password_login.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
+        decklab.check_password_login.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
 
     def test_buildroot_ssh_uses_observed_service_on_this_connection(self):
         self.device.probe_info.update(os_id='buildroot', sshd='active', ts=self.device.started - 1)
@@ -88,7 +88,7 @@ class SessionRegistryTests(unittest.TestCase):
         self.device.probe_info['ts'] = time.time()
         self.assertFalse(self.device.ssh_settings().get('needs_credentials'))
         self.assertIsNotNone(self.device.ssh_connect()[0])
-        seriald.check_password_login.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
+        decklab.check_password_login.assert_called_once_with('192.0.2.1', 'root', 'bianbu')
 
     def test_pending_reservations_enforce_cap_and_ids_remain_unique(self):
         device = self.device
@@ -118,8 +118,8 @@ class SessionRegistryTests(unittest.TestCase):
                     state.notify_all()
 
         threads = [threading.Thread(target=connect) for _ in range(9)]
-        with mock.patch.object(seriald, 'SSH_LIMIT', 3), \
-                mock.patch.object(seriald, 'SshSession', side_effect=factory):
+        with mock.patch.object(decklab, 'SSH_LIMIT', 3), \
+                mock.patch.object(decklab, 'SshSession', side_effect=factory):
             try:
                 for thread in threads:
                     thread.start()
@@ -147,24 +147,24 @@ class SessionRegistryTests(unittest.TestCase):
         device = self.device
         failed = FakeSession('ssh1')
         failed.on_ensure = lambda: False
-        with mock.patch.object(seriald, 'SSH_LIMIT', 1), \
-                mock.patch.object(seriald, 'SshSession', return_value=failed):
+        with mock.patch.object(decklab, 'SSH_LIMIT', 1), \
+                mock.patch.object(decklab, 'SshSession', return_value=failed):
             session, error = device.ssh_connect()
         self.assertIsNone(session)
         self.assertIn('失败', error)
         self.assertEqual(failed.close_count, 1)
         self.assertEqual(device.ssh_pending, 0)
         self.assertEqual(device.ssh_sessions, {})
-        with mock.patch.object(seriald, 'SSH_LIMIT', 1):
+        with mock.patch.object(decklab, 'SSH_LIMIT', 1):
             session, error = device.ssh_connect()
         self.assertEqual(error, '')
         self.assertNotEqual(session.sid, 'ssh1')
         self.assertIs(device.get_session(session.sid), session)
 
     def test_default_password_falls_back_without_changing_board(self):
-        with mock.patch.object(seriald, 'check_password_login',
+        with mock.patch.object(decklab, 'check_password_login',
                                side_effect=[(False, True, 'SSH 认证失败'), (True, False, '')]) as check, \
-                mock.patch.object(seriald, 'SshSession', side_effect=FakeSession) as opening, \
+                mock.patch.object(decklab, 'SshSession', side_effect=FakeSession) as opening, \
                 mock.patch.object(self.device, 'configure_root_ssh') as configure, \
                 mock.patch.object(self.device, '_write') as write:
             session, error = self.device.ssh_connect()
@@ -179,12 +179,12 @@ class SessionRegistryTests(unittest.TestCase):
         write.assert_not_called()
 
     def test_all_authentication_failures_offer_manual_configuration_without_serial_writes(self):
-        with mock.patch.object(seriald, 'check_password_login',
+        with mock.patch.object(decklab, 'check_password_login',
                                return_value=(False, True, 'SSH 认证失败')) as check, \
-                mock.patch.object(seriald, 'SshSession') as opening, \
+                mock.patch.object(decklab, 'SshSession') as opening, \
                 mock.patch.object(self.device, 'configure_root_ssh') as configure, \
                 mock.patch.object(self.device, '_write') as write:
-            with self.assertRaises(seriald.SSHAuthenticationError) as caught:
+            with self.assertRaises(decklab.SSHAuthenticationError) as caught:
                 self.device.ssh_connect()
         self.assertEqual(caught.exception.user, 'root')
         self.assertNotIn('bianbu', str(caught.exception))
@@ -197,7 +197,7 @@ class SessionRegistryTests(unittest.TestCase):
         self.assertEqual(self.device.ssh_sessions, {})
 
     def test_network_failure_never_tries_another_password(self):
-        with mock.patch.object(seriald, 'check_password_login',
+        with mock.patch.object(decklab, 'check_password_login',
                                return_value=(False, False, 'SSH 连接超时')) as check, \
                 mock.patch.object(self.device, 'configure_root_ssh') as configure:
             session, error = self.device.ssh_connect()
@@ -210,10 +210,10 @@ class SessionRegistryTests(unittest.TestCase):
         for credentials in ({'ssh_user': 'ubuntu', 'ssh_password': 'different'},
                             {'ssh_user': 'root'}, {'ssh_password': 'bianbu'}):
             with self.subTest(credentials=list(credentials)), \
-                    mock.patch.object(seriald, 'check_password_login',
+                    mock.patch.object(decklab, 'check_password_login',
                                       return_value=(False, True, 'denied')) as check, \
                     mock.patch.object(self.device, 'configure_root_ssh') as configure:
-                with self.assertRaises(seriald.SSHAuthenticationError):
+                with self.assertRaises(decklab.SSHAuthenticationError):
                     self.device.ssh_connect(**credentials)
                 self.assertEqual(check.call_count, 1)
                 configure.assert_not_called()
@@ -224,12 +224,12 @@ class SessionRegistryTests(unittest.TestCase):
                                      ('bianbu', ['bianbu', 'debian']),
                                      ('debian', ['debian', 'bianbu'])):
             with self.subTest(configured=configured), \
-                    mock.patch.object(seriald.Device, 'profile', new_callable=mock.PropertyMock,
+                    mock.patch.object(decklab.Device, 'profile', new_callable=mock.PropertyMock,
                                       return_value=BoardProfile(ssh_user='ubuntu', ssh_password=configured,
                                                                auto_configure_ssh=False)), \
-                    mock.patch.object(seriald, 'check_password_login',
+                    mock.patch.object(decklab, 'check_password_login',
                                       return_value=(False, True, 'denied')) as check:
-                with self.assertRaises(seriald.SSHAuthenticationError) as caught:
+                with self.assertRaises(decklab.SSHAuthenticationError) as caught:
                     self.device.ssh_connect()
                 self.assertEqual(caught.exception.user, 'ubuntu')
                 self.assertEqual(check.call_args_list,
@@ -240,7 +240,7 @@ class SessionRegistryTests(unittest.TestCase):
         def deny_and_replug(*args):
             self.device.connection_id = 'replacement'
             return False, True, 'denied'
-        with mock.patch.object(seriald, 'check_password_login', side_effect=deny_and_replug) as check:
+        with mock.patch.object(decklab, 'check_password_login', side_effect=deny_and_replug) as check:
             session, error = self.device.ssh_connect()
         self.assertIsNone(session)
         self.assertIn('重新枚举', error)
@@ -253,7 +253,7 @@ class SessionRegistryTests(unittest.TestCase):
             cancelled.set()
             return False, True, 'denied'
         with self.device.transactions.task_scope(cancelled, self.device.connection_id, self.device.stop), \
-                mock.patch.object(seriald, 'check_password_login', side_effect=deny_and_cancel) as check:
+                mock.patch.object(decklab, 'check_password_login', side_effect=deny_and_cancel) as check:
             with self.assertRaises(TransactionError) as caught:
                 self.device.ssh_connect()
         self.assertEqual(caught.exception.code, 'cancelled')
@@ -264,7 +264,7 @@ class SessionRegistryTests(unittest.TestCase):
         for failure in ((False, False, 'server echoed secret-value'), RuntimeError('secret-value')):
             with self.subTest(exception=isinstance(failure, Exception)):
                 options = {'side_effect': failure} if isinstance(failure, Exception) else {'return_value': failure}
-                with mock.patch.object(seriald, 'check_password_login', **options):
+                with mock.patch.object(decklab, 'check_password_login', **options):
                     session, error = self.device.ssh_connect(ssh_password='secret-value')
                 self.assertIsNone(session)
                 self.assertNotIn('secret-value', error)
@@ -325,8 +325,8 @@ class SessionRegistryTests(unittest.TestCase):
                 checks.append(s.sid)
 
             session.on_close = disposal
-        with mock.patch.object(seriald.time, 'monotonic', return_value=1000), \
-                mock.patch.object(seriald, 'SSH_IDLE', 60):
+        with mock.patch.object(decklab.time, 'monotonic', return_value=1000), \
+                mock.patch.object(decklab, 'SSH_IDLE', 60):
             device.reap_sessions()
         self.assertEqual(checks, ['ssh-idle', 'ssh-ended'])
         self.assertEqual(device.ssh_sessions, {'ssh-fresh': fresh})
@@ -417,11 +417,11 @@ class SavedSshCredentialTests(unittest.TestCase):
             'profiles': {'test': {'ssh_user': 'root', 'ssh_password': 'profile-secret'}},
             'default': 'test'}))
         patches = [
-            mock.patch.object(seriald.Device, 'preload'),
-            mock.patch.object(seriald.Device, 'stable_dir', return_value='/unused'),
-            mock.patch.object(seriald, 'SshSession', side_effect=FakeSession),
-            mock.patch.object(seriald, 'check_password_login', return_value=(True, False, '')),
-            mock.patch.object(seriald.os, 'open', side_effect=AssertionError('hardware forbidden')),
+            mock.patch.object(decklab.Device, 'preload'),
+            mock.patch.object(decklab.Device, 'stable_dir', return_value='/unused'),
+            mock.patch.object(decklab, 'SshSession', side_effect=FakeSession),
+            mock.patch.object(decklab, 'check_password_login', return_value=(True, False, '')),
+            mock.patch.object(decklab.os, 'open', side_effect=AssertionError('hardware forbidden')),
             mock.patch.object(subprocess, 'Popen', side_effect=AssertionError('SSH forbidden')),
         ]
         self.opening = patches[2].start()
@@ -451,7 +451,7 @@ class SavedSshCredentialTests(unittest.TestCase):
         info = {'serial': serial, 'serial_source': 'device-tree',
                 'ips': ['eth0 ' + ip + '/24']}
         record = self.store.bind(info, path, '/fake/tty')
-        device = seriald.Device(path, '/fake/tty', self.manager, record=record)
+        device = decklab.Device(path, '/fake/tty', self.manager, record=record)
         device.present, device.fd = True, 98765
         self.store.bind(info, path, '/fake/tty', connection_id=device.connection_id)
         return device
@@ -503,7 +503,7 @@ class SavedSshCredentialTests(unittest.TestCase):
     def test_rejected_saved_password_does_not_try_defaults_or_replace_the_setting(self):
         remembered = self.remember()
         self.check.return_value = False, True, 'denied'
-        with self.assertRaises(seriald.SSHAuthenticationError) as caught:
+        with self.assertRaises(decklab.SSHAuthenticationError) as caught:
             self.device.ssh_connect()
         self.assertEqual(caught.exception.user, 'ubuntu')
         self.check.assert_called_once_with('192.0.2.1', 'ubuntu', remembered['ssh_password'])
@@ -514,7 +514,7 @@ class SavedSshCredentialTests(unittest.TestCase):
     def test_manual_replacement_is_saved_only_after_verified_connection(self):
         remembered = self.remember()
         self.check.return_value = False, True, 'denied'
-        with self.assertRaises(seriald.SSHAuthenticationError):
+        with self.assertRaises(decklab.SSHAuthenticationError):
             self.device.ssh_connect(ssh_user='debian', ssh_password='rejected-private-password')
         self.assertEqual(self.store.get_ssh_credentials('SN1'), remembered)
         self.check.return_value = True, False, ''
@@ -674,7 +674,7 @@ class SavedSshCredentialTests(unittest.TestCase):
         self.assertEqual(dict(raw), remembered)
 
     def test_unidentified_connection_never_persists_by_port_or_ip(self):
-        device = seriald.Device('test-usb', '/fake/tty', self.manager)
+        device = decklab.Device('test-usb', '/fake/tty', self.manager)
         device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
         with mock.patch.object(device, 'run_probe', return_value={'ok': True}), \
                 mock.patch.object(self.store, 'save_ssh_credentials', wraps=self.store.save_ssh_credentials) as save:

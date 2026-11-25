@@ -1,6 +1,6 @@
 (function (global) {
   'use strict';
-  var UI = global.SerialdUI, document = global.document;
+  var UI = global.DeckLabUI, document = global.document;
   var groups = [
     ['access', '访问与共享', [
       ['网页登录', ['PORT', 'BIND', 'AUTH_TOKEN', 'UI_LANGUAGE', 'SHARE_SECONDS']],
@@ -365,7 +365,7 @@
       var caption = el('div', null, wiring);
       el('strong', '工位接线', caption);
       el('small', '将控制器槽位绑定到开发板，用于复位和进入下载模式。', caption);
-      button(wiring, '管理接线', function () { global.SerialdControlSlots.open(); });
+      button(wiring, '管理接线', function () { global.DeckLabControlSlots.open(); });
     }
     parts.forEach(function (part) {
       var section = el(part[2] ? 'details' : 'section', null, pane);
@@ -544,5 +544,5 @@
     }
   }
   if (document && UI) { var trigger = UI.byId('b-settings'); if (trigger) trigger.addEventListener('click', function () { open('web'); }); }
-  global.SerialdSettings = {validateBrowser: validateBrowser};
+  global.DeckLabSettings = {validateBrowser: validateBrowser};
 })(window);

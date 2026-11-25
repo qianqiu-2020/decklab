@@ -9,11 +9,11 @@ import unittest
 from unittest import mock
 from urllib.parse import urlsplit
 
-import serialctl as ctl
-from seriald_core.devices import Manager
-from seriald_core.storage import Store
-from seriald_core import web
-from seriald_core.results import response
+import decklabctl as ctl
+from decklab_core.devices import Manager
+from decklab_core.storage import Store
+from decklab_core import web
+from decklab_core.results import response
 from examples.platform_executor import run_attempt
 
 
@@ -37,7 +37,7 @@ class MemoryHTTP:
         # The authenticated control layer pins this actor in production. Tests
         # deliberately do not use an arbitrary POST actor as authentication.
         handler.headers = {'Content-Length': str(len(body)), 'Content-Type': 'application/json',
-                           'X-Seriald-Actor': self.actor}
+                           'X-DeckLab-Actor': self.actor}
         handler.rfile, handler.wfile = io.BytesIO(body), io.BytesIO()
         handler.send_response = mock.Mock()
         handler.send_header, handler.end_headers = mock.Mock(), mock.Mock()
@@ -107,7 +107,7 @@ class IntegrationClientTests(unittest.TestCase):
     def test_lost_submission_queries_original_request_and_never_reexecutes(self):
         self.client.select_mapping(self.mapping)
         self.transport.lose_submission = True
-        with mock.patch('seriald_core.task_actions.DeviceActions.execute',
+        with mock.patch('decklab_core.task_actions.DeviceActions.execute',
                         return_value=response(200, {'ok': True, 'serial': 'BOARD-ONE'})) as execute:
             result = self.client.submit_task('identify', 'stable-attempt-001')
             task = self.finish(result['task']['id'])
@@ -122,7 +122,7 @@ class IntegrationClientTests(unittest.TestCase):
     def test_owner_lookup_preserves_original_post_actor_and_grant_lookup_ignores_override(self):
         self.client.select_mapping(self.mapping)
         self.transport.actor, self.transport.lose_submission = 'web', True
-        with mock.patch('seriald_core.task_actions.DeviceActions.execute',
+        with mock.patch('decklab_core.task_actions.DeviceActions.execute',
                         return_value=response(200, {'ok': True, 'serial': 'BOARD-ONE'})) as execute:
             result = self.client.submit_task('identify', 'owner-attempt-001')
             self.finish(result['task']['id'])
@@ -136,7 +136,7 @@ class IntegrationClientTests(unittest.TestCase):
     def test_unavailable_reconciliation_reports_unknown_with_original_id_and_no_replay(self):
         self.client.select_mapping(self.mapping)
         self.transport.lose_submission, self.transport.lose_lookup = True, True
-        with mock.patch('seriald_core.task_actions.DeviceActions.execute',
+        with mock.patch('decklab_core.task_actions.DeviceActions.execute',
                         return_value=response(200, {'ok': True, 'serial': 'BOARD-ONE'})):
             with self.assertRaises(ctl.SubmissionUnconfirmed) as failed:
                 self.client.submit_task('identify', 'stable-attempt-002')
@@ -145,7 +145,7 @@ class IntegrationClientTests(unittest.TestCase):
 
     def test_same_request_deduplicates_and_changed_input_is_explicit_conflict(self):
         self.client.select_mapping(self.mapping)
-        with mock.patch('seriald_core.task_actions.DeviceActions.execute',
+        with mock.patch('decklab_core.task_actions.DeviceActions.execute',
                         return_value=response(200, {'ok': True, 'serial': 'BOARD-ONE'})) as execute:
             first = self.client.submit_task('identify', 'stable-attempt-003')
             self.finish(first['task']['id'])
@@ -176,7 +176,7 @@ class IntegrationClientTests(unittest.TestCase):
         self.assertFalse(owner['cross_platform_exclusive'])
         self.assertNotIn(secret, json.dumps(owner))
         self.client.renew_board(60)
-        with mock.patch('seriald_core.task_actions.DeviceActions.execute',
+        with mock.patch('decklab_core.task_actions.DeviceActions.execute',
                         return_value=response(200, {'ok': True, 'serial': 'BOARD-ONE'})):
             result = self.client.submit_task('identify', 'leased-attempt-001')
             self.finish(result['task']['id'])

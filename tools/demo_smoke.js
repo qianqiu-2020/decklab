@@ -19,7 +19,7 @@ async function until(check, description) {
   throw new Error('Timed out: ' + description);
 }
 (async () => {
-  demo = spawn(process.env.PYTHON || 'python3', ['seriald_demo.py', '--port', '0'], {cwd: root});
+  demo = spawn(process.env.PYTHON || 'python3', ['decklab_demo.py', '--port', '0'], {cwd: root});
   let output = '';
   demo.stdout.on('data', chunk => { output += chunk; });
   demo.stderr.on('data', chunk => errors.push(String(chunk)));
@@ -62,7 +62,7 @@ async function until(check, description) {
   await rpc('Page.enable');
   await rpc('Emulation.setDeviceMetricsOverride', {width: 1440, height: 960, deviceScaleFactor: 1, mobile: false});
   await until(() => evaluate('document.querySelectorAll(".dev").length === 3'), 'device list');
-  await evaluate('SerialdI18n.setLocale("zh-CN")');
+  await evaluate('DeckLabI18n.setLocale("zh-CN")');
   const bounds = selector => evaluate(`(() => { const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
     return {left:r.left, width:r.width, height:r.height, right:r.right}; })()`);
   const meta = await bounds('.dev .meta'), header = await bounds('.directory-columns span:nth-child(2)');
@@ -178,13 +178,13 @@ async function until(check, description) {
   const overview = await rpc('Page.captureScreenshot', {format: 'png'});
   fs.mkdirSync(path.join(root, 'dist'), {recursive: true});
   fs.writeFileSync(path.join(root, 'dist', 'demo-overview.png'), Buffer.from(overview.data, 'base64'));
-  await evaluate('window.originalDemoTerm=demoTerm;window.originalClientId=SerialdUI.clientId;SerialdI18n.setLocale("en")');
+  await evaluate('window.originalDemoTerm=demoTerm;window.originalClientId=DeckLabUI.clientId;DeckLabI18n.setLocale("en")');
   await until(() => evaluate('document.querySelector("#b-input-owner").textContent.includes("Reserve input")'), 'English UI');
-  assert.equal(await evaluate('demoTerm===originalDemoTerm && SerialdUI.clientId===originalClientId'), true);
+  assert.equal(await evaluate('demoTerm===originalDemoTerm && DeckLabUI.clientId===originalClientId'), true);
   assert.equal(await evaluate('document.querySelector("#b-agent-share").textContent.includes("AI access")'), true);
   const englishOverview = await rpc('Page.captureScreenshot', {format: 'png'});
   fs.writeFileSync(path.join(root, 'dist', 'demo-overview-en.png'), Buffer.from(englishOverview.data, 'base64'));
-  await evaluate('SerialdI18n.setLocale("zh-CN")');
+  await evaluate('DeckLabI18n.setLocale("zh-CN")');
   // Two independent page instances use the production ownership API and UI.
   await evaluate('document.querySelector("#b-input-owner").click()');
   await until(() => evaluate('document.querySelector("#input-owner-label").textContent === "释放输入"'), 'first page ownership');
@@ -192,10 +192,10 @@ async function until(check, description) {
     peerPage.style.cssText='position:fixed;left:-2000px;top:0;width:1024px;height:768px';
     peerPage.src=${JSON.stringify(address)};document.body.appendChild(peerPage);`);
   await until(() => evaluate('peerPage.contentDocument.querySelectorAll(".dev").length === 3'), 'second page list');
-  assert.equal(await evaluate('SerialdUI.clientId !== peerPage.contentWindow.SerialdUI.clientId'), true);
+  assert.equal(await evaluate('DeckLabUI.clientId !== peerPage.contentWindow.DeckLabUI.clientId'), true);
   await evaluate('peerPage.contentDocument.querySelector(\'[data-key="demo-k1"]\').click()');
   await until(() => evaluate('peerPage.contentDocument.querySelector("#d-in").disabled'), 'second page spectator');
-  assert.equal(await evaluate(`peerPage.contentWindow.SerialdUI.fetch('/api/session-send', {
+  assert.equal(await evaluate(`peerPage.contentWindow.DeckLabUI.fetch('/api/session-send', {
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({key:'demo-k1',sid:'serial',data:'blocked\\r',actor:'web'})
   }).then(response=>response.status)`), 423);
@@ -226,9 +226,9 @@ async function until(check, description) {
   await until(() => evaluate('document.querySelector("#d-status").textContent.includes("识别完成")'), 'background identification');
   await evaluate('document.querySelector("#b-tasks").click()');
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("已完成")'), 'persisted task result');
-  const previousClient = await evaluate('SerialdUI.clientId');
+  const previousClient = await evaluate('DeckLabUI.clientId');
   await rpc('Page.reload');
-  await until(() => evaluate('typeof SerialdUI !== "undefined" && SerialdUI.clientId !== ' + JSON.stringify(previousClient)
+  await until(() => evaluate('typeof DeckLabUI !== "undefined" && DeckLabUI.clientId !== ' + JSON.stringify(previousClient)
     + ' && document.querySelectorAll(".dev").length === 3'), 'fresh page');
   await evaluate('document.querySelector(\'[data-key="demo-k1"]\').click(); document.querySelector("#b-tasks").click()');
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("已完成")'), 'task history after reload');

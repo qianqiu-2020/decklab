@@ -2,7 +2,7 @@
 (function (global) {
   'use strict';
   function create(options) {
-    var $ = options.byId, client = global.SerialdTasks.createClient(options.fetch);
+    var $ = options.byId, client = global.DeckLabTasks.createClient(options.fetch);
     var names = {reset: '复位', 'power-on': '上电', 'power-off': '断电', 'enter-download': '进入下载模式'};
     var selection = '', generation = 0, actions = [], wiring = null, target = null, pending = Object.create(null);
     function scope(ctx) { return ctx && ctx.connectionId ? (ctx.serial || ctx.key || '') + ':' + ctx.connectionId : ''; }
@@ -66,7 +66,7 @@
     }
     function bind(ctx) {
       if (!current(ctx) || !(options.canBind && options.canBind())) return;
-      global.SerialdControlSlots.open(ctx.serial, ctx.serial ? null : {key:ctx.key, connection_id:ctx.connectionId});
+      global.DeckLabControlSlots.open(ctx.serial, ctx.serial ? null : {key:ctx.key, connection_id:ctx.connectionId});
     }
     $('b-board-control').addEventListener('click', function () { open(options.getView()); });
     $('b-board-slot-bind').addEventListener('click', function () { bind(options.getView()); });
@@ -80,5 +80,5 @@
     $('board-control-dialog').addEventListener('cancel', close);
     return {refresh: refresh, close: close, bind: bind, invalidate: function () { selection = ''; refresh(options.getView()); }};
   }
-  global.SerialdBoardControl = {create: create};
+  global.DeckLabBoardControl = {create: create};
 })(window);

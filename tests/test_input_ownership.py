@@ -7,18 +7,18 @@ import unittest
 import tempfile
 from unittest import mock
 
-from seriald_core.device import Device
-from seriald_core.actions import DeviceActions
-from seriald_core.transactions import TransactionError
-from seriald_core import web
-from seriald_core.agent_grants import AgentGrantStore, attach_agent_grants
+from decklab_core.device import Device
+from decklab_core.actions import DeviceActions
+from decklab_core.transactions import TransactionError
+from decklab_core import web
+from decklab_core.agent_grants import AgentGrantStore, attach_agent_grants
 
 
 class InputOwnershipTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        patcher = mock.patch('seriald_core.device.LOG_ROOT', temporary.name)
+        patcher = mock.patch('decklab_core.device.LOG_ROOT', temporary.name)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.device = Device('fake-usb', '/fake/tty')

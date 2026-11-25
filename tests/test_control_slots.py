@@ -8,13 +8,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from seriald_core.control_slots import ControlSlots
-from seriald_core.ha_slots import SlotAction, inventory
-from seriald_core.hardware import HardwareBook
-from seriald_core.tasks import TaskError
-from seriald_core.tasks import TaskManager
-from seriald_core.storage import Store
-from seriald_core.web_settings import WebSettings
+from decklab_core.control_slots import ControlSlots
+from decklab_core.ha_slots import SlotAction, inventory
+from decklab_core.hardware import HardwareBook
+from decklab_core.tasks import TaskError
+from decklab_core.tasks import TaskManager
+from decklab_core.storage import Store
+from decklab_core.web_settings import WebSettings
 
 
 URL = 'http://ha.example.test'
@@ -39,7 +39,7 @@ class ControlSlotsTests(unittest.TestCase):
             store=Mock(has_conflict=Mock(return_value=False)))
         self.slots = ControlSlots(self.manager)
         self.slots.settings = self.settings
-        fake = patch('seriald_core.ha_slots.inventory', return_value={ONE:slot('controllerA'), TWO:slot('controllerB')})
+        fake = patch('decklab_core.ha_slots.inventory', return_value={ONE:slot('controllerA'), TWO:slot('controllerB')})
         self.inventory = fake.start()
         self.addCleanup(fake.stop)
 
@@ -97,9 +97,9 @@ class ControlSlotsTests(unittest.TestCase):
                 outcome('issued')
                 outcome('acknowledged')
 
-            with patch('seriald_core.flash_tasks._discovery',return_value=discovery), \
-                    patch('seriald_core.control_slots.transactions_for', return_value=transaction), \
-                    patch('seriald_core.ha_slots.SlotAction') as actuator:
+            with patch('decklab_core.flash_tasks._discovery',return_value=discovery), \
+                    patch('decklab_core.control_slots.transactions_for', return_value=transaction), \
+                    patch('decklab_core.ha_slots.SlotAction') as actuator:
                 actuator.return_value.run.side_effect = trigger
                 started = self.slots.execute(action)['task']
                 deadline = time.monotonic() + 3
@@ -185,7 +185,7 @@ class ControlSlotsTests(unittest.TestCase):
         action = self.manager.hardware.command('A','enter-download','web')
         state = {'entity_id':action.entity, 'state':'unknown'}
         for reply in ([], TaskError('timed out',502)):
-            with patch('seriald_core.ha_slots.request', side_effect=[state,reply]) as api:
+            with patch('decklab_core.ha_slots.request', side_effect=[state,reply]) as api:
                 outcome=Mock()
                 if isinstance(reply, list):
                     self.assertEqual(action.run(lambda:None,outcome=outcome)['control_result'],'acknowledged')
@@ -199,7 +199,7 @@ class ControlSlotsTests(unittest.TestCase):
         rows=[{'device_id':'abc','entity_id':e,'platform':'esphome'} for e in slot('a')['entities'].values()]
         rows += [dict(rows[0],device_id='def',entity_id='switch.b_board_1_reset'),
                  dict(rows[0],entity_id='switch.a_board_4_reset',disabled_by='user')]
-        with patch('seriald_core.ha_slots.registries', return_value=([],
+        with patch('decklab_core.ha_slots.registries', return_value=([],
                 [{'id':'abc','name':'Desk'},{'id':'def','name':'Desk'}],rows)):
             self.assertEqual(set(inventory(URL,TOKEN)),{'abc/1','def/1'})
 
@@ -208,7 +208,7 @@ class ControlSlotsTests(unittest.TestCase):
                 for device, numbers in [('abc', range(4)), ('def', range(1, 5))]
                 for number in numbers for entity in slot(device, number)['entities'].values()]
         self.inventory.side_effect = inventory
-        with patch('seriald_core.ha_slots.registries', return_value=([],
+        with patch('decklab_core.ha_slots.registries', return_value=([],
                 [{'id':'abc','name':'Desk'}, {'id':'def','name':'Desk'}], rows)):
             first = self.scan()
             self.assertEqual([row['key'] for row in first['slots']],

@@ -7,14 +7,14 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.device_preferences import apply, snapshot
-from seriald_core.storage import Store
-from seriald_core.devices import Manager
-from seriald_core.device import Device
-from seriald_core.board_maintenance import maintenance_for
-from seriald_core.web_settings import SettingsError
-from seriald_core.transactions import TransactionError, transactions_for
-from seriald_core.web import Handler
+from decklab_core.device_preferences import apply, snapshot
+from decklab_core.storage import Store
+from decklab_core.devices import Manager
+from decklab_core.device import Device
+from decklab_core.board_maintenance import maintenance_for
+from decklab_core.web_settings import SettingsError
+from decklab_core.transactions import TransactionError, transactions_for
+from decklab_core.web import Handler
 
 
 class PreferencesTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class PreferencesTests(unittest.TestCase):
         root = Path(self.temporary.name)
         self.store = Store(root / 'registry.sqlite3')
         self.addCleanup(self.store.close)
-        for module in ('seriald_core.device', 'seriald_core.devices'):
+        for module in ('decklab_core.device', 'decklab_core.devices'):
             patch = mock.patch(module + '.LOG_ROOT', str(root / 'logs'))
             patch.start()
             self.addCleanup(patch.stop)

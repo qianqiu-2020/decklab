@@ -648,7 +648,7 @@
     '服务已启用；客户端使用 Streamable HTTP，并发送 Authorization: Bearer 令牌。': 'Server ready. Use Streamable HTTP with an Authorization: Bearer token header.',
     '服务端 MCP 组件未安装': 'Server MCP component is not installed',
     '服务端 MCP 尚未启动': 'Server MCP has not started', '服务端 MCP 已停用': 'Server MCP is disabled',
-    '服务端 MCP 组件不可用，请检查安装或 SERIALD_MCP_PYTHON': 'Server MCP component unavailable; check installation or SERIALD_MCP_PYTHON',
+    '服务端 MCP 组件不可用，请检查安装或 DECKLAB_MCP_PYTHON': 'Server MCP component unavailable; check installation or DECKLAB_MCP_PYTHON',
     '服务端 MCP 工作进程已停止': 'Server MCP worker has stopped', '服务端 MCP 尚未启用': 'Server MCP is not enabled',
     '授权已生成；请修正连接地址后复制配置。': 'Grant created. Correct the connection URL, then copy the configuration.',
     'MCP 可执行文件': 'MCP executable', '首次安装：使用独立 Python 环境': 'First install: use an isolated Python environment',
@@ -1128,7 +1128,7 @@
     try { localStorage.setItem('decklab-language', next === 'en' ? 'en' : 'zh-CN'); } catch (_) {}
     applyLocale(next);
   }
-  global.SerialdI18n = { translate: translate, setLocale: setLocale,
+  global.DeckLabI18n = { translate: translate, setLocale: setLocale,
     setDefaultLocale: function (next) { if (!userChosen && (next === 'en' || next === 'zh-CN')) applyLocale(next); },
     get locale() { return locale; } };
   document.querySelectorAll('[data-language-select]').forEach(function (select) {

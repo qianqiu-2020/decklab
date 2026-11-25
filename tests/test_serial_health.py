@@ -9,9 +9,9 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core.device import Device
-from seriald_core import serial_health
-from seriald_core.terminal_backend import node_binary
+from decklab_core.device import Device
+from decklab_core import serial_health
+from decklab_core.terminal_backend import node_binary
 
 
 @unittest.skipUnless(node_binary(), 'requires the packaged terminal runtime')
@@ -20,7 +20,7 @@ class SerialHealthTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        logs = mock.patch('seriald_core.device.LOG_ROOT', str(self.root / 'logs'))
+        logs = mock.patch('decklab_core.device.LOG_ROOT', str(self.root / 'logs'))
         logs.start()
         self.addCleanup(logs.stop)
         self.device = Device('fake-port', '/fake/tty')

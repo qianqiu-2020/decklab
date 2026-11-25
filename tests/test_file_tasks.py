@@ -11,12 +11,12 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core.demo import DemoManager
-from seriald_core.storage import Store
-from seriald_core.task_actions import TaskActions
-from seriald_core.artifact_actions import ArtifactActions, body_limit
-from seriald_core.transfer_artifacts import ArtifactPolicy
-from seriald_core import web
+from decklab_core.demo import DemoManager
+from decklab_core.storage import Store
+from decklab_core.task_actions import TaskActions
+from decklab_core.artifact_actions import ArtifactActions, body_limit
+from decklab_core.transfer_artifacts import ArtifactPolicy
+from decklab_core import web
 
 
 class FileTaskTests(unittest.TestCase):
@@ -27,10 +27,10 @@ class FileTaskTests(unittest.TestCase):
         self.store = Store(str(self.path / 'registry.sqlite3'))
         self.addCleanup(self.store.close)
         for module in ('device', 'devices'):
-            patcher = mock.patch('seriald_core.' + module + '.LOG_ROOT', str(self.path / 'logs'))
+            patcher = mock.patch('decklab_core.' + module + '.LOG_ROOT', str(self.path / 'logs'))
             patcher.start()
             self.addCleanup(patcher.stop)
-        with mock.patch('seriald_core.device.LOG_ROOT', str(self.path / 'logs')):
+        with mock.patch('decklab_core.device.LOG_ROOT', str(self.path / 'logs')):
             self.manager = DemoManager(self.store)
         self.addCleanup(self.manager.close)
         self.device = self.manager.resolve('demo-k1')
@@ -63,7 +63,7 @@ class FileTaskTests(unittest.TestCase):
         handler = web.Handler.__new__(web.Handler)
         raw = json.dumps(body).encode() if body is not None else b''
         handler.path = route
-        handler.headers = {'Content-Length': str(len(raw)), 'X-Seriald-Actor': actor}
+        handler.headers = {'Content-Length': str(len(raw)), 'X-DeckLab-Actor': actor}
         handler.rfile, handler.wfile = io.BytesIO(raw), io.BytesIO()
         handler.send_response, handler.send_header, handler.end_headers = mock.Mock(), mock.Mock(), mock.Mock()
         with mock.patch.object(web, 'MGR', self.manager):
@@ -107,7 +107,7 @@ class FileTaskTests(unittest.TestCase):
         self.assertEqual(task['state'], 'failed')
         self.assertEqual(self.device.files['/tmp/upload'], b'original')
         self.assertEqual(self.artifacts.get(row['id'])['state'], 'failed')
-        self.assertFalse(any('.seriald-' in path for path in self.device.files))
+        self.assertFalse(any('.decklab-' in path for path in self.device.files))
 
     def test_download_result_is_durable_and_scoped_stream_matches_hash(self):
         task = self.finish(self.start(actor='agent-one'))
@@ -217,7 +217,7 @@ class FileTaskTests(unittest.TestCase):
             task = self.finish(response)
         self.assertEqual(task['state'], 'cancelled', task)
         self.assertNotIn('/tmp/cancelled', self.device.files)
-        self.assertFalse(any('.seriald-' in path for path in self.device.files))
+        self.assertFalse(any('.decklab-' in path for path in self.device.files))
         self.assertEqual(self.artifacts.get(artifact['id'])['state'], 'ready')
         self.assertEqual(self.artifacts._readers, {})
         with self.artifacts.open(artifact['id']) as source:

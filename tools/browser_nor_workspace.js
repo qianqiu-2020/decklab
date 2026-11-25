@@ -145,7 +145,7 @@ const server = http.createServer((req,res) => {
     res.setHeader('Content-Type','text/html');
     return res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/static/app.css"><body>'+dialog+
       '<script src="/static/i18n.js"></script><script src="/static/tasks.js"></script><script src="/static/flashing.js"></script><script>'+
-      'SerialdI18n.setLocale("zh-CN");window.ui=SerialdFlashing.create({byId:id=>document.getElementById(id),fetch:fetch,translate:SerialdI18n.translate,openImageStore:(choose,picker)=>{window.fixtureChooseFile=choose;window.fixturePicker=picker;},'+
+      'DeckLabI18n.setLocale("zh-CN");window.ui=DeckLabFlashing.create({byId:id=>document.getElementById(id),fetch:fetch,translate:DeckLabI18n.translate,openImageStore:(choose,picker)=>{window.fixtureChooseFile=choose;window.fixturePicker=picker;},'+
       'formatBytes:n=>n>=1048576?(n/1048576).toFixed(1)+" MiB":n>=1024?(n/1024).toFixed(1)+" KiB":n+" B"});ui.open('+JSON.stringify(target)+');</script></body></html>');
   }
   if(url.pathname==='/api/tasks') return json({tasks:current?[current]:[]});
@@ -351,12 +351,12 @@ let chrome,ws;
   await wait('document.querySelectorAll("#fl-backups a").length===2');
   await rpc('Emulation.setDeviceMetricsOverride',{width:1600,height:1100,deviceScaleFactor:1,mobile:false});
   await evaluate('document.querySelector(".fl-execution").scrollIntoView({block:"center"})');await shot('nor-results-dark-fixture');
-  await evaluate('SerialdI18n.setLocale("en");document.querySelector("#flash-dialog").scrollTop=0');await delay(100);await shot('nor-results-english-fixture');
+  await evaluate('DeckLabI18n.setLocale("en");document.querySelector("#flash-dialog").scrollTop=0');await delay(100);await shot('nor-results-english-fixture');
   assert.equal(await evaluate('document.querySelector("#fl-title").textContent'),'Flashing workspace');
   assert.ok(await evaluate('[...document.querySelectorAll(".fl-partition")].every(r=>r.artifactSelect.hidden===!r.checkbox.checked)'),'language changes preserve selection visibility');
   current={...current,id:'skip-readback-fixture',state:'running',progress:{phase:'verifying-nor',done:4<<20,total:8<<20},
     flash:{...current.flash,can_skip_verification:true,verify_result:'running'},result:null};
-  await evaluate('SerialdI18n.setLocale("zh-CN");ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
+  await evaluate('DeckLabI18n.setLocale("zh-CN");ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
   await wait('!document.querySelector("#fl-skip-verify").hidden && !document.querySelector("#fl-skip-verify").disabled');
   await evaluate('document.querySelector("#fl-skip-verify").click()');
   await wait('document.querySelector("#fl-results").textContent.includes("用户跳过，校验未完成")');
@@ -367,7 +367,7 @@ let chrome,ws;
   // USB port. Saved request IDs and history must not restore the old identity.
   current.board_targets=['OLD-SN'];current.flash.request_serial='OLD-SN';
   target.target_generation='new-bootrom-after-flash';target.serial='';
-  await evaluate('SerialdI18n.setLocale("zh-CN");ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
+  await evaluate('DeckLabI18n.setLocale("zh-CN");ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
   await wait('document.querySelector("#fl-status").textContent.includes("identity changed")');
   const readsBeforeRedetect=targetReads.length,submissionsBeforeRedetect=submissions.length;
   assert.equal(await evaluate('document.querySelector("#fl-new").getClientRects().length'),1);

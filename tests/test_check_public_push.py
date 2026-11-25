@@ -98,7 +98,7 @@ class ScanTextTests(unittest.TestCase):
         self.assertEqual(hits(f'Authorization: Basic {basic}'), [('authorization-header', basic)])
 
     def test_authorization_header_templates_do_not_hit(self):
-        for text in ('Authorization: Bearer ${TOKEN}', 'Authorization: Bearer $SERIALD_TOKEN',
+        for text in ('Authorization: Bearer ${TOKEN}', 'Authorization: Bearer $DECKLAB_TOKEN',
                      "'Authorization': 'Bearer ' + token", 'Authorization: Bearer <token>',
                      'f"Authorization: Bearer {token}"', 'Authorization: Bearer YOUR_TOKEN_HERE_PLEASE',
                      'Authorization: Basic ' + b64('no-colon-here'), 'Authorization: Basic notbase64!!',

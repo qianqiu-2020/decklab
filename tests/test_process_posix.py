@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.hardware import PosixProcess
+from decklab_core.hardware import PosixProcess
 
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux process-group verification')
@@ -50,9 +50,9 @@ class PosixProcessTests(unittest.TestCase):
             for state, expected in (('S', True), ('D', True), ('Z', False), ('X', False)):
                 stat.write_bytes(b'42 (helper \xff (worker) name) ' + state.encode()
                                  + b' 1 123456 123456 0')
-                with mock.patch('seriald_core.hardware.os.scandir',
+                with mock.patch('decklab_core.hardware.os.scandir',
                                 side_effect=lambda path: scandir(directory if path == '/proc' else path)), \
-                        mock.patch('seriald_core.hardware.os.killpg'):
+                        mock.patch('decklab_core.hardware.os.killpg'):
                     self.assertEqual(process._group_running(), expected)
 
     def test_zombie_leader_with_live_thread_is_not_stopped(self):
@@ -63,23 +63,23 @@ class PosixProcessTests(unittest.TestCase):
             (leader / 'stat').write_text('42 (leader) Z 1 123456 123456 0')
             (thread / 'stat').write_text('43 (worker) D 1 123456 123456 0')
             scandir = os.scandir
-            with mock.patch('seriald_core.hardware.os.scandir',
+            with mock.patch('decklab_core.hardware.os.scandir',
                             side_effect=lambda path: scandir(directory if path == '/proc' else path)), \
-                    mock.patch('seriald_core.hardware.os.killpg'):
+                    mock.patch('decklab_core.hardware.os.killpg'):
                 self.assertTrue(self.process_fixture()._group_running())
 
     def test_invisible_existing_group_is_not_treated_as_stopped(self):
         with tempfile.TemporaryDirectory() as directory:
             entries = os.scandir(directory)
-            with entries, mock.patch('seriald_core.hardware.os.scandir', return_value=entries), \
-                    mock.patch('seriald_core.hardware.os.killpg'):
+            with entries, mock.patch('decklab_core.hardware.os.scandir', return_value=entries), \
+                    mock.patch('decklab_core.hardware.os.killpg'):
                 self.assertTrue(self.process_fixture()._group_running())
 
     def test_cleanup_waits_for_remaining_members_after_root_wait(self):
         process = self.process_fixture()
-        with mock.patch('seriald_core.hardware.os.killpg'), \
+        with mock.patch('decklab_core.hardware.os.killpg'), \
                 mock.patch.object(process, '_group_running', side_effect=[True, True, False]) as members, \
-                mock.patch('seriald_core.hardware.time.sleep') as sleep:
+                mock.patch('decklab_core.hardware.time.sleep') as sleep:
             process.close()
         process.process.wait.assert_called_once_with(timeout=3)
         self.assertEqual(members.call_count, 3)
@@ -87,23 +87,23 @@ class PosixProcessTests(unittest.TestCase):
 
     def test_unstopped_group_has_bounded_cleanup_failure(self):
         process = self.process_fixture()
-        with mock.patch('seriald_core.hardware.os.killpg'), \
+        with mock.patch('decklab_core.hardware.os.killpg'), \
                 mock.patch.object(process, '_group_running', return_value=True), \
-                mock.patch('seriald_core.hardware.time.monotonic', side_effect=[0, 4]):
+                mock.patch('decklab_core.hardware.time.monotonic', side_effect=[0, 4]):
             with self.assertRaisesRegex(OSError, 'process group did not stop'):
                 process.close()
 
     def test_root_wait_timeout_is_reported_as_cleanup_failure(self):
         process = self.process_fixture()
         process.process.wait.side_effect = subprocess.TimeoutExpired('helper', 3)
-        with mock.patch('seriald_core.hardware.os.killpg'):
+        with mock.patch('decklab_core.hardware.os.killpg'):
             with self.assertRaisesRegex(OSError, 'root process did not stop'):
                 process.close()
 
     def test_unreadable_process_metadata_does_not_prove_cleanup(self):
         process = self.process_fixture()
-        with mock.patch('seriald_core.hardware.os.killpg'), \
-                mock.patch('seriald_core.hardware.os.scandir', side_effect=PermissionError('proc unavailable')):
+        with mock.patch('decklab_core.hardware.os.killpg'), \
+                mock.patch('decklab_core.hardware.os.scandir', side_effect=PermissionError('proc unavailable')):
             with self.assertRaises(PermissionError):
                 process._group_running()
 

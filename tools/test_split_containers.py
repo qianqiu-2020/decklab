@@ -47,18 +47,18 @@ def main():
                 name = names[index]
                 command = ['run', '-d', '--user', str(os.getuid()) + ':' + str(os.getgid()), '--name', name, '--network', network, '--network-alias', role,
                     '-w', '/app', *mounts, '-v', str(base / role) + ':/state', *extra]
-                values = dict(SERIALD_BASE='/state', SERIALD_STATIC='/app', SERIALD_MCP_ENABLED='0',
-                    SERIALD_AUTH_TOKEN='container-web-owner', SERIALD_BACKEND_TOKEN=token, **environment)
+                values = dict(DECKLAB_BASE='/state', DECKLAB_STATIC='/app', DECKLAB_MCP_ENABLED='0',
+                    DECKLAB_AUTH_TOKEN='container-web-owner', DECKLAB_BACKEND_TOKEN=token, **environment)
                 for key, value in values.items():
                     command += ['-e', key + '=' + value]
                 command += ['ubuntu:22.04', '/usr/bin/python3.10', *arguments]
                 docker(*command)
                 created.append(name)
                 return name
-            backend = start('backend', 0, {'SERIALD_BACKEND_CERT': '/tls/cert.pem', 'SERIALD_BACKEND_KEY': '/tls/key.pem'},
-                ['-m', 'seriald_core.backend_server', '--bind', '0.0.0.0', '--demo'])
-            web = start('web', 1, {'SERIALD_BACKEND_URL': 'https://backend:8899', 'SERIALD_BACKEND_CA': '/tls/cert.pem'},
-                ['-m', 'seriald_core.control_server', '--bind', '0.0.0.0', '--no-browser', '--require-backend'],
+            backend = start('backend', 0, {'DECKLAB_BACKEND_CERT': '/tls/cert.pem', 'DECKLAB_BACKEND_KEY': '/tls/key.pem'},
+                ['-m', 'decklab_core.backend_server', '--bind', '0.0.0.0', '--demo'])
+            web = start('web', 1, {'DECKLAB_BACKEND_URL': 'https://backend:8899', 'DECKLAB_BACKEND_CA': '/tls/cert.pem'},
+                ['-m', 'decklab_core.control_server', '--bind', '0.0.0.0', '--no-browser', '--require-backend'],
                 ['-p', '127.0.0.1::8898'])
             images = start('images', 2, {}, ['-m', 'http.server', '8080', '--directory', '/state'])
             docker('exec', images, '/usr/bin/python3.10', '-c',

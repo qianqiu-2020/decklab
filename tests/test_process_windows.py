@@ -11,9 +11,9 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core import process_windows as win
-from seriald_core import hardware
-from seriald_core.tasks import TaskCancelled, TaskError
+from decklab_core import process_windows as win
+from decklab_core import hardware
+from decklab_core.tasks import TaskCancelled, TaskError
 
 
 def dereference(pointer, kind):
@@ -264,7 +264,7 @@ class NativeWindowsProcessTests(unittest.TestCase):
                       'ready=Path(sys.argv[1]);temporary=ready.with_suffix(".tmp");'
                       'temporary.write_text(json.dumps([os.getpid(),child.pid]));'
                       'temporary.replace(ready);time.sleep(60)')
-            owner_code = ('import sys,time;from seriald_core.process_windows import WindowsProcess;'
+            owner_code = ('import sys,time;from decklab_core.process_windows import WindowsProcess;'
                           'process=WindowsProcess([sys.executable,"-c",%r,sys.argv[1]]);time.sleep(60)' % helper)
             owner = subprocess.Popen([sys.executable, '-c', owner_code, str(ready)],
                 cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL,

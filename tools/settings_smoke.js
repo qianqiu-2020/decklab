@@ -8,7 +8,7 @@ const net = require('node:net');
 const {spawn} = require('node:child_process');
 const {launchBrowser, stopBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
-const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'seriald-settings-ui-'));
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'decklab-settings-ui-'));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let control, collector, chrome, ws;
 (async () => {
@@ -17,11 +17,11 @@ let control, collector, chrome, ws;
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   fs.mkdirSync(path.join(temporary,'empty-ports'));
-  const seed = require('node:child_process').spawnSync('python3',['-c',"from seriald_core.storage import Store; import sys; s=Store(sys.argv[1]); s.bind({'serial':'FIXTURE-A','hostname':'fixture-a'},'fixture-physical-port','/fake/tty'); s.rename_attachment('fixture-port','fixture-left'); s.set_probe_settings('fixture-port',{'mode':'manual','command':''}); s.close()",path.join(temporary,'registry.sqlite3')],{cwd:root});
+  const seed = require('node:child_process').spawnSync('python3',['-c',"from decklab_core.storage import Store; import sys; s=Store(sys.argv[1]); s.bind({'serial':'FIXTURE-A','hostname':'fixture-a'},'fixture-physical-port','/fake/tty'); s.rename_attachment('fixture-port','fixture-left'); s.set_probe_settings('fixture-port',{'mode':'manual','command':''}); s.close()",path.join(temporary,'registry.sqlite3')],{cwd:root});
   assert.equal(seed.status,0,seed.stderr.toString());
-  const hostEnvironment = {...process.env, SERIALD_BASE:temporary, SERIALD_MCP_ENABLED:'0', SERIALD_AUTH_TOKEN:'', SERIALD_BY_PATH:path.join(temporary,'empty-ports')};
-  collector = spawn('python3',['-m','seriald_core.collector_server'],{cwd:root,env:hostEnvironment,stdio:['ignore','ignore','ignore']});
-  control = spawn('python3', ['-m', 'seriald_core.control_server', String(port)], {cwd:root,
+  const hostEnvironment = {...process.env, DECKLAB_BASE:temporary, DECKLAB_MCP_ENABLED:'0', DECKLAB_AUTH_TOKEN:'', DECKLAB_BY_PATH:path.join(temporary,'empty-ports')};
+  collector = spawn('python3',['-m','decklab_core.collector_server'],{cwd:root,env:hostEnvironment,stdio:['ignore','ignore','ignore']});
+  control = spawn('python3', ['-m', 'decklab_core.control_server', String(port)], {cwd:root,
     env:hostEnvironment, stdio:['ignore','ignore','pipe']});
   let diagnostics = ''; control.stderr.on('data', chunk => {diagnostics = (diagnostics + chunk).slice(-4096);});
   const address = 'http://127.0.0.1:' + port;
@@ -49,8 +49,8 @@ let control, collector, chrome, ws;
   console.log('Settings browser: connected');
   await rpc('Runtime.enable'); await rpc('Page.enable');
   await rpc('Emulation.setDeviceMetricsOverride',{width:1360,height:1000,deviceScaleFactor:1,mobile:false});
-  await wait('!!window.SerialdSettings');
-  await evaluate('SerialdI18n.setLocale("zh-CN")');
+  await wait('!!window.DeckLabSettings');
+  await evaluate('DeckLabI18n.setLocale("zh-CN")');
   console.log('Settings browser: opening form');
   await evaluate('document.querySelector("#b-settings").click()');
   await wait('!!document.querySelector(".settings-dialog[open]")');
@@ -114,9 +114,9 @@ let control, collector, chrome, ws;
   assert.equal(exported.browser.deviceOrder.ids[0],'board:fixture-a');
   assert.deepEqual(exported.configuration.environment.SSH_PASSWORD,{$redacted:true});
   await click('#settings-tab-access');
-  await evaluate('SerialdI18n.setLocale("en")');
+  await evaluate('DeckLabI18n.setLocale("en")');
   await wait('document.querySelector("#settings-tab-access").textContent === "Access & sharing"');
-  await evaluate('SerialdI18n.setLocale("zh-CN")');
+  await evaluate('DeckLabI18n.setLocale("zh-CN")');
   const output = path.join(root,'dist/settings-ui'); fs.mkdirSync(output,{recursive:true});
   for (const [name,width,height] of [['desktop',1360,1000],['mobile',390,844]]) {
     await rpc('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<600});

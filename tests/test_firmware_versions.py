@@ -4,10 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from seriald_core.firmware_versions import describe_firmware
-from seriald_core.flash_tasks import FlashActions
-from seriald_core.storage_metadata import read_inventory
-from seriald_core.tasks import TaskError
+from decklab_core.firmware_versions import describe_firmware
+from decklab_core.flash_tasks import FlashActions
+from decklab_core.storage_metadata import read_inventory
+from decklab_core.tasks import TaskError
 
 
 class FirmwareMediaTests(unittest.TestCase):

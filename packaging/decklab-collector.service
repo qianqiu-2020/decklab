@@ -1,0 +1,26 @@
+[Unit]
+Description=Serial board collector and SSH session owner
+After=local-fs.target
+
+[Service]
+Type=simple
+User=decklab
+Group=decklab
+SupplementaryGroups=dialout
+EnvironmentFile=/etc/decklab/decklab.env
+Environment=HOME=/data/decklab-data
+WorkingDirectory=/usr/lib/decklab
+ExecStart=/usr/bin/decklab-collector
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillMode=control-group
+RuntimeDirectory=decklab
+RuntimeDirectoryMode=0750
+UMask=0007
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -6,8 +6,8 @@ import time
 import unittest
 from dataclasses import replace
 
-from seriald_core.tasks import TaskError
-from seriald_core.flash_runner import FlashRunnerError
+from decklab_core.tasks import TaskError
+from decklab_core.flash_runner import FlashRunnerError
 import test_flash_integration as flash_fixture
 
 FakeFlashExecutor = flash_fixture.FakeFlashExecutor

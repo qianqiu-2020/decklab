@@ -17,7 +17,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-import serialctl as ctl
+import decklabctl as ctl
 
 
 NONCE = '0123456789abcdef01234567'
@@ -43,7 +43,7 @@ class ClientTests(unittest.TestCase):
 
     def test_piped_json_preserves_unicode_under_legacy_output_encoding(self):
         for failed in (False, True):
-            script = ("from unittest.mock import patch\nimport serialctl as c\n"
+            script = ("from unittest.mock import patch\nimport decklabctl as c\n"
                       "with patch.object(c, 'urlopen', side_effect=AssertionError('unexpected network')):\n"
                       + ("    with patch.object(c.Client, 'request', side_effect=c.ClientError('连接失败')):\n"
                          if failed else "    with patch.object(c.Client, 'request', return_value={'message':'中文'}):\n")
@@ -577,7 +577,7 @@ class FramingTests(unittest.TestCase):
                 actual, output = ctl.parse_frame(stream, NONCE)
                 self.assertEqual((actual, output), (code, expected))
 
-    @unittest.skipUnless((shutil.which('busybox') or os.environ.get('SERIALD_TEST_BUSYBOX_ARGV')) and os.name == 'posix', 'requires a local BusyBox shell and PTY')
+    @unittest.skipUnless((shutil.which('busybox') or os.environ.get('DECKLAB_TEST_BUSYBOX_ARGV')) and os.name == 'posix', 'requires a local BusyBox shell and PTY')
     def test_execute_long_command_in_actual_busybox_interactive_pty(self):
         import pty
         # This is a local child shell, not a managed serial device. The entire
@@ -585,7 +585,7 @@ class FramingTests(unittest.TestCase):
         pid, fd = pty.fork()
         if pid == 0:
             os.environ.update(PS1='BUSYBOX# ', PS2='> ', ENV='')
-            argv = json.loads(os.environ.get('SERIALD_TEST_BUSYBOX_ARGV', 'null'))
+            argv = json.loads(os.environ.get('DECKLAB_TEST_BUSYBOX_ARGV', 'null'))
             argv = argv or [shutil.which('busybox'), 'ash', '-i']
             os.execvp(argv[0], argv)
 

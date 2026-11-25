@@ -17,7 +17,7 @@ const server=http.createServer((req,res)=>{
     res.end(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/static/app.css">
       <div hidden><span id="count-online"></span><span id="count-history"></span><span id="count-pending"></span><span id="conn-dot"></span><span id="conn-txt"></span><input id="device-search"><select id="device-filter"><option value="all">all</option><option value="active">active</option></select><select id="device-sort"><option value="status">status</option><option value="manual">manual</option></select></div>
       ${warningMarkup}<main id="fixture" style="margin:24px;width:320px;max-height:1140px;overflow:auto"><p>模拟设备 · 实际鼠标拖拽测试</p><div id="grid" class="grid" style="grid-template-columns:1fr"></div></main>
-      <script src="/static/devices.js"></script><script>window.ui=SerialdDevices.create({byId:id=>document.getElementById(id),fetch:fetch,formatBytes:n=>n+' B',age:()=> 'now',open:()=>{window.unexpectedSelection=true},getView:()=>null,isCurrent:()=>false,loadSessions(){},loadActivity(){},renderInfo(){}});ui.poll();setInterval(()=>ui.poll(),100);</script>`);return;
+      <script src="/static/devices.js"></script><script>window.ui=DeckLabDevices.create({byId:id=>document.getElementById(id),fetch:fetch,formatBytes:n=>n+' B',age:()=> 'now',open:()=>{window.unexpectedSelection=true},getView:()=>null,isCurrent:()=>false,loadSessions(){},loadActivity(){},renderInfo(){}});ui.poll();setInterval(()=>ui.poll(),100);</script>`);return;
   }
   if(!['/static/app.css','/static/devices.js'].includes(req.url)){res.statusCode=404;res.end();return;}
   res.setHeader('Content-Type',req.url.endsWith('.js')?'text/javascript':'text/css');res.end(fs.readFileSync(path.join(root,req.url)));

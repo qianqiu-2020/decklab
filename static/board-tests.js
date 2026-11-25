@@ -5,7 +5,7 @@
   const states = {queued:'排队',running:'运行中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
   const roundStates = {passed:'通过',failed:'失败',uncertain:'无结果',cancelled:'已停止'};
   function create({byId:$,fetch,getView,copyText}) {
-    const client = global.SerialdTasks.createClient(fetch);
+    const client = global.DeckLabTasks.createClient(fetch);
     const dialog = $('board-tests-dialog');
     let selected, task, timer, sequence = 0, followSequence = 0, pending = false, requestId, runningId;
     let round, inspected = '', roundSignature = '', logRequest, rawSerial = '';
@@ -603,5 +603,5 @@
     });
     return {open};
   }
-  global.SerialdBoardTests={create};
+  global.DeckLabBoardTests={create};
 })(window);

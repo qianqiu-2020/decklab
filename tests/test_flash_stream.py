@@ -3,7 +3,7 @@ import copy
 import threading
 import unittest
 
-from seriald_core.flash_runner import FlashRunnerError
+from decklab_core.flash_runner import FlashRunnerError
 import test_flash_discovery_integration as usb_fixture
 
 
@@ -75,9 +75,9 @@ class FlashStreamTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
         from pathlib import Path
         from unittest.mock import patch
         import os
-        manifest = (Path(os.environ['SERIALD_FLASH_LOADERS']) if os.environ.get('SERIALD_FLASH_LOADERS') else
+        manifest = (Path(os.environ['DECKLAB_FLASH_LOADERS']) if os.environ.get('DECKLAB_FLASH_LOADERS') else
                     Path(__file__).resolve().parents[1] / 'packaging/flash-components/common/flash-loaders/manifest.json')
-        with usb_fixture.automatic_flashing() as fixture, patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}):
+        with usb_fixture.automatic_flashing() as fixture, patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(manifest)}):
             executor = StreamExecutor(self.tmp.name)
             executor.candidates = usb_fixture.FakeBootROMExecutor(self.tmp.name).candidates
             fixture.manager.flash_executor = fixture.executor = executor
@@ -132,7 +132,7 @@ class FlashStreamTests(usb_fixture.FlashDiscoveryHTTPIntegrationTests):
             self.assertTrue(fixture.executor.streams[0]['restrict_source'])
 
     def test_finished_fast_flash_releases_the_board_and_unconfirmed_stop_keeps_recovery(self):
-        from seriald_core.board_maintenance import maintenance_for
+        from decklab_core.board_maintenance import maintenance_for
         with usb_fixture.automatic_flashing() as fixture:
             target = self.target(fixture)
             body = dict(self.scope(target), url=self.URL, system_storage='nvme:0', request_id='fast-release-001')

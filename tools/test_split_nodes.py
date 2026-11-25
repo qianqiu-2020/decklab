@@ -67,20 +67,20 @@ def main():
         web.mkdir()
         backend_port, web_port = port(), port()
         address = 'http://127.0.0.1:%d' % web_port
-        common = {key: value for key, value in os.environ.items() if not key.startswith('SERIALD_')}
+        common = {key: value for key, value in os.environ.items() if not key.startswith('DECKLAB_')}
         static = args.exe.resolve().parent / '_internal' if args.exe else ROOT
-        common.update(SERIALD_STATIC=str(static), SERIALD_MCP_ENABLED='0', SERIALD_AUTH_TOKEN='split-web-owner',
-                      SERIALD_BACKEND_TOKEN='split-backend-' + 'x' * 48)
+        common.update(DECKLAB_STATIC=str(static), DECKLAB_MCP_ENABLED='0', DECKLAB_AUTH_TOKEN='split-web-owner',
+                      DECKLAB_BACKEND_TOKEN='split-backend-' + 'x' * 48)
         cert = ROOT / 'tests/fixtures/backend-tls/certificate.pem'
         key = ROOT / 'tests/fixtures/backend-tls/public-test-key.pem'
-        backend_environment = dict(common, SERIALD_BASE=str(hardware), SERIALD_BACKEND_BIND='127.0.0.1',
-            SERIALD_BACKEND_PORT=str(backend_port), SERIALD_BACKEND_CERT=str(cert), SERIALD_BACKEND_KEY=str(key))
-        web_environment = dict(common, SERIALD_BASE=str(web), SERIALD_BACKEND_URL='https://127.0.0.1:%d' % backend_port,
-            SERIALD_BACKEND_CA=str(cert), SERIALD_PORT=str(web_port), SERIALD_BIND='127.0.0.1')
+        backend_environment = dict(common, DECKLAB_BASE=str(hardware), DECKLAB_BACKEND_BIND='127.0.0.1',
+            DECKLAB_BACKEND_PORT=str(backend_port), DECKLAB_BACKEND_CERT=str(cert), DECKLAB_BACKEND_KEY=str(key))
+        web_environment = dict(common, DECKLAB_BASE=str(web), DECKLAB_BACKEND_URL='https://127.0.0.1:%d' % backend_port,
+            DECKLAB_BACKEND_CA=str(cert), DECKLAB_PORT=str(web_port), DECKLAB_BIND='127.0.0.1')
         def command(role):
             if args.exe:
                 return [str(args.exe.resolve()), role]
-            return [sys.executable, '-m', 'seriald_core.' + ('backend_server' if role == 'backend' else 'control_server')]
+            return [sys.executable, '-m', 'decklab_core.' + ('backend_server' if role == 'backend' else 'control_server')]
         backend_log, web_log = base / 'backend.log', base / 'web.log'
         with backend_log.open('wb') as backend_output, web_log.open('wb') as web_output:
             try:

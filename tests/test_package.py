@@ -16,8 +16,8 @@ from unittest import mock
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from seriald_core.storage import Store
-from seriald_core import __version__
+from decklab_core.storage import Store
+from decklab_core import __version__
 from tools.build_deb import build, collector_build_id, flash_executor_metadata, flash_notice_files
 from tools import build_linux_mcp as mcp_builder
 from test_linux_mcp_runtime import prepare_desktop_runtime_fixture
@@ -75,7 +75,7 @@ class PackageTests(unittest.TestCase):
             extracted = root / 'extracted'
             subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True,
                            stdout=subprocess.DEVNULL)
-            installed = extracted / 'usr/lib/seriald'
+            installed = extracted / 'usr/lib/decklab'
             self.assertEqual(json.loads((installed / 'installation.json').read_text())['profile'], 'complete')
             self.assertEqual(validate(installed / 'mcp-runtime' / mcp_builder.DESKTOP_RUNTIME, 'linux-amd64'),
                 validate(runtime / mcp_builder.DESKTOP_RUNTIME, 'linux-amd64'))
@@ -94,7 +94,7 @@ class PackageTests(unittest.TestCase):
             extracted = root / 'extract'
             subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True,
                            stdout=subprocess.DEVNULL)
-            code = extracted / 'usr/lib/seriald'
+            code = extracted / 'usr/lib/decklab'
             for tree in ('novnc', 'python'):
                 original = SOURCE_ROOT / 'vendor' / tree
                 installed = code / 'vendor' / tree
@@ -103,12 +103,12 @@ class PackageTests(unittest.TestCase):
                 for name in expected:
                     self.assertEqual((installed / name).read_bytes(), (original / name).read_bytes(), str(name))
             result = subprocess.run([os.sys.executable, '-S', '-c',
-                'from seriald_core.websocket_io import _protocol_modules; p,e=_protocol_modules(); '
+                'from decklab_core.websocket_io import _protocol_modules; p,e=_protocol_modules(); '
                 'import h11,sys; assert p.__version__=="1.3.2" and h11.__version__=="0.16.0"; '
                 'assert ".whl/" in p.__file__.replace(chr(92),"/"); assert "mcp" not in sys.modules'],
                 cwd=code, capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('ZIP importer', (extracted / 'usr/share/doc/seriald/THIRD_PARTY.md').read_text())
+            self.assertIn('ZIP importer', (extracted / 'usr/share/doc/decklab/THIRD_PARTY.md').read_text())
 
     def test_optional_flash_executor_is_packaged_with_dependency_digest_and_inert_example(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -125,32 +125,32 @@ class PackageTests(unittest.TestCase):
             extracted, control = root / 'extract', root / 'control'
             subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True)
             subprocess.run(['dpkg-deb', '--control', str(package), str(control)], check=True)
-            binary = extracted / 'usr/libexec/seriald/decklab-flash'
+            binary = extracted / 'usr/libexec/decklab/decklab-flash'
             self.assertEqual(binary.read_bytes(), executor.read_bytes())
             self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
             dependencies = (control / 'control').read_text()
             for name in ('libusb-1.0-0', 'udev', 'libstdc++6', 'libgcc-s1', 'e2fsprogs',
                          'device-tree-compiler', 'initramfs-tools-core', 'lz4', 'zstd'):
                 self.assertIn(', ' + name, dependencies)
-            rule = (extracted / 'lib/udev/rules.d/70-seriald-fastboot.rules').read_text()
+            rule = (extracted / 'lib/udev/rules.d/70-decklab-fastboot.rules').read_text()
             self.assertIn('ATTR{idVendor}=="361c"', rule)
             self.assertIn('ENV{ID_USB_INTERFACES}=="*:ff4203:*"', rule)
             self.assertIn('GROUP="dialout", MODE="0660"', rule)
             self.assertNotIn('0666', rule)
-            metadata = json.loads((extracted / 'usr/share/doc/seriald/flash-executor.json').read_text())
+            metadata = json.loads((extracted / 'usr/share/doc/decklab/flash-executor.json').read_text())
             self.assertEqual(metadata['sha256'], hashlib.sha256(executor.read_bytes()).hexdigest())
             self.assertEqual(metadata['size'], executor.stat().st_size)
             self.assertEqual(metadata['architecture'], 'amd64')
             self.assertNotIn(str(root), json.dumps(metadata))
-            self.assertEqual((extracted / 'usr/share/doc/seriald/flash-third-party/LICENSE').read_text(),
+            self.assertEqual((extracted / 'usr/share/doc/decklab/flash-third-party/LICENSE').read_text(),
                              'fixture upstream notice')
             self.assertEqual(metadata['notices'], flash_notice_files(notices))
-            example = json.loads((extracted / 'usr/share/doc/seriald/examples/flash.json').read_text())
+            example = json.loads((extracted / 'usr/share/doc/decklab/examples/flash.json').read_text())
             self.assertEqual(list(example['boards']), ['YOUR-REGISTERED-BOARD-SERIAL'])
             self.assertEqual(example['boards']['YOUR-REGISTERED-BOARD-SERIAL']['flash']['argv'],
-                             ['/usr/libexec/seriald/decklab-flash'])
-            environment = (extracted / 'etc/seriald/seriald.env').read_text()
-            self.assertFalse(any(line.startswith('SERIALD_FLASH=') for line in environment.splitlines()))
+                             ['/usr/libexec/decklab/decklab-flash'])
+            environment = (extracted / 'etc/decklab/decklab.env').read_text()
+            self.assertFalse(any(line.startswith('DECKLAB_FLASH=') for line in environment.splitlines()))
 
     def test_optional_flash_executor_rejects_wrong_architecture_links_and_non_elf(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -178,18 +178,18 @@ class PackageTests(unittest.TestCase):
     def test_collector_build_id_ignores_control_but_tracks_collector(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / 'seriald_core').mkdir()
+            (root / 'decklab_core').mkdir()
             (root / 'packaging').mkdir()
             for name in ('__init__.py', 'admin.py', 'control_server.py', 'mcp_host.py', 'version.py',
                          'collector_server.py', 'desktop_proxy.py'):
-                (root / 'seriald_core' / name).write_text(name)
-            unit = root / 'packaging/seriald-collector.service'
+                (root / 'decklab_core' / name).write_text(name)
+            unit = root / 'packaging/decklab-collector.service'
             unit.write_text('collector unit')
             original = collector_build_id(root)
-            (root / 'seriald_core/control_server.py').write_text('new control')
-            (root / 'seriald_core/mcp_host.py').write_text('new control-owned MCP worker')
-            (root / 'seriald_core/version.py').write_text("__version__ = 'next'")
-            (root / 'seriald_core/desktop_proxy.py').write_text('new control-owned desktop proxy')
+            (root / 'decklab_core/control_server.py').write_text('new control')
+            (root / 'decklab_core/mcp_host.py').write_text('new control-owned MCP worker')
+            (root / 'decklab_core/version.py').write_text("__version__ = 'next'")
+            (root / 'decklab_core/desktop_proxy.py').write_text('new control-owned desktop proxy')
             self.assertEqual(collector_build_id(root), original)
             (root / 'vendor/python').mkdir(parents=True)
             wheel = root / 'vendor/python/protocol.whl'
@@ -198,7 +198,7 @@ class PackageTests(unittest.TestCase):
             self.assertNotEqual(changed_wheel, original)
             wheel.write_bytes(b'revised protocol wheel')
             self.assertNotEqual(collector_build_id(root), changed_wheel)
-            (root / 'seriald_core/collector_server.py').write_text('new collector')
+            (root / 'decklab_core/collector_server.py').write_text('new collector')
             self.assertNotEqual(collector_build_id(root), original)
             changed_collector = collector_build_id(root)
             unit.write_text('new collector unit')
@@ -211,21 +211,21 @@ class PackageTests(unittest.TestCase):
             with mock.patch.object(mcp_builder, 'notice_module') as notices:
                 package = build(root / 'dist', __version__, runtime=runtime)
                 notices.return_value.verify.assert_called_once_with(runtime / 'third-party', bundle=runtime)
-            self.assertEqual(package.name, 'seriald_%s_amd64.deb' % __version__)
+            self.assertEqual(package.name, 'decklab_%s_amd64.deb' % __version__)
             extracted = root / 'extract'
             subprocess.run(['dpkg-deb', '--extract', str(package), str(extracted)], check=True,
                            stdout=subprocess.DEVNULL)
             subprocess.run(['dpkg-deb', '--control', str(package), str(root / 'control')], check=True)
             self.assertIn('Architecture: amd64\n', (root / 'control/control').read_text())
             self.assertIn('libstdc++6, libgcc-s1', (root / 'control/control').read_text())
-            packaged_runtime = extracted / 'usr/lib/seriald/mcp-runtime'
+            packaged_runtime = extracted / 'usr/lib/decklab/mcp-runtime'
             self.assertEqual((packaged_runtime / 'runtime-manifest.json').read_bytes(),
                              (runtime / 'runtime-manifest.json').read_bytes())
             worker = packaged_runtime / mcp_builder.EXECUTABLE
             self.assertEqual(worker.read_bytes(), (runtime / mcp_builder.EXECUTABLE).read_bytes())
             self.assertEqual(worker.stat().st_mode & 0o777, 0o755)
-            self.assertFalse((extracted / 'usr/libexec/seriald/decklab-flash').exists())
-            self.assertFalse((extracted / 'lib/udev/rules.d/70-seriald-fastboot.rules').exists())
+            self.assertFalse((extracted / 'usr/libexec/decklab/decklab-flash').exists())
+            self.assertFalse((extracted / 'lib/udev/rules.d/70-decklab-fastboot.rules').exists())
             self.assertNotIn('libusb-1.0-0', (root / 'control/control').read_text())
             for script in ('preinst', 'postinst', 'prerm', 'postrm'):
                 subprocess.run(['sh', '-n', str(root / 'control' / script)], check=True)
@@ -234,25 +234,25 @@ class PackageTests(unittest.TestCase):
             self.assertIn('dpkg --compare-versions "$2" lt 1.3.2', postinst)
             self.assertIn('chmod 0660', postinst)
             self.assertIn('[ -e "$restart_marker" ]', postinst)
-            self.assertIn('restart seriald-collector.service', postinst)
+            self.assertIn('restart decklab-collector.service', postinst)
             self.assertIn('collector restarted (collector code changed)', postinst)
             self.assertIn('collector kept running (collector code unchanged)', postinst)
             self.assertIn('collector started (was not running)', postinst)
             address_script = postinst.split("<<'PY'", 1)[1].split('\n', 1)[1].split('\nPY\n', 1)[0]
             address_output = io.StringIO()
-            with mock.patch('pathlib.Path.read_text', return_value='SERIALD_PORT=9123\nSERIALD_BIND=0.0.0.0\n'), \
-                    mock.patch('seriald_core.control_server.lan_hosts', return_value=['192.0.2.161']), \
+            with mock.patch('pathlib.Path.read_text', return_value='DECKLAB_PORT=9123\nDECKLAB_BIND=0.0.0.0\n'), \
+                    mock.patch('decklab_core.control_server.lan_hosts', return_value=['192.0.2.161']), \
                     redirect_stdout(address_output):
                 exec(compile(address_script, 'postinst-access', 'exec'), {})
             self.assertIn('http://127.0.0.1:9123/', address_output.getvalue())
             self.assertIn('http://192.0.2.161:9123/', address_output.getvalue())
-            installed_build_id = (extracted / 'usr/lib/seriald/.collector-build-id').read_text().strip()
+            installed_build_id = (extracted / 'usr/lib/decklab/.collector-build-id').read_text().strip()
             self.assertEqual(installed_build_id, collector_build_id())
             self.assertIn(installed_build_id, preinst)
             old_id, marker = root / 'old-build-id', root / 'restart-required'
             old_id.write_text(installed_build_id + '\n')
-            preinst_env = dict(os.environ, SERIALD_INSTALLED_BUILD_ID_FILE=str(old_id),
-                               SERIALD_RESTART_MARKER=str(marker))
+            preinst_env = dict(os.environ, DECKLAB_INSTALLED_BUILD_ID_FILE=str(old_id),
+                               DECKLAB_RESTART_MARKER=str(marker))
             subprocess.run(['sh', str(root / 'control/preinst'), 'upgrade', '1.3.6'],
                            check=True, env=preinst_env)
             self.assertFalse(marker.exists(), 'unchanged collector must keep running')
@@ -260,18 +260,18 @@ class PackageTests(unittest.TestCase):
             subprocess.run(['sh', str(root / 'control/preinst'), 'upgrade', '1.3.6'],
                            check=True, env=preinst_env)
             self.assertTrue(marker.exists(), 'changed collector must restart')
-            code = extracted / 'usr/lib/seriald'
-            self.assertTrue((extracted / 'usr/share/doc/seriald/DEVICE_IDENTITY_MATRIX.md').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/seriald/index.md').is_file())
+            code = extracted / 'usr/lib/decklab'
+            self.assertTrue((extracted / 'usr/share/doc/decklab/DEVICE_IDENTITY_MATRIX.md').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/decklab/index.md').is_file())
             for name in ('REFACTOR_PLAN', 'OPEN_SOURCE_PLAN', 'RELEASE_ACCEPTANCE', 'BRAND'):
-                self.assertFalse((extracted / ('usr/share/doc/seriald/' + name + '.md')).exists())
-            self.assertTrue((extracted / 'usr/share/doc/seriald/CONFIGURATION.md').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/seriald/TRANSFER_ARTIFACTS.md').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/seriald/HARDWARE_EXTENSIONS.md').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/seriald/API.md').is_file())
+                self.assertFalse((extracted / ('usr/share/doc/decklab/' + name + '.md')).exists())
+            self.assertTrue((extracted / 'usr/share/doc/decklab/CONFIGURATION.md').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/decklab/TRANSFER_ARTIFACTS.md').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/decklab/HARDWARE_EXTENSIONS.md').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/decklab/API.md').is_file())
             from tools.package_docs import LINK
             from urllib.parse import urlsplit, unquote
-            doc_root = extracted / 'usr/share/doc/seriald'
+            doc_root = extracted / 'usr/share/doc/decklab'
             links_checked = 0
             for guide in doc_root.rglob('*.md'):
                 for match in LINK.finditer(guide.read_text(encoding='utf-8')):
@@ -281,25 +281,25 @@ class PackageTests(unittest.TestCase):
                     self.assertTrue((guide.parent / unquote(link.path)).is_file(), (guide, link.path))
                     links_checked += 1
             self.assertGreater(links_checked, 25)
-            self.assertTrue((extracted / 'usr/share/doc/seriald/examples/hardware.json').is_file())
-            self.assertTrue((code / 'seriald_core/hardware.py').is_file())
-            self.assertTrue((code / 'seriald_core/console_protocol.py').is_file())
-            self.assertTrue((code / 'seriald_core/ssh_pty.py').is_file())
-            self.assertTrue((code / 'seriald_core/terminal_worker.js').is_file())
-            self.assertTrue((code / 'seriald_core/terminal_snapshot.js').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/decklab/examples/hardware.json').is_file())
+            self.assertTrue((code / 'decklab_core/hardware.py').is_file())
+            self.assertTrue((code / 'decklab_core/console_protocol.py').is_file())
+            self.assertTrue((code / 'decklab_core/ssh_pty.py').is_file())
+            self.assertTrue((code / 'decklab_core/terminal_worker.js').is_file())
+            self.assertTrue((code / 'decklab_core/terminal_snapshot.js').is_file())
             self.assertTrue((code / 'vendor/terminal/headless-LICENSE').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/seriald/examples/profiles.json').is_file())
-            self.assertTrue((code / 'seriald_core/profiles.py').is_file())
-            self.assertTrue((code / 'seriald_demo.py').is_file())
-            self.assertTrue((extracted / 'usr/share/doc/seriald/DEMO.md').is_file())
-            self.assertTrue((extracted / 'usr/lib/seriald/skills/seriald-board/SKILL.md').is_file())
-            package_env = (extracted / 'etc/seriald/seriald.env').read_text()
-            self.assertIn('SERIALD_BASE=/data/seriald-data', package_env)
-            self.assertIn('SERIALD_BIND=0.0.0.0', package_env)
-            collector_unit = (extracted / 'lib/systemd/system/seriald-collector.service').read_text()
-            control_unit = (extracted / 'lib/systemd/system/seriald.service').read_text()
-            self.assertIn('RuntimeDirectory=seriald', collector_unit)
-            self.assertNotIn('RuntimeDirectory=seriald', control_unit)
+            self.assertTrue((extracted / 'usr/share/doc/decklab/examples/profiles.json').is_file())
+            self.assertTrue((code / 'decklab_core/profiles.py').is_file())
+            self.assertTrue((code / 'decklab_demo.py').is_file())
+            self.assertTrue((extracted / 'usr/share/doc/decklab/DEMO.md').is_file())
+            self.assertTrue((extracted / 'usr/lib/decklab/skills/decklab-board/SKILL.md').is_file())
+            package_env = (extracted / 'etc/decklab/decklab.env').read_text()
+            self.assertIn('DECKLAB_BASE=/data/decklab-data', package_env)
+            self.assertIn('DECKLAB_BIND=0.0.0.0', package_env)
+            collector_unit = (extracted / 'lib/systemd/system/decklab-collector.service').read_text()
+            control_unit = (extracted / 'lib/systemd/system/decklab.service').read_text()
+            self.assertIn('RuntimeDirectory=decklab', collector_unit)
+            self.assertNotIn('RuntimeDirectory=decklab', control_unit)
             self.assertIn('UMask=0007', collector_unit)
             self.assertIn('UMask=0007', control_unit)
             state, ports = root / 'state', root / 'empty-ports'
@@ -311,15 +311,15 @@ class PackageTests(unittest.TestCase):
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]
             collector_socket = state / 'collector.sock'
-            env = dict(os.environ, PYTHONPATH=str(code), SERIALD_BASE=str(state),
-                       SERIALD_STATIC=str(code), SERIALD_SOCKET=str(collector_socket),
-                       SERIALD_BY_PATH=str(ports), SERIALD_PORT=str(port), SERIALD_BIND='127.0.0.1')
-            collector = subprocess.Popen(['python3', '-m', 'seriald_core.collector_server'], env=env,
+            env = dict(os.environ, PYTHONPATH=str(code), DECKLAB_BASE=str(state),
+                       DECKLAB_STATIC=str(code), DECKLAB_SOCKET=str(collector_socket),
+                       DECKLAB_BY_PATH=str(ports), DECKLAB_PORT=str(port), DECKLAB_BIND='127.0.0.1')
+            collector = subprocess.Popen(['python3', '-m', 'decklab_core.collector_server'], env=env,
                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             control = None
 
             def start_control():
-                return subprocess.Popen(['python3', '-m', 'seriald_core.control_server'], env=env,
+                return subprocess.Popen(['python3', '-m', 'decklab_core.control_server'], env=env,
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
             def stop(process):
@@ -343,7 +343,7 @@ class PackageTests(unittest.TestCase):
                     self.fail('collector socket did not start')
                 collector_pid = collector.pid
                 duplicate = subprocess.run(
-                    ['python3', '-m', 'seriald_core.collector_server'], env=env,
+                    ['python3', '-m', 'decklab_core.collector_server'], env=env,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=5)
                 self.assertNotEqual(duplicate.returncode, 0)
                 self.assertIn('already active', duplicate.stdout)
@@ -363,17 +363,17 @@ class PackageTests(unittest.TestCase):
                     self.fail('isolated service did not start')
                 self.assertEqual([(d['key'], d['serial'], d['state']) for d in devices],
                                  [('test-board', 'TEST-SERIAL', 'offline')])
-                with urlopen(url + '/skills/seriald-board/SKILL.md') as response:
+                with urlopen(url + '/skills/decklab-board/SKILL.md') as response:
                     self.assertIn('charset=utf-8', response.headers['Content-Type'])
-                    self.assertEqual(response.read(), (SOURCE_ROOT / 'skills/seriald-board/SKILL.md').read_bytes())
-                with urlopen(url + '/skills/seriald-board/SKILL.md?lang=zh-CN') as response:
+                    self.assertEqual(response.read(), (SOURCE_ROOT / 'skills/decklab-board/SKILL.md').read_bytes())
+                with urlopen(url + '/skills/decklab-board/SKILL.md?lang=zh-CN') as response:
                     self.assertIn('charset=utf-8', response.headers['Content-Type'])
                     skill = response.read().decode('utf-8')
                     self.assertIn('开发板', skill)
-                    self.assertIn('seriald-board', skill)
-                with urlopen(url + '/serialctl.py') as response:
+                    self.assertIn('decklab-board', skill)
+                with urlopen(url + '/decklabctl.py') as response:
                     self.assertIn(b'class Client', response.read())
-                for name in ('seriald_mcp.py', 'requirements-mcp.txt', 'pyproject.toml'):
+                for name in ('decklab_mcp.py', 'requirements-mcp.txt', 'pyproject.toml'):
                     with urlopen(url + '/' + name) as response:
                         self.assertEqual(response.read(), (SOURCE_ROOT / name).read_bytes())
                 share = Request(url + '/api/agent-share',
@@ -406,11 +406,11 @@ class PackageTests(unittest.TestCase):
                         self.assertIn(mime, response.headers['Content-Type'])
                         self.assertIn('no-cache', response.headers['Cache-Control'])
                         self.assertTrue(response.read().startswith(signature))
-                for route in ('/registry.sqlite3', '/vendor/%2e%2e/seriald.py'):
+                for route in ('/registry.sqlite3', '/vendor/%2e%2e/decklab.py'):
                     with self.assertRaises(HTTPError) as error:
                         urlopen(url + route)
                     self.assertEqual(error.exception.code, 404)
-                cli = subprocess.run(['python3', str(code / 'serialctl.py'), '--url', url, 'devices'],
+                cli = subprocess.run(['python3', str(code / 'decklabctl.py'), '--url', url, 'devices'],
                                      capture_output=True, text=True, timeout=5)
                 self.assertEqual(cli.returncode, 0, cli.stdout + cli.stderr)
                 self.assertEqual(json.loads(cli.stdout)['devices'][0]['key'], 'test-board')

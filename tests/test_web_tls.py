@@ -9,8 +9,8 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from seriald_core.httpd import BoundedThreadingTCPServer
-from seriald_core.web_tls import https_listener
+from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.web_tls import https_listener
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -36,7 +36,7 @@ class WebTLSTests(unittest.TestCase):
             with socket.socket() as free:
                 free.bind(('127.0.0.1', 0))
                 port = free.getsockname()[1]
-            with patch.dict(os.environ, SERIALD_HTTPS_PORT=str(port), SERIALD_HTTPS_CERT='', SERIALD_HTTPS_KEY=''):
+            with patch.dict(os.environ, DECKLAB_HTTPS_PORT=str(port), DECKLAB_HTTPS_CERT='', DECKLAB_HTTPS_KEY=''):
                 with https_listener(server, folder):
                     trust = server.https_ca
                     context = ssl.create_default_context(cadata=trust)

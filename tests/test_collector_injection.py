@@ -12,21 +12,21 @@ from unittest import mock
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from seriald_core import web
-from seriald_core.devices import Manager
-from seriald_core.httpd import BoundedThreadingTCPServer
-from seriald_core.storage import Store
+from decklab_core import web
+from decklab_core.devices import Manager
+from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.storage import Store
 
 
 class CollectorInjectionTests(unittest.TestCase):
     def test_import_does_not_create_manager_read_profiles_or_create_storage(self):
         with tempfile.TemporaryDirectory() as directory:
-            environment = dict(os.environ, SERIALD_BASE=directory + '/unused',
-                               SERIALD_BAUD='invalid', SERIALD_PROFILES=directory + '/missing.json',
-                               SERIALD_HARDWARE=directory + '/missing-hardware.json')
+            environment = dict(os.environ, DECKLAB_BASE=directory + '/unused',
+                               DECKLAB_BAUD='invalid', DECKLAB_PROFILES=directory + '/missing.json',
+                               DECKLAB_HARDWARE=directory + '/missing-hardware.json')
             root = Path(__file__).resolve().parents[1]
             result = subprocess.run([sys.executable, '-c',
-                'from seriald_core import web; assert web.MGR is None'],
+                'from decklab_core import web; assert web.MGR is None'],
                 cwd=root, env=environment, capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((Path(directory) / 'unused').exists())

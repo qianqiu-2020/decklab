@@ -739,15 +739,15 @@ PasswordAuthentication yes</code></pre>
     <p id="agent-share-mcp-status" role="status"></p>
   </div>
   <div id="agent-share-mcp-options" hidden>
-    <label class="agent-share-launcher">MCP 可执行文件<input id="agent-share-command" type="text" value="seriald-mcp" spellcheck="false" autocomplete="off" aria-label="MCP 可执行文件"></label>
+    <label class="agent-share-launcher">MCP 可执行文件<input id="agent-share-command" type="text" value="decklab-mcp" spellcheck="false" autocomplete="off" aria-label="MCP 可执行文件"></label>
     <details class="agent-share-install"><summary>首次安装：使用独立 Python 环境</summary>
       <p>先下载 DeckLab 源码，并将下方源码目录替换为实际路径。最后一行显示应填写的可执行文件路径。</p>
       <p>Linux / macOS</p><pre><code>python3 -m venv "$HOME/.local/share/decklab-mcp"
 "$HOME/.local/share/decklab-mcp/bin/python" -m pip install /path/to/decklab
-echo "$HOME/.local/share/decklab-mcp/bin/seriald-mcp"</code></pre>
+echo "$HOME/.local/share/decklab-mcp/bin/decklab-mcp"</code></pre>
       <p>Windows PowerShell</p><pre><code>py -3 -m venv "$env:LOCALAPPDATA\decklab-mcp"
 &amp; "$env:LOCALAPPDATA\decklab-mcp\Scripts\python.exe" -m pip install C:\path\to\decklab
-Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\seriald-mcp.exe'</code></pre>
+Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\decklab-mcp.exe'</code></pre>
     </details>
   </div>
   <div class="agent-share-actions"><button class="pri" id="agent-share-create" type="button">生成并复制</button><button id="agent-share-copy" class="pri" type="button" hidden disabled>再次复制</button><span id="agent-share-status" role="status"></span></div>

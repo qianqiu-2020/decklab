@@ -13,10 +13,10 @@ from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-from seriald_core import devices as sd
-from seriald_core import device as device_module
-from seriald_core import transport as tr
-from seriald_core.httpd import BoundedThreadingTCPServer as BoundedThreadingServer
+from decklab_core import devices as sd
+from decklab_core import device as device_module
+from decklab_core import transport as tr
+from decklab_core.httpd import BoundedThreadingTCPServer as BoundedThreadingServer
 
 
 class SerialIoTests(unittest.TestCase):

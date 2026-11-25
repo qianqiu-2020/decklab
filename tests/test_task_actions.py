@@ -7,13 +7,13 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core.devices import Manager
-from seriald_core.storage import Store
-from seriald_core.task_actions import TaskActions
-from seriald_core.transactions import TransactionError
-from seriald_core.results import response
-from seriald_core import web
-from seriald_core.agent_grants import attach_agent_grants
+from decklab_core.devices import Manager
+from decklab_core.storage import Store
+from decklab_core.task_actions import TaskActions
+from decklab_core.transactions import TransactionError
+from decklab_core.results import response
+from decklab_core import web
+from decklab_core.agent_grants import attach_agent_grants
 
 
 class TaskActionTests(unittest.TestCase):
@@ -50,7 +50,7 @@ class TaskActionTests(unittest.TestCase):
     def http(self, route, body=None, actor='web'):
         handler = web.Handler.__new__(web.Handler)
         raw = json.dumps(body).encode() if body is not None else b''
-        handler.path, handler.headers = route, {'Content-Length': str(len(raw)), 'X-Seriald-Actor': actor}
+        handler.path, handler.headers = route, {'Content-Length': str(len(raw)), 'X-DeckLab-Actor': actor}
         handler.rfile, handler.wfile = io.BytesIO(raw), io.BytesIO()
         handler.send_response, handler.send_header, handler.end_headers = mock.Mock(), mock.Mock(), mock.Mock()
         with mock.patch.object(web, 'MGR', self.manager):
@@ -120,7 +120,7 @@ class TaskActionTests(unittest.TestCase):
         payload = {'kind': 'ssh-connect', 'key': 'board', 'serial': 'SN1',
                    'connection_id': self.device.connection_id, 'actor': 'web', 'client_id': 'page',
                    'ssh_user': 'ubuntu', 'ssh_password': 'submitted-private-password'}
-        with mock.patch('seriald_core.task_actions.DeviceActions.execute',
+        with mock.patch('decklab_core.task_actions.DeviceActions.execute',
                         return_value=response(502, failure)) as execute:
             code, result = self.http('/api/task-start', payload)
             self.assertEqual(code, 202)
@@ -136,7 +136,7 @@ class TaskActionTests(unittest.TestCase):
         self.assertNotIn('private authentication output', json.dumps(task))
 
     def test_other_ssh_failure_does_not_offer_a_credential_retry(self):
-        with mock.patch('seriald_core.task_actions.DeviceActions.execute', return_value=response(502, {
+        with mock.patch('decklab_core.task_actions.DeviceActions.execute', return_value=response(502, {
                 'ok': False, 'error': 'SSH 连接超时', 'ssh_user': 'ubuntu', 'ssh_password': 'private'})):
             result = self.actions.start({'kind': 'ssh-connect', 'key': 'board',
                 'connection_id': self.device.connection_id}, self.device, 'web')
@@ -156,8 +156,8 @@ class TaskActionTests(unittest.TestCase):
             session.ensure.return_value = True
             return session
 
-        with mock.patch('seriald_core.device.SshSession', side_effect=session_factory), \
-                mock.patch('seriald_core.device.check_password_login', return_value=(True, False, '')), \
+        with mock.patch('decklab_core.device.SshSession', side_effect=session_factory), \
+                mock.patch('decklab_core.device.check_password_login', return_value=(True, False, '')), \
                 mock.patch.object(self.device, 'stable_dir', return_value='/unused'):
             code, result = self.http('/api/task-start', {
                 'kind': 'ssh-connect', 'key': 'board', 'serial': 'SN1',

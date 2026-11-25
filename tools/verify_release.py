@@ -24,19 +24,19 @@ from tools.package_desktop_runtime import validate as inspect_desktop_runtime
 def inspect_complete_install(root, platform):
     root = Path(root)
     windows = platform == 'windows-amd64'
-    code = root if windows else root / 'usr/lib/seriald'
+    code = root if windows else root / 'usr/lib/decklab'
     info = json.loads((code / 'installation.json').read_text())
     if info.get('profile') != 'complete':
         raise ValueError('release requires a complete standalone installation')
-    executor = root / ('_internal/decklab-flash.exe' if windows else 'usr/libexec/seriald/decklab-flash')
+    executor = root / ('_internal/decklab-flash.exe' if windows else 'usr/libexec/decklab/decklab-flash')
     actual = executor_metadata(executor, platform)
-    pinned = info if windows else json.loads((root / 'usr/share/doc/seriald/flash-executor.json').read_text())
+    pinned = info if windows else json.loads((root / 'usr/share/doc/decklab/flash-executor.json').read_text())
     if any(actual[key] != pinned.get(key) for key in ('sha256', 'size')):
         raise ValueError('installed flash executor checksum mismatch')
-    loaders = root / ('_internal/flash-loaders' if windows else 'usr/lib/seriald/flash-loaders')
+    loaders = root / ('_internal/flash-loaders' if windows else 'usr/lib/decklab/flash-loaders')
     with tempfile.TemporaryDirectory() as temporary:
         inspect_loaders(loaders, temporary)
-    notices = root / ('flash-third-party' if windows else 'usr/share/doc/seriald/flash-third-party')
+    notices = root / ('flash-third-party' if windows else 'usr/share/doc/decklab/flash-third-party')
     tree_inventory(notices)
     if windows:
         driver = root / 'usb-driver'
@@ -74,7 +74,7 @@ def unpack_portable(archive_path, destination):
             relative = PurePosixPath(name)
             key = name.rstrip('/').casefold()
             if (relative.is_absolute() or ':' in name or '..' in relative.parts
-                    or not relative.parts or relative.parts[0] != 'seriald'
+                    or not relative.parts or relative.parts[0] != 'decklab'
                     or key in seen or stat.S_ISLNK(member.external_attr >> 16)):
                 raise ValueError('unsafe or duplicate portable archive path: ' + name)
             if len(relative.parts) > 1 and relative.parts[1].casefold() == 'data':
@@ -88,7 +88,7 @@ def unpack_portable(archive_path, destination):
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(archive.read(member))
-    return destination / 'seriald'
+    return destination / 'decklab'
 
 
 def inspect_linux_runtime(runtime, architecture):
@@ -99,7 +99,7 @@ def inspect_linux_runtime(runtime, architecture):
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     if (manifest.get('schema') != 1 or manifest.get('architecture') != architecture
             or manifest.get('mcp_version') != '2.3.0'
-            or manifest.get('executable') != 'seriald-mcp-worker'
+            or manifest.get('executable') != 'decklab-mcp-worker'
             or manifest.get('notices') != 'third-party/inventory.json'):
         raise ValueError('Debian MCP runtime metadata mismatch')
     platform = manifest.get('build_platform', {})
@@ -132,7 +132,7 @@ def inspect_linux_runtime(runtime, architecture):
         if (not isinstance(row, dict) or row.get('size') != len(payload)
                 or row.get('sha256') != hashlib.sha256(payload).hexdigest()):
             raise ValueError('Debian MCP runtime checksum mismatch: ' + name)
-    executable = runtime / 'seriald-mcp-worker'
+    executable = runtime / 'decklab-mcp-worker'
     header = executable.read_bytes()[:20]
     if (len(header) != 20 or header[:5] != b'\x7fELF\x02' or header[5] != 1
             or int.from_bytes(header[18:20], 'little') != {'amd64': 62, 'arm64': 183}[architecture]
@@ -160,17 +160,18 @@ def inspect_release(directory, version):
     release_version = tuple(map(int, version.split('.')))
     architectures = ('amd64',) if release_version >= (1, 14, 0) else (
         ('amd64', 'arm64') if release_version >= (1, 7, 1) else ('all',))
-    debs = {architecture: 'seriald_%s_%s.deb' % (version, architecture)
+    debs = {architecture: 'decklab_%s_%s.deb' % (version, architecture)
             for architecture in architectures}
-    setup = 'seriald-%s-windows-x64-setup.exe' % version
-    portable = 'seriald-windows-portable.zip'
+    setup = 'decklab-%s-windows-x64-setup.exe' % version
+    windows_receipt = 'windows-install-verification.json'
+    windows_evidence = windows_receipt if release_version >= (1, 18, 23) else 'decklab-windows-portable.zip'
     aliases = {}
     if release_version >= (1, 7, 0):
-        aliases['seriald-windows-x64-setup.exe'] = setup
-        aliases['seriald_latest_all.deb'] = debs.get('all', debs.get('amd64'))
+        aliases['decklab-windows-x64-setup.exe'] = setup
+        aliases['decklab_latest_all.deb'] = debs.get('all', debs.get('amd64'))
     if release_version >= (1, 7, 1):
-        aliases.update({'seriald_latest_%s.deb' % arch: name for arch, name in debs.items()})
-    checksums(directory, 'SHA256SUMS.txt', (*debs.values(), setup, portable, *aliases))
+        aliases.update({'decklab_latest_%s.deb' % arch: name for arch, name in debs.items()})
+    checksums(directory, 'SHA256SUMS.txt', (*debs.values(), setup, windows_evidence, *aliases))
     for alias, canonical in aliases.items():
         if hashlib.sha256((directory / alias).read_bytes()).digest() != hashlib.sha256(
                 (directory / canonical).read_bytes()).digest():
@@ -185,26 +186,34 @@ def inspect_release(directory, version):
     for architecture, deb in debs.items():
         fields = subprocess.run(['dpkg-deb', '--field', str(directory / deb), 'Package', 'Version', 'Architecture'],
                                 check=True, capture_output=True, text=True).stdout
-        expected = {'Package': 'seriald', 'Version': version, 'Architecture': architecture}
+        expected = {'Package': 'decklab', 'Version': version, 'Architecture': architecture}
         actual = dict(line.split(': ', 1) for line in fields.splitlines())
         if actual != expected:
             raise ValueError('Debian package metadata mismatch: ' + deb)
         if release_version >= (1, 7, 1):
             with tempfile.TemporaryDirectory(prefix='decklab-debian-inspection-') as temporary:
                 subprocess.run(['dpkg-deb', '--extract', str(directory / deb), temporary], check=True)
-                code = Path(temporary) / 'usr/lib/seriald'
+                code = Path(temporary) / 'usr/lib/decklab'
                 if release_version >= (1, 10, 0):
                     inspect_complete_install(Path(temporary), 'linux-' + architecture)
                 if release_version >= (1, 12, 2) and architecture == 'amd64':
                     inspect_desktop_runtime(code / 'mcp-runtime' / DESKTOP_RUNTIME, 'linux-amd64')
                 runtime = inspect_linux_runtime(code / 'mcp-runtime', architecture)
-                for name in ('seriald_mcp.py', 'serialctl.py'):
+                for name in ('decklab_mcp.py', 'decklabctl.py'):
                     if hashlib.sha256((code / name).read_bytes()).hexdigest() != runtime['source_files'][name]:
                         raise ValueError('Debian adapter and embedded MCP runtime differ: ' + name)
     if (directory / setup).read_bytes()[:2] != b'MZ':
         raise ValueError('installer is not a Windows executable')
+    if windows_evidence == windows_receipt:
+        report = json.loads((directory / windows_receipt).read_text(encoding='utf-8'))
+        if (report.get('schema') != 1 or report.get('version') != version or report.get('sha256') != digest.lower()
+                or not all(type(report.get(key)) is int and report[key] > 0
+                           for key in ('bundle_files', 'distribution_notice_sets'))):
+            raise ValueError('Windows installed-file verification does not match the exact installer')
+        return {'version': version, 'debian_architectures': list(architectures),
+                'bundle_files': report['bundle_files'], 'distribution_notice_sets': report['distribution_notice_sets']}
     with tempfile.TemporaryDirectory(prefix='decklab-release-inspection-') as temporary:
-        bundle = unpack_portable(directory / portable, Path(temporary))
+        bundle = unpack_portable(directory / windows_evidence, Path(temporary))
         manifest = verify_bundle(bundle)
         if release_version >= (1, 10, 0):
             inspect_complete_install(bundle, 'windows-amd64')
@@ -213,7 +222,7 @@ def inspect_release(directory, version):
         notices = verify_notices(bundle / 'third-party')
         if (bundle / 'package-version.txt').read_text(encoding='ascii').strip() != version:
             raise ValueError('portable package version mismatch')
-        if (bundle / 'seriald.exe').read_bytes()[:2] != b'MZ':
+        if (bundle / 'decklab.exe').read_bytes()[:2] != b'MZ':
             raise ValueError('portable host is not a Windows executable')
         if len(notices.get('native_crypto_providers', [])) != 2:
             raise ValueError('native crypto provider notices missing')

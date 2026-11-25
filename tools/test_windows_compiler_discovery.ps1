@@ -2,7 +2,7 @@
 # Filesystem/registry fixtures only; runs on PowerShell without Windows or Inno.
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows_installer_compiler.ps1')
-$fixture = Join-Path ([IO.Path]::GetTempPath()) ('seriald-iscc-' + [guid]::NewGuid().ToString('N'))
+$fixture = Join-Path ([IO.Path]::GetTempPath()) ('decklab-iscc-' + [guid]::NewGuid().ToString('N'))
 $registered = @{}
 $pathCompiler = $null
 function Get-ItemProperty($LiteralPath, $ErrorAction) { return $registered[$LiteralPath] }

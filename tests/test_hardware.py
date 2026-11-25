@@ -10,11 +10,11 @@ import time
 import unittest
 from unittest import mock
 
-from seriald_core.hardware import HardwareBook
-from seriald_core.tasks import TaskCancelled, TaskError
-from seriald_core.demo import DemoManager
-from seriald_core.storage import Store
-from seriald_core.task_actions import TaskActions
+from decklab_core.hardware import HardwareBook
+from decklab_core.tasks import TaskCancelled, TaskError
+from decklab_core.demo import DemoManager
+from decklab_core.storage import Store
+from decklab_core.task_actions import TaskActions
 
 
 class HardwareConfigTests(unittest.TestCase):
@@ -47,7 +47,7 @@ class HardwareConfigTests(unittest.TestCase):
     def test_environment_file_limits_and_duplicate_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'hardware.json'
-            with mock.patch.dict(os.environ, SERIALD_HARDWARE=str(path)):
+            with mock.patch.dict(os.environ, DECKLAB_HARDWARE=str(path)):
                 for raw in ('{"boards":{},"boards":{}}', ' ' * 65537):
                     path.write_text(raw)
                     with self.assertRaises(ValueError):
@@ -63,7 +63,7 @@ class HardwareTaskTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         for module in ('device', 'devices'):
-            patch = mock.patch('seriald_core.' + module + '.LOG_ROOT', str(self.root / 'logs'))
+            patch = mock.patch('decklab_core.' + module + '.LOG_ROOT', str(self.root / 'logs'))
             patch.start(); self.addCleanup(patch.stop)
         self.store = Store(str(self.root / 'registry.sqlite3'))
         self.addCleanup(self.store.close)
@@ -131,7 +131,7 @@ class HardwareTaskTests(unittest.TestCase):
                 outcome('acknowledged')
             return {'exit_code': 0, 'duration_ms': 1}
         with mock.patch.object(self.manager, 'exclusive_serial', side_effect=handoff), \
-                mock.patch('seriald_core.hardware.run_command', side_effect=run):
+                mock.patch('decklab_core.hardware.run_command', side_effect=run):
             task = self.finish(self.start())
         self.assertEqual(phases, ['released', 'cleaned', 'resumed'])
         self.assertEqual(task['state'], 'completed')
@@ -154,12 +154,12 @@ class HardwareTaskTests(unittest.TestCase):
         self.assertIsNone(self.device.transactions.snapshot())
 
     def test_hardware_discovery_is_actor_scoped_and_never_executes(self):
-        from seriald_core import web
+        from decklab_core import web
         self.configure('raise AssertionError("must not execute")')
         for actor, expected in [('web', ['reset']), ('agent', [])]:
             handler = web.Handler.__new__(web.Handler)
             handler.path = '/api/hardware?key=demo-k1&serial=DEMO-001'
-            handler.headers = {'X-Seriald-Actor': actor}
+            handler.headers = {'X-DeckLab-Actor': actor}
             handler.wfile = io.BytesIO()
             handler.send_response = mock.Mock(); handler.send_header = mock.Mock(); handler.end_headers = mock.Mock()
             with mock.patch.object(web, 'MGR', self.manager):
@@ -204,7 +204,7 @@ class HardwareTaskTests(unittest.TestCase):
         process = mock.Mock(returncode=0)
         process.poll.return_value = 0
         process.close.side_effect = OSError('process stop not confirmed')
-        with mock.patch('seriald_core.hardware.helper_process', return_value=process):
+        with mock.patch('decklab_core.hardware.helper_process', return_value=process):
             task = self.finish(self.start('web', request_id='failed-cleanup-001'))
         self.assertEqual(task['state'], 'failed')
         self.assertEqual(task['outcome'], 'unknown')

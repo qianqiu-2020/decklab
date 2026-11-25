@@ -9,28 +9,37 @@ import os
 from pathlib import Path
 import stat
 import tempfile
-import zipfile
 
 NAME = 'bundle-manifest.json'
 
 
-def files(root):
+def files(root, *, installed=False):
     root = Path(root)
     if root.is_symlink() or getattr(root, 'is_junction', lambda: False)():
         raise ValueError('bundle root must not be redirected')
     if not root.is_dir():
         raise ValueError('bundle directory is missing')
-    if os.path.lexists(root / 'data'):
+    if not installed and os.path.lexists(root / 'data'):
         raise ValueError('bundle contains runtime data')
     result = {}
-    for path in sorted(root.rglob('*')):
+    pending = [root]
+    while pending:
+        path = pending.pop()
+        if path == root:
+            pending.extend(sorted(root.iterdir(), reverse=True))
+            continue
+        relative = path.relative_to(root)
+        if installed and (relative.parts[0] == 'data' or
+                          len(relative.parts) == 1 and relative.name in ('unins000.dat', 'unins000.exe')):
+            continue
         if path.is_symlink() or getattr(path, 'is_junction', lambda: False)():
             raise ValueError('bundle contains a redirected path')
         if path.is_dir():
+            pending.extend(sorted(path.iterdir(), reverse=True))
             continue
         if not stat.S_ISREG(path.stat().st_mode):
             raise ValueError('bundle contains a nonregular file')
-        relative = path.relative_to(root).as_posix()
+        relative = relative.as_posix()
         if relative == NAME:
             continue
         digest = hashlib.sha256()
@@ -64,9 +73,9 @@ def create(root):
             temporary.unlink(missing_ok=True)
 
 
-def verify(root):
+def verify(root, *, installed=False):
     root = Path(root)
-    actual = files(root)
+    actual = files(root, installed=installed)
     manifest = json.loads((root / NAME).read_text(encoding='utf-8'))
     if (not isinstance(manifest, dict) or manifest.get('schema') != 1
             or manifest.get('scope') != 'complete-distribution-files'
@@ -81,32 +90,10 @@ def verify(root):
     return manifest
 
 
-def pack(root, output, compression):
-    root, output = Path(root), Path(output)
-    manifest = verify(root)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as stream:
-            temporary = Path(stream.name)
-        with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED, compresslevel=compression) as archive:
-            for name in [*manifest['files'], NAME]:
-                archive.write(root / name, root.name + '/' + name)
-        temporary.replace(output)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('bundle', type=Path)
     parser.add_argument('--verify', action='store_true')
-    parser.add_argument('--zip', type=Path)
-    parser.add_argument('--compression', type=int, choices=range(1, 10), default=6)
     args = parser.parse_args()
-    if args.zip:
-        pack(args.bundle, args.zip, args.compression)
-        parser.exit()
-
     result = verify(args.bundle) if args.verify else create(args.bundle)
     print('Bundle %s: %d files' % ('verified' if args.verify else 'inventoried', len(result['files'])))

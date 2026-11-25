@@ -9,12 +9,12 @@ import time
 import types
 import unittest
 
-from seriald_core import schema
-from seriald_core.board_maintenance import maintenance_for, CACHE_POOL_RESOURCE
-from seriald_core.flash_store import FlashStore
-from seriald_core.models import Board
-from seriald_core.storage import Store
-from seriald_core.tasks import TaskError, TaskManager
+from decklab_core import schema
+from decklab_core.board_maintenance import maintenance_for, CACHE_POOL_RESOURCE
+from decklab_core.flash_store import FlashStore
+from decklab_core.models import Board
+from decklab_core.storage import Store
+from decklab_core.tasks import TaskError, TaskManager
 
 
 class FlashTargetFoundationTests(unittest.TestCase):

@@ -9,16 +9,17 @@ import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ENVIRONMENT = re.compile(r'\bSERIALD_[A-Z_]+\b')
-GUIDES = ('CONFIGURATION', 'INSTALL', 'WINDOWS', 'LOG_OPERATIONS',
-          'TRANSFER_ARTIFACTS', 'HARDWARE_EXTENSIONS', 'FLASH_WORKSPACE', 'AGENT_ACCESS')
+ENVIRONMENT = re.compile(r'\bDECKLAB_[A-Z_]+\b')
+GUIDES = ('reference/environment', 'operations/install-linux', 'operations/install-windows',
+          'operations/log-operations', 'modules/file-transfer', 'modules/hardware-control',
+          'modules/flashing', 'modules/agent-access')
 
 
 def inventory(root):
     root = Path(root)
     environment, routes = set(), {'/healthz'}
-    sources = list((root / 'seriald_core').glob('*.py'))
-    sources += [root / 'seriald.py', root / 'seriald_windows.py']
+    sources = list((root / 'decklab_core').glob('*.py'))
+    sources += [root / 'decklab.py', root / 'decklab_windows.py']
     for source in sources:
         tree = ast.parse(source.read_text(encoding='utf-8'), filename=str(source))
         prefixes = {}
@@ -35,7 +36,7 @@ def inventory(root):
                             prefixes[id(child)] = '/api/' + test.args[0].value
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                environment.update(ENVIRONMENT.findall(node.value))
+                environment.update(name for name in ENVIRONMENT.findall(node.value) if name != 'DECKLAB_')
                 if node.value.startswith('/api/') and not node.value.endswith(('/', '-')):
                     routes.add(node.value)
             # Device actions are dispatched after stripping the /api/ prefix.
@@ -51,7 +52,7 @@ def inventory(root):
 def check(root=ROOT):
     root = Path(root)
     environment, routes = inventory(root)
-    api = (root / 'docs/API.md').read_text(encoding='utf-8')
+    api = (root / 'docs/reference/http-api.md').read_text(encoding='utf-8')
     configuration = '\n'.join((root / ('docs/' + guide + '.md')).read_text(encoding='utf-8')
                               for guide in GUIDES)
     documented_environment = set(ENVIRONMENT.findall(configuration))

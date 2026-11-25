@@ -7,8 +7,8 @@ import threading
 import tempfile
 import unittest
 
-from seriald_core.storage import Store
-from seriald_core.tasks import TaskContext, TaskError, TaskManager, TaskStore
+from decklab_core.storage import Store
+from decklab_core.tasks import TaskContext, TaskError, TaskManager, TaskStore
 
 TARGET = {'serial': 'SN-ONE', 'connection_id': 'connection-one'}
 
@@ -261,7 +261,7 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(history.list(target_serial='UNPROVEN'), [])
 
     def test_connection_cannot_be_reassigned_and_new_generation_does_not_steal_history(self):
-        from seriald_core.storage import IdentityError
+        from decklab_core.storage import IdentityError
         task_id = self.tasks.store.create('file-upload', 'agent', '', [{'serial': '', 'connection_id': 'old'}])
         self.store.bind({'serial': 'SN-A'}, 'usb', 'tty', connection_id='old')
         with self.assertRaises(IdentityError):

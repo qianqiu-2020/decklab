@@ -2,21 +2,21 @@
 
 ## Project Structure & Module Organization
 
-`seriald.py` contains the Linux serial capture service, device registry, SSH sessions, and HTTP API. `index.html` holds the UI with inline CSS and JavaScript; `vendor/` supplies xterm assets. `rescue.sh` is the privileged USB recovery helper. `tests/` contains backend and frontend regression tests. Read `FIXES.md` for architecture decisions and known limitations. Runtime `logs/`, `labels.json`, and `seriald.log` are ignored by Git.
+`decklab.py` contains the Linux serial capture service, device registry, SSH sessions, and HTTP API. `index.html` holds the UI with inline CSS and JavaScript; `vendor/` supplies xterm assets. `rescue.sh` is the privileged USB recovery helper. `tests/` contains backend and frontend regression tests. Read `FIXES.md` for architecture decisions and known limitations. Runtime `logs/`, `labels.json`, and `decklab.log` are ignored by Git.
 
 ## Build, Test, and Development Commands
 
 There is no build step or package manager configuration. The backend uses Python 3's standard library; frontend tests require Node.js. SSH sessions also require system `ssh` and `sshpass`.
 
-- `python3 seriald.py 8898 127.0.0.1` — start the service locally on an idle development host; it discovers real serial devices.
+- `python3 decklab.py 8898 127.0.0.1` — start the service locally on an idle development host; it discovers real serial devices.
 - `python3 -m unittest discover -s tests` — run backend regression tests.
 - `node tests/frontend.test.js` — run the frontend's custom Node assertion harness.
-- `python3 -m py_compile seriald.py` — check Python syntax.
+- `python3 -m py_compile decklab.py` — check Python syntax.
 - `bash -n rescue.sh` — check shell syntax without executing recovery.
 - `git diff --check` — catch whitespace errors before submitting.
 
 Local Debian packages go directly in `dist/`, using versioned filenames such as
-`seriald_1.7.5~web8_amd64.deb`; do not create a per-build delivery subdirectory.
+`decklab_1.7.5~web8_amd64.deb`; do not create a per-build delivery subdirectory.
 Keep build inputs and diagnostic records separate from the delivered packages.
 
 ## Coding Style & Naming Conventions
@@ -29,7 +29,7 @@ Python tests use `unittest` and `unittest.mock`, with files named `tests/test_*.
 
 ## Commit & Pull Request Guidelines
 
-History uses concise, action-oriented Chinese subjects prefixed with `seriald:` or `FIXES:`. Follow those scopes where appropriate. PRs should describe the problem, resulting behavior, and validation commands/results; link relevant issues and include screenshots for visible UI changes.
+History uses concise, action-oriented Chinese subjects prefixed with `decklab:` or `FIXES:`. Follow those scopes where appropriate. PRs should describe the problem, resulting behavior, and validation commands/results; link relevant issues and include screenshots for visible UI changes.
 
 ## Public Branch
 
@@ -37,8 +37,8 @@ History uses concise, action-oriented Chinese subjects prefixed with `seriald:` 
 
 ## Branches & Releases
 
-Keep a single long-lived branch, `main`; GitHub `main` must always fast-forward to it and is never force-pushed. Do not create `release/*` or version-named branches (such as `decklab-1.17.40`). A release is an annotated `v<version>` tag on a `main` commit, following [docs/RELEASING.md](docs/RELEASING.md). For isolated release acceptance use `git worktree add --detach` and remove the worktree once the release is published. Delete short-lived task branches after they merge. Push tags one by one, never with `--tags`; local archive tags stay local.
+Keep a single long-lived branch, `main`; GitHub `main` must always fast-forward to it and is never force-pushed. Do not create `release/*` or version-named branches (such as `decklab-1.17.40`). A release is an annotated `v<version>` tag on a `main` commit, following [docs/RELEASING.md](docs/operations/release.md). For isolated release acceptance use `git worktree add --detach` and remove the worktree once the release is published. Delete short-lived task branches after they merge. Push tags one by one, never with `--tags`; local archive tags stay local.
 
 ## Serial Safety & Configuration
 
-Keep exactly one reader per port; writes use separate write-only descriptors. Configure termios only when opening the collector, never from writers. Do not start another collector against active devices. `SERIALD_BASE` selects runtime storage; `SERIALD_STATIC` selects static assets. Recovery helpers must remain root-owned and non-writable by the service account.
+Keep exactly one reader per port; writes use separate write-only descriptors. Configure termios only when opening the collector, never from writers. Do not start another collector against active devices. `DECKLAB_BASE` selects runtime storage; `DECKLAB_STATIC` selects static assets. Recovery helpers must remain root-owned and non-writable by the service account.

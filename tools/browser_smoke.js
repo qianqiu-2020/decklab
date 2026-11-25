@@ -1,5 +1,5 @@
 'use strict';
-// Real bundled xterm + Chromium, isolated HTTP fixtures. No seriald or board access.
+// Real bundled xterm + Chromium, isolated HTTP fixtures. No decklab or board access.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -7,7 +7,7 @@ const os = require('node:os');
 const http = require('node:http');
 const {launchBrowser, stopBrowser} = require('./browser_launch');
 const root = path.resolve(__dirname, '..');
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'seriald-browser-'));
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'decklab-browser-'));
 const posts = [], errors = [];
 const probeSettingsPosts = [], grantPosts = [], sshConnectPosts = [];
 // This private fixture store survives page reloads. Only username/status metadata
@@ -187,7 +187,7 @@ const server = http.createServer((req, res) => {
               ssh_user:credentials && credentials.user || 'root'}}});
         }
         grantPosts.push(payload);
-        return json({token: 'seriald-ag-simulated-fixture-only', grant: {id: 'fixture', actor: 'shared-agent/fixture',
+        return json({token: 'decklab-ag-simulated-fixture-only', grant: {id: 'fixture', actor: 'shared-agent/fixture',
           created: 1, expires: null, revoked: null, ...payload}});
       }); return;
     }
@@ -280,7 +280,7 @@ let chrome, ws;
   await rpc('Emulation.setDeviceMetricsOverride',{width:1500,height:1200,deviceScaleFactor:1,mobile:false});
   for(let n=0;n<50 && !await evaluate('document.querySelectorAll(".dev").length === 5');n++)await delay(100);
   assert.equal(await evaluate('document.querySelectorAll(".dev").length'),5);
-  await evaluate('SerialdI18n.setLocale("zh-CN")');
+  await evaluate('DeckLabI18n.setLocale("zh-CN")');
   const out=path.join(root,'dist');fs.mkdirSync(out,{recursive:true});
   const overviewShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-overview.png'),Buffer.from(overviewShot.data,'base64'));
@@ -757,7 +757,7 @@ let chrome, ws;
   assert.equal(grantPosts[0].scope,'connection');
   const generatedConfig=await evaluate('JSON.parse(document.querySelector("#agent-share-text").value)');
   assert.equal(generatedConfig.mcpServers.decklab.url, address + '/mcp');
-  assert.equal(generatedConfig.mcpServers.decklab.headers.Authorization,'Bearer seriald-ag-simulated-fixture-only');
+  assert.equal(generatedConfig.mcpServers.decklab.headers.Authorization,'Bearer decklab-ag-simulated-fixture-only');
   assert.equal(await evaluate('document.querySelector("#agent-share-mcp-options").hidden'),true);
   const mcpShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-share-mcp.png'),Buffer.from(mcpShot.data,'base64'));
@@ -834,7 +834,7 @@ let chrome, ws;
   await evaluate('window.sshReloadMarker=true');
   await rpc('Page.navigate',{url:address + '/#device=' + rememberedBoard.serial});
   for(let n=0;n<50 && !await evaluate('!window.sshReloadMarker && Array.from(document.querySelectorAll("#d-tabs button")).some(button=>button.textContent.startsWith("SSH 设置"))');n++)await delay(100);
-  await evaluate('SerialdI18n.setLocale("zh-CN");Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.startsWith("SSH 设置")).click()');
+  await evaluate('DeckLabI18n.setLocale("zh-CN");Array.from(document.querySelectorAll("#d-tabs button")).find(button=>button.textContent.startsWith("SSH 设置")).click()');
   assert.equal(await evaluate('document.querySelector("#ssh-credentials-user").value'),'ubuntu','new page must prefill the server-stored account');
   assert.equal(await evaluate('document.querySelector("#ssh-credentials-password").value'),'','new page must never receive the stored password');
   assert.equal(await evaluate('JSON.stringify({local:{...localStorage},session:{...sessionStorage}}).includes("simulated-saved-password-only")'),false);
@@ -920,7 +920,7 @@ let chrome, ws;
   assert.equal(flashRecords[0].state,'running','closing the dialog must leave server work running');
   await rpc('Page.navigate',{url:address + '/#device=' + fixtures[1].serial});
   for(let n=0;n<50 && !await evaluate('document.querySelector("#d-name").textContent.includes("riscv-118")');n++)await delay(100);
-  await evaluate('SerialdI18n.setLocale("zh-CN");document.querySelector("#b-flash").click()');
+  await evaluate('DeckLabI18n.setLocale("zh-CN");document.querySelector("#b-flash").click()');
   for(let n=0;n<40 && !await evaluate('document.querySelector("#fl-task-id").textContent.includes("cccccccc")');n++)await delay(50);
   assert.equal(flashSubmissions.length,1,'reload must recover the original task without submitting again');
   await evaluate('document.querySelector("#fl-task-details").open=true');
@@ -972,7 +972,7 @@ let chrome, ws;
   await rpc('Page.reload',{ignoreCache:true});
   for(let n=0;n<50 && !await evaluate('document.querySelectorAll("#grid>.dev").length === 5');n++)await delay(100);
   assert.deepEqual(await directoryOrder(),dragOrder,'a new page must restore personal device positions');
-  await evaluate('SerialdI18n.setLocale("zh-CN")');
+  await evaluate('DeckLabI18n.setLocale("zh-CN")');
   const deviceOrderShot=await rpc('Page.captureScreenshot',{format:'png'});
   fs.writeFileSync(path.join(out,'ui-device-order.png'),Buffer.from(deviceOrderShot.data,'base64'));
   await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});

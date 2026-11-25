@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from seriald_core.actions import DeviceActions
-from seriald_core.device import Device
-from seriald_core.profiles import ProfileBook
-from seriald_core.storage import Store
+from decklab_core.actions import DeviceActions
+from decklab_core.device import Device
+from decklab_core.profiles import ProfileBook
+from decklab_core.storage import Store
 
 
 class ProbeSettingsTests(unittest.TestCase):

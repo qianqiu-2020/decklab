@@ -39,7 +39,7 @@ function harness(storage, controls = {}) {
     setItem:(key,value) => storage.set(key,value), removeItem:key => storage.delete(key)};
   sandbox.window = sandbox;
   vm.runInNewContext(source, sandbox);
-  const api = sandbox.SerialdFlashing.create({byId: get, formatBytes: value => value + ' B', ...controls,
+  const api = sandbox.DeckLabFlashing.create({byId: get, formatBytes: value => value + ' B', ...controls,
     openImageStore: (choose,picker) => {imageChoice=choose;imagePicker=picker;},
     fetch: (url, options = {}) => new Promise((resolve, reject) => requests.push({url, options,
       payload: options.body && JSON.parse(options.body), reject,

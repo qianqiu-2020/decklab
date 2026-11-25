@@ -2,9 +2,9 @@ name: Split Web and hardware backend
 on:
   workflow_dispatch:
   push:
-    paths: ['seriald_core/**', 'seriald_windows.py', 'tests/**', 'tools/test_split_nodes.py', '.github/workflows/split-nodes.yml']
+    paths: ['decklab_core/**', 'decklab_windows.py', 'tests/**', 'tools/test_split_nodes.py', '.github/workflows/split-nodes.yml']
   pull_request:
-    paths: ['seriald_core/**', 'seriald_windows.py', 'tests/**', 'tools/test_split_nodes.py', '.github/workflows/split-nodes.yml']
+    paths: ['decklab_core/**', 'decklab_windows.py', 'tests/**', 'tools/test_split_nodes.py', '.github/workflows/split-nodes.yml']
 permissions:
   contents: read
 jobs:

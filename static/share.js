@@ -41,7 +41,7 @@
 
   fetch('/api/access', { cache: 'no-store' }).then(function (response) { return response.json(); })
     .then(function (access) {
-      if (window.SerialdI18n) window.SerialdI18n.setDefaultLocale(access.default_language);
+      if (window.DeckLabI18n) window.DeckLabI18n.setDefaultLocale(access.default_language);
       openAccess = !!access.open_access;
       mcpEnabled = access.mcp_enabled === true;
       mcpPath = access.mcp_url || '';
@@ -115,7 +115,7 @@
 
   function shellQuote(value) { return "'" + value.replace(/'/g, "'\\''") + "'"; }
   function selectedDevice() {
-    return typeof window.SerialdShareSelection === 'function' ? window.SerialdShareSelection() : null;
+    return typeof window.DeckLabShareSelection === 'function' ? window.DeckLabShareSelection() : null;
   }
   function updateHint() {
     var board = selected;
@@ -158,7 +158,7 @@
     return endpoint.href;
   }
   function agentText(url, token, grant, board) {
-    var english = window.SerialdI18n && window.SerialdI18n.locale === 'en';
+    var english = window.DeckLabI18n && window.DeckLabI18n.locale === 'en';
     function phrase(chinese, translated) { return english ? translated : chinese; }
     var target = grant.scope === 'all' ? phrase('<先用 devices 选择标签>', '<choose a label with devices>')
       : grant.scope === 'connection' ? grant.key : board.label;
@@ -181,24 +181,24 @@
         'Prefer SSH for Linux commands. Use shared serial for boot, kernel or SSH failures and interactive firmware.'),
       phrase('先读取以下自托管 skill 和客户端，再操作设备：',
         'Read the self-hosted skill and client before operating the boards:'), '', '```sh',
-      'mkdir -p "$HOME/.local/share/seriald" "$HOME/.claude/skills/seriald-board" "$HOME/.codex/skills/seriald-board"',
-      'curl -fsSL ' + shellQuote(url + '/serialctl.py') + ' -o "$HOME/.local/share/seriald/serialctl.py"',
-      'curl -fsSL ' + shellQuote(url + '/skills/seriald-board/SKILL.md?lang=' + (english ? 'en' : 'zh-CN')) + ' -o "$HOME/.claude/skills/seriald-board/SKILL.md"',
-      'cp "$HOME/.claude/skills/seriald-board/SKILL.md" "$HOME/.codex/skills/seriald-board/SKILL.md"',
-      'export SERIALD_URL=' + shellQuote(url),
-      'export SERIALD_TOKEN=' + shellQuote(token),
-      'python3 "$HOME/.local/share/seriald/serialctl.py" devices',
+      'mkdir -p "$HOME/.local/share/decklab" "$HOME/.claude/skills/decklab-board" "$HOME/.codex/skills/decklab-board"',
+      'curl -fsSL ' + shellQuote(url + '/decklabctl.py') + ' -o "$HOME/.local/share/decklab/decklabctl.py"',
+      'curl -fsSL ' + shellQuote(url + '/skills/decklab-board/SKILL.md?lang=' + (english ? 'en' : 'zh-CN')) + ' -o "$HOME/.claude/skills/decklab-board/SKILL.md"',
+      'cp "$HOME/.claude/skills/decklab-board/SKILL.md" "$HOME/.codex/skills/decklab-board/SKILL.md"',
+      'export DECKLAB_URL=' + shellQuote(url),
+      'export DECKLAB_TOKEN=' + shellQuote(token),
+      'python3 "$HOME/.local/share/decklab/decklabctl.py" devices',
       ...(grant.scope !== 'connection' ? [
         phrase('# 先按任务选定标签；首选 SSH：', '# Choose the label required by the task; prefer SSH:'),
-        'python3 "$HOME/.local/share/seriald/serialctl.py" --device ' + shellQuote(target) + ' exec --command ' + shellQuote('uname -a')
+        'python3 "$HOME/.local/share/decklab/decklabctl.py" --device ' + shellQuote(target) + ' exec --command ' + shellQuote('uname -a')
       ] : []),
       phrase('# 读取当前串口输出：', '# Read the current serial output:'),
-      'python3 "$HOME/.local/share/seriald/serialctl.py" --device ' + shellQuote(target) + ' read --sid serial',
+      'python3 "$HOME/.local/share/decklab/decklabctl.py" --device ' + shellQuote(target) + ' read --sid serial',
       '```', '',
-      phrase('如果 Agent 运行在 Windows PowerShell，请用 Invoke-WebRequest 下载相同两个地址，并用 py -3 运行 serialctl.py。',
-        'On Windows PowerShell, download the same URLs with Invoke-WebRequest and run serialctl.py with py -3.'),
-      phrase('SSH 会话和串口输入会显示在网页中，并保留操作记录。串口由 seriald 独占采集，不要直接打开 /dev/ttyUSB*。',
-        'SSH sessions and serial input are visible and recorded in the UI. seriald owns serial capture; do not open /dev/ttyUSB* directly.'),
+      phrase('如果 Agent 运行在 Windows PowerShell，请用 Invoke-WebRequest 下载相同两个地址，并用 py -3 运行 decklabctl.py。',
+        'On Windows PowerShell, download the same URLs with Invoke-WebRequest and run decklabctl.py with py -3.'),
+      phrase('SSH 会话和串口输入会显示在网页中，并保留操作记录。串口由 decklab 独占采集，不要直接打开 /dev/ttyUSB*。',
+        'SSH sessions and serial input are visible and recorded in the UI. decklab owns serial capture; do not open /dev/ttyUSB* directly.'),
       phrase('如果通过 SSH 操作失败，先用 read 查看当前串口，再按 skill 指引决定是否发送输入。',
         'If SSH fails, read the existing serial output first, then follow the skill before sending input.')
     ].join('\n');
@@ -233,8 +233,8 @@
     output.value = format.value === 'cli'
       ? agentText(url, instructions.token, instructions.grant, instructions.board)
       : JSON.stringify({ mcpServers: { decklab: format.value === 'stdio'
-        ? { command: mcpCommand.value.trim() || 'seriald-mcp', args: [],
-            env: { SERIALD_URL: url, SERIALD_TOKEN: instructions.token } }
+        ? { command: mcpCommand.value.trim() || 'decklab-mcp', args: [],
+            env: { DECKLAB_URL: url, DECKLAB_TOKEN: instructions.token } }
         : { url: endpoint, headers: { Authorization: 'Bearer ' + instructions.token } } } }, null, 2);
     copyButton.disabled = false;
   }
@@ -290,7 +290,7 @@
     selected = selectedDevice();
     scope.value = initialScope;
     format.value = 'mcp';
-    if (!mcpCommand.value.trim()) mcpCommand.value = 'seriald-mcp';
+    if (!mcpCommand.value.trim()) mcpCommand.value = 'decklab-mcp';
     addressMode.value = lanUrl() ? 'lan' : 'local';
     selectAddress();
     output.value = '';

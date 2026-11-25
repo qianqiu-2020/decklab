@@ -9,9 +9,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core import transport
-from seriald_core.collector_lock import CollectorLock
-from seriald_core.profiles import SerialSettings
+from decklab_core import transport
+from decklab_core.collector_lock import CollectorLock
+from decklab_core.profiles import SerialSettings
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,13 +69,13 @@ class CollectorExclusionTests(unittest.TestCase):
         first_base, second_base = self.base / 'first', self.base / 'second'
         with CollectorLock(first_base):
             self.reader()
-            environment = dict(os.environ, SERIALD_BASE=str(second_base))
+            environment = dict(os.environ, DECKLAB_BASE=str(second_base))
             child = subprocess.run([sys.executable, '-c', '''
 import errno,os,sys
-from seriald_core.collector_lock import CollectorLock
-from seriald_core.profiles import SerialSettings
-from seriald_core.transport import open_serial
-with CollectorLock(os.environ['SERIALD_BASE']):
+from decklab_core.collector_lock import CollectorLock
+from decklab_core.profiles import SerialSettings
+from decklab_core.transport import open_serial
+with CollectorLock(os.environ['DECKLAB_BASE']):
     try:
         fd=open_serial(sys.argv[1], settings=SerialSettings(9600))
     except OSError as error:

@@ -1,0 +1,25 @@
+[Unit]
+Description=DeckLab Web/API/MCP node for a remote hardware backend
+After=network-online.target
+Wants=network-online.target
+Conflicts=decklab.service decklab-collector.service decklab-backend.service
+
+[Service]
+Type=simple
+User=decklab
+Group=decklab
+EnvironmentFile=/etc/decklab/decklab.env
+Environment=HOME=/data/decklab-data
+WorkingDirectory=/usr/lib/decklab
+ExecStart=/usr/bin/decklab-control --require-backend
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

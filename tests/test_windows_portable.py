@@ -9,13 +9,13 @@ import json
 
 import serial
 
-from seriald_core import device as device_module
-from seriald_core import control_server, handoff, web
-from seriald_core import windows_manager
-from seriald_core.httpd import BoundedThreadingTCPServer
-from seriald_core.sessions_windows import SshSession, check_password_login
-from seriald_core.storage import Store
-from seriald_core.agent_grants import AgentGrantStore
+from decklab_core import device as device_module
+from decklab_core import control_server, handoff, web
+from decklab_core import windows_manager
+from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.sessions_windows import SshSession, check_password_login
+from decklab_core.storage import Store
+from decklab_core.agent_grants import AgentGrantStore
 
 
 def port(device='COM7', location='1-4.2', serial_number='adapter-1'):
@@ -168,7 +168,7 @@ class WindowsPortableTests(unittest.TestCase):
         self.assertIsNone(device.fd)
 
     def test_console_events_release_ports_but_ctrl_c_keeps_python_shutdown(self):
-        from seriald_core import console_close_windows as close
+        from decklab_core import console_close_windows as close
         calls = []
         for event in (close.CTRL_CLOSE_EVENT, close.CTRL_BREAK_EVENT, close.CTRL_LOGOFF_EVENT, close.CTRL_SHUTDOWN_EVENT):
             self.assertTrue(close.release_on(event, lambda budget: calls.append(budget)))
@@ -208,7 +208,7 @@ class WindowsPortableTests(unittest.TestCase):
             self.assertFalse(device._write('hello')[0])
 
     def test_ssh_auth_failure_is_reported_as_denied(self):
-        with mock.patch('seriald_core.sessions_windows._connect',
+        with mock.patch('decklab_core.sessions_windows._connect',
                         side_effect=__import__('paramiko').AuthenticationException()):
             self.assertEqual(check_password_login('127.0.0.1', 'root', 'wrong'),
                              (False, True, 'SSH 认证失败'))
@@ -219,7 +219,7 @@ class WindowsPortableTests(unittest.TestCase):
                 mock.patch.object(device_module.Device, 'preload'), \
                 mock.patch.object(device_module.Device, 'stable_dir', return_value=root), \
                 mock.patch.object(device_module, 'check_password_login', side_effect=check_password_login), \
-                mock.patch('seriald_core.sessions_windows._connect',
+                mock.patch('decklab_core.sessions_windows._connect',
                            side_effect=[__import__('paramiko').AuthenticationException(), client]) as connect, \
                 mock.patch.object(device_module, 'SshSession') as opening:
             device = device_module.Device('usb-1', 'COM7')
@@ -241,7 +241,7 @@ class WindowsPortableTests(unittest.TestCase):
     def test_windows_network_failure_never_tries_default_passwords(self):
         with mock.patch.object(device_module.Device, 'preload'), \
                 mock.patch.object(device_module, 'check_password_login', side_effect=check_password_login), \
-                mock.patch('seriald_core.sessions_windows._connect', side_effect=OSError('refused')) as connect:
+                mock.patch('decklab_core.sessions_windows._connect', side_effect=OSError('refused')) as connect:
             device = device_module.Device('usb-1', 'COM7')
             device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
             session, error = device.ssh_connect()
@@ -259,7 +259,7 @@ class WindowsPortableTests(unittest.TestCase):
                 mock.patch.object(device_module.Device, 'preload'), \
                 mock.patch.object(device_module.Device, 'stable_dir', return_value=root), \
                 mock.patch.object(device_module, 'check_password_login', side_effect=check_password_login), \
-                mock.patch('seriald_core.sessions_windows._connect', side_effect=lambda *args: mock.Mock()) as connect, \
+                mock.patch('decklab_core.sessions_windows._connect', side_effect=lambda *args: mock.Mock()) as connect, \
                 mock.patch.object(device_module, 'SshSession', side_effect=fake_session):
             path = root + '/registry.sqlite3'
             store = Store(path)

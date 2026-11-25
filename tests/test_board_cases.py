@@ -8,16 +8,16 @@ import threading
 import unittest
 from unittest.mock import Mock, mock_open, patch
 
-from seriald_core.board_cases import BoardCase, SerialEvidence, config, library, resolve_connection, save_case, select_transport, verify_boot
-from seriald_core import board_case_target
-from seriald_core.board_case_target import run_command
-from seriald_core.board_maintenance import maintenance_for
-from seriald_core.device import Device
-from seriald_core.devices import Manager
-from seriald_core.hardware import HardwareBook
-from seriald_core.storage import Store
-from seriald_core.task_actions import TaskActions
-from seriald_core.tasks import TaskError
+from decklab_core.board_cases import BoardCase, SerialEvidence, config, library, resolve_connection, save_case, select_transport, verify_boot
+from decklab_core import board_case_target
+from decklab_core.board_case_target import run_command
+from decklab_core.board_maintenance import maintenance_for
+from decklab_core.device import Device
+from decklab_core.devices import Manager
+from decklab_core.hardware import HardwareBook
+from decklab_core.storage import Store
+from decklab_core.task_actions import TaskActions
+from decklab_core.tasks import TaskError
 
 
 BOOT1 = '11111111-1111-4111-8111-111111111111'
@@ -159,10 +159,10 @@ class BoardCasesTests(unittest.TestCase):
                 select_transport(value, '2-1.3')
 
     def test_registered_usb_diagnostics_distinguish_visible_interface_and_duplicate(self):
-        with patch('seriald_core.board_cases.usb_adb_interface', return_value=True):
+        with patch('decklab_core.board_cases.usb_adb_interface', return_value=True):
             with self.assertRaisesRegex(ConnectionError, '已枚举 ADB 接口'):
                 select_transport('', '2-1.3')
-        with patch('seriald_core.board_cases.usb_adb_interface', return_value=False):
+        with patch('decklab_core.board_cases.usb_adb_interface', return_value=False):
             with self.assertRaisesRegex(ConnectionError, '已登记的 USB 路径'):
                 select_transport('', '2-1.3')
         with self.assertRaisesRegex(ConnectionError, '多个在线'):
@@ -178,7 +178,7 @@ class BoardCasesTests(unittest.TestCase):
             self.assertIn(args[1], ('81','82'))
             serial = SERIAL if args[1] == '82' else 'OTHER-BOARD'
             return SimpleNamespace(returncode=0, stdout=f'serial={serial}\nboot_id={BOOT1}\nuid=0\nconsoles=ttyS0 tty0\n')
-        with patch('seriald_core.board_cases.adb_command', side_effect=execute):
+        with patch('decklab_core.board_cases.adb_command', side_effect=execute):
             self.assertEqual(resolve_connection('/fixture/adb', SERIAL, None),
                              {'usb_port':'2-1.3','uart':'/dev/ttyS0','cases':['rtc-wake']})
             with self.assertRaisesRegex(ConnectionError, '未找到'):
@@ -258,7 +258,7 @@ class BoardCasesTests(unittest.TestCase):
             return 'uncertain', 'no evidence of a wake'
 
         case.observe = Mock(side_effect=observe)
-        with patch('seriald_core.board_cases.FlashStore') as flash, self.assertRaisesRegex(TaskError, 'no evidence'):
+        with patch('decklab_core.board_cases.FlashStore') as flash, self.assertRaisesRegex(TaskError, 'no evidence'):
             case.run(context)
         case.command.assert_called_once()
         self.assertEqual(case.command.call_args.args[:3], ('-t','82','shell'))
@@ -292,7 +292,7 @@ class BoardCasesTests(unittest.TestCase):
         def finish_chunk(_seconds):
             case.device.buf.extend(tail)
         case.command = Mock(side_effect=submit)
-        with patch('seriald_core.board_cases.time.sleep', side_effect=finish_chunk), \
+        with patch('decklab_core.board_cases.time.sleep', side_effect=finish_chunk), \
                 self.assertRaisesRegex(TaskError, '第 2 条命令 · 未看到预期串口输出'):
             case.run(context)
         self.assertEqual(case.command.call_count, 2)
@@ -348,7 +348,7 @@ class BoardCasesTests(unittest.TestCase):
         stderr = 'Failed to start transient service unit: Connection timed out'
         case.command = Mock(return_value=SimpleNamespace(returncode=1, stdout='', stderr=stderr))
         case.observe = Mock(return_value=('uncertain', 'no evidence of a wake'))
-        with patch('seriald_core.board_cases.FlashStore'), self.assertRaisesRegex(TaskError, 'no evidence'):
+        with patch('decklab_core.board_cases.FlashStore'), self.assertRaisesRegex(TaskError, 'no evidence'):
             case.run(context)
         case.command.assert_called_once()
         case.observe.assert_called_once()
@@ -381,7 +381,7 @@ class BoardCasesTests(unittest.TestCase):
         evidence = SerialEvidence(case.device)
         case.device.buf.extend((tag+' ISSUED\nnor m:0x1 d:0x1\n').encode())
         result = {}
-        with patch('seriald_core.board_cases.time.sleep'):
+        with patch('decklab_core.board_cases.time.sleep'):
             self.assertEqual(case.observe(tag, {'boot_id':BOOT1}, baseline, evidence, result)[0], 'passed')
         case.facts.assert_called_once_with('91', {})
         self.assertEqual(result['boot_after'], BOOT2)
@@ -418,7 +418,7 @@ class BoardCasesTests(unittest.TestCase):
             payload = {'kind':'board-test','serial':SERIAL,'connection_id':device.connection_id,
                        'case':custom['id'],'case_revision':1,'rounds':1,'request_id':'test-request-1'}
             actions = TaskActions(manager)
-            with patch('seriald_core.board_cases.BoardCase.run', run), patch('seriald_core.board_cases.shutil.which', return_value='/fixture/adb'):
+            with patch('decklab_core.board_cases.BoardCase.run', run), patch('decklab_core.board_cases.shutil.which', return_value='/fixture/adb'):
                 first = actions.start(payload, device, 'web')
                 self.assertEqual(first.status, 202, first.payload)
                 self.assertTrue(started.wait(2))

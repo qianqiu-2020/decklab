@@ -4,8 +4,8 @@ import struct
 import unittest
 import uuid
 
-from seriald_core import nor_contents
-from seriald_core.nor_contents import partition_content
+from decklab_core import nor_contents
+from decklab_core.nor_contents import partition_content
 
 # `lzop -9` of 256 filler bytes around a K3 U-Boot version string.
 LZOP_UBOOT = bytes.fromhex(

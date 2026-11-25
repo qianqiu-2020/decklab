@@ -8,10 +8,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.nor_backups import compare_payloads, publish_backup
-from seriald_core.storage import Store
-from seriald_core.tasks import TaskCancelled, TaskError, TaskStore
-from seriald_core.transfer_artifacts import ArtifactPolicy, TransferArtifacts
+from decklab_core.nor_backups import compare_payloads, publish_backup
+from decklab_core.storage import Store
+from decklab_core.tasks import TaskCancelled, TaskError, TaskStore
+from decklab_core.transfer_artifacts import ArtifactPolicy, TransferArtifacts
 
 
 class NORBackupTests(unittest.TestCase):

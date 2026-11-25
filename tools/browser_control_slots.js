@@ -26,8 +26,8 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.url !== '/api/control-slots') {
     res.setHeader('Content-Type','text/html; charset=utf-8');
-    return res.end('<meta charset="utf-8"><script>window.SerialdUI={fetch:window.fetch.bind(window)};window.confirmCalls=0;window.confirm=()=>{window.confirmCalls++;return true}</script>' +
-      '<script src="/static/tasks.js"></script><script src="/static/control-slots.js"></script><button onclick="SerialdControlSlots.open()">Bulk</button>');
+    return res.end('<meta charset="utf-8"><script>window.DeckLabUI={fetch:window.fetch.bind(window)};window.confirmCalls=0;window.confirm=()=>{window.confirmCalls++;return true}</script>' +
+      '<script src="/static/tasks.js"></script><script src="/static/control-slots.js"></script><button onclick="DeckLabControlSlots.open()">Bulk</button>');
   }
   let body = '';
   for await (const chunk of req) body += chunk;
@@ -80,8 +80,8 @@ async function test() {
       }
       throw Error('Timed out waiting for '+expression);
     }
-    await wait('typeof SerialdControlSlots==="object"');
-    await evaluate('SerialdControlSlots.open()');
+    await wait('typeof DeckLabControlSlots==="object"');
+    await evaluate('DeckLabControlSlots.open()');
     const rows = 'document.querySelectorAll(".wiring-row")';
     await wait(rows+'.length===4');
     assert.equal(await evaluate(rows+'.length'),4, await evaluate('document.querySelector(".wiring-footer").textContent'));
@@ -101,7 +101,7 @@ async function test() {
     await evaluate('document.querySelector(".wiring-footer button").click()');
     await wait('!document.querySelector(".wiring-dialog")');
     assert.deepEqual(saved[0],{'North/0':{serial:'A',allow_agent:true},'South/1':{serial:'B',allow_agent:true}});
-    await evaluate('SerialdControlSlots.open("A")');
+    await evaluate('DeckLabControlSlots.open("A")');
     await wait(rows+'.length===4');
     await choose('[aria-label="控制器"]','South');
     await evaluate(rows+'[1].querySelector("button").click()');
@@ -110,7 +110,7 @@ async function test() {
     assert.deepEqual(saved[1],{'North/0':{serial:'',allow_agent:false},'South/2':{serial:'A',allow_agent:true}});
     handoff = {key:'South/2', origin};
     const confirmations = await evaluate('window.confirmCalls');
-    await evaluate('SerialdControlSlots.open("C")');
+    await evaluate('DeckLabControlSlots.open("C")');
     await wait('!!document.querySelector(".wiring-handoff")');
     assert.match(await evaluate('document.querySelector(".wiring-handoff").textContent'),/已选槽位 2.*A → C/);
     assert.equal(await evaluate('document.querySelector(".wiring-footer button").textContent'),'确认换板接线');
@@ -122,7 +122,7 @@ async function test() {
     assert.equal(await evaluate('window.confirmCalls'),confirmations);
     handoff = undefined;
     bindings.set('North/1',{serial:'A'});
-    await evaluate('SerialdControlSlots.open(null,{key:"pending-uart",connection_id:"fixture-connection"})');
+    await evaluate('DeckLabControlSlots.open(null,{key:"pending-uart",connection_id:"fixture-connection"})');
     await wait(rows+'.length===4');
     assert.equal(await evaluate('document.querySelector(".wiring-footer button").disabled'),true);
     await choose('[aria-label="控制器"]','South');

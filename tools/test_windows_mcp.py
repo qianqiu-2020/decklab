@@ -21,7 +21,7 @@ from urllib.request import urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN = 'seriald-ag-' + 'packagedFixtureOnly' * 2
+TOKEN = 'decklab-ag-' + 'packagedFixtureOnly' * 2
 KEY = 'packaged-unknown-os'
 CONNECTION = 'packaged-fixture-connection'
 
@@ -133,14 +133,14 @@ def check_public_control(url):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument('--executable', type=Path, help='Frozen seriald.exe built by PyInstaller')
+    mode.add_argument('--executable', type=Path, help='Frozen decklab.exe built by PyInstaller')
     mode.add_argument('--source', action='store_true', help='Validate the harness against the source worker')
     mode.add_argument('--control-url', help='Already running isolated packaged host with open loopback access')
     args = parser.parse_args(argv)
     if args.control_url:
         return check_public_control(args.control_url)
     command = ([str(args.executable.resolve()), 'mcp'] if args.executable else
-               [sys.executable, str(ROOT / 'seriald_mcp.py')])
+               [sys.executable, str(ROOT / 'decklab_mcp.py')])
     with ThreadingHTTPServer(('127.0.0.1', 0), FixtureAPI) as api, tempfile.TemporaryDirectory() as folder:
         api.active, api.inputs = True, []
         worker = threading.Thread(target=api.serve_forever, daemon=True)
@@ -148,7 +148,7 @@ def main(argv=None):
         ready = Path(folder) / 'mcp-ready.json'
         log = Path(folder) / 'mcp-worker.log'
         # An inherited owner token must never give HTTP callers implicit access.
-        environment = dict(os.environ, SERIALD_TOKEN='fixture-owner-must-not-be-used')
+        environment = dict(os.environ, DECKLAB_TOKEN='fixture-owner-must-not-be-used')
         with log.open('wb') as output, subprocess.Popen(command + [
                 '--transport', 'streamable-http', '--url', 'http://127.0.0.1:%d' % api.server_port,
                 '--host', '127.0.0.1', '--port', '0', '--ready-file', str(ready)],

@@ -14,7 +14,7 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core import websocket_io as module
+from decklab_core import websocket_io as module
 
 
 @contextmanager
@@ -86,7 +86,7 @@ class WebSocketIOTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256((directory / row['filename']).read_bytes()).hexdigest(), row['sha256'])
             self.assertIn('Permission is hereby granted', (directory / row['license_file']).read_text())
         result = subprocess.run([sys.executable, '-S', '-c',
-            'from seriald_core.websocket_io import _protocol_modules; '
+            'from decklab_core.websocket_io import _protocol_modules; '
             'p,e=_protocol_modules(); import h11; '
             'assert p.__version__=="1.3.2" and h11.__version__=="0.16.0"; '
             'assert ".whl/" in p.__file__.replace(chr(92),"/")'],

@@ -12,11 +12,11 @@ import unittest
 from unittest import mock
 from urllib.parse import urlencode
 
-from seriald_core.agent_grants import AgentGrantStore
-from seriald_core.backend_link import BackendLink, server_context
-from seriald_core.control_server import ControlHandler
-from seriald_core.httpd import BoundedThreadingTCPServer
-from seriald_core.websocket_io import WSConnection, WSError, WSTimeout, _protocol_modules
+from decklab_core.agent_grants import AgentGrantStore
+from decklab_core.backend_link import BackendLink, server_context
+from decklab_core.control_server import ControlHandler
+from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.websocket_io import WSConnection, WSError, WSTimeout, _protocol_modules
 
 
 PROTOCOL = 'decklab-desktop-v1'
@@ -28,7 +28,7 @@ class Echo(http.server.BaseHTTPRequestHandler):
         self.server.received.append({'path': self.path, 'headers': dict(self.headers)})
         ws = None
         try:
-            ws = WSConnection.accept(self, origins={self.headers['X-Seriald-Desktop-Origin']}, subprotocol=PROTOCOL)
+            ws = WSConnection.accept(self, origins={self.headers['X-DeckLab-Desktop-Origin']}, subprotocol=PROTOCOL)
             ws.send('ready')
             while True:
                 try:
@@ -126,9 +126,9 @@ class Peer:
 
 
 class DesktopProxyTests(unittest.TestCase):
-    @mock.patch('seriald_core.control_server.public_mcp_host_allowed', return_value=False)
+    @mock.patch('decklab_core.control_server.public_mcp_host_allowed', return_value=False)
     def test_secondary_interface_matches_socket_and_browser_origin(self, _allowed):
-        from seriald_core.desktop_proxy import public_origin
+        from decklab_core.desktop_proxy import public_origin
         handler = mock.Mock()
         handler.connection.getsockname.return_value = ('192.0.2.18', 8898)
         host = '192.0.2.18:8898'
@@ -145,7 +145,7 @@ class DesktopProxyTests(unittest.TestCase):
                     public_origin(handler)
 
     def owner(self):
-        return 'Basic ' + base64.b64encode(('seriald:' + OWNER).encode()).decode()
+        return 'Basic ' + base64.b64encode(('decklab:' + OWNER).encode()).decode()
 
     def test_basic_and_share_cookie_auth_with_prefetched_frames_in_both_directions(self):
         with tunnel() as (control, backend, grants):
@@ -164,7 +164,7 @@ class DesktopProxyTests(unittest.TestCase):
             dummy = ControlHandler.__new__(ControlHandler)
             dummy.auth_token = OWNER
             share = dummy._new_share()
-            cookie_peer = Peer(control, cookie='seriald_share=' + share)
+            cookie_peer = Peer(control, cookie='decklab_share=' + share)
             try:
                 cookie_peer.receive(cookie_peer.events.AcceptConnection)
                 self.assertEqual(cookie_peer.receive(cookie_peer.events.TextMessage).data, 'ready')
@@ -193,7 +193,7 @@ class DesktopProxyTests(unittest.TestCase):
                 self.assertEqual(peer.receive(peer.events.TextMessage).data, 'ready')
                 self.assertIn('serial=BOARD-A', backend.received[0]['path'])
                 self.assertNotIn('BOARD-B', backend.received[0]['path'])
-                self.assertEqual(backend.received[0]['headers']['X-Seriald-Actor'], grant['actor'])
+                self.assertEqual(backend.received[0]['headers']['X-DeckLab-Actor'], grant['actor'])
                 grants.revoke(grant['id'])
                 self.assertTrue(backend.closed.wait(3))
             finally:

@@ -21,7 +21,7 @@ function harness() {
   const sandbox = {window: {}, document: {createElement: () => new Element()}, setTimeout() {}};
   vm.runInNewContext(source, sandbox);
   let ctx = {key: 'A', serial: 'SN-A', connectionId: 'A1'};
-  const control = sandbox.window.SerialdBoardControl.create({byId: get, getView: () => ctx,
+  const control = sandbox.window.DeckLabBoardControl.create({byId: get, getView: () => ctx,
     fetch: (url, options) => new Promise(resolve => requests.push({url, body: options && options.body && JSON.parse(options.body),
       reply: data => resolve({ok: true, json: () => Promise.resolve(data)})}))});
   return {get, requests, control, select(value) { ctx = value; control.refresh(ctx); }, ctx};

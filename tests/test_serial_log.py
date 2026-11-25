@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.serial_log import SerialLog
+from decklab_core.serial_log import SerialLog
 
 
 class SerialLogTests(unittest.TestCase):

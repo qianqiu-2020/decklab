@@ -2,7 +2,7 @@
 # For disposable Windows CI/container builders; desktop builders can use winget.
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Inno Setup requires Windows.' }
-$download = Join-Path $env:TEMP ('seriald-inno-' + [guid]::NewGuid().ToString('N') + '.exe')
+$download = Join-Path $env:TEMP ('decklab-inno-' + [guid]::NewGuid().ToString('N') + '.exe')
 try {
     Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $download
     $signature = Get-AuthenticodeSignature -LiteralPath $download

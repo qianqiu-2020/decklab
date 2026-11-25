@@ -4,17 +4,17 @@ import os
 import unittest
 from unittest import mock
 
-from seriald_core import image_catalog as catalog
-from seriald_core.tasks import TaskError
+from decklab_core import image_catalog as catalog
+from decklab_core.tasks import TaskError
 from test_image_download import fixture, wait_task, DATA
-from seriald_core.image_download import ImageDownloads
+from decklab_core.image_download import ImageDownloads
 
 
 class CatalogTests(unittest.TestCase):
     def setUp(self):
         patcher = mock.patch.dict(os.environ, {
-            'SERIALD_IMAGE_INTERNAL_BROWSE': 'https://images.example.test/service/rest/repository/browse/image/',
-            'SERIALD_IMAGE_INTERNAL_DOWNLOAD': 'https://images.example.test/repository/image/'})
+            'DECKLAB_IMAGE_INTERNAL_BROWSE': 'https://images.example.test/service/rest/repository/browse/image/',
+            'DECKLAB_IMAGE_INTERNAL_DOWNLOAD': 'https://images.example.test/repository/image/'})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -23,24 +23,24 @@ class CatalogTests(unittest.TestCase):
         for url in ('http://images.example.test/', 'https://[broken/', 'https://user:password@images.example.test/',
                     'https://images.example.test/?token=private', 'https://images.example.test/not-a-directory'):
             with self.subTest(url=url), self.assertRaises(TaskError):
-                catalog.configured_sources({'SERIALD_IMAGE_INTERNAL_BROWSE': url,
-                                            'SERIALD_IMAGE_INTERNAL_DOWNLOAD': url})
-        with mock.patch.dict(os.environ, {'SERIALD_IMAGE_INTERNAL_BROWSE': '', 'SERIALD_IMAGE_INTERNAL_DOWNLOAD': ''}):
+                catalog.configured_sources({'DECKLAB_IMAGE_INTERNAL_BROWSE': url,
+                                            'DECKLAB_IMAGE_INTERNAL_DOWNLOAD': url})
+        with mock.patch.dict(os.environ, {'DECKLAB_IMAGE_INTERNAL_BROWSE': '', 'DECKLAB_IMAGE_INTERNAL_DOWNLOAD': ''}):
             with self.assertRaisesRegex(TaskError, '尚未配置'):
                 catalog.catalog('internal')
 
     def test_nexus_origin_resolves_the_image_catalog_and_download_paths(self):
-        spec = catalog.configured_sources({'SERIALD_IMAGE_INTERNAL_BROWSE': 'https://images.example.test:8443'})['internal']
+        spec = catalog.configured_sources({'DECKLAB_IMAGE_INTERNAL_BROWSE': 'https://images.example.test:8443'})['internal']
         self.assertEqual(spec['browse'], 'https://images.example.test:8443/service/rest/repository/browse/image/')
         self.assertEqual(spec['download'], 'https://images.example.test:8443/repository/image/')
         with mock.patch.object(catalog, '_CACHE', {}), mock.patch.object(catalog, '_fetch', return_value='<a href="k3/">K3</a>') as fetch:
             catalog.catalog('internal')
-            fetch.assert_called_once_with(os.environ['SERIALD_IMAGE_INTERNAL_BROWSE'], verify_tls=False)
+            fetch.assert_called_once_with(os.environ['DECKLAB_IMAGE_INTERNAL_BROWSE'], verify_tls=False)
             catalog.catalog('public')
             self.assertTrue(fetch.call_args.kwargs['verify_tls'])
 
     def test_organization_tls_is_limited_to_exact_repository_paths(self):
-        from seriald_core.image_download import image_url
+        from decklab_core.image_download import image_url
         root = 'https://images.example.test/repository/image/'
         self.assertTrue(catalog.organization_download(image_url(root + 'k3/signed%20image.tar.gz')))
         for url in (root, root + 'k3/%2e%2e/other.tar', root.replace('https:', 'http:') + 'k3/test.tar',

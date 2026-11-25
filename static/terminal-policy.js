@@ -70,5 +70,5 @@
       finally { pasting = false; }
     };
   }
-  global.SerialdTerminalPolicy = { install: install };
+  global.DeckLabTerminalPolicy = { install: install };
 })(window);

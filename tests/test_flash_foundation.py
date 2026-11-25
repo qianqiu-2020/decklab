@@ -8,14 +8,14 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core.board_maintenance import maintenance_for
-from seriald_core.device import Device
-from seriald_core.flash_store import FlashStore, MAX_EVENTS
-from seriald_core.models import Board
-from seriald_core.storage import Store, IdentityError
-from seriald_core.tasks import TaskContext, TaskError, TaskManager, TaskStore
-from seriald_core.transactions import TransactionError
-from seriald_core import schema
+from decklab_core.board_maintenance import maintenance_for
+from decklab_core.device import Device
+from decklab_core.flash_store import FlashStore, MAX_EVENTS
+from decklab_core.models import Board
+from decklab_core.storage import Store, IdentityError
+from decklab_core.tasks import TaskContext, TaskError, TaskManager, TaskStore
+from decklab_core.transactions import TransactionError
+from decklab_core import schema
 
 
 class FlashFoundationTests(unittest.TestCase):
@@ -31,7 +31,7 @@ class FlashFoundationTests(unittest.TestCase):
         self.tasks = TaskManager(self.store, max_active=2)
         self.addCleanup(self.tasks.close)
         self.flashes = FlashStore(self.store)
-        logs = mock.patch('seriald_core.device.LOG_ROOT', temporary.name)
+        logs = mock.patch('decklab_core.device.LOG_ROOT', temporary.name)
         logs.start()
         self.addCleanup(logs.stop)
 

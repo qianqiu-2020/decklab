@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = ["mcp==2.3.0"]
 
 [project.scripts]
-seriald-mcp = "seriald_mcp:main"
+decklab-mcp = "decklab_mcp:main"
 
 [tool.setuptools]
-py-modules = ["seriald_mcp", "serialctl"]
+py-modules = ["decklab_mcp", "decklabctl"]

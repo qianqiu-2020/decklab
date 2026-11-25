@@ -96,7 +96,7 @@
   });
   $('bc-run').addEventListener('click', run);
   $('bc-close').addEventListener('click', function () { $('boot-compare-dialog').close(); });
-  window.SerialdBootCompare = { open: function (selected, available) {
+  window.DeckLabBootCompare = { open: function (selected, available) {
     devices = (available || []).filter(function (entry) { return !!entry.serial; });
     if (!devices.length) return;
     ['left', 'right'].forEach(function (side) {

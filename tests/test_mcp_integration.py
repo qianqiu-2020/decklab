@@ -10,9 +10,9 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
-import seriald_mcp
-from seriald_core.device import Device
-from seriald_core.flash_runner import FlashBook
+import decklab_mcp
+from decklab_core.device import Device
+from decklab_core.flash_runner import FlashBook
 from test_connection_access import protected_connection
 from test_flash_discovery_integration import FakeDiscoveryExecutor
 
@@ -20,7 +20,7 @@ from test_flash_discovery_integration import FakeDiscoveryExecutor
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@unittest.skipUnless(seriald_mcp.MCPServer is not None, 'optional mcp==2.3.0 SDK is not installed')
+@unittest.skipUnless(decklab_mcp.MCPServer is not None, 'optional mcp==2.3.0 SDK is not installed')
 class ProtectedMCPTests(unittest.TestCase):
     def test_official_stdio_client_reads_and_writes_unknown_os_with_real_scope_enforcement(self):
         from mcp import Client as MCPClient, StdioServerParameters
@@ -28,8 +28,8 @@ class ProtectedMCPTests(unittest.TestCase):
             device = fixture.device
             device.append(b'unknown-firmware> ')
             async def check():
-                params = StdioServerParameters(command=sys.executable, args=[str(ROOT / 'seriald_mcp.py')],
-                    env=dict(os.environ, SERIALD_URL=fixture.url, SERIALD_TOKEN=fixture.token))
+                params = StdioServerParameters(command=sys.executable, args=[str(ROOT / 'decklab_mcp.py')],
+                    env=dict(os.environ, DECKLAB_URL=fixture.url, DECKLAB_TOKEN=fixture.token))
                 async with MCPClient(params, mode='auto') as client:
                     listed = await client.call_tool('list_devices', {})
                     self.assertFalse(listed.is_error, repr(listed))
@@ -76,8 +76,8 @@ class ProtectedMCPTests(unittest.TestCase):
                 port = handle.getsockname()[1]
             endpoint = 'http://127.0.0.1:%d/mcp' % port
             # An HTTP caller must supply its own grant even if the process has owner credentials.
-            env = dict(os.environ, SERIALD_URL=fixture.url, SERIALD_TOKEN=fixture.owner_token)
-            with subprocess.Popen([sys.executable, str(ROOT / 'seriald_mcp.py'), '--transport', 'streamable-http',
+            env = dict(os.environ, DECKLAB_URL=fixture.url, DECKLAB_TOKEN=fixture.owner_token)
+            with subprocess.Popen([sys.executable, str(ROOT / 'decklab_mcp.py'), '--transport', 'streamable-http',
                                    '--port', str(port)], env=env, stdout=subprocess.DEVNULL,
                                   stderr=subprocess.PIPE) as process:
                 try:

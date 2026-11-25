@@ -19,8 +19,8 @@ class TerminalGeometryTests(unittest.TestCase):
         import pty
         import select
         import termios
-        from seriald_core.actions import DeviceActions
-        from seriald_core.device import Device
+        from decklab_core.actions import DeviceActions
+        from decklab_core.device import Device
 
         busybox = shutil.which('busybox')
         with tempfile.TemporaryDirectory() as temporary:
@@ -36,7 +36,7 @@ class TerminalGeometryTests(unittest.TestCase):
                 os.execv(busybox, [busybox, 'ash', '-i'])
             device = None
             try:
-                with mock.patch('seriald_core.device.LOG_ROOT', temporary), \
+                with mock.patch('decklab_core.device.LOG_ROOT', temporary), \
                         mock.patch.object(Device, '_protocol_reply', return_value=True):
                     device = Device('fixture-busybox-pty', '/fixture-only-local-pty', record={
                         'serial': 'LOCAL-BUSYBOX-PTY', 'label': 'busybox', 'info': {}})

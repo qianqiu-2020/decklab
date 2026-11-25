@@ -1,7 +1,7 @@
 #!/bin/bash
-# seriald 串口自愈脚本 —— 供 seriald 通过 `sudo -n` 调用。
+# decklab 串口自愈脚本 —— 供 decklab 通过 `sudo -n` 调用。
 #
-# 为什么做成独立脚本 + sudoers 白名单,而不是给 seriald 通用 sudo:
+# 为什么做成独立脚本 + sudoers 白名单,而不是给 decklab 通用 sudo:
 #   web 服务不该持有通用提权能力。白名单只放行这个 USB 重新绑定脚本。
 #
 # 为什么必须装在 root 拥有的目录(如 /usr/local/sbin):
@@ -9,7 +9,7 @@
 #   安装时务必 root:root 0755,且所在目录不可被服务使用者写。
 #
 # 用法(参数受控,不做任何别的事):
-#   seriald-rescue.sh <usb设备名> [rebind]  软拔插(内核层 unbind/bind,设备名可能变)
+#   decklab-rescue.sh <usb设备名> [rebind]  软拔插(内核层 unbind/bind,设备名可能变)
 set -u
 
 DEV="${1:-}"

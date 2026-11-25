@@ -17,8 +17,8 @@ from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-import seriald_mcp
-from seriald_core.mcp_host import LOG_LIMIT, MCPHost, _WorkerLog, local_control_url
+import decklab_mcp
+from decklab_core.mcp_host import LOG_LIMIT, MCPHost, _WorkerLog, local_control_url
 from test_connection_access import protected_connection, api_request
 
 
@@ -27,11 +27,11 @@ class IsolatedMCPHostTestCase(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix='decklab-mcp-test-')
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
-        self.base_patch = mock.patch('seriald_core.mcp_host.BASE', str(self.directory))
+        self.base_patch = mock.patch('decklab_core.mcp_host.BASE', str(self.directory))
         self.base_patch.start()
         self.addCleanup(self.base_patch.stop)
-        environment = mock.patch.dict(os.environ, {'SERIALD_BASE': str(self.directory),
-            'SERIALD_MCP_ENABLED': '1', 'SERIALD_MCP_PYTHON': ''})
+        environment = mock.patch.dict(os.environ, {'DECKLAB_BASE': str(self.directory),
+            'DECKLAB_MCP_ENABLED': '1', 'DECKLAB_MCP_PYTHON': ''})
         environment.start()
         self.addCleanup(environment.stop)
 
@@ -46,8 +46,8 @@ class MCPHostTests(IsolatedMCPHostTestCase):
             self.assertEqual(local_control_url(SimpleNamespace(server_address=address)), expected)
 
     def test_disabled_worker_does_not_spawn_or_require_the_sdk(self):
-        with mock.patch.dict(os.environ, {'SERIALD_MCP_ENABLED': '0'}), \
-                mock.patch('seriald_core.mcp_host.subprocess.Popen') as spawn:
+        with mock.patch.dict(os.environ, {'DECKLAB_MCP_ENABLED': '0'}), \
+                mock.patch('decklab_core.mcp_host.subprocess.Popen') as spawn:
             with MCPHost('http://127.0.0.1:8898') as host:
                 self.assertIsNone(host.target)
                 self.assertEqual(host.snapshot(), {'mcp_enabled': False, 'mcp_url': '/mcp',
@@ -68,7 +68,7 @@ class MCPHostTests(IsolatedMCPHostTestCase):
 
     def test_dependency_error_is_logged_privately_without_exposing_tokens_to_ui(self):
         program = ('import sys; '
-                   'print("ModuleNotFoundError: mcp Bearer hidden-token seriald-ag-secret", file=sys.stderr); '
+                   'print("ModuleNotFoundError: mcp Bearer hidden-token decklab-ag-secret", file=sys.stderr); '
                    'raise SystemExit(1)')
         host = MCPHost('http://127.0.0.1:8898', startup_timeout=2)
         with mock.patch.object(host, '_command', return_value=[sys.executable, '-c', program]), host:
@@ -77,12 +77,12 @@ class MCPHostTests(IsolatedMCPHostTestCase):
             log = (self.directory / 'mcp-worker.log').read_text()
             self.assertIn('ModuleNotFoundError', log)
             self.assertNotIn('hidden-token', log)
-            self.assertNotIn('seriald-ag-secret', log)
+            self.assertNotIn('decklab-ag-secret', log)
             if os.name != 'nt':
                 self.assertEqual((self.directory / 'mcp-worker.log').stat().st_mode & 0o777, 0o600)
 
     def test_adapter_missing_sdk_diagnostic_is_classified_as_dependency_failure(self):
-        message = seriald_mcp.sdk_unavailable_message()
+        message = decklab_mcp.sdk_unavailable_message()
         program = 'import sys; print(sys.argv[1], file=sys.stderr); raise SystemExit(1)'
         host = MCPHost('http://127.0.0.1:8898', startup_timeout=2)
         with mock.patch.object(host, '_command', return_value=[sys.executable, '-c', program, message]), host:
@@ -91,35 +91,35 @@ class MCPHostTests(IsolatedMCPHostTestCase):
 
     def test_source_entry_point_does_not_follow_custom_static_assets(self):
         host = MCPHost('http://127.0.0.1:8898')
-        with mock.patch('seriald_core.mcp_host.STATIC', str(self.directory / 'assets'), create=True), \
-                mock.patch.dict(os.environ, {'SERIALD_STATIC': str(self.directory / 'assets')}), \
+        with mock.patch('decklab_core.mcp_host.STATIC', str(self.directory / 'assets'), create=True), \
+                mock.patch.dict(os.environ, {'DECKLAB_STATIC': str(self.directory / 'assets')}), \
                 mock.patch.object(sys, 'frozen', False, create=True):
             command = host._command(self.directory / 'ready.json')
-        self.assertEqual(Path(command[1]), Path(__file__).resolve().parents[1] / 'seriald_mcp.py')
+        self.assertEqual(Path(command[1]), Path(__file__).resolve().parents[1] / 'decklab_mcp.py')
 
     def test_bundled_worker_is_selected_before_source_python_and_override_takes_priority(self):
-        bundle = self.directory / 'mcp-runtime' / 'seriald-mcp-worker'
+        bundle = self.directory / 'mcp-runtime' / 'decklab-mcp-worker'
         bundle.parent.mkdir()
         bundle.write_text('#!/bin/sh\n')
         bundle.chmod(0o755)
-        (self.directory / 'seriald_mcp.py').write_text('')
+        (self.directory / 'decklab_mcp.py').write_text('')
         host = MCPHost('http://127.0.0.1:8898')
-        with mock.patch('seriald_core.mcp_host.CODE_ROOT', self.directory), \
+        with mock.patch('decklab_core.mcp_host.CODE_ROOT', self.directory), \
                 mock.patch.object(sys, 'frozen', False, create=True):
             self.assertEqual(host._command(self.directory / 'ready')[0], str(bundle))
-            with mock.patch.dict(os.environ, {'SERIALD_MCP_PYTHON': '/custom/python'}):
+            with mock.patch.dict(os.environ, {'DECKLAB_MCP_PYTHON': '/custom/python'}):
                 self.assertEqual(host._command(self.directory / 'ready')[:2],
-                                 ['/custom/python', str(self.directory / 'seriald_mcp.py')])
+                                 ['/custom/python', str(self.directory / 'decklab_mcp.py')])
 
     @unittest.skipIf(os.name == 'nt', 'POSIX executable permissions only apply to the Linux bundle')
     def test_nonexecutable_bundle_is_an_installation_error_without_fallback(self):
-        bundle = self.directory / 'mcp-runtime' / 'seriald-mcp-worker'
+        bundle = self.directory / 'mcp-runtime' / 'decklab-mcp-worker'
         bundle.parent.mkdir()
         bundle.write_text('invalid runtime')
         bundle.chmod(0o644)
-        with mock.patch('seriald_core.mcp_host.CODE_ROOT', self.directory), \
+        with mock.patch('decklab_core.mcp_host.CODE_ROOT', self.directory), \
                 mock.patch.object(sys, 'frozen', False, create=True), \
-                mock.patch('seriald_core.mcp_host.subprocess.Popen') as spawn:
+                mock.patch('decklab_core.mcp_host.subprocess.Popen') as spawn:
             with MCPHost('http://127.0.0.1:8898') as host:
                 self.assertIn('内置 MCP 运行程序不可执行', host.error)
                 self.assertIsNone(host.target)
@@ -129,13 +129,13 @@ class MCPHostTests(IsolatedMCPHostTestCase):
         for exception, expected in ((FileNotFoundError(2, 'missing'), '启动程序不存在'),
                                     (PermissionError(13, 'denied'), '启动程序权限不足')):
             with self.subTest(exception=exception), \
-                    mock.patch('seriald_core.mcp_host.subprocess.Popen', side_effect=exception):
+                    mock.patch('decklab_core.mcp_host.subprocess.Popen', side_effect=exception):
                 with MCPHost('http://127.0.0.1:8898') as host:
                     self.assertIn(expected, host.error)
                     self.assertIsNone(host.process)
                     self.assertIsNone(host._temporary)
-        with mock.patch('seriald_core.mcp_host._WorkerLog', side_effect=PermissionError(13, 'denied')), \
-                mock.patch('seriald_core.mcp_host.subprocess.Popen') as spawn:
+        with mock.patch('decklab_core.mcp_host._WorkerLog', side_effect=PermissionError(13, 'denied')), \
+                mock.patch('decklab_core.mcp_host.subprocess.Popen') as spawn:
             with MCPHost('http://127.0.0.1:8898') as host:
                 self.assertIn('无法创建诊断日志', host.error)
             spawn.assert_not_called()
@@ -176,14 +176,15 @@ class MCPHostTests(IsolatedMCPHostTestCase):
     def test_diagnostic_log_redacts_credentials_and_removes_terminal_escapes(self):
         path = self.directory / 'mcp-worker.log'
         log = _WorkerLog(path)
+        suffix = 'dummy_value_' + str(id(log))
         try:
             log.write('Authorization: Bearer hide\x1b[31m-this\x1b[0m\n')
-            log.write('token=seriald-ag-secret_123 url=https://user:password@localhost/mcp\n')
+            log.write('token=' + 'decklab-ag-' + suffix + ' url=https://user:password@localhost/mcp\n')
             log.write('control\x00characters\x7f\n')
         finally:
             tail = log.close()
         contents = path.read_text()
-        for secret in ('hide-this', 'hide', 'secret_123', 'user:password', '\x1b', '\x00', '\x7f'):
+        for secret in ('hide-this', 'hide', suffix, 'user:password', '\x1b', '\x00', '\x7f'):
             self.assertNotIn(secret, contents)
             self.assertNotIn(secret, tail)
         self.assertIn('Bearer <redacted>', contents)
@@ -191,7 +192,7 @@ class MCPHostTests(IsolatedMCPHostTestCase):
 
     def test_server_python_is_one_executable_and_frozen_host_reuses_its_dispatch(self):
         host = MCPHost('http://127.0.0.1:8898')
-        with mock.patch.dict(os.environ, {'SERIALD_MCP_PYTHON': '/opt/a path/python'}), \
+        with mock.patch.dict(os.environ, {'DECKLAB_MCP_PYTHON': '/opt/a path/python'}), \
                 mock.patch.object(sys, 'frozen', False, create=True):
             command = host._command(Path('/tmp/readiness.json'))
             self.assertEqual(command[0], '/opt/a path/python')
@@ -201,14 +202,14 @@ class MCPHostTests(IsolatedMCPHostTestCase):
             self.assertEqual(host._command(Path('/tmp/status'))[:2], [sys.executable, 'mcp'])
 
 
-@unittest.skipUnless(seriald_mcp.MCPServer is not None, 'optional server-side MCP SDK is not installed')
+@unittest.skipUnless(decklab_mcp.MCPServer is not None, 'optional server-side MCP SDK is not installed')
 class PublicMCPHostTests(IsolatedMCPHostTestCase):
     def test_abrupt_parent_exit_does_not_leave_a_private_mcp_listener_running(self):
-        program = ('import json,time; from seriald_core.mcp_host import MCPHost; '
+        program = ('import json,time; from decklab_core.mcp_host import MCPHost; '
                    "h=MCPHost('http://127.0.0.1:9'); h.start(); "
                    "print(json.dumps({'target':h.target,'temporary':h._temporary.name if h._temporary else None}),flush=True); "
                    'time.sleep(60)')
-        environment = dict(os.environ, SERIALD_MCP_ENABLED='1')
+        environment = dict(os.environ, DECKLAB_MCP_ENABLED='1')
         child = subprocess.Popen([sys.executable, '-c', program], stdout=subprocess.PIPE,
                                  stderr=subprocess.DEVNULL, text=True, env=environment)
         output = queue.Queue()

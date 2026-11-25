@@ -3,16 +3,16 @@ import unittest
 import tempfile
 from unittest import mock
 
-from seriald_core.actions import DeviceActions
-from seriald_core.device import Device
-from seriald_core.terminal_state import SerialTerminalState
+from decklab_core.actions import DeviceActions
+from decklab_core.device import Device
+from decklab_core.terminal_state import SerialTerminalState
 
 
 class SerialTerminalTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        logs = mock.patch('seriald_core.device.LOG_ROOT', temporary.name)
+        logs = mock.patch('decklab_core.device.LOG_ROOT', temporary.name)
         logs.start()
         self.addCleanup(logs.stop)
         self.device = Device('fixture-port', '/fake/tty', record={
@@ -171,7 +171,7 @@ class SerialTerminalTests(unittest.TestCase):
         self.write.assert_not_called()
 
     def test_replay_geometry_is_selected_at_the_first_byte_not_latest_state(self):
-        from seriald_core.queries import SessionQueries
+        from decklab_core.queries import SessionQueries
         self.feed(b'root@ubuntu:~# ')
         self.resize()
         old_start = self.device.now_off()

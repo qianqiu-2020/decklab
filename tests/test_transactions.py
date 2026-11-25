@@ -9,10 +9,10 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core.device import Device
-from seriald_core.transactions import TransactionError
-from seriald_core.file_transfer import TransferError
-from seriald_core import transport, web
+from decklab_core.device import Device
+from decklab_core.transactions import TransactionError
+from decklab_core.file_transfer import TransferError
+from decklab_core import transport, web
 
 
 class TransactionTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class TransactionTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        logs = mock.patch('seriald_core.device.LOG_ROOT', temporary.name)
+        logs = mock.patch('decklab_core.device.LOG_ROOT', temporary.name)
         logs.start()
         self.addCleanup(logs.stop)
         self.device = Device('fake-usb', '/fake/tty')
@@ -88,7 +88,7 @@ class TransactionTests(unittest.TestCase):
         self.assertIsNone(self.device.transactions.snapshot())
 
     def test_changed_generation_prevents_writer_open(self):
-        with mock.patch('seriald_core.device.write_serial') as write:
+        with mock.patch('decklab_core.device.write_serial') as write:
             with self.assertRaises(TransactionError) as stale:
                 with self.device.transactions.begin('input', 5):
                     self.device.connection_id = 'replacement'

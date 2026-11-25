@@ -6,6 +6,7 @@
 logs/
 
 # 服务自身的 stdout/stderr
+decklab.log
 seriald.log
 /web-tls/
 
@@ -18,6 +19,7 @@ __pycache__/
 # Persistent registry and local build output
 registry.sqlite3*
 dist/
+decklab-installed/
 seriald-installed/
 
 # Development environments and runtime credentials

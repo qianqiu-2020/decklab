@@ -1,12 +1,12 @@
 #Requires -Version 5.1
-param([switch]$UseCurrentPython, [switch]$LocalFast, [switch]$FastCompression, [switch]$PortableOnly, [string]$ParamikoSource,
+param([switch]$UseCurrentPython, [switch]$LocalFast, [switch]$FastCompression, [string]$ParamikoSource,
       [string]$FlashExecutor, [string]$FlashNotices, [string]$FlashLoaders,
       [string]$FlashDriver, [string]$FlashComponents, [string]$DesktopRuntime,
       [string]$LanFirewallTool, [string]$LanFirewallPolicy, [switch]$CoreOnly)
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') {
-    throw 'Windows portable packages must be built on Windows.'
+    throw 'Windows installers must be built on Windows.'
 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -40,6 +40,10 @@ if ($ParamikoSource) {
         throw 'ParamikoSource must be a .tar.gz or .zip source archive.'
     }
 }
+$elapsed = [Diagnostics.Stopwatch]::StartNew()
+function Write-Phase([string]$Name) {
+    Write-Host ('Build time {0:N2}s: {1}' -f $elapsed.Elapsed.TotalSeconds, $Name)
+}
 Push-Location $root
 try {
     if ($LanFirewallTool -or $LanFirewallPolicy) {
@@ -49,9 +53,9 @@ try {
         }
     }
     & (Join-Path $PSScriptRoot 'test_windows_compiler_discovery.ps1')
-    $bundle = Join-Path $root 'dist\seriald'
+    $bundle = Join-Path $root 'dist\decklab'
     if (Test-Path (Join-Path $bundle 'data')) {
-        throw 'dist\seriald\data contains runtime data. Move the running installation elsewhere before rebuilding; the build must not erase it.'
+        throw 'dist\decklab\data contains runtime data. Move the running installation elsewhere before rebuilding; the build must not erase it.'
     }
     # The environment and dist tree belong to one build at a time.
     $buildDir = [IO.Directory]::CreateDirectory((Join-Path $root 'build'))
@@ -64,6 +68,7 @@ try {
     if ($UseCurrentPython) { $cacheKey = & python @prepareArgs }
     else { $cacheKey = & py -3.12 @prepareArgs }
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is required (install it with the py launcher).' }
+    Write-Phase 'Packaging environment ready'
     $python = Join-Path $root 'build\windows-venv\Scripts\python.exe'
     $pyinstaller = Join-Path $root 'build\windows-venv\Scripts\pyinstaller.exe'
     $desktopArguments = @()
@@ -85,22 +90,24 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'The Windows x64 package requires 64-bit Python.' }
 
     if ($cacheKey -ne 'cached') {
-        & $python -m pip install -r requirements-windows.txt
+        & $python -m pip install --disable-pip-version-check --no-compile -r requirements-windows.txt
         if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
         if ($ParamikoSource) {
-            & $python -m pip install --no-deps --force-reinstall $ParamikoSource
+            & $python -m pip install --disable-pip-version-check --no-compile --no-deps --force-reinstall $ParamikoSource
             if ($LASTEXITCODE -ne 0) { throw 'Replacement Paramiko source installation failed.' }
         }
         if ($LocalFast) {
             Set-Content -LiteralPath (Join-Path $root 'build/windows-venv/decklab-dependencies.sha256') -Value $cacheKey -Encoding ASCII
         }
     } else { Write-Host 'Reusing local packaging dependencies.' }
+    Write-Phase 'Packaging dependencies ready'
     & $python tools/prepare_terminal_runtime.py
     if ($LASTEXITCODE -ne 0) { throw 'Verified terminal runtime preparation failed.' }
     & $python tools/check_public_docs.py
     if ($LASTEXITCODE -ne 0) { throw 'Public API/configuration documentation inventory failed.' }
     & (Join-Path $PSScriptRoot 'test_windows_regressions.ps1') -Python $python -PackagingOnly:$LocalFast
 
+    Write-Phase 'Source checks passed'
     $frozenRestored = $false
     if ($LocalFast) {
         $dependencyStamp = (Get-Content -LiteralPath (Join-Path $root 'build/windows-venv/decklab-dependencies.sha256') -Raw).Trim()
@@ -113,10 +120,10 @@ try {
         $frozenRestored = $LASTEXITCODE -eq 0
     }
     if (-not $frozenRestored) {
-        & $pyinstaller --noconfirm --clean --onedir --name seriald `
-            --hidden-import serialctl `
-            --hidden-import seriald_mcp `
-            --hidden-import seriald_core.backend_server `
+        & $pyinstaller --noconfirm --clean --onedir --name decklab `
+            --hidden-import decklabctl `
+            --hidden-import decklab_mcp `
+            --hidden-import decklab_core.backend_server `
             --collect-submodules mcp.server `
             --collect-submodules mcp.shared `
             --collect-submodules mcp.client `
@@ -127,12 +134,12 @@ try {
             --collect-all aardwolf `
             --hidden-import unicrypto.backends.pycryptodomex `
             --collect-all Cryptodome `
-            --hidden-import seriald_core.desktop_providers `
-            --hidden-import seriald_core.desktop_freerdp `
+            --hidden-import decklab_core.desktop_providers `
+            --hidden-import decklab_core.desktop_freerdp `
             --recursive-copy-metadata mcp `
             --icon packaging/decklab.ico `
             @desktopArguments `
-            seriald_windows.py
+            decklab_windows.py
         if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
         if ($DesktopRuntime) {
             & $python tools/package_desktop_runtime.py $bundle --platform windows-amd64 --prune-frozen-aliases | Out-Null
@@ -152,6 +159,7 @@ try {
     & $python tools/windows_frozen_inputs.py stage $bundle
     if ($LASTEXITCODE -ne 0) { throw 'Could not stage the current application resources.' }
 
+    Write-Phase 'Runtime frozen and application resources staged'
     $noticeArguments = @('tools/collect_windows_notices.py', (Join-Path $bundle 'third-party'), '--bundle', $bundle)
     if ($ParamikoSource) { $noticeArguments += @('--paramiko-source', $ParamikoSource) }
     & $python @noticeArguments
@@ -167,9 +175,9 @@ try {
     }
 
     $launchers = Join-Path $root 'tools\windows-launchers'
-    foreach ($name in @('Start-seriald.cmd', 'Start-seriald-LAN.cmd', 'Start-seriald-LAN.ps1',
-                       'Get-seriald-LANFirewall.ps1', 'Start-seriald-LAN-Open.cmd', 'Start-seriald-LAN-Open.ps1',
-                       'serialctl.cmd', 'seriald-admin.cmd', 'Start-seriald-Web.cmd', 'Start-seriald-Backend.cmd')) {
+    foreach ($name in @('Start-decklab.cmd', 'Start-decklab-LAN.cmd', 'Start-decklab-LAN.ps1',
+                       'Get-decklab-LANFirewall.ps1', 'Start-decklab-LAN-Open.cmd', 'Start-decklab-LAN-Open.ps1',
+                       'decklabctl.cmd', 'decklab-admin.cmd', 'Start-decklab-Web.cmd', 'Start-decklab-Backend.cmd')) {
         Copy-Item -LiteralPath (Join-Path $launchers $name) -Destination $bundle
     }
     $lanProfile = Join-Path $bundle 'lan-firewall.json'
@@ -179,21 +187,26 @@ try {
     } elseif (Test-Path -LiteralPath $lanProfile) { Remove-Item -LiteralPath $lanProfile }
     & $python tools/package_docs.py $bundle --platform windows
     if ($LASTEXITCODE -ne 0) { throw 'Installed documentation links failed validation.' }
-    & (Join-Path $bundle 'seriald.exe') --help | Out-Null
+    $version = (& $python -c 'from decklab_core.version import __version__; print(__version__)').Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read the bundle version.' }
+    Set-Content -LiteralPath (Join-Path $bundle 'package-version.txt') -Value $version -Encoding ASCII
+
+    & (Join-Path $bundle 'decklab.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged host launcher failed.' }
-    & (Join-Path $bundle 'seriald.exe') ctl --help | Out-Null
+    & (Join-Path $bundle 'decklab.exe') ctl --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI launcher failed.' }
-    & (Join-Path $bundle 'seriald.exe') admin resolve-conflict --help | Out-Null
+    & (Join-Path $bundle 'decklab.exe') admin resolve-conflict --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged offline administration launcher failed.' }
-    & (Join-Path $bundle 'seriald.exe') mcp --help | Out-Null
+    & (Join-Path $bundle 'decklab.exe') mcp --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP worker launcher failed.' }
-    & $python tools/test_windows_mcp.py --executable (Join-Path $bundle 'seriald.exe')
+    & $python tools/test_windows_mcp.py --executable (Join-Path $bundle 'decklab.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP worker protocol smoke failed.' }
     if ($DesktopRuntime) {
-        & $python tools/test_desktop_security.py --executable (Join-Path $bundle 'seriald.exe')
+        & $python tools/test_desktop_security.py --executable (Join-Path $bundle 'decklab.exe')
         if ($LASTEXITCODE -ne 0) { throw 'Packaged desktop transport security regression failed.' }
     }
 
+    Write-Phase 'Packaged launcher, MCP and desktop checks passed'
     # A content-specific ICO path makes shortcuts independent of the EXE icon cache.
     $iconSource = Join-Path $root 'packaging\decklab.ico'
     $iconHash = (Get-FileHash -LiteralPath $iconSource -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -201,27 +214,14 @@ try {
     Copy-Item -LiteralPath $iconSource -Destination (Join-Path $bundle $iconName)
     Set-Content -LiteralPath (Join-Path $bundle 'app-icon-name.txt') -Value $iconName -Encoding ASCII
 
-    $exeHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'seriald.exe') -Algorithm SHA256).Hash
-    Set-Content -LiteralPath (Join-Path $bundle 'seriald.exe.sha256') -Value $exeHash -Encoding ASCII
-
-    $version = (& $python -c 'from seriald_core.version import __version__; print(__version__)').Trim()
-    if ($LASTEXITCODE -ne 0) { throw 'Could not read the bundle version.' }
-    Set-Content -LiteralPath (Join-Path $bundle 'package-version.txt') -Value $version -Encoding ASCII
+    $exeHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'decklab.exe') -Algorithm SHA256).Hash
+    Set-Content -LiteralPath (Join-Path $bundle 'decklab.exe.sha256') -Value $exeHash -Encoding ASCII
 
     & $python tools/bundle_manifest.py $bundle
     if ($LASTEXITCODE -ne 0) { throw 'Complete bundle inventory failed.' }
-    & $python tools/bundle_manifest.py $bundle --verify
-    if ($LASTEXITCODE -ne 0) { throw 'Complete bundle integrity validation failed.' }
 
-    $archive = Join-Path $root 'dist\seriald-windows-portable.zip'
-    $compression = if ($LocalFast -or $FastCompression) { 1 } else { 6 }
-    & $python tools/bundle_manifest.py $bundle --zip $archive --compression $compression
-    if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP failed.' }
-    Write-Host "Built $archive"
-    Write-Host "seriald.exe SHA-256: $exeHash"
-    if (-not $PortableOnly) { & (Join-Path $PSScriptRoot 'build_windows_installer.ps1') -LocalFast:($LocalFast -or $FastCompression) }
-    if ($PortableOnly) { Write-Host 'ZIP only: run Install-seriald.cmd to install/update.' }
-    else { Write-Host 'Distribute the setup EXE for installation and future upgrades.' }
+    & (Join-Path $PSScriptRoot 'build_windows_installer.ps1') -LocalFast:($LocalFast -or $FastCompression)
+    Write-Phase 'Windows installer complete'
 } finally {
     if ($desktopSnapshot -and (Test-Path -LiteralPath $desktopSnapshot)) {
         Remove-Item -LiteralPath $desktopSnapshot -Recurse -Force

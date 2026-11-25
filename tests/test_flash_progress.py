@@ -2,10 +2,10 @@ import unittest
 
 from unittest.mock import patch
 
-from seriald_core.flash_progress import PHASES, PreviewProgress, FlashWriteProgress
-from seriald_core.flash_store import FlashStore
-from seriald_core.storage import Store
-from seriald_core.tasks import TaskStore
+from decklab_core.flash_progress import PHASES, PreviewProgress, FlashWriteProgress
+from decklab_core.flash_store import FlashStore
+from decklab_core.storage import Store
+from decklab_core.tasks import TaskStore
 
 
 class PreviewProgressTests(unittest.TestCase):
@@ -64,7 +64,7 @@ class FlashWriteProgressTests(unittest.TestCase):
                                                 step('OS', [('ESP', 20), ('rootfs', 100)])]})
         def measure(done, name, component, total):
             return progress.measure(dict(component=component, storage='active', partition=name, done=done, total=total))
-        with patch('seriald_core.flash_progress.time.monotonic', side_effect=[0, 1, 2, 4]):
+        with patch('decklab_core.flash_progress.time.monotonic', side_effect=[0, 1, 2, 4]):
             self.assertEqual(measure(5, 'boot', 'Firmware', 10)[:2], (5, 130))
             self.assertEqual(progress.measure(dict(component='OS', storage='active', partition='ESP', total=120))[:2], (10, 130))
             self.assertNotIn('bytes_per_second', measure(20, 'rootfs', 'OS', 120)[2])

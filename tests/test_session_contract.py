@@ -8,17 +8,17 @@ import unittest
 from unittest import mock
 import paramiko
 
-from seriald_core.sessions_windows import SshSession as WindowsSession
-from seriald_core.session_base import relocate_session_logs
-from seriald_core.archive import stage_logs, finish_staged
-from seriald_core.device import Device
-from seriald_core.devices import Manager
-from seriald_core.storage import Store, IdentityError
-from seriald_core.config import SCROLLBACK
+from decklab_core.sessions_windows import SshSession as WindowsSession
+from decklab_core.session_base import relocate_session_logs
+from decklab_core.archive import stage_logs, finish_staged
+from decklab_core.device import Device
+from decklab_core.devices import Manager
+from decklab_core.storage import Store, IdentityError
+from decklab_core.config import SCROLLBACK
 
 ADAPTERS = [WindowsSession]
 if sys.platform != 'win32':
-    from seriald_core.sessions import SshSession as LinuxSession
+    from decklab_core.sessions import SshSession as LinuxSession
     ADAPTERS.append(LinuxSession)
 
 
@@ -132,7 +132,7 @@ class IdentitySessionMigration(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = self.temporary.name
-        for module in ('seriald_core.device', 'seriald_core.devices'):
+        for module in ('decklab_core.device', 'decklab_core.devices'):
             patcher = mock.patch(module + '.LOG_ROOT', self.root)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -177,7 +177,7 @@ class IdentitySessionMigration(unittest.TestCase):
         self.assertIn('after rollback', Path(original).read_text(encoding='utf-8'))
 
     def test_cleanup_failure_keeps_committed_writer_at_destination(self):
-        with mock.patch('seriald_core.devices.finish_staged', side_effect=OSError('cleanup failed')):
+        with mock.patch('decklab_core.devices.finish_staged', side_effect=OSError('cleanup failed')):
             with self.assertRaises(OSError):
                 self.manager.identify(self.device, self.fields)
         self.session._append('after committed cleanup failure\n')
@@ -241,7 +241,7 @@ class WindowsAdapterContracts(unittest.TestCase):
         session = self.session()
         client = mock.Mock()
         client.invoke_shell.side_effect = paramiko.SSHException('shell denied')
-        with mock.patch('seriald_core.sessions_windows._connect', return_value=client) as connect:
+        with mock.patch('decklab_core.sessions_windows._connect', return_value=client) as connect:
             self.assertFalse(session.ensure())
             self.assertFalse(session.ensure())
             session.close()
@@ -255,7 +255,7 @@ class WindowsAdapterContracts(unittest.TestCase):
         client, channel = mock.Mock(), mock.Mock()
         client.invoke_shell.return_value = channel
         channel.settimeout.side_effect = OSError('channel gone')
-        with mock.patch('seriald_core.sessions_windows._connect', return_value=client):
+        with mock.patch('decklab_core.sessions_windows._connect', return_value=client):
             self.assertFalse(session.ensure())
         channel.close.assert_called_once()
         client.close.assert_called_once()
@@ -274,7 +274,7 @@ class WindowsAdapterContracts(unittest.TestCase):
 
         channel.recv.side_effect = receive
         channel.close.side_effect = release.set
-        with mock.patch('seriald_core.sessions_windows._connect', return_value=client):
+        with mock.patch('decklab_core.sessions_windows._connect', return_value=client):
             self.assertTrue(session.ensure())
             try:
                 self.assertTrue(entered.wait(2))

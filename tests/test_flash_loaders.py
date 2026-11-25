@@ -9,21 +9,21 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core.flash_loaders import (K1_RAM_BOOT_PROTOCOL, K3_RAM_BOOT_PROTOCOL,
+from decklab_core.flash_loaders import (K1_RAM_BOOT_PROTOCOL, K3_RAM_BOOT_PROTOCOL,
                                        k1_ram_boot_installed, prepare_materials, ram_boot_installed)
-from seriald_core.flash_runner import FlashRunnerError, LocalFlashExecutor
-from seriald_core.tasks import TaskError
+from decklab_core.flash_runner import FlashRunnerError, LocalFlashExecutor
+from decklab_core.tasks import TaskError
 from tools.package_flash_loaders import publish
 from test_flash_runner import configuration
-from seriald_core.flash_runner import FlashBook
+from decklab_core.flash_runner import FlashBook
 
 
 class FlashLoaderTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'nt', 'Windows short-path normalization')
     def test_windows_short_runtime_paths_are_canonical_before_go_loader_validation(self):
         import ctypes
-        from seriald_core.transfer_artifacts import TransferArtifacts
-        from seriald_core.storage import Store
+        from decklab_core.transfer_artifacts import TransferArtifacts
+        from decklab_core.storage import Store
         with tempfile.TemporaryDirectory(prefix='decklab loader path ') as directory:
             buffer = ctypes.create_unicode_buffer(32768)
             count = ctypes.windll.kernel32.GetShortPathNameW(directory, buffer, len(buffer))
@@ -58,7 +58,7 @@ class FlashLoaderTests(unittest.TestCase):
             manifest = self.bundle(root / 'bundle')
             workspace = root / 'workspace'
             workspace.mkdir()
-            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}):
+            with mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(manifest)}):
                 materials = prepare_materials(SimpleNamespace(profile_data={'chip_family': 'k3'}), workspace, lambda: None)
             self.assertEqual(materials['chip_family'], 'k3')
             self.assertEqual(Path(materials['fsbl']['path']), workspace / 'ram-loaders/factory/FSBL.bin')
@@ -84,15 +84,15 @@ class FlashLoaderTests(unittest.TestCase):
                 binding = SimpleNamespace(profile_data={'chip_family': 'k3'}, device={'port_path': port})
                 materials = prepare_materials(binding, workspace, lambda: None, **options)
                 return Path(materials['uboot']['path'])
-            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(root / 'installed/manifest.json'),
-                                              'SERIALD_FLASH_USB2_PORTS': '1.2, 2.3'}):
+            with mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(root / 'installed/manifest.json'),
+                                              'DECKLAB_FLASH_USB2_PORTS': '1.2, 2.3'}):
                 selected = prepare([2, 3])
                 normal = prepare([2, 30])
                 self.assertEqual(selected.read_bytes(), payload)
                 self.assertEqual(normal.read_bytes(), b'RAM only uboot')
                 self.assertEqual(prepare([2, 3], ram_boot=True).read_bytes(), b'RAM only uboot')
                 self.assertEqual(prepare([1, 2]), selected)
-                with mock.patch('seriald_core.config.SETTINGS.read', return_value={'environment': {'FLASH_USB2_PORTS': ''}}):
+                with mock.patch('decklab_core.config.SETTINGS.read', return_value={'environment': {'FLASH_USB2_PORTS': ''}}):
                     self.assertEqual(prepare([2, 3]), normal)
 
     def test_old_url_loader_is_ignored_and_omitted_from_new_packages(self):
@@ -106,7 +106,7 @@ class FlashLoaderTests(unittest.TestCase):
                 'file': 'url.itb', 'sha256': hashlib.sha256(legacy).hexdigest()}
             manifest.write_text(json.dumps(document))
             board = SimpleNamespace(profile_data={'chip_family': 'k3'})
-            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}):
+            with mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(manifest)}):
                 materials = prepare_materials(board, root / 'workspace', lambda: None)
             self.assertEqual(Path(materials['uboot']['path']).read_bytes(), b'RAM only uboot')
             publish(manifest.parent, root / 'installed')
@@ -130,7 +130,7 @@ class FlashLoaderTests(unittest.TestCase):
                     manifest.write_text(json.dumps(document))
                 workspace = root / 'workspace'
                 workspace.mkdir()
-                with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}), self.assertRaises(TaskError):
+                with mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(manifest)}), self.assertRaises(TaskError):
                     prepare_materials(SimpleNamespace(profile_data={'chip_family': family}), workspace, lambda: None)
 
     def test_k1_ram_boot_material_is_separate_from_the_firmware_loader(self):
@@ -148,7 +148,7 @@ class FlashLoaderTests(unittest.TestCase):
             installed = root / 'installed'
             publish(manifest.parent, installed)
             binding = SimpleNamespace(profile_data={'chip_family': 'k1'})
-            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(installed / 'manifest.json')}):
+            with mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(installed / 'manifest.json')}):
                 self.assertTrue(k1_ram_boot_installed())
                 normal = prepare_materials(binding, root / 'stock', lambda: None)
                 ram = prepare_materials(binding, root / 'ram', lambda: None, ram_boot=True)
@@ -171,7 +171,7 @@ class FlashLoaderTests(unittest.TestCase):
             installed = root / 'installed'
             publish(manifest.parent, installed)
             binding = SimpleNamespace(profile_data={'chip_family': 'k3'})
-            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(installed / 'manifest.json')}):
+            with mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(installed / 'manifest.json')}):
                 self.assertTrue(ram_boot_installed('k3'))
                 normal = prepare_materials(binding, root / 'stock', lambda: None)
                 ram = prepare_materials(binding, root / 'ram', lambda: None, ram_boot=True)
@@ -192,7 +192,7 @@ class FlashLoaderTests(unittest.TestCase):
 
     def test_training_result_is_kept_per_board_and_embedded_into_the_fsbl_for_that_port(self):
         import struct, zlib
-        from seriald_core import flash_loaders
+        from decklab_core import flash_loaders
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             bundle = root / 'bundle'
@@ -214,7 +214,7 @@ class FlashLoaderTests(unittest.TestCase):
             workspace.mkdir()
             board = SimpleNamespace(profile_data={'chip_family': 'k3'}, device={'port_path': [1, 8, 2]})
             other = SimpleNamespace(profile_data={'chip_family': 'k3'}, device={'port_path': [1, 8, 3]})
-            with mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': str(manifest)}):
+            with mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(manifest)}):
                 # No result yet: the plain FSBL trains DDR.
                 plain = prepare_materials(board, workspace, lambda: None, work)
                 self.assertNotIn('trained_for', plain)
@@ -252,6 +252,6 @@ class FlashLoaderTests(unittest.TestCase):
                 self.assertNotIn('trained_for', prepare_materials(board, workspace, lambda: None, work))
 
     def test_missing_materials_fail_explicitly_and_do_not_select_any_payload(self):
-        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {'SERIALD_FLASH_LOADERS': directory + '/missing.json'}):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': directory + '/missing.json'}):
             with self.assertRaisesRegex(TaskError, '预备刷机环境'):
                 prepare_materials(SimpleNamespace(profile_data={'chip_family': 'k3'}), directory, lambda: None)

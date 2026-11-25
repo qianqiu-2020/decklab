@@ -10,10 +10,10 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core import device as device_module
-from seriald_core import devices, web
-from seriald_core.admin import import_legacy
-from seriald_core.storage import IdentityError, Store, archive_component, serial_component
+from decklab_core import device as device_module
+from decklab_core import devices, web
+from decklab_core.admin import import_legacy
+from decklab_core.storage import IdentityError, Store, archive_component, serial_component
 
 
 class PersistenceTests(unittest.TestCase):
@@ -474,9 +474,9 @@ class PersistenceTests(unittest.TestCase):
         self.assertTrue(replacement.auto_identify)
 
     def test_prepare_switch_detaches_old_board_and_arms_one_probe(self):
-        from seriald_core.flash_tasks import _discovery
-        from seriald_core.hardware import HardwareBook
-        from seriald_core.web_settings import WebSettings
+        from decklab_core.flash_tasks import _discovery
+        from decklab_core.hardware import HardwareBook
+        from decklab_core.web_settings import WebSettings
 
         d = self.connection('usb-1')
         self.identify(d)

@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  var UI = window.SerialdUI, $ = UI.byId, fmt = UI.formatBytes, ago = UI.age, copyText = UI.copyText;
+  var UI = window.DeckLabUI, $ = UI.byId, fmt = UI.formatBytes, ago = UI.age, copyText = UI.copyText;
   var fetch = UI.fetch;
   function ownsInput(owner) { return owner && owner.scope !== 'board' && owner.actor === 'web' && owner.client_id === UI.clientId; }
   var boardRecoveryAuthorized = false;
@@ -22,7 +22,7 @@
   var panelTriggers = {history: 'b-records', inputs: 'b-command-nav', commands: 'b-commands', tasks: 'b-tasks'};
   var ACTIVITY_PAGE_SIZE = 10;
   var takenOver = {};
-  var deviceDirectory = window.SerialdDevices.create({
+  var deviceDirectory = window.DeckLabDevices.create({
     byId: $, fetch: fetch, formatBytes: fmt, age: ago,
     getView: function () { return terminalView.current; },
     isCurrent: function (ctx) { return isCurrent(ctx); },
@@ -31,7 +31,7 @@
     updateInputOwner: updateInputOwner
   });
   var pollDevices = deviceDirectory.poll, markSelected = deviceDirectory.markSelected, adoptKey = deviceDirectory.adopt;
-  var terminalView = window.SerialdTerminalView.create({
+  var terminalView = window.DeckLabTerminalView.create({
     byId: $, fetch: fetch, ownsInput: ownsInput, setInputMode: setInputMode,
     onControlChange: function () { renderTabs(); },
     board: function (key) { return deviceDirectory.items.find(function (board) { return board.key === key; }); },
@@ -57,7 +57,7 @@
   var isCurrent = terminalView.isCurrent, createView = terminalView.create, disposeView = terminalView.dispose;
   var resizeTerm = terminalView.resize, redrawTerminal = terminalView.redraw;
   var writeTerminalPayload = terminalView.write, startStream = terminalView.start, send = terminalView.send;
-  var terminalNavigation = window.SerialdTerminalNavigation.create({
+  var terminalNavigation = window.DeckLabTerminalNavigation.create({
     byId: $, isCurrent: isCurrent,
     getView: function () { return terminalView.current; },
     navigationVisible: function () { return recordsTab === 'inputs' && !$('d-records').hidden; }
@@ -67,7 +67,7 @@
   var renderCommandNav = terminalNavigation.renderNavigation;
   var scheduleCommandNav = terminalNavigation.scheduleNavigation;
   var jumpToCommand = terminalNavigation.jump;
-  var archives = window.SerialdArchives.create({
+  var archives = window.DeckLabArchives.create({
     byId: $, formatBytes: fmt, fetch: fetch, isCurrent: isCurrent,
     getView: function () { return terminalView.current; },
     logsVisible: function () { return !$('d-records').hidden && recordsTab === 'logs'; },
@@ -75,7 +75,7 @@
     openArchive: openArchivedLog, searchTerminal: searchTerminal
   });
   var loadLogs = archives.load, searchBootLogs = archives.search, clearBootSearch = archives.clearSearch;
-  var taskUI = window.SerialdTasks.create({
+  var taskUI = window.DeckLabTasks.create({
     byId: $, fetch: fetch, age: ago,
     getView: function () { return terminalView.current; },
     visible: function () { return !$('d-records').hidden && recordsTab === 'tasks'; },
@@ -102,7 +102,7 @@
       if (selected) flashing.open(selected, task);
     }
   });
-  var adbUI = window.SerialdTasks.createAdb({
+  var adbUI = window.DeckLabTasks.createAdb({
     byId: $, fetch: fetch, clientId: UI.clientId,
     getView: function () { return terminalView.current; },
     boardLabel: function (ctx) { return deviceDirectory.find(ctx.key)?.label || ctx.key; },
@@ -111,18 +111,18 @@
     openLogs: function () { recordsTab = 'logs'; setRecordsOpen(true); },
     canRecover: function () { return boardRecoveryAuthorized; }
   });
-  var boardTests = window.SerialdBoardTests && window.SerialdBoardTests.create({
+  var boardTests = window.DeckLabBoardTests && window.DeckLabBoardTests.create({
     byId:$, fetch:fetch, copyText:copyText, getView:function () {
       var ctx = terminalView.current;
       return ctx && {key:ctx.key, serial:ctx.serial, connectionId:ctx.connectionId, label:deviceDirectory.find(ctx.key)?.label};
     }
   });
-  var imageStore = window.SerialdImageStore && window.SerialdImageStore.create({byId:$,fetch:fetch,formatBytes:fmt});
+  var imageStore = window.DeckLabImageStore && window.DeckLabImageStore.create({byId:$,fetch:fetch,formatBytes:fmt});
   $('b-image-store').addEventListener('click', function () { if (imageStore) imageStore.open(); });
-  var imageWorkspaces = window.SerialdImageWorkspaces && window.SerialdImageWorkspaces.create({byId:$,fetch:fetch,copyText:copyText,formatBytes:fmt});
-  var flashing = window.SerialdFlashing && window.SerialdFlashing.create({
+  var imageWorkspaces = window.DeckLabImageWorkspaces && window.DeckLabImageWorkspaces.create({byId:$,fetch:fetch,copyText:copyText,formatBytes:fmt});
+  var flashing = window.DeckLabFlashing && window.DeckLabFlashing.create({
     byId: $, fetch: fetch, formatBytes: fmt, copyText: copyText,
-    canBind: function () { return boardRecoveryAuthorized && !!window.SerialdControlSlots; },
+    canBind: function () { return boardRecoveryAuthorized && !!window.DeckLabControlSlots; },
     bindControl: function (context) {
       var ctx = terminalView.current;
       if (ctx && ctx.connectionId === context.connection_id) boardControl.bind(ctx);
@@ -134,16 +134,16 @@
     if (boardControl) boardControl.invalidate();
     if (flashing) flashing.refreshWiring();
   });
-  var boardControl = window.SerialdBoardControl && window.SerialdBoardControl.create({
+  var boardControl = window.DeckLabBoardControl && window.DeckLabBoardControl.create({
     byId: $, fetch: fetch, getView: function () { return terminalView.current; },
     canBind: function () { return boardRecoveryAuthorized; },
     onTask: function () { taskUI.refresh(); }
   });
-  var desktop = window.SerialdDesktop && window.SerialdDesktop.create({byId:$,fetch:fetch,
+  var desktop = window.DeckLabDesktop && window.DeckLabDesktop.create({byId:$,fetch:fetch,
     canQuickConnect:function () { return boardRecoveryAuthorized; },
     clientId:UI.clientId,copyText:copyText,stageSerialCommand:stageSerialCommand,
     prepareSetup:function () { closeSshCredentials(); selectSetupSerial(); },getView:function () { return terminalView.current; }});
-  window.SerialdShareSelection = function () {
+  window.DeckLabShareSelection = function () {
     return deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0] || null;
   };
 
@@ -959,7 +959,7 @@
   $('b-file-transfer').addEventListener('click', function () {
     if (!deviceDirectory.selected) return;
     var selected = deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0];
-    if (selected) SerialdFileTransfer.open(selected, deviceDirectory.items);
+    if (selected) DeckLabFileTransfer.open(selected, deviceDirectory.items);
   });
   [
     ['b-flash', 'b-flash-discover', 'normal'],
@@ -977,7 +977,7 @@
   $('b-boot-compare').addEventListener('click', function () {
     if (!deviceDirectory.selected) return;
     var selected = deviceDirectory.items.filter(function (device) { return device.key === deviceDirectory.selected; })[0];
-    if (selected) SerialdBootCompare.open(selected, deviceDirectory.items);
+    if (selected) DeckLabBootCompare.open(selected, deviceDirectory.items);
   });
   [-1, 1].forEach(function (step) {
     $('command-nav-' + (step < 0 ? 'prev' : 'next')).addEventListener('click', function () {
@@ -1042,7 +1042,7 @@
     var cur = $('d-name').textContent;
     var prompt = ctx.serial ? '修改设备标签（日志目录仍为设备序列号）'
       : '修改串口标签（1–64 位字母、数字、点、下划线或连字符，不改变设备身份）';
-    var v = window.prompt(window.SerialdI18n ? window.SerialdI18n.translate(prompt) : prompt, cur);
+    var v = window.prompt(window.DeckLabI18n ? window.DeckLabI18n.translate(prompt) : prompt, cur);
     if (!v || !isCurrent(ctx)) return;
     fetch('/api/label', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId, label: v }) })
@@ -1067,7 +1067,7 @@
     if (!isCurrent(ctx) || !ctx.serial) return;
     var question = '确认换板？当前板卡的串口和刷机关联将解除。';
     var board = $('d-name').textContent + ' · SN ' + ctx.serial;
-    if (!window.confirm((window.SerialdI18n ? window.SerialdI18n.translate(question) : question) + '\n' + board)
+    if (!window.confirm((window.DeckLabI18n ? window.DeckLabI18n.translate(question) : question) + '\n' + board)
         || !isCurrent(ctx)) return;
     $('d-status').textContent = ' 正在解除串口和刷机关联…';
     fetch('/api/switch-mode', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1090,7 +1090,7 @@
     var serial = ctx.serial;
     var expectedOwner = ctx.inputOwner;
     function current() { return isCurrent(ctx) && ctx.sid === 'serial' && ctx.serial === serial; }
-    function message(text) { return window.SerialdI18n ? window.SerialdI18n.translate(text) : text; }
+    function message(text) { return window.DeckLabI18n ? window.DeckLabI18n.translate(text) : text; }
     ctx.ownerPending = true;
     deviceDirectory.advanceOwnership();
     setInputMode(ctx);
@@ -1469,7 +1469,7 @@
     $('device-search').focus();
   });
 
-  window.SerialdDevices.bindShortcuts($, function (direction, position) {
+  window.DeckLabDevices.bindShortcuts($, function (direction, position) {
     if (deviceDirectory.jump(direction, position) && terminalView.current) terminalView.current.term.focus();
   });
   pollDevices();

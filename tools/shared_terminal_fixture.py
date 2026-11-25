@@ -60,16 +60,16 @@ def ssh_child(directory):
 
 def main():
     with tempfile.TemporaryDirectory(prefix='decklab-shared-pty-') as directory:
-        os.environ['SERIALD_BASE'] = directory
-        os.environ['SERIALD_BY_PATH'] = str(Path(directory) / 'empty-ports')
+        os.environ['DECKLAB_BASE'] = directory
+        os.environ['DECKLAB_BY_PATH'] = str(Path(directory) / 'empty-ports')
         Path(directory, 'sample.txt').write_text(''.join('sample line %03d 中文\n' % n for n in range(80)))
-        from seriald_core.device import Device
-        from seriald_core.devices import Manager
-        from seriald_core.storage import Store
-        from seriald_core.sessions import SshSession
-        from seriald_core.httpd import BoundedThreadingTCPServer
-        from seriald_core.web import Handler
-        from seriald_core.control_server import ControlHandler
+        from decklab_core.device import Device
+        from decklab_core.devices import Manager
+        from decklab_core.storage import Store
+        from decklab_core.sessions import SshSession
+        from decklab_core.httpd import BoundedThreadingTCPServer
+        from decklab_core.web import Handler
+        from decklab_core.control_server import ControlHandler
 
         class LocalSession(SshSession):
             def __init__(self, *args):

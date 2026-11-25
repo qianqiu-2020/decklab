@@ -40,7 +40,7 @@ function harness(storage = new Map()) {
     localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) } };
   context.window = context;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../static/devices.js'), 'utf8'), context);
-  const controller = context.SerialdDevices.create({ byId,
+  const controller = context.DeckLabDevices.create({ byId,
     fetch: () => new Promise(resolve => requests.push(payload => resolve({ json: () => Promise.resolve(payload) }))),
     formatBytes: number => String(number || 0), age: () => 'now', open: key => opened.push(key),
     getView: () => null, isCurrent: () => false, loadSessions() {}, loadActivity() {}, renderInfo() {} });

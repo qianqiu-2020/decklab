@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import call, patch
 
-from seriald_core.ramboot_prepare import (
+from decklab_core.ramboot_prepare import (
     IMAGE_MAGIC, K1_BIANBU_JUNE_SHA256, K1_BIANBU_RCPU, K1_BIANBU_SHA256,
     K3_PICO_MODEL, PrepareError, choose_dtb, clear_k1_boot_properties,
     kernel_image, newc_entry, prepare_k1_bianbu_rcpu, ramboot_tool_path, select_partitions,
@@ -19,20 +19,20 @@ class PrepareRambootTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform.startswith('linux'), 'private LZ4 tooling is Linux-only')
     def test_private_lz4_path_requires_both_initramfs_cli_names(self):
         with tempfile.TemporaryDirectory() as tmp:
-            code = Path(tmp) / 'seriald_core' / 'ramboot_prepare.py'
+            code = Path(tmp) / 'decklab_core' / 'ramboot_prepare.py'
             tools = Path(tmp) / 'ramboot-tools'
             tools.mkdir()
             cli = tools / 'lz4'
             cli.write_text('#!/bin/sh\n')
             cli.chmod(0o755)
-            with patch('seriald_core.ramboot_prepare.__file__', str(code)), patch.dict(
+            with patch('decklab_core.ramboot_prepare.__file__', str(code)), patch.dict(
                     'os.environ', {'PATH': '/host-tools'}):
                 self.assertEqual(ramboot_tool_path(), '/host-tools')
                 (tools / 'lz4cat').symlink_to('lz4')
                 self.assertEqual(ramboot_tool_path(), str(tools) + ':/host-tools')
 
     def test_june_bianbu_keeps_original_rcpu_enabled(self):
-        with patch('seriald_core.ramboot_prepare.run',
+        with patch('decklab_core.ramboot_prepare.run',
                    side_effect=[b'spacemit,k1-x-rproc\n', b'okay\n']) as fdt:
             self.assertEqual(prepare_k1_bianbu_rcpu(Path('board.dtb'), K1_BIANBU_JUNE_SHA256), [])
             self.assertEqual(fdt.call_args_list, [
@@ -41,7 +41,7 @@ class PrepareRambootTests(unittest.TestCase):
             ])
 
     def test_september_bianbu_limit_stays_bound_to_exact_image(self):
-        with patch('seriald_core.ramboot_prepare.run', return_value=b'spacemit,k1-x-rproc\n') as fdt:
+        with patch('decklab_core.ramboot_prepare.run', return_value=b'spacemit,k1-x-rproc\n') as fdt:
             with self.assertRaisesRegex(PrepareError, 'no verified'):
                 prepare_k1_bianbu_rcpu(Path('board.dtb'), '0' * 64)
             fdt.assert_not_called()
@@ -104,9 +104,9 @@ class PrepareRambootTests(unittest.TestCase):
             def extract(_image, name, destination):
                 destination.write_bytes(board)
 
-            with patch('seriald_core.ramboot_prepare.ext_list', return_value=[('pico.dtb', '100644', len(board))]), \
-                    patch('seriald_core.ramboot_prepare.ext_dump', side_effect=extract), \
-                    patch('seriald_core.ramboot_prepare.run') as fdt:
+            with patch('decklab_core.ramboot_prepare.ext_list', return_value=[('pico.dtb', '100644', len(board))]), \
+                    patch('decklab_core.ramboot_prepare.ext_dump', side_effect=extract), \
+                    patch('decklab_core.ramboot_prepare.run') as fdt:
                 for compat, expect in ((b'spacemit,k3-pico-itx spacemit,k3', True), (b'spacemit,k3', False)):
                     fdt.side_effect = lambda *args: b'SpacemiT K3 Pico ITX' if args[-1] == 'model' else compat
                     if expect:
@@ -129,7 +129,7 @@ class PrepareRambootTests(unittest.TestCase):
         self.assertEqual(payload.read(), b'NEXT')
 
     def test_k1_direct_boot_drops_inherited_args_and_efi_pointers(self):
-        with patch('seriald_core.ramboot_prepare.run', side_effect=[
+        with patch('decklab_core.ramboot_prepare.run', side_effect=[
                 b'chosen\nsoc\n', b'bootargs\nstdout-path\nlinux,uefi-system-table\n', b'', b'']) as fdt:
             clear_k1_boot_properties(Path('board.dtb'))
         self.assertEqual(fdt.call_args_list, [
@@ -140,6 +140,6 @@ class PrepareRambootTests(unittest.TestCase):
         ])
 
     def test_k1_direct_boot_accepts_a_tree_without_chosen(self):
-        with patch('seriald_core.ramboot_prepare.run', return_value=b'soc\n') as fdt:
+        with patch('decklab_core.ramboot_prepare.run', return_value=b'soc\n') as fdt:
             clear_k1_boot_properties(Path('board.dtb'))
         fdt.assert_called_once_with('fdtget', '-l', 'board.dtb', '/')

@@ -71,8 +71,8 @@ def probe(executable, pinned, negotiation):
         if pinned:
             config['certificate_sha256'] = '00' * 32
         environment = {key: value for key, value in os.environ.items()
-                       if not key.startswith('SERIALD_') and key not in ('PYTHONPATH', 'PYTHONHOME')}
-        environment['SERIALD_BASE'] = directory
+                       if not key.startswith('DECKLAB_') and key not in ('PYTHONPATH', 'PYTHONHOME')}
+        environment['DECKLAB_BASE'] = directory
         command = [str(executable)] + (['mcp'] if sys.platform == 'win32' else [])
         process = subprocess.Popen(command + ['--desktop-worker'], env=environment,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

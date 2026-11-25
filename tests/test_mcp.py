@@ -18,14 +18,14 @@ from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import urlopen
 
-import seriald_mcp
-from serialctl import ClientError
-from seriald_mcp import Adapter, Settings
+import decklab_mcp
+from decklabctl import ClientError
+from decklab_mcp import Adapter, Settings
 
-SDK = seriald_mcp.MCPServer is not None
+SDK = decklab_mcp.MCPServer is not None
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN_A = 'seriald-ag-' + 'A' * 32
-TOKEN_B = 'seriald-ag-' + 'B' * 32
+TOKEN_A = 'decklab-ag-' + 'A' * 32
+TOKEN_B = 'decklab-ag-' + 'B' * 32
 
 
 class FakeAPI(BaseHTTPRequestHandler):
@@ -47,7 +47,7 @@ class FakeAPI(BaseHTTPRequestHandler):
         if token not in self.server.active:
             return self.reply(401, {'error': 'invalid grant', 'code': 'unauthorized'})
         if path.path == '/api/capabilities':
-            from seriald_core.actions import capabilities
+            from decklab_core.actions import capabilities
             return self.reply(200, capabilities().payload)
         if path.path == '/api/task' and payload.get('request_id'):
             return self.reply(200, {'task': {'id': 'original-task', 'request_id': payload['request_id'],
@@ -209,7 +209,7 @@ class AdapterTests(APICase):
             with self.assertRaisesRegex(ClientError, 'Another MCP write'):
                 self.adapter.send('board-B', 'hello', token=TOKEN_B)
         expected = {'ok': False, 'sent': True, 'completed': False, 'may_still_be_running': True}
-        with mock.patch('seriald_mcp.execute', return_value=expected) as command:
+        with mock.patch('decklab_mcp.execute', return_value=expected) as command:
             self.assertEqual(self.adapter.command('board-B', 'echo hi', token=TOKEN_B), expected)
             self.assertEqual(command.call_args.args[0].token, TOKEN_B)
         self.assertFalse(any(route == '/api/identify' for _, route, _ in self.api.calls))
@@ -250,10 +250,10 @@ class AdapterTests(APICase):
 class StartupFailureTests(unittest.TestCase):
     def test_missing_transitive_dependency_is_not_hidden_by_sdk_import_guard(self):
         output = io.StringIO()
-        with mock.patch.object(seriald_mcp, 'MCPServer', None), \
-                mock.patch.object(seriald_mcp, 'SDK_IMPORT_ERROR', 'No module named missing_native'), \
+        with mock.patch.object(decklab_mcp, 'MCPServer', None), \
+                mock.patch.object(decklab_mcp, 'SDK_IMPORT_ERROR', 'No module named missing_native'), \
                 redirect_stderr(output):
-            self.assertEqual(seriald_mcp.main([]), 2)
+            self.assertEqual(decklab_mcp.main([]), 2)
         self.assertIn('No module named missing_native', output.getvalue())
 
 
@@ -263,8 +263,8 @@ class MCPTransportTests(APICase):
         from mcp import Client as MCPClient, StdioServerParameters
 
         async def check(mode):
-            params = StdioServerParameters(command=sys.executable, args=[str(ROOT / 'seriald_mcp.py')],
-                env=dict(os.environ, SERIALD_URL=self.url, SERIALD_TOKEN=TOKEN_A))
+            params = StdioServerParameters(command=sys.executable, args=[str(ROOT / 'decklab_mcp.py')],
+                env=dict(os.environ, DECKLAB_URL=self.url, DECKLAB_TOKEN=TOKEN_A))
             async with MCPClient(params, mode=mode) as client:
                 tools = await client.list_tools()
                 names = {tool.name for tool in tools.tools}
@@ -324,8 +324,8 @@ class MCPTransportTests(APICase):
             port = handle.getsockname()[1]
         endpoint = 'http://127.0.0.1:%d/mcp' % port
         # A process-wide token must never turn missing caller credentials into access.
-        env = dict(os.environ, SERIALD_URL=self.url, SERIALD_TOKEN=TOKEN_B)
-        with subprocess.Popen([sys.executable, str(ROOT / 'seriald_mcp.py'), '--transport', 'streamable-http',
+        env = dict(os.environ, DECKLAB_URL=self.url, DECKLAB_TOKEN=TOKEN_B)
+        with subprocess.Popen([sys.executable, str(ROOT / 'decklab_mcp.py'), '--transport', 'streamable-http',
                                '--port', str(port)], env=env, stdout=subprocess.DEVNULL,
                               stderr=subprocess.PIPE) as process:
             try:

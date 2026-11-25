@@ -10,8 +10,8 @@ import types
 import unittest
 from unittest import mock
 
-from seriald_core.device import Device
-from seriald_core.maintenance import MaintenancePolicy, LogMaintenance, disk_status, diagnostic_summary, usb_serial_warnings
+from decklab_core.device import Device
+from decklab_core.maintenance import MaintenancePolicy, LogMaintenance, disk_status, diagnostic_summary, usb_serial_warnings
 
 
 class MaintenanceTests(unittest.TestCase):
@@ -45,7 +45,7 @@ class MaintenanceTests(unittest.TestCase):
             interface = usb / (port + ':1.0')
             interface.mkdir()
             (interface / 'uevent').write_text('PRODUCT=' + product + '\n' + driver)
-        with mock.patch('seriald_core.maintenance.sys.platform', 'linux'):
+        with mock.patch('decklab_core.maintenance.sys.platform', 'linux'):
             self.assertEqual(usb_serial_warnings(usb, udev), [
                 {'port': '2-1', 'chip': 'CH340', 'brltty_rule': True},
                 {'port': '2-2', 'chip': 'FTDI FT232', 'brltty_rule': False}])
@@ -56,13 +56,13 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_windows_skips_linux_usb_serial_diagnostics(self):
         usb = mock.Mock(spec=Path)
-        with mock.patch('seriald_core.maintenance.sys.platform', 'win32'):
+        with mock.patch('decklab_core.maintenance.sys.platform', 'win32'):
             self.assertEqual(usb_serial_warnings(usb, self.root), [])
         usb.glob.assert_not_called()
 
     def test_disabled_policy_never_enumerates_or_deletes(self):
         maintenance = LogMaintenance(MaintenancePolicy())
-        with mock.patch('seriald_core.maintenance.os.walk', side_effect=AssertionError('disabled retention')):
+        with mock.patch('decklab_core.maintenance.os.walk', side_effect=AssertionError('disabled retention')):
             self.assertEqual(maintenance.prune(self.manager, self.root)['removed'], 0)
             maintenance.run_due(self.manager, self.root)
 
@@ -112,7 +112,7 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_deletion_failure_is_reported_and_does_not_remove_history(self):
         path = self.old('serial-20260901.log')
-        with mock.patch('seriald_core.maintenance.os.unlink', side_effect=PermissionError('denied')):
+        with mock.patch('decklab_core.maintenance.os.unlink', side_effect=PermissionError('denied')):
             result = self.manager.maintenance.prune(self.manager, self.root, now=self.now)
         self.assertEqual(result['errors'], 1)
         self.assertTrue(path.exists())
@@ -134,7 +134,7 @@ class MaintenanceTests(unittest.TestCase):
         original = os.lstat(path)
         replacement = types.SimpleNamespace(st_mode=original.st_mode, st_dev=original.st_dev,
                                            st_ino=original.st_ino + 1, st_mtime=original.st_mtime)
-        with mock.patch('seriald_core.maintenance.os.lstat', side_effect=[original, replacement]):
+        with mock.patch('decklab_core.maintenance.os.lstat', side_effect=[original, replacement]):
             result = self.manager.maintenance.prune(self.manager, self.root, now=self.now)
         self.assertEqual(result['removed'], 0)
         self.assertTrue(path.exists())
@@ -150,9 +150,9 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_disk_thresholds_and_unavailable_disk_are_structured(self):
         policy = MaintenancePolicy(min_free_mb=1, min_free_percent=5)
-        with mock.patch('seriald_core.maintenance.shutil.disk_usage', return_value=types.SimpleNamespace(total=100000000, free=3000000)):
+        with mock.patch('decklab_core.maintenance.shutil.disk_usage', return_value=types.SimpleNamespace(total=100000000, free=3000000)):
             self.assertEqual(disk_status(self.root, policy)['reason'], 'low-space')
-        with mock.patch('seriald_core.maintenance.shutil.disk_usage', side_effect=OSError('secret path')):
+        with mock.patch('decklab_core.maintenance.shutil.disk_usage', side_effect=OSError('secret path')):
             result = disk_status(self.root, policy)
         self.assertFalse(result['available'])
         self.assertNotIn('secret', json.dumps(result))
@@ -173,7 +173,7 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_policy_rejects_invalid_values_before_running(self):
         for value in ('-1', 'nan', '1.5', '36501', ''):
-            with mock.patch.dict(os.environ, {'SERIALD_LOG_RETENTION_DAYS': value}):
+            with mock.patch.dict(os.environ, {'DECKLAB_LOG_RETENTION_DAYS': value}):
                 with self.assertRaises(ValueError):
                     MaintenancePolicy.from_env()
 

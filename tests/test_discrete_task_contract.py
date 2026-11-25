@@ -4,10 +4,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-from seriald_core.devices import Manager
-from seriald_core.storage import Store
-from seriald_core.task_actions import TaskActions
-from seriald_core.results import response
+from decklab_core.devices import Manager
+from decklab_core.storage import Store
+from decklab_core.task_actions import TaskActions
+from decklab_core.results import response
 
 
 class DiscreteTaskContractTests(unittest.TestCase):
@@ -44,7 +44,7 @@ class DiscreteTaskContractTests(unittest.TestCase):
             payload = self.payload(kind, request_id)
             if kind == 'ssh-connect':
                 payload.update(ssh_user='user', ssh_password='private-credential')
-            with mock.patch('seriald_core.task_actions.DeviceActions.execute',
+            with mock.patch('decklab_core.task_actions.DeviceActions.execute',
                             return_value=response(200, {'ok': True, 'serial': 'SN1'})) as execute:
                 first = self.finish(self.actions.start(payload, self.device, 'web'))
                 # A page reload changes its client ID; querying/replaying the
@@ -69,8 +69,8 @@ class DiscreteTaskContractTests(unittest.TestCase):
                 destination.fd, destination.present = 98764, True
                 payload.update(to_key='other', to_serial='SN2', to_connection_id=destination.connection_id,
                                to_path='/tmp/destination')
-            with mock.patch('seriald_core.task_actions.TransferFile') as file_operation, \
-                    mock.patch('seriald_core.task_actions.TransferCopy') as copy_operation:
+            with mock.patch('decklab_core.task_actions.TransferFile') as file_operation, \
+                    mock.patch('decklab_core.task_actions.TransferCopy') as copy_operation:
                 operation = copy_operation.return_value if kind == 'file-copy' else file_operation.return_value
                 operation.run.return_value = {'ok': True, 'size': 1, 'sha256': 'verified-by-transfer'}
                 if kind == 'file-copy':
@@ -85,7 +85,7 @@ class DiscreteTaskContractTests(unittest.TestCase):
 
     def test_replay_after_connection_change_returns_original_without_reentering_adapter(self):
         payload = self.payload('identify', 'stale-original-request')
-        with mock.patch('seriald_core.task_actions.DeviceActions.execute',
+        with mock.patch('decklab_core.task_actions.DeviceActions.execute',
                         return_value=response(200, {'ok': True, 'serial': 'SN1'})) as execute:
             first = self.finish(self.actions.start(payload, self.device, 'web'))
             self.device.connection_id = 'replacement'

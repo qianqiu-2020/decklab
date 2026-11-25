@@ -20,7 +20,7 @@ def check(url='http://127.0.0.1:18898', owner_token=None):
     """Prove bundled SDK availability and public, revocable-grant tool access."""
     if importlib.util.find_spec('mcp') is not None:
         raise AssertionError('installation fixture system Python unexpectedly contains the MCP SDK')
-    if os.environ.get('SERIALD_MCP_PYTHON'):
+    if os.environ.get('DECKLAB_MCP_PYTHON'):
         raise AssertionError('installation fixture must not select an external MCP Python')
     parts = urlsplit(url)
     if (parts.scheme not in ('http', 'https') or not parts.hostname
@@ -77,7 +77,7 @@ def check(url='http://127.0.0.1:18898', owner_token=None):
         raise AssertionError('installed service did not advertise its same-origin MCP route')
 
     denied_body = {'jsonrpc': '2.0', 'id': 99, 'method': 'tools/list'}
-    for token in (None, 'seriald-ag-invalid-installation-fixture'):
+    for token in (None, 'decklab-ag-invalid-installation-fixture'):
         status, _, _ = request('/mcp', denied_body, token=token)
         if status != 401:
             raise AssertionError('public MCP accepted a missing or invalid agent grant')

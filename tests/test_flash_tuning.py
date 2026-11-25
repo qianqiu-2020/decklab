@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from seriald_core import flash_tuning
-from seriald_core.flash_runner import LocalFlashExecutor
+from decklab_core import flash_tuning
+from decklab_core.flash_runner import LocalFlashExecutor
 import test_flash_discovery_integration as usb_fixture
 from test_flash_stream import StreamExecutor
 

@@ -2,36 +2,41 @@
 set -e
 case "$1" in
   configure)
-    if ! getent passwd seriald >/dev/null; then
-      adduser --system --group --home /data/seriald-data --no-create-home seriald
+    PYTHONPATH=/usr/lib/decklab /usr/bin/python3 -m decklab_core.migrate_debian
+    if ! getent passwd decklab >/dev/null; then
+      adduser --system --group --home /data/decklab-data --no-create-home decklab
     fi
-    adduser seriald dialout
-    install -d -o seriald -g seriald -m 2770 /data/seriald-data
+    if [ "$(id -gn decklab)" != decklab ]; then
+      echo 'DeckLab requires the decklab service group.' >&2
+      exit 1
+    fi
+    adduser decklab dialout
+    install -d -o decklab -g decklab -m 2770 /data/decklab-data
     if [ -z "${2:-}" ] || dpkg --compare-versions "$2" lt 1.3.2; then
-      find /data/seriald-data -xdev -type d -exec chown seriald:seriald {} + -exec chmod 2770 {} +
-      find /data/seriald-data -xdev -type f -exec chown seriald:seriald {} +
+      find /data/decklab-data -xdev -type d -exec chown decklab:decklab {} + -exec chmod 2770 {} +
+      find /data/decklab-data -xdev -type f -exec chown decklab:decklab {} +
       # Retained owner-only data may contain credentials, including after a
       # purge/fresh install. Do not widen its permissions during legacy repair.
-      find /data/seriald-data -xdev -type f -perm /0077 -exec chmod 0660 {} +
+      find /data/decklab-data -xdev -type f -perm /0077 -exec chmod 0660 {} +
     fi
     # Tighten old registries and snapshots before starting any service. Backups
     # may already contain SSH passwords and are not reopened by Store startup.
-    find /data/seriald-data -xdev -maxdepth 1 -type f \
+    find /data/decklab-data -xdev -maxdepth 1 -type f \
       \( -name registry.sqlite3 -o -name registry.sqlite3-wal -o -name registry.sqlite3-shm \
       -o -name registry.sqlite3-journal \) -exec chmod 0600 {} +
-    if [ -d /data/seriald-data/backups ]; then
-      find /data/seriald-data/backups -xdev -type f -exec chmod 0600 {} +
+    if [ -d /data/decklab-data/backups ]; then
+      find /data/decklab-data/backups -xdev -type f -exec chmod 0600 {} +
     fi
-    chown root:seriald /etc/seriald/seriald.env
-    chmod 0640 /etc/seriald/seriald.env
-    if [ -f /lib/udev/rules.d/70-seriald-fastboot.rules ] && command -v udevadm >/dev/null 2>&1; then
+    chown root:decklab /etc/decklab/decklab.env
+    chmod 0640 /etc/decklab/decklab.env
+    if [ -f /lib/udev/rules.d/70-decklab-fastboot.rules ] && command -v udevadm >/dev/null 2>&1; then
       # A change event updates access permissions, without resetting USB or
       # changing the single-reader ownership of serial connections.
       udevadm control --reload-rules || true
       udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=361c || true
     fi
     if [ -d /run/systemd/system ]; then
-      restart_marker=/run/seriald-collector-restart-required
+      restart_marker=/run/decklab-collector-restart-required
       systemctl daemon-reload
       # Package helpers may return success without running a unit (policy-rc.d).
       # Preserve service policy in images and keep failures visible to dpkg.
@@ -42,7 +47,7 @@ case "$1" in
           policy=0
           /usr/sbin/policy-rc.d "$unit" "$action" >/dev/null || policy=$?
           if [ "$policy" = 101 ]; then
-            echo "seriald: $action $unit deferred by policy-rc.d"
+            echo "decklab: $action $unit deferred by policy-rc.d"
             deferred=true
             return 0
           fi
@@ -52,55 +57,66 @@ case "$1" in
         fi
         if ! deb-systemd-invoke "$action" "$unit" ||
            { [ "$action" != stop ] && ! systemctl is-active --quiet "$unit"; }; then
-          echo "seriald: $action $unit failed; see journalctl -u $unit -b" >&2
+          echo "decklab: $action $unit failed; see journalctl -u $unit -b" >&2
           systemctl --no-pager --lines=0 status "$unit" >&2 || true
           return 1
         fi
       }
-      if systemctl is-enabled --quiet seriald-web.service; then
-        service_action restart seriald-web.service
-      elif systemctl is-enabled --quiet seriald-backend.service; then
-        if systemctl is-active --quiet seriald-backend.service && [ ! -e "$restart_marker" ]; then
-          echo "seriald: hardware backend kept running (code unchanged)"
+      # Adopt the old node role when apt removed its unit files.
+      if ! systemctl is-enabled --quiet decklab.service &&
+         ! systemctl is-enabled --quiet decklab-web.service &&
+         ! systemctl is-enabled --quiet decklab-backend.service; then
+        for role in web backend; do
+          if [ -L "/etc/systemd/system/multi-user.target.wants/seriald-$role.service" ]; then
+            deb-systemd-helper enable "decklab-$role.service" >/dev/null
+            break
+          fi
+        done
+      fi
+      if systemctl is-enabled --quiet decklab-web.service; then
+        service_action restart decklab-web.service
+      elif systemctl is-enabled --quiet decklab-backend.service; then
+        if systemctl is-active --quiet decklab-backend.service && [ ! -e "$restart_marker" ]; then
+          echo "decklab: hardware backend kept running (code unchanged)"
         else
-          service_action restart seriald-backend.service
+          service_action restart decklab-backend.service
         fi
       else
-        deb-systemd-helper enable seriald-collector.service >/dev/null
-        deb-systemd-helper enable seriald.service >/dev/null
-        if systemctl is-active --quiet seriald-collector.service; then
+        deb-systemd-helper enable decklab-collector.service >/dev/null
+        deb-systemd-helper enable decklab.service >/dev/null
+        if systemctl is-active --quiet decklab-collector.service; then
           if [ -e "$restart_marker" ]; then
-            service_action restart seriald-collector.service
-            $deferred || echo "seriald: collector restarted (collector code changed)"
+            service_action restart decklab-collector.service
+            $deferred || echo "decklab: collector restarted (collector code changed)"
           else
-            echo "seriald: collector kept running (collector code unchanged)"
+            echo "decklab: collector kept running (collector code unchanged)"
           fi
         else
-          # A pre-split package can still hold the serial ports in seriald.service.
-          if [ -n "${2:-}" ] && systemctl is-active --quiet seriald.service; then
-            service_action stop seriald.service
+          # A pre-split package can still hold the serial ports in decklab.service.
+          if [ -n "${2:-}" ] && systemctl is-active --quiet decklab.service; then
+            service_action stop decklab.service
           fi
-          service_action start seriald-collector.service
-          $deferred || echo "seriald: collector started (was not running)"
+          service_action start decklab-collector.service
+          $deferred || echo "decklab: collector started (was not running)"
         fi
-        service_action restart seriald.service
+        service_action restart decklab.service
       fi
       if $deferred; then exit 0; fi
       rm -f "$restart_marker"
     fi
-    PYTHONPATH=/usr/lib/seriald /usr/bin/python3 - <<'PY' || echo "seriald: could not determine access addresses" >&2
+    PYTHONPATH=/usr/lib/decklab /usr/bin/python3 - <<'PY' || echo "decklab: could not determine access addresses" >&2
 import re
 from pathlib import Path
-from seriald_core.control_server import lan_hosts
+from decklab_core.control_server import lan_hosts
 
-config = Path('/etc/seriald/seriald.env').read_text(encoding='utf-8')
+config = Path('/etc/decklab/decklab.env').read_text(encoding='utf-8')
 def setting(name, default):
     match = re.search(r'^' + name + r'=(.*)$', config, re.MULTILINE)
     return match.group(1).strip().strip('"\'') if match else default
 
-port = setting('SERIALD_PORT', '8898')
-bind = setting('SERIALD_BIND', '0.0.0.0')
-print('seriald: web and agent access:')
+port = setting('DECKLAB_PORT', '8898')
+bind = setting('DECKLAB_BIND', '0.0.0.0')
+print('decklab: web and agent access:')
 if bind in ('0.0.0.0', '127.0.0.1', 'localhost'):
     print(f'  local: http://127.0.0.1:{port}/')
 if bind == '0.0.0.0':
@@ -114,8 +130,8 @@ elif bind not in ('127.0.0.1', 'localhost'):
 PY
     # Reuse the running service's existing share-link/cookie protocol. No node
     # enrollment, collector restart, key copying or extra client installation.
-    if [ -d /run/systemd/system ] && ! systemctl is-enabled --quiet seriald-backend.service; then
-      /usr/bin/seriald-access --wait 20 || true
+    if [ -d /run/systemd/system ] && ! systemctl is-enabled --quiet decklab-backend.service; then
+      /usr/bin/decklab-access --wait 20 || true
     fi
     ;;
 esac

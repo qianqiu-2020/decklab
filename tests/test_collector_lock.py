@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from seriald_core.collector_lock import CollectorLock
+from decklab_core.collector_lock import CollectorLock
 
 
 class CollectorLockTests(unittest.TestCase):
@@ -16,7 +16,7 @@ class CollectorLockTests(unittest.TestCase):
                     with CollectorLock(base):
                         self.fail('two hardware owners entered')
                 result = subprocess.run([sys.executable, '-c',
-                    'from seriald_core.collector_lock import CollectorLock; '\
+                    'from decklab_core.collector_lock import CollectorLock; '\
                     'guard=CollectorLock(__import__("sys").argv[1]); guard.__enter__()', base],
                     capture_output=True, text=True, timeout=5)
                 self.assertNotEqual(result.returncode, 0)

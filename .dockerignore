@@ -1,6 +1,7 @@
 .git
 .venv
 dist
+decklab-installed
 seriald-installed
 logs
 __pycache__

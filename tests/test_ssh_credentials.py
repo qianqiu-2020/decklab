@@ -10,8 +10,8 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core import schema, storage
-from seriald_core.storage import Store
+from decklab_core import schema, storage
+from decklab_core.storage import Store
 
 
 class SSHCredentialStoreTests(unittest.TestCase):

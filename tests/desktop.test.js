@@ -104,8 +104,8 @@ function fixture(configuration = {}) {
   const context = {window, AbortController, setTimeout, clearTimeout, setInterval(fn, ms) { intervals.push({fn, ms}); return setInterval(fn, ms); }, clearInterval, console, Date, Math, Promise, Map, Uint8Array};
   vm.createContext(context);
   for (const file of ['static/ui-common.js', 'static/tasks.js', 'static/desktop.js']) vm.runInContext(fs.readFileSync(file, 'utf8'), context);
-  const desktop = window.SerialdDesktop.create({byId: $, fetch: window.SerialdUI.fetch,
-    getView: () => view, canQuickConnect: () => !!configuration.quick, clientId: window.SerialdUI.clientId, copyText:text=>{copied=text;return true;}, websocketFactory: (url, protocol) => new Socket(url, protocol), libraryLoader: async () => ({Display, Keyboard}),
+  const desktop = window.DeckLabDesktop.create({byId: $, fetch: window.DeckLabUI.fetch,
+    getView: () => view, canQuickConnect: () => !!configuration.quick, clientId: window.DeckLabUI.clientId, copyText:text=>{copied=text;return true;}, websocketFactory: (url, protocol) => new Socket(url, protocol), libraryLoader: async () => ({Display, Keyboard}),
     stageCheckDelay: configuration.stageCheckDelay, seatRetryDelay: 10, ackTimeout: configuration.ackTimeout, settingsTimeout: configuration.settingsTimeout,
     requestAnimationFrame: window.requestAnimationFrame, cancelAnimationFrame: clearImmediate});
   cleanup.push(() => desktop.close());
@@ -197,7 +197,7 @@ function fixture(configuration = {}) {
   assert.ok(!/password|token=/.test(ws.url));
   assert.ok($('detail').classList.contains('desktop-active'));
   assert.strictEqual($('desktop-panel').hidden, false);
-  assert.strictEqual(f.calls.find(x => x.url === '/api/desktop/open').body.client_id, f.window.SerialdUI.clientId);
+  assert.strictEqual(f.calls.find(x => x.url === '/api/desktop/open').body.client_id, f.window.DeckLabUI.clientId);
   assert.strictEqual(f.calls.filter(x => x.url.startsWith('/api/desktop/frame')).length, 0, 'continuous viewing must never poll screenshots');
   assert.strictEqual(ws.sent[0].type, 'observed');
   ws.server({type: 'observed', ok: true, frame_id: 'mode-1', sequence: 1});
@@ -419,7 +419,7 @@ function fixture(configuration = {}) {
   assert.strictEqual(submitted.candidate_id,'rdp-service');
   assert.strictEqual(submitted.certificate_policy,'accept');
   assert.strictEqual(submitted.certificate_sha256,'');
-  assert.strictEqual(submitted.client_id,setup.window.SerialdUI.clientId);
+  assert.strictEqual(submitted.client_id,setup.window.DeckLabUI.clientId);
   assert.strictEqual(setup.calls.filter(x=>x.url==='/api/desktop/open').length,1);
   assert.strictEqual(setup.$('desktop-password').value,'','passwords disappear from the form after saving');
   setup.desktop.close();

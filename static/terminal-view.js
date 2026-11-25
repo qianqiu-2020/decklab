@@ -223,7 +223,7 @@
         if (event.stopPropagation) event.stopPropagation();
       };
       $('d-term').addEventListener('wheel', ctx.wheelHandler, { passive: false });
-      ctx.paste = SerialdTerminalPolicy.install(ctx, {
+      ctx.paste = DeckLabTerminalPolicy.install(ctx, {
         isCurrent: isCurrent,
         keyboardEnabled: function () { return $('d-kbd').checked; },
         send: send,
@@ -234,8 +234,8 @@
     }
 
     function resetProgress(ctx) {
-      if (ctx.sid !== 'serial' || !window.SerialdSerialProgress) return;
-      ctx.progress = window.SerialdSerialProgress.create({
+      if (ctx.sid !== 'serial' || !window.DeckLabSerialProgress) return;
+      ctx.progress = window.DeckLabSerialProgress.create({
         canonical: true, rows: function () { return ctx.term.rows; },
         sourceRows: function () { return ctx.serialCols ? ctx.serialRows : 0; }
       });
@@ -831,7 +831,7 @@
         + '&serial=' + encodeURIComponent(ctx.serial || '')
         + '&sid=' + encodeURIComponent(ctx.sid) + '&off=' + ctx.off
         + '&screen=1&terminal_rev=' + (ctx.terminalRevision || 0)
-        + '&client_id=' + encodeURIComponent(SerialdUI.clientId);
+        + '&client_id=' + encodeURIComponent(DeckLabUI.clientId);
       var stream = new window.EventSource(url);
       ctx.stream = stream;
       stream.onmessage = function (event) {
@@ -869,7 +869,7 @@
       ctx.ctrl = new AbortController();
       fetch('/api/session?key=' + encodeURIComponent(ctx.key) + '&serial=' + encodeURIComponent(ctx.serial || '') + '&sid=' + encodeURIComponent(ctx.sid)
             + '&off=' + ctx.off + '&screen=1&terminal_rev=' + (ctx.terminalRevision || 0)
-            + '&client_id=' + encodeURIComponent(SerialdUI.clientId), { cache: 'no-store', signal: ctx.ctrl.signal })
+            + '&client_id=' + encodeURIComponent(DeckLabUI.clientId), { cache: 'no-store', signal: ctx.ctrl.signal })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (!isCurrent(ctx) || readSeq !== ctx.readSeq) return; // 切换/重绘后的旧响应,丢弃
@@ -964,5 +964,5 @@
     Object.defineProperty(controller, 'fontSize', { get: function () { return autoFontSize ? 'auto' : preferredFontSize; } });
     return controller;
   }
-  global.SerialdTerminalView = { create: create };
+  global.DeckLabTerminalView = { create: create };
 })(window);

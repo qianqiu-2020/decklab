@@ -9,7 +9,7 @@ import threading
 import unittest
 from unittest import mock
 
-from seriald_core.file_transfer import (BATCH_SIZE, CHUNK_SIZE, MAX_CONSOLE_LINE,
+from decklab_core.file_transfer import (BATCH_SIZE, CHUNK_SIZE, MAX_CONSOLE_LINE,
                                         SerialFileTransfer, TransferError, _field)
 
 
@@ -37,7 +37,7 @@ class ShellDevice:
 
 class SerialFileTransferTests(unittest.TestCase):
     def test_completed_and_aborted_transfers_release_expiry_timer(self):
-        with mock.patch('seriald_core.file_transfer.threading.Timer') as timer_factory:
+        with mock.patch('decklab_core.file_transfer.threading.Timer') as timer_factory:
             timers = []
 
             def make_timer(*args, **kwargs):
@@ -73,7 +73,7 @@ class SerialFileTransferTests(unittest.TestCase):
         self.assertFalse(timer.is_alive())
 
     def test_idle_timer_reschedules_then_expires_and_releases_reservation(self):
-        with mock.patch('seriald_core.file_transfer.threading.Timer') as factory:
+        with mock.patch('decklab_core.file_transfer.threading.Timer') as factory:
             factory.side_effect = lambda *args, **kwargs: mock.Mock()
             state = self.transfer.start('upload', str(self.root / 'expire'),
                                         self.device.connection_id, size=0)
@@ -90,7 +90,7 @@ class SerialFileTransferTests(unittest.TestCase):
             self.assertFalse(list(self.root.glob('*.part')))
 
     def test_stale_expiry_callback_cannot_cancel_replacement_transfer(self):
-        with mock.patch('seriald_core.file_transfer.threading.Timer') as factory:
+        with mock.patch('decklab_core.file_transfer.threading.Timer') as factory:
             factory.side_effect = lambda *args, **kwargs: mock.Mock()
             first = self.transfer.start('upload', str(self.root / 'first'),
                                         self.device.connection_id, size=0)

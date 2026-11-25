@@ -17,10 +17,10 @@ import unittest
 from unittest import mock
 from urllib.parse import unquote, urlsplit, urlunsplit
 
-from seriald_core.desktop import DesktopBook, DesktopSessions
-from seriald_core.desktop_setup import checked_host, hosts_for, probe, receive
-from seriald_core.tasks import TaskError
-from seriald_core.web_settings import WebSettings
+from decklab_core.desktop import DesktopBook, DesktopSessions
+from decklab_core.desktop_setup import checked_host, hosts_for, probe, receive
+from decklab_core.tasks import TaskError
+from decklab_core.web_settings import WebSettings
 from test_desktop import Screen
 import test_flash_discovery_integration as fixture
 
@@ -113,7 +113,7 @@ class SetupTests(unittest.TestCase):
     @contextmanager
     def setup(self):
         with fixture.automatic_flashing([('GRAPHICS-SN', 'graphics')]) as f, tempfile.TemporaryDirectory() as directory:
-            settings = WebSettings(Path(directory) / 'web-settings.json', {'SERIALD_BASE': directory})
+            settings = WebSettings(Path(directory) / 'web-settings.json', {'DECKLAB_BASE': directory})
             screen = Screen()
             f.manager.desktop = DesktopSessions(f.manager, provider_factory=lambda c: screen,
                 book=DesktopBook(), settings=settings)
@@ -170,8 +170,8 @@ class SetupTests(unittest.TestCase):
                         queries=['show-seat', 'grdctl', secret])
             reply = SimpleNamespace(stdout=json.dumps(data), returncode=0)
             with mock.patch.object(desktop.setup, 'quick_eligible', return_value=True), mock.patch(
-                    'seriald_core.board_cases.find_transport', return_value=('usb', '5', {'boot_id':'boot'})), mock.patch(
-                    'seriald_core.board_cases.adb_command', return_value=reply):
+                    'decklab_core.board_cases.find_transport', return_value=('usb', '5', {'boot_id':'boot'})), mock.patch(
+                    'decklab_core.board_cases.adb_command', return_value=reply):
                 status, result = self.request(f, '/api/desktop/quick-open', body)
                 self.assertEqual(status, 200, result)
                 reply.returncode = 3
@@ -209,20 +209,20 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(restarted.boards[device.serial], saved)
 
     def test_setup_and_discovery_cannot_mutate_from_an_agent_grant(self):
-        from seriald_mcp import Adapter, Settings
-        from serialctl import ClientError
-        from seriald_core.agent_grants import attach_agent_grants
+        from decklab_mcp import Adapter, Settings
+        from decklabctl import ClientError
+        from decklab_core.agent_grants import attach_agent_grants
         with self.setup() as (f, device, settings, _):
             attach_agent_grants(f.manager, f.grants)
             token, grant = f.grants.issue('device', serial=device.serial)
-            from serialctl import Client
+            from decklabctl import Client
             client = Client(f.url, token=token)
             client.key, client.serial = device.key, device.serial
             with self.assertRaises(ClientError) as error:
                 client.post('/api/desktop/configure', **self.payload(settings))
             self.assertEqual(error.exception.status, 403)
             adapter = Adapter(Settings(f.url, token))
-            with mock.patch('seriald_core.desktop_setup.probe', return_value=None) as network:
+            with mock.patch('decklab_core.desktop_setup.probe', return_value=None) as network:
                 result = adapter.desktop(device.serial, 'discover')
                 self.assertEqual(result['hosts'], ['10.0.0.2'])
                 self.assertEqual({call.args[0] for call in network.call_args_list}, {'10.0.0.2'})
@@ -234,7 +234,7 @@ class SetupTests(unittest.TestCase):
     def test_cache_and_identity_change_never_scan_a_subnet_or_reuse_old_result(self):
         with self.setup() as (f, device, settings, _):
             setup = f.manager.desktop.setup
-            with mock.patch('seriald_core.desktop_setup.probe', side_effect=lambda host, port, provider:
+            with mock.patch('decklab_core.desktop_setup.probe', side_effect=lambda host, port, provider:
                     {'host':host,'port':port,'provider':provider} if port==5900 else None) as call:
                 first=setup.discover(device); self.assertEqual(len(first['candidates']),1)
                 self.assertEqual(call.call_count,5)
@@ -251,7 +251,7 @@ class SetupTests(unittest.TestCase):
     def test_rdp_recheck_includes_both_default_ports_and_keeps_custom_ports_exact(self):
         with self.setup() as (f, device, settings, _):
             setup = f.manager.desktop.setup
-            with mock.patch('seriald_core.desktop_setup.probe', side_effect=lambda host, port, provider:
+            with mock.patch('decklab_core.desktop_setup.probe', side_effect=lambda host, port, provider:
                     {'host': host, 'port': port, 'provider': provider, 'certificate_sha256': 'a' * 64}) as network:
                 for port in (3389, 3390):
                     network.reset_mock()
@@ -283,7 +283,7 @@ class SetupTests(unittest.TestCase):
         with self.setup() as (f, device, settings, _):
             setup = f.manager.desktop.setup
             observed = {'host':'10.0.0.2', 'port':3389, 'provider':'rdp', 'certificate_sha256':'a' * 64}
-            with mock.patch('seriald_core.desktop_setup.probe', return_value=observed):
+            with mock.patch('decklab_core.desktop_setup.probe', return_value=observed):
                 candidate = setup.discover(device, ('10.0.0.2',3389,'rdp'))['candidates'][0]
             payload = dict(provider='rdp', host='10.0.0.2', port=3389, username='rdp')
             result = setup.configure(device, self.payload(settings, **payload, candidate_id=candidate['id']))
@@ -309,10 +309,10 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(settings.read(),original)
 
     def test_manual_probe_is_one_explicit_owner_target_and_agents_cannot_select_it(self):
-        from serialctl import Client, ClientError
-        from seriald_core.agent_grants import attach_agent_grants
+        from decklabctl import Client, ClientError
+        from decklab_core.agent_grants import attach_agent_grants
         with self.setup() as (f, device, settings, _):
-            with mock.patch('seriald_core.desktop_setup.probe', side_effect=lambda host, port, provider:
+            with mock.patch('decklab_core.desktop_setup.probe', side_effect=lambda host, port, provider:
                     {'host':host,'port':port,'provider':provider}) as network:
                 scope={'key':device.key,'serial':device.serial}
                 status,data=self.request(f,'/api/desktop/discover',dict(scope,host='10.0.0.9',port=5905,provider='vnc'))
@@ -335,7 +335,7 @@ class SetupTests(unittest.TestCase):
             current=dict(other,display='monitor-B',reservation=lease,scale=1.5,width=1280,height=800)
             document={'boards':{device.serial:current,'OTHER-SN':other}}
             file=Path(settings.path).parent/'external-desktop.json';file.write_text(json.dumps(document))
-            settings.environment['SERIALD_DESKTOP']=str(file)
+            settings.environment['DECKLAB_DESKTOP']=str(file)
             f.manager.desktop.book=DesktopBook(document)
             f.manager.desktop.setup.configure(device,self.payload(settings))
             saved=settings.read()['documents']['desktop']['boards']
@@ -351,7 +351,7 @@ class SetupTests(unittest.TestCase):
             def changed(*args):
                 device.probe_info['ips']=['eth0 10.0.0.4/24']
                 return None
-            with mock.patch('seriald_core.desktop_setup.probe',side_effect=changed),self.assertRaises(TaskError) as error:
+            with mock.patch('decklab_core.desktop_setup.probe',side_effect=changed),self.assertRaises(TaskError) as error:
                 f.manager.desktop.setup.discover(device)
             self.assertEqual(error.exception.status,409)
             self.assertFalse(f.manager.desktop.setup.cache)
@@ -365,7 +365,7 @@ class SetupTests(unittest.TestCase):
             def change(_):
                 replacement=dict(desktop.book.boards[device.serial],secret_url='vnc+plain://new-target:5900')
                 desktop.book=DesktopBook({'boards':{device.serial:replacement}})
-            with mock.patch('seriald_core.desktop.check_reservation',side_effect=change),self.assertRaises(TaskError) as error:
+            with mock.patch('decklab_core.desktop.check_reservation',side_effect=change),self.assertRaises(TaskError) as error:
                 desktop.open(device,'web','browser')
             self.assertEqual(error.exception.status,409);factory.assert_not_called()
             self.assertFalse(desktop.sessions)
@@ -389,7 +389,7 @@ class SetupTests(unittest.TestCase):
     def test_explicit_manual_recheck_is_fresh_while_automatic_results_are_cached(self):
         with self.setup() as (f, device, settings, _):
             endpoint=('10.0.0.2',5905,'vnc')
-            with mock.patch('seriald_core.desktop_setup.probe',side_effect=[None,{'host':endpoint[0],'port':5905,'provider':'vnc'}]) as network:
+            with mock.patch('decklab_core.desktop_setup.probe',side_effect=[None,{'host':endpoint[0],'port':5905,'provider':'vnc'}]) as network:
                 self.assertEqual(f.manager.desktop.setup.discover(device,endpoint)['candidates'],[])
                 result=f.manager.desktop.setup.discover(device,endpoint)
                 self.assertEqual(len(result['candidates']),1)

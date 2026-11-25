@@ -29,9 +29,9 @@ LOCK = ROOT / 'packaging/linux-mcp-requirements.lock'
 WHEELS = ROOT / 'packaging/linux-mcp-wheels.json'
 MACHINES = {'amd64': ('x86_64', 62), 'arm64': ('aarch64', 183),
             'riscv64': ('riscv64', 243)}
-SOURCES = ('seriald_mcp.py', 'serialctl.py', 'seriald_core/desktop_providers.py', 'seriald_core/desktop_errors.py',
-           'seriald_core/desktop_freerdp.py', 'tools/linux_mcp_entrypoint.py')
-EXECUTABLE = 'seriald-mcp-worker'
+SOURCES = ('decklab_mcp.py', 'decklabctl.py', 'decklab_core/desktop_providers.py', 'decklab_core/desktop_errors.py',
+           'decklab_core/desktop_freerdp.py', 'tools/linux_mcp_entrypoint.py')
+EXECUTABLE = 'decklab-mcp-worker'
 DESKTOP_RUNTIME = Path('_internal/desktop-runtime/freerdp')
 
 
@@ -233,12 +233,12 @@ def build_local(output, architecture, wheelhouse, desktop_runtime=None):
         command = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir',
                    '--name', EXECUTABLE, '--distpath', str(temporary / 'dist'),
                    '--workpath', str(temporary / 'work'), '--specpath', str(temporary / 'spec'),
-                   '--paths', str(ROOT), '--hidden-import', 'serialctl',
-                   '--hidden-import', 'seriald_mcp']
+                   '--paths', str(ROOT), '--hidden-import', 'decklabctl',
+                   '--hidden-import', 'decklab_mcp']
         for module in ('mcp.server', 'mcp.shared', 'mcp.client'):
             command += ['--collect-submodules', module]
-        command += ['--hidden-import', 'seriald_core.desktop_providers', '--collect-all', 'vncdotool']
-        command += ['--hidden-import', 'seriald_core.desktop_freerdp']
+        command += ['--hidden-import', 'decklab_core.desktop_providers', '--collect-all', 'vncdotool']
+        command += ['--hidden-import', 'decklab_core.desktop_freerdp']
         if desktop_manifest is not None:
             command += ['--add-data', str(desktop_snapshot) + os.pathsep + 'desktop-runtime/freerdp']
         command += ['--collect-all', 'aardwolf']
@@ -286,19 +286,18 @@ def build_docker(output, architecture, image, desktop_runtime=None):
         raise ValueError('runtime output already exists; choose a fresh output directory')
     desktop_runtime = desktop_runtime_source(architecture, desktop_runtime)
     output.parent.mkdir(parents=True, exist_ok=True)
+    # Reuse only compiler/interpreter/dependency layers. Every invocation
+    # freezes a new runtime from the current checkout and verifies its inventory.
+    with tempfile.TemporaryDirectory(prefix='decklab-linux-builder-') as context:
+        shutil.copyfile(LOCK, Path(context) / LOCK.name)
+        shutil.copyfile(ROOT / 'tools/linux_mcp_builder.Dockerfile', Path(context) / 'Dockerfile')
+        image_id = Path(context) / 'image-id'
+        subprocess.run(['docker', 'build', '--progress=plain', '--network=host', '--platform', 'linux/' + architecture,
+                        '--iidfile', str(image_id), '--build-arg', 'BASE_IMAGE=' + image, context], check=True)
+        builder_image = image_id.read_text().strip()
     shell = '\n'.join([
         'set -eu',
-        'export DEBIAN_FRONTEND=noninteractive',
-        'apt-get update',
-        'apt-get install -y --no-install-recommends software-properties-common gpg-agent binutils ca-certificates',
-        # Build-only PPA. The installed application retains the stdlib collector
-        # and bundles this interpreter; no repository is added on the user's host.
-        'add-apt-repository -y ppa:deadsnakes/ppa',
-        'apt-get install -y --no-install-recommends python3.12 python3.12-venv python3.12-dev',
-        'python3.12 -m venv /tmp/mcp-build',
-        '/tmp/mcp-build/bin/python -m pip download --disable-pip-version-check --index-url https://pypi.org/simple --only-binary=:all: --require-hashes -r /source/packaging/linux-mcp-requirements.lock -d /tmp/wheelhouse',
-        '/tmp/mcp-build/bin/python -m pip install --disable-pip-version-check --no-index --find-links /tmp/wheelhouse --only-binary=:all: --require-hashes -r /source/packaging/linux-mcp-requirements.lock',
-        '/tmp/mcp-build/bin/python /source/tools/build_linux_mcp.py --local --arch "$MCP_ARCH" --wheelhouse /tmp/wheelhouse --output "$MCP_OUTPUT"'
+        '/opt/mcp-build/bin/python /source/tools/build_linux_mcp.py --local --arch "$MCP_ARCH" --wheelhouse /opt/wheelhouse --output "$MCP_OUTPUT"'
         + (' --desktop-runtime /desktop-runtime' if desktop_runtime is not None else ''),
         'chown -R "$MCP_UID:$MCP_GID" "$MCP_OUTPUT"'])
     command = ['docker', 'run', '--rm', '--platform', 'linux/' + architecture,
@@ -308,7 +307,7 @@ def build_docker(output, architecture, image, desktop_runtime=None):
     subprocess.run(command + [
                     '-e', 'MCP_ARCH=' + architecture, '-e', 'MCP_OUTPUT=/output/' + output.name,
                     '-e', 'MCP_UID=' + str(os.getuid()), '-e', 'MCP_GID=' + str(os.getgid()),
-                    image, 'bash', '-c', shell], check=True)
+                    builder_image, 'bash', '-c', shell], check=True)
     return validate_runtime(output, architecture)
 
 

@@ -6,8 +6,8 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from seriald_core import os_contents
-from seriald_core.os_contents import ImageError, image_content
+from decklab_core import os_contents
+from decklab_core.os_contents import ImageError, image_content
 
 # 16 MiB GPT disk built with sgdisk, mkfs.vfat and mke2fs -d: opensbi raw
 # firmware, an ESP with a GRUB version string and grub.cfg, and an ext4 rootfs

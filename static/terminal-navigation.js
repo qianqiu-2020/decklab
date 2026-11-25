@@ -168,5 +168,5 @@
       scheduleNavigation: scheduleCommandNav, jump: jumpToCommand
     };
   }
-  global.SerialdTerminalNavigation = { create: create };
+  global.DeckLabTerminalNavigation = { create: create };
 })(window);

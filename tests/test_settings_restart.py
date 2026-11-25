@@ -14,8 +14,8 @@ import unittest
 from unittest import mock
 from types import SimpleNamespace
 
-from seriald_core.settings_restart import configure_collector, configure_control
-from seriald_core.web_settings import WebSettings, SettingsError
+from decklab_core.settings_restart import configure_collector, configure_control
+from decklab_core.web_settings import WebSettings, SettingsError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,10 +27,10 @@ class ControlShutdownTests(unittest.TestCase):
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1', 0))
                 port = listener.getsockname()[1]
-            environment = {key: value for key, value in os.environ.items() if not key.startswith('SERIALD_')}
-            environment.update(SERIALD_BASE=folder, SERIALD_SOCKET=str(Path(folder) / 'absent.sock'),
-                               SERIALD_STATIC=str(ROOT), SERIALD_MCP_ENABLED='0')
-            process = subprocess.Popen([sys.executable, '-m', 'seriald_core.control_server',
+            environment = {key: value for key, value in os.environ.items() if not key.startswith('DECKLAB_')}
+            environment.update(DECKLAB_BASE=folder, DECKLAB_SOCKET=str(Path(folder) / 'absent.sock'),
+                               DECKLAB_STATIC=str(ROOT), DECKLAB_MCP_ENABLED='0')
+            process = subprocess.Popen([sys.executable, '-m', 'decklab_core.control_server',
                 '--bind', '127.0.0.1', '--port', str(port), '--no-browser'], cwd=ROOT,
                 env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             try:
@@ -63,7 +63,7 @@ class RestartAdmissionTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
-        self.settings = WebSettings(Path(self.folder.name) / 'web-settings.json', {'SERIALD_BASE': self.folder.name})
+        self.settings = WebSettings(Path(self.folder.name) / 'web-settings.json', {'DECKLAB_BASE': self.folder.name})
         self.tasks = SimpleNamespace(_lock=threading.RLock(), _active={}, _closing=False)
         self.manager = SimpleNamespace(tasks=self.tasks, all_devices=lambda: [], stopping=threading.Event())
         self.server = SimpleNamespace(manager=self.manager, shutdown=mock.Mock())
@@ -93,7 +93,7 @@ class RestartAdmissionTests(unittest.TestCase):
             self.assertFalse(self.server.restart_requested)
 
     def test_accepted_activation_blocks_new_tasks_before_shutdown(self):
-        with mock.patch('seriald_core.settings_restart.threading.Thread') as thread:
+        with mock.patch('decklab_core.settings_restart.threading.Thread') as thread:
             self.server.activate_settings(self.revision)
         self.assertTrue(self.server.restart_requested)
         self.assertTrue(self.tasks._closing)
@@ -121,7 +121,7 @@ class RestartAdmissionTests(unittest.TestCase):
                 return SimpleNamespace(status=200, read=lambda size: b'{"restarting":false}')
             connection.request, connection.getresponse = request, response
             return connection
-        configure_control(self.server, self.settings, str(self.settings.path.parent / 'seriald.sock'), connection_factory)
+        configure_control(self.server, self.settings, str(self.settings.path.parent / 'decklab.sock'), connection_factory)
         saved = self.settings.save({'version': 1, 'environment': {'BAUD': '9600'}}, self.revision)
         with self.assertRaises(SettingsError) as context:
             self.server.activate_settings(saved['revision'])
@@ -134,14 +134,14 @@ class RestartAdmissionTests(unittest.TestCase):
 @unittest.skipUnless(os.name == 'posix', 'private Unix socket activation')
 class RestartProcessTests(unittest.TestCase):
     def test_real_processes_reexec_without_discovering_host_serial_ports(self):
-        with tempfile.TemporaryDirectory(prefix='seriald-settings-') as folder:
+        with tempfile.TemporaryDirectory(prefix='decklab-settings-') as folder:
             base = Path(folder)
             (base / 'no-serial-devices').mkdir()
             with socket.socket() as reservation:
                 reservation.bind(('127.0.0.1', 0))
                 port = reservation.getsockname()[1]
-            environment = dict(os.environ, SERIALD_BASE=folder, SERIALD_MCP_ENABLED='0',
-                               SERIALD_BY_PATH=str(base / 'no-serial-devices'), SERIALD_AUTH_TOKEN='')
+            environment = dict(os.environ, DECKLAB_BASE=folder, DECKLAB_MCP_ENABLED='0',
+                               DECKLAB_BY_PATH=str(base / 'no-serial-devices'), DECKLAB_AUTH_TOKEN='')
             processes = []
             logs = []
             try:
@@ -149,9 +149,9 @@ class RestartProcessTests(unittest.TestCase):
                     log = (base / (name + '.log')).open('w+')
                     logs.append(log)
                     command = ([sys.executable, '-c', 'import time; time.sleep(0.4); '
-                                'from seriald_core.collector_server import main; main()']
+                                'from decklab_core.collector_server import main; main()']
                                if name == 'collector_server' else
-                               [sys.executable, '-m', 'seriald_core.' + name] + arguments)
+                               [sys.executable, '-m', 'decklab_core.' + name] + arguments)
                     process = subprocess.Popen(command,
                                                cwd=ROOT, env=environment, stdout=log, stderr=log)
                     processes.append(process)
