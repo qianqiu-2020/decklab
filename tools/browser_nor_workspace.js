@@ -233,17 +233,21 @@ let chrome,ws;
   current.flash.storage_inventory={boot_priority_editable:true,default_storage:'nvme:0',priority_source:'eeprom:SSD',full_backup:false,metadata_bytes_read:131072,
     storages:[{id:'nvme:0',size:128*1024**3,partitions:[{name:'bootfs',offset:1048576,size:512*1024**2,
       content:{filesystem:{type:'fat32'},version:'Linux 6.6.63（模拟）',version_state:'identified'}},
-      {name:'rootfs',offset:1024**3,size:120*1024**3,content:{filesystem:{type:'ext4'},version:'Debian 13（模拟）',version_state:'identified'}}]}]};
+      {name:'rootfs',offset:1024**3,size:120*1024**3,content:{filesystem:{type:'ext4'},version:'Debian 13（模拟）',version_state:'identified'}}]},
+      {id:'scsi:0',size:64*1024**3,partitions:[]}]};
   await wait('document.querySelectorAll(".fl-partition").length===6');
-  assert.equal(await evaluate('document.querySelector("#fl-system-storage").value'),'nvme:0');
+  const diskList = '#fl-system-parts .fl-disk';
+  assert.equal(await evaluate(`document.querySelectorAll("${diskList}").length`),2);
+  assert.match(await evaluate(`document.querySelector("${diskList}[open] > summary").textContent`),/nvme:0/);
   assert.ok(await evaluate('document.querySelector("#fl-system-parts").textContent.includes("Debian 13")'));
   assert.ok(await evaluate('document.querySelector("#fl-system").closest("section").contains(document.querySelector("#fl-device"))'));
   if (!await evaluate('document.querySelector("#fl-storage-details").open')) await evaluate('document.querySelector("#fl-storage-details > summary").click()');
   assert.ok(await evaluate('document.querySelector("#fl-system-parts .fl-map-heading").textContent.includes("板上已有布局")'));
   const destination = await evaluate('document.querySelector("#fl-target-storage").value');
-  await evaluate('document.querySelector("#fl-system-storage").value="";document.querySelector("#fl-system-storage").dispatchEvent(new Event("change"))');
+  await evaluate(`document.querySelectorAll("${diskList} > summary")[1].click()`);
+  assert.match(await evaluate(`document.querySelectorAll("${diskList}[open] > summary")[1].textContent`),/scsi:0/);
   assert.equal(await evaluate('document.querySelector("#fl-target-storage").value'),destination);
-  await evaluate('document.querySelector("#fl-system-storage").value="nvme:0";document.querySelector("#fl-system-storage").dispatchEvent(new Event("change"))');
+  await evaluate(`document.querySelectorAll("${diskList} > summary")[1].click()`);
   await evaluate('document.querySelector("#fl-system").scrollIntoView({block:"start"})');
   await evaluate('document.querySelector("#fl-boot-config > summary").click()');
   assert.equal(await evaluate('document.querySelector("#fl-boot-priority").value'),'SSD');
