@@ -22,7 +22,7 @@ $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile('__SOURCE__',[ref]$tokens,[ref]$errors)
 if($errors.Count -ne 0){throw 'Builder syntax invalid'}
-$sdk=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.IfStatementAst] -and $node.Extent.Text.Contains('--prune-frozen-aliases')},$true))
+$sdk=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.IfStatementAst] -and $node.Clauses[0].Item1.Extent.Text -eq '$DesktopRuntime' -and $node.Extent.Text.Contains('--prune-frozen-aliases')},$true))
 if($sdk.Count -ne 1){throw 'Expected one SDK finalization block'}
 $freeze=$ast.Find({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.CommandElements[0].Extent.Text -eq '$pyinstaller'},$true)
 $notices=$ast.Find({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.Extent.Text.Contains('@noticeArguments')},$true)

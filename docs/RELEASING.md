@@ -60,8 +60,7 @@ git push github v1.14.0
   新标签，不使用 `git push --tags`，本地归档标签不推送到任何 remote。
 
 标签推送触发 `Tagged packages`：amd64 在原生 Ubuntu 22.04 runner
-构建 MCP 运行时和 deb，Windows 任务构建安装包和便携 ZIP。两平台任务
-都通过后才汇总附件，验证版本、运行时架构、逐文件摘要、第三方清单与校验和，
+构建 MCP 运行时和 deb，Windows 任务构建安装包和便携 ZIP。标签构建复用同一提交在 main 已通过的应用回归。两平台的安装验收通过后才汇总附件，验证版本、运行时架构、逐文件摘要、第三方清单与校验和，
 然后创建带附件的 **Release 草稿**。普通代码推送提供
 `seriald-linux-amd64` 和 `seriald-windows` Actions Artifacts，
 不创建正式 Release。不要移动已发布标签；修复应使用新版本号。
@@ -80,7 +79,7 @@ glibc 2.35 为基线，包含私有 Python、MCP SDK 与全部 Python 依赖；�
 
 本地完整测试包可显式使用固定材料和版本文件名，直接输出 `dist/`。Windows 在原生构建机生成安装器并验证 USB 驱动签名。普通软件 CI 和标签构建都使用固定公开组件输入；精简包只能显式请求，不能冒充完整安装包。
 
-日常在同一个工作目录出包时，Linux 可在原有打包命令末尾加 `--local-fast`，Windows 可在 `tools/build_windows.ps1` 的原有参数后加 `-LocalFast`。Debian 包使用 gzip 快速压缩。Windows 在 Python 和依赖输入匹配时复用上次安装好的打包环境，运行打包相关回归，并用快速压缩生成便携包和安装器。测试本次功能改动时另行运行对应回归。省略快速选项即使用正式构建流程。
+日常在同一个工作目录出包时，Linux 可在原有打包命令末尾加 `--local-fast`，Windows 可在 `tools/build_windows.ps1` 的原有参数后加 `-LocalFast`。Debian 包使用 gzip 快速压缩。Windows 在 Python 和依赖输入匹配时复用上次安装好的打包环境，运行打包相关回归，并用快速压缩生成便携包和安装器。冻结所用 Python 源码、依赖和桌面运行时匹配时，Windows 会检查并复用冻结结果，再加入本次的网页和其他资源。修改 Python 源码或这些依赖时会重新冻结。测试本次功能改动时另行运行对应回归。全新的构建目录也可使用快速压缩，适合在空缓存下计时。
 
 包含执行器的安装包启动后会自动发现本机 USB 下载设备；普通手动下载模式刷机
 无需先登记串口序列号或手写板卡配置。单文件 NOR 刷写还需匹配的预装 RAM 材料。

@@ -29,7 +29,12 @@ jobs:
           DECKLAB_COMPONENTS_SHA256: ${{ vars.COMPONENTS_LINUX_AMD64_SHA256 || secrets.COMPONENTS_LINUX_AMD64_SHA256 || '804be4bc200ddefbc99a614e676ba829670100556d6da405bb3597cfb667127c' }}
         run: python tools/fetch_install_components.py --platform linux-amd64
       - name: Freeze the included MCP worker on the native Ubuntu 22.04 baseline
-        run: python tools/build_linux_mcp.py --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
+        run: |
+          python -m venv build/linux-mcp-venv
+          worker_python=build/linux-mcp-venv/bin/python
+          "$worker_python" -m pip download --disable-pip-version-check --only-binary=:all: --require-hashes -r packaging/linux-mcp-requirements.lock -d build/linux-mcp-wheels
+          "$worker_python" -m pip install --disable-pip-version-check --no-index --find-links build/linux-mcp-wheels --only-binary=:all: --require-hashes -r packaging/linux-mcp-requirements.lock
+          "$worker_python" tools/build_linux_mcp.py --local --wheelhouse build/linux-mcp-wheels --arch '${{ matrix.arch }}' --desktop-runtime build/install-components/linux-amd64/desktop-runtime --output 'build/linux-mcp/${{ matrix.arch }}/runtime'
       - run: python tools/build_deb.py --local-fast --runtime 'build/linux-mcp/${{ matrix.arch }}/runtime' --output dist
       - name: Check fresh installs and upgrades on Ubuntu 22.04 and 24.04 in parallel
         run: |
