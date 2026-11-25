@@ -21,6 +21,29 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class WindowsEntrypointTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'win32', 'requires Windows PowerShell')
+    def test_upgrade_fences_running_host_in_another_windows_session(self):
+        command = """
+function Get-CimInstance {
+    [pscustomobject]@{
+        ExecutablePath = Join-Path $env:FIXTURE_RUNNING_DIR 'seriald.exe'
+        SessionId = (Get-Process -Id $PID).SessionId + 1
+    }
+}
+& $env:FIXTURE_PROBE -InstallDir $env:FIXTURE_UPGRADE_DIR
+exit $LASTEXITCODE
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            for running_dir, code in ((directory, 4), (directory + '-different', 0)):
+                with self.subTest(running_dir=running_dir):
+                    result = subprocess.run(
+                        ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+                         '-Command', command],
+                        env=dict(os.environ, FIXTURE_RUNNING_DIR=running_dir, FIXTURE_UPGRADE_DIR=directory,
+                                 FIXTURE_PROBE=str(ROOT / 'packaging/windows-upgrade-mode.ps1')),
+                        capture_output=True, timeout=20)
+                    self.assertEqual(result.returncode, code, result.stderr)
+
+    @unittest.skipUnless(sys.platform == 'win32', 'requires Windows PowerShell')
     def test_protected_lan_launcher_reports_actual_child_exit(self):
         with tempfile.TemporaryDirectory(prefix='launcher test ') as directory:
             launcher = shutil.copy(ROOT / 'tools/windows-launchers/Start-decklab-LAN.ps1', directory)

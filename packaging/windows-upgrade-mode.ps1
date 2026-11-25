@@ -4,8 +4,11 @@ param([Parameter(Mandatory=$true)][string]$InstallDir)
 $ErrorActionPreference = 'Stop'
 $executables = @('decklab.exe','seriald.exe') | ForEach-Object { Join-Path $InstallDir $_ }
 $session = (Get-Process -Id $PID).SessionId
-$hostsFound = @(Get-CimInstance Win32_Process -Filter "SessionId=$session AND (Name='decklab.exe' OR Name='seriald.exe')" |
+$hostsFound = @(Get-CimInstance Win32_Process -Filter "Name='decklab.exe' OR Name='seriald.exe'" |
     Where-Object { $_.ExecutablePath -in $executables })
+# Restart Manager cannot close the console of an installation in another logon
+# session. Report it before Setup tries to replace files held open by that host.
+if (@($hostsFound | Where-Object SessionId -ne $session).Count -gt 0) { exit 4 }
 $launches = @()
 foreach ($proc in $hostsFound) {
     $argsText = $proc.CommandLine -replace '^\s*(?:"[^"]+"|\S+)\s*', ''

@@ -93,6 +93,8 @@ Name: "{userdesktop}\DeckLab"; Filename: "{app}\Start-decklab-LAN.cmd"; WorkingD
 [CustomMessages]
 english.LaunchProtectedLAN=Start DeckLab with password-protected LAN sharing
 chinesesimplified.LaunchProtectedLAN=启动 DeckLab（局域网有密码）
+english.CloseOtherSession=DeckLab is running from this directory in another Windows session. Close that DeckLab window and run Setup again.
+chinesesimplified.CloseOtherSession=另一个 Windows 登录会话正在从此目录运行 DeckLab。请关闭那个 DeckLab 窗口，再运行安装器。
 
 [Run]
 Filename: "{code:HostProgram}"; Parameters: "{code:HostArguments}"; WorkingDir: "{app}"; Check: ResumeHost; Flags: nowait runasoriginaluser
@@ -115,6 +117,12 @@ begin
     ExpandConstant('{tmp}\windows-upgrade-mode.ps1') + '" -InstallDir "' + ExpandConstant('{app}') + '"',
     ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code) then
   begin
+    if Code = 4 then
+    begin
+      Result := ExpandConstant('{cm:CloseOtherSession}');
+      Log(Result);
+      Exit;
+    end;
     if (Code div 65536 >= 1) and (Code div 65536 <= 3) and (Code mod 65536 > 0) then
     begin
       PreviousMode := Code div 65536;
