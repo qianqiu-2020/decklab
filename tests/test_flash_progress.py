@@ -56,6 +56,19 @@ class PreviewProgressTests(unittest.TestCase):
         self.assertEqual(saved['stages'][5]['state'], 'pending')
 
 class FlashWriteProgressTests(unittest.TestCase):
+    def test_ec_has_a_durable_step_start_but_does_not_count_as_written_bytes(self):
+        progress = FlashWriteProgress({'ec': {'state': 'selected'}, 'writes': [
+            dict(storage='active', partition='bootinfo', size=512)]})
+        ec = {'event':'phase', 'storage':'EC', 'partition':'EC'}
+        with patch('decklab_core.flash_progress.time.time', return_value=20):
+            done, total, detail = progress.measure(ec)
+        self.assertEqual((done, total, detail['partition'], detail['step_started_ms']), (0, 512, 'EC', 20_000))
+        with patch('decklab_core.flash_progress.time.time', return_value=40):
+            self.assertEqual(progress.measure(ec)[2]['step_started_ms'], 20_000)
+            self.assertEqual(progress.measure({'storage':'active', 'partition':'bootinfo', 'total':512})[2]['step_started_ms'], 40_000)
+        skipped = FlashWriteProgress({'ec': {'state': 'not-applicable'}})
+        self.assertEqual(skipped.measure(ec), (0, 0, {}))
+
     def test_combined_progress_tracks_native_partition_offsets_and_speed(self):
         def step(label, writes):
             return {'label': label, 'result': {'plan': {'writes': [

@@ -1580,7 +1580,7 @@ class FlashOperation:
             if type(done) is int and type(total) is int and 0 <= done and (done <= total
                     or total == 0 and phase == 'reading-system-metadata'):
                 progress = {}
-                if write_progress is not None and phase == 'writing' and 'total' in value:
+                if write_progress is not None and phase == 'writing':
                     done, total, progress = write_progress.measure(value)
                 context.progress(done, total, phase, **progress)
         self.check = check

@@ -42,7 +42,7 @@
     PROBE: '默认探测模式', PROBE_COMMAND: '自定义探测命令', AUTO_CONFIGURE_SSH: '允许显式配置 SSH',
     SSH_USER: 'SSH 用户', SSH_PASSWORD: 'SSH 密码', CONSOLE_USER: '串口用户', CONSOLE_PASSWORD: '串口密码',
     LOG_RETENTION_DAYS: '日志保留天数（0 为不清理）', DISK_MIN_FREE_MB: '磁盘最低剩余 MB', DISK_MIN_FREE_PERCENT: '磁盘最低剩余百分比',
-    TRANSFER_MAX_FILES: '暂存文件数上限', TRANSFER_MAX_FILE_BYTES: '单文件上限（字节）', TRANSFER_MAX_TOTAL_BYTES: '暂存总量上限（字节）',
+    TRANSFER_MAX_FILES: '缓存文件数上限', TRANSFER_MAX_FILE_BYTES: '单文件上限（字节）', TRANSFER_MAX_TOTAL_BYTES: '文件缓存总额度（字节）',
     TRANSFER_MIN_FREE_BYTES: '暂存保留空闲（字节）', TRANSFER_IDLE_SECONDS: '未完成上传超时（秒）', TRANSFER_RETENTION_SECONDS: '暂存保留时间（秒）',
     BASE: '运行数据目录', STATIC: '页面资源目录', SOCKET: '采集器通信路径（Linux）', HANDOFF: '重启接续文件',
     BY_PATH: '串口发现目录（Linux）', RESCUE_BIN: 'USB 恢复工具', AGENT_TOKENS_FILE: 'Agent 令牌文件',
@@ -58,7 +58,7 @@
   var headers = {access: '控制其他人如何访问这台 DeckLab，以及网页分享链接的有效期。',
     serial: '作为新接入串口的默认值。单块板的识别和 SSH 请在设备页设置。',
     flash: '配置镜像来源和开发板的复位、下载模式接线。',
-    storage: '管理控制机上的串口日志留存和上传暂存空间。',
+    storage: '管理串口日志保留时间，以及镜像、传输文件和任务附件共用的控制机缓存额度。',
     advanced: '多机部署、服务路径及批量配置。修改数据目录不会迁移已有数据。'};
   var snapshot, inputs = {}, editors = {}, pendingBrowser = null;
   var dialog, status, preview, save, activate, browserBox, body, saveState, selectPage, busy = false;

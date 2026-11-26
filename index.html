@@ -648,6 +648,7 @@ PasswordAuthentication yes</code></pre>
     <div id="fl-write-partition" hidden><div class="fl-progress-heading"><strong id="fl-write-target"></strong><span id="fl-write-count"></span></div>
       <progress id="fl-partition-progress" max="1" value="0" aria-label="当前分区写入进度"></progress>
     </div>
+    <ol id="fl-firmware-steps" aria-label="固件刷写顺序" hidden></ol>
     <dl id="fl-results" class="fl-connections"></dl>
     <p id="fl-result-firmware" class="fl-hint" data-i18n-ignore hidden></p>
     <div id="fl-result-backup"></div>
@@ -661,13 +662,13 @@ PasswordAuthentication yes</code></pre>
     <summary>本次任务记录</summary>
     <p id="fl-task-id" class="fl-task-label" data-i18n-ignore></p>
     <dl id="fl-verification" class="fl-connections"></dl>
-    <ul id="fl-event-summary" class="fl-event-summary" hidden></ul>
     <section id="fl-key-commands" class="fl-key-commands" hidden>
-      <strong>最近的关键操作</strong><ol id="fl-key-command-list"></ol>
+      <strong>本次执行命令</strong><ol id="fl-key-command-list"></ol>
     </section>
     <details id="fl-event-raw" class="fl-event-raw">
-      <summary id="fl-event-caption">完整命令与应答</summary>
-      <div class="ft-actions"><button id="fl-copy-events" type="button" disabled>复制执行记录</button></div>
+      <summary id="fl-event-caption">完整协议日志</summary>
+      <ul id="fl-event-summary" class="fl-event-summary" hidden></ul>
+      <div class="ft-actions"><button id="fl-copy-events" type="button" disabled>复制完整协议日志</button></div>
       <pre id="fl-events" data-i18n-ignore></pre>
     </details>
     <p id="fl-event-status" role="status"></p>

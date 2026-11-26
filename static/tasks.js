@@ -4,13 +4,19 @@
   var states = { queued: '等待执行', running: '执行中', completed: '已完成', failed: '失败',
                  cancelled: '已取消', interrupted: '已中断' };
   function active(task) { return task.state === 'queued' || task.state === 'running'; }
+  function errorMessage(message) {
+    if (message === 'artifact quota exceeded') {
+      return '控制机的文件缓存已达到额度上限。可从「已下载」复用镜像，或删除不用的镜像缓存后重试。';
+    }
+    return message;
+  }
   function createClient(fetch) {
     function request(url, payload, options) {
       return fetch(url, Object.assign({}, options, payload ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload) } : { cache: 'no-store' })).then(function (response) {
         return response.json().then(function (data) {
           if (data.error || data.ok === false || response.ok === false) {
-            var error = new Error(data.error || '任务请求失败'); error.status = response.status;
+            var error = new Error(errorMessage(data.error) || '任务请求失败'); error.status = response.status;
             error.result = data; throw error;
           }
           return data;
@@ -35,7 +41,7 @@
           if (active(current)) return false;
           if (current.state === 'completed') resolve(current.result || { ok: true });
           else {
-            var failure = new Error(current.error || states[current.state] || '任务失败');
+            var failure = new Error(errorMessage(current.error) || states[current.state] || '任务失败');
             failure.result = current.result; failure.permanent = true; reject(failure);
           }
           return true;
@@ -361,5 +367,5 @@
     });
     return {open: open};
   }
-  global.DeckLabTasks = { create: create, createClient: createClient, createAdb: createAdb };
+  global.DeckLabTasks = { create: create, createClient: createClient, createAdb: createAdb, errorMessage: errorMessage };
 })(window);

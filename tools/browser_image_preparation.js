@@ -19,8 +19,12 @@ function prepareTask(){return {id:'prepare-original',kind:'image-prepare',state:
      {name:'ESP',offset:1048576,size:272629760,payload:'esp.vfat',payload_size:272629760},
      {name:'rootfs',offset:273678336,remaining:true,payload:'rootfs.ext4',payload_size:12e9}]},
    ...['partition_nor.json','partition_4M.json'].map(name=>({name,format:'mtd',selected:false,
-     partitions:[{name:'bootinfo',offset:0,size:131072,payload:'bootinfo.bin',available:false}]})),
-   {name:'partition_flash.json',format:'gpt',selected:false,partitions:[]}],payload_metadata:[{partition:'rootfs',content:{size:12e9,version:'Debian GNU/Linux 13（模拟）',version_state:'identified',filesystem:{type:'ext4',label:'rootfs'}}}]}}:null};}
+     partitions:[{name:'opensbi',offset:0,size:393216,payload:'long-directory-name-that-cannot-fit-narrow-columns/fw_dynamic.itb',
+       available:true,sha256:'b'.repeat(64),payload_size:270000}]})),
+   {name:'partition_flash.json',format:'gpt',selected:false,partitions:[]}],
+   payload_metadata:[{partition:'rootfs',content:{size:12e9,version:'Debian GNU/Linux 13（模拟）',version_state:'identified',filesystem:{type:'ext4',label:'rootfs'}}},
+     {partition:'opensbi',sha256:'b'.repeat(64),content:{size:270000,version:'OpenSBI v1.6 '+ 'a'.repeat(72)}}],
+   firmware_versions:[{name:'OpenSBI',member:'long-directory-name-that-cannot-fit-narrow-columns/fw_dynamic.itb',sha256:'b'.repeat(64),version:18,cab_digests:['c'.repeat(64)]}]}}:null};}
 const caps=()=>({supported:true,chip:'k1',image_preparation_supported:true,profile:'fixture',modes:['full','partitions'],artifacts:[artifact],storages:[]});
 const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://localhost');res.setHeader('Cache-Control','no-store');
  const json=value=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));};
@@ -74,12 +78,18 @@ let chrome,ws;const delay=ms=>new Promise(r=>setTimeout(r,ms));
  assert.equal(await evaluate('document.querySelector("#fl-board").textContent.includes("K1")'),true);
  assert.equal(await evaluate('document.querySelectorAll("#fl-image-information .fl-map").length'),2);
  assert.equal(await evaluate('document.querySelector("#fl-image-information").textContent.includes("partition_flash.json")'),false);
+ assert.equal(await evaluate('document.querySelector("#fl-image-information .fl-image-table td:last-child").textContent.includes("CAB 版本 18")'),true);
+ const stageFits='document.querySelector("#fl-stage-body").scrollWidth <= document.querySelector("#fl-stage-body").clientWidth+1';
+ await evaluate('document.querySelector("#fl-image-information td details").open=true');
+ assert.equal(await evaluate(stageFits),true,'long version, payload and CAB digest fit inside the wide preparation form');
  await evaluate('(()=>{const s=document.querySelector("#fl-image-information select");s.value="1";s.dispatchEvent(new Event("change"));})()');
  assert.equal(await evaluate('document.querySelector("#fl-image-information select").selectedOptions[0].textContent'),'partition_4M.json');
  await shot('prepared-simulated');
  await rpc('Page.reload');await wait('document.querySelector("#fl-image-information").textContent.includes("ext4")');
  assert.equal(preparations,2,'refresh resolves the existing task through server dedup');assert.equal(await evaluate('document.querySelector("#fl-artifact").value'),artifact.id);
  await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ await evaluate('document.querySelector("#fl-image-information-details").open=true;document.querySelector("#fl-image-information td details").open=true');
+ assert.equal(await evaluate(stageFits),true,'expanded NOR and CAB details fit on a phone');
  assert.equal(await evaluate('document.querySelector("#flash-dialog").scrollWidth<=document.querySelector("#flash-dialog").clientWidth+1'),true);await shot('prepared-mobile-simulated');
  phase='failed';
  await rpc('Page.reload');

@@ -24,7 +24,7 @@
     var downloadTask = null, downloadTimer = null, downloadRequest = null, downloadRetry = false;
     var renderedBackup = '', automaticDownloadIdentity = '';
     var bootPriorityRequest = null;
-    var progressSample = null, previewTask = null, previewRequestId = '';
+    var progressSample = null, writeTiming = null, previewTask = null, previewRequestId = '';
     var previewProgress = null, preparingReviewTaskId = '', confirmedTaskId = '';
     var imagePreparations = Object.create(null), rememberedImage = null;
     try { rememberedImage = JSON.parse(global.sessionStorage && global.sessionStorage.getItem('decklab-flash-image') || 'null'); } catch (_) {}
@@ -147,34 +147,21 @@
       })]);
       if (info.dataset.signature === signature) return;
       info.dataset.signature = signature; info.textContent = '';
-      var groups = {mtd:[], gpt:[]};
+      var groups = {mtd:[], gpt:[]}, ecParts = [];
       sources.forEach(function (id) {
         var job = imagePreparations[id], prepared = job && job.result && job.result.preparation;
         if (!prepared) return;
-        if ((prepared.firmware_versions || []).length) {
-          var versions = text('details', '', info);
-          text('summary', '固件组件与 CAB 版本', versions);
-          var table = text('table', '', versions); table.className = 'fl-scope-table';
-          var heading = text('tr', '', table);
-          ['组件', '包内文件', '固件自报版本', '发布版本号', '对应 CAB'].forEach(label => text('th', label, heading));
-          prepared.firmware_versions.forEach(function (row) {
-            var tr = text('tr', '', table);
-            text('td', row.name, tr); text('td', row.member, tr);
-            var payload = (prepared.payload_metadata || []).find(item => item.sha256 === row.sha256);
-            var versionText = row.name === 'EC' ? prepared.ec?.version_text : payload?.content?.version;
-            text('td', versionText || '—', tr);
-            text('td', row.version == null ? '未知' : String(row.version), tr);
-            var cell = text('td', '', tr);
-            if (row.cab_digests?.length) {
-              var hashes = text('details', '', cell); text('summary', '已匹配', hashes);
-              row.cab_digests.forEach(sha => { text('code', sha, hashes).className = 'fl-firmware-version'; });
-            } else cell.textContent = '暂无已核实记录';
-          });
+        var firmware = prepared.firmware_versions || [];
+        if (prepared.ec) {
+          var ec = prepared.ec;
+          ecParts.push({name:ec.member, payload_size:ec.size, versionText:ec.version_text,
+            firmware:firmware.find(row => row.name === 'EC' && row.member === ec.member && row.sha256 === ec.sha256)});
         }
         var metadata = prepared.payload_metadata || [], tables = prepared.catalogue || [];
         tables.forEach(function (table) {
           if (groups[table.format] && table.name !== 'partition_flash.json') {
-            groups[table.format].push({id:id, table:table, metadata:metadata, tables:tables, choice:prepared.table_choice});
+            groups[table.format].push({id:id, table:table, metadata:metadata, firmware:firmware,
+              tables:tables, choice:prepared.table_choice});
           }
         });
         if (!tables.length && metadata.length) {
@@ -184,6 +171,11 @@
         }
       });
       Object.keys(groups).forEach(function (medium) {
+        if (medium === 'gpt' && ecParts.length) {
+          var ecSection = text('section', '', info);
+          text('h4', 'EC', ecSection);
+          drawImageRows(ecSection, ecParts, '固件文件');
+        }
         var entries = groups[medium];
         if (medium === 'mtd' && $('fl-mode').value === 'full' && embeddedTable())
           entries = entries.filter(entry => entry.table.name === embeddedTable());
@@ -234,7 +226,10 @@
             });
             var hit = part.sha256 ? matches.find(function (item) {return item.sha256 === part.sha256;})
               : sameFiles && matches.length === 1 && matches[0];
-            return Object.assign({}, part, {content:part.available !== false && hit && hit.content});
+            var firmware = medium === 'mtd' && part.sha256 && entry.firmware.find(function (item) {
+              return item.member === part.payload && item.sha256 === part.sha256;
+            });
+            return Object.assign({}, part, {content:part.available !== false && hit && hit.content, firmware:firmware});
           });
           var payloads = rows.filter(function (part) { return part.available !== false; }).map(function (part) {
             return {partition:part.name, offset:part.offset, size:part.payload_size || (part.content || {}).size};
@@ -297,10 +292,11 @@
       } catch (error) { if (seq === sequence) status(error.message); }
       finally { if (seq === sequence) { busy = false; updateControls(); } }
     }
-    function drawImageRows(section, rows) {
+    function drawImageRows(section, rows, fileLabel) {
       var table = text('table', '', section); table.className = 'fl-image-table';
       var head = text('tr', '', table);
-      ['分区 / 文件', '载荷大小', '版本 / 文件系统'].forEach(function (label) { text('th', label, head); });
+      [fileLabel || '分区 / 文件', '载荷大小', fileLabel ? '版本' : '版本 / 文件系统']
+        .forEach(function (label) { text('th', label, head); });
       rows.forEach(function (part) {
         var row = text('tr', '', table), file = text('td', '', row), content = part.content || {};
         text('strong', part.name || '镜像文件', file).dataset.i18nIgnore = '';
@@ -309,10 +305,20 @@
         text('td', Number.isSafeInteger(part.payload_size) ? format(part.payload_size) : Number.isSafeInteger(content.size) ? format(content.size) : '—', row);
         var facts = text('td', '', row);
         if (part.available === false) { text('span', '未附带载荷', facts); return; }
-        text('span', [content.version, content.filesystem && content.filesystem.type].filter(Boolean).join(' · ') || '—', facts).dataset.i18nIgnore = '';
-        if (part.content) {
+        var firmware = part.firmware, cabDigests = firmware && firmware.cab_digests || [];
+        var version = [part.versionText || content.version, content.filesystem && content.filesystem.type].filter(Boolean).join(' · ');
+        if (version || !firmware || firmware.version == null) text('span', version || '—', facts).dataset.i18nIgnore = '';
+        if (firmware && firmware.version != null) {
+          var label = cabDigests.length ? 'CAB 版本' : '发布版本号';
+          text('small', translate(label) + ' ' + firmware.version, facts).dataset.i18nIgnore = '';
+        }
+        if (part.content || cabDigests.length) {
           var details = text('details', '', facts); text('summary', '详细信息', details);
-          renderContent(text('div', '', details), content, '', true);
+          if (part.content) renderContent(text('div', '', details), content, '', true);
+          if (cabDigests.length) {
+            text('small', 'CAB SHA-256', details);
+            cabDigests.forEach(sha => { text('small', sha, details).className = 'fl-hash'; });
+          }
         }
       });
     }
@@ -1184,8 +1190,102 @@
         if (row.currentInfo) renderContent(row.currentInfo, content, '尚未读取', true, row.currentHashScope);
       });
     }
+    function writeStages(plan) {
+      var selectedTables = (plan.catalogue || []).filter(table => table.selected);
+      var norOnly = selectedTables.some(table => table.format === 'mtd') && !selectedTables.some(table => table.format === 'gpt');
+      var stages = (plan.writes || []).map(function (write) {
+        var layout = (plan.storage_layouts || []).find(s => s.id === write.storage && (!s.component || s.component === write.component));
+        var disk = layout?.physical_device || plan.physical_storage || plan.target_storage;
+        var nor = write.component !== 'OS' && (write.component === 'Firmware' || write.storage === 'NOR'
+          || write.target === 'mtd' || layout?.capacity_source === 'spacemit-ram-v1' || norOnly);
+        var system = write.component === 'OS' || disk || write.target === 'gpt' || selectedTables.some(table => table.format === 'gpt')
+          || /^(nvme|scsi|mmc|usb):\d+$/.test(write.storage);
+        var bytes = write.write_size || write.size || 0;
+        // A measured K3 erase took about 50 ms per 4 KiB sector. Small writes
+        // still have a fixed command/transfer cost. This is time, not bytes acknowledged.
+        var seconds = write.kind === 'layout' ? 2 : 1 + Math.ceil(bytes / 4096) * .05 + bytes / (1024 ** 2);
+        return {medium:nor ? 'nor' : system ? 'disk' : '', storage:write.storage, disk:disk, component:write.component || '',
+          name:write.partition || write.target, target:write.target, layout:write.kind === 'layout', size:write.size || 0, seconds:seconds};
+      });
+      if (!plan.skip_ec && plan.ec?.state === 'selected') stages.unshift({medium:'ec', name:'EC', seconds:20});
+      return stages;
+    }
+    function writeDuration(seconds) {
+      seconds = Math.ceil(seconds);
+      var minutes = Math.floor(seconds / 60), remainder = seconds % 60;
+      return minutes ? minutes + ' ' + translate('分钟') + (remainder ? ' ' + remainder + ' ' + translate('秒') : '')
+        : seconds + ' ' + translate('秒');
+    }
+    function renderWriteProgress(progress, now) {
+      var stages = writeStages(task?.flash?.plan || {});
+      var report = progress || {};
+      var index = stages.findIndex(function (step) {
+        if (step.medium === 'ec') return report.storage === 'EC' && report.partition === 'EC';
+        return step.component === (report.component || '') && (step.name === report.partition || step.target === report.partition)
+          && (step.storage === report.storage || report.storage === 'active');
+      });
+      if (index < 0) return false;
+      var step = stages[index], mib = 1024 ** 2;
+      if (!writeTiming || writeTiming.taskId !== task.id) writeTiming = {taskId:task.id, diskRates:new Map()};
+      if (writeTiming.index !== index) {
+        writeTiming.index = index; writeTiming.started = now; writeTiming.lastCount = -1;
+      }
+      var elapsed = Math.max(0, now - (report.step_started_ms || writeTiming.started)) / 1000;
+      var size = report.partition_total || step.size;
+      var count = Number(report.partition_done) || 0;
+      var confirmed = size > 0 && count >= size;
+      var firmware = step.medium === 'ec' || step.medium === 'nor';
+      if (step.medium === 'disk' && count !== writeTiming.lastCount && elapsed >= 2 && count >= mib && report.bytes_per_second > 0) {
+        writeTiming.lastCount = count;
+        var key = step.disk || step.storage, lastRate = writeTiming.diskRates.get(key);
+        writeTiming.diskRates.set(key, lastRate ? (lastRate + report.bytes_per_second) / 2 : report.bytes_per_second);
+      }
+      var link = loaderLinkSpeed ?? board?.usb_link_speed;
+      var configuration = capabilities?.flash_configuration;
+      function estimate(stage, left) {
+        if (stage.medium !== 'disk' || stage.layout) return stage.seconds;
+        var measured = writeTiming.diskRates.get(stage.disk || stage.storage);
+        var rate = measured || (link >= 4 ? 100 : link && link < 3 ? 1 : 24) * mib;
+        var calibrated = configuration?.tuning?.write_bps;
+        if (!measured && calibrated > 0 && stage.disk && configuration.system_disk === stage.disk) rate = Math.min(rate, calibrated);
+        return left / rate;
+      }
+      var remaining = stages.slice(index);
+      var overdue = firmware && !confirmed && elapsed >= step.seconds;
+      if (!overdue && remaining.every(stage => stage.medium)) {
+        var estimateCurrent = confirmed ? 0 : firmware ? step.seconds - elapsed : estimate(step, Math.max(0, size - count));
+        var seconds = estimateCurrent + remaining.slice(1).reduce((sum, stage) => sum + estimate(stage, stage.size), 0);
+        if (seconds > 0) $('fl-progress-text').textContent += ' · ' + translate('预计剩余写入时间') + ' ' + writeDuration(seconds);
+      }
+      if (!firmware) return false;
+      var partition = $('fl-write-partition'), bar = $('fl-partition-progress');
+      var title = step.medium === 'ec' ? 'EC' : 'NOR · ' + report.partition;
+      var action = step.medium === 'ec' ? '更新固件' : step.layout ? '准备 NOR 分区映射' : '擦除并写入';
+      var detail = confirmed ? translate('写入已确认') : translate(action) + ' · ' + translate('已用') + ' ' + writeDuration(elapsed)
+        + ' · ' + (overdue ? translate('等待板卡确认') : translate('预计') + ' ' + writeDuration(step.seconds));
+      $('fl-write-target').textContent = title;
+      $('fl-write-count').textContent = detail;
+      partition.hidden = false;
+      partition.dataset.estimated = confirmed ? 'false' : 'true';
+      partition.title = translate('按预计耗时显示，完成以板卡应答为准');
+      bar.max = 1;
+      if (overdue) bar.removeAttribute('value');
+      else bar.value = confirmed ? 1 : Math.min(.95, elapsed / step.seconds);
+      bar.setAttribute('aria-valuetext', title + ' · ' + detail);
+      var list = $('fl-firmware-steps'); list.textContent = ''; list.hidden = false;
+      stages.forEach(function (stage, i) {
+        if (stage.medium !== 'ec' && (stage.medium !== 'nor' || stage.layout)) return;
+        var state = i < index || i === index && confirmed ? 'completed' : i === index ? 'running' : 'pending';
+        var part = text('li', stage.name || stage.target, list);
+        part.dataset.state = state;
+        part.setAttribute('aria-label', part.textContent + ' · ' + translate({completed:'已完成',running:'进行中',pending:'等待开始'}[state]));
+        if (state === 'running') part.setAttribute('aria-current', 'step');
+      });
+      return true;
+    }
     function setProgress(phase, done, total, active, progress) {
       $('fl-stream-progress').hidden = true;
+      $('fl-firmware-steps').hidden = true;
       var names = {'checking-upload': '核对上传文件 SHA-256', 'checking-image-sha256': '核对镜像 SHA-256',
         'expanding-image': '解压镜像（压缩包读取）', 'checking-payloads': '核对包内载荷',
         'checking-layout': '核对现场布局', 'reading-payload-metadata': '读取分区文件系统信息', 'reading-nor': '读取整片 NOR', 'checking-nor-baseline': '检查备份后板上内容是否变化',
@@ -1211,14 +1311,16 @@
       var now = Date.now();
       if (!active || !progressSample || progressSample.phase !== phase || done < progressSample.done || total !== progressSample.total)
         progressSample = active ? {phase:phase,done:done,total:total,time:now} : null;
-      if (active && progressSample && now - progressSample.time >= 3000 && done > progressSample.done && total > done) {
+      if (active && phase !== 'writing' && progressSample && now - progressSample.time >= 3000 && done > progressSample.done && total > done) {
         var rate = (done - progressSample.done) / ((now - progressSample.time) / 1000);
         var seconds = Math.ceil((total - done) / rate);
         $('fl-progress-text').textContent += ' · 预计剩余 ' + (seconds < 60 ? seconds + ' 秒' : Math.ceil(seconds / 60) + ' 分钟');
       }
       var partition = $('fl-write-partition');
       partition.hidden = !(active && phase === 'writing' && progress && progress.partition && progress.partition_total > 0);
-      if (!partition.hidden) {
+      var estimated = active && phase === 'writing' && renderWriteProgress(progress, now);
+      if (!estimated && !partition.hidden) {
+        partition.dataset.estimated = 'false';
         var current = progress.partition_done, size = progress.partition_total;
         $('fl-write-target').textContent = [progress.component || progress.storage, progress.partition].filter(Boolean).join(' · ');
         var rate = progress.bytes_per_second > 0 ? translate('平均写入速率') + ' ' + format(progress.bytes_per_second) + '/s' : translate('测速中…');
@@ -1245,6 +1347,7 @@
           || !['streaming-image','writing-gpt','writing'].includes(current.progress?.phase)) return false;
       $('fl-execution').hidden = false;
       $('fl-progress').hidden = $('fl-write-partition').hidden = true;
+      $('fl-firmware-steps').hidden = true;
       $('fl-stream-progress').hidden = false;
       $('fl-progress-text').textContent = translate('边读边写');
       $('fl-stream-write-title').textContent = translate('当前分区写入')
@@ -2403,7 +2506,7 @@
       if (value === undefined || value === null) return '未执行';
       var names = { 'not-started': '未开始', 'not-completed': '未完成', pending: '等待执行',
         skipped: '用户跳过，校验未完成', 'not-applicable': '板型不适用，本次跳过',
-        writing: '正在写入', written: '写入完成', completed: '已完成', verified: '校验通过',
+        running: '进行中', writing: '正在写入', written: '写入完成', completed: '已完成', verified: '校验通过',
         unsupported: '不支持回读校验', 'not-supported': '不支持回读校验',
         'not-requested': '未请求', 'reset-command-acknowledged': '复位已应答', unknown: '结果待确认', failed: '失败', 'partial-or-unknown': '可能部分写入，结果待确认',
         'unknown-or-partial': '写入结果未知或可能部分完成' };
@@ -2491,7 +2594,7 @@
           + format(result.verified_bytes || details.verified_bytes || 0), box).dataset.i18nIgnore = '';
       }
       var remaining = Math.max(0, Math.ceil((details.selection_deadline || 0) - Date.now() / 1000));
-      setMessage('fl-task-status', selectionExpired(current) ? translate(details.recovery_required ? '确认已超时。请先处理恢复占用。' : '确认已超时，本次未开始写入。请重新检测设备。') : current.error || (current.cancel_requested
+      setMessage('fl-task-status', selectionExpired(current) ? translate(details.recovery_required ? '确认已超时。请先处理恢复占用。' : '确认已超时，本次未开始写入。请重新检测设备。') : taskError(current) || (current.cancel_requested
         ? '已请求取消；等待执行器确认停止，可能已部分写入。'
         : awaitingSelection(current) && details.selection_deadline
           ? translate('确认剩余') + ' · ' + Math.floor(remaining / 60) + ':' + String(remaining % 60).padStart(2, '0')
@@ -2501,10 +2604,19 @@
       if (workspaceSelection() && !busy && !uploading && !sourceCatalogue && sourceAnalysedId !== sourceIdentity() && imageReady()
           && packageFile(artifacts.find(function (item) { return item.id === $('fl-artifact').value; }))) { inspectSource(); }
     }
+    function taskError(current) {
+      var error = current.error || '', progress = current.progress || {};
+      if (progress.phase === 'writing' && progress.component === 'Firmware' && progress.partition
+          && (current.result?.write_result || current.flash?.write_result) === 'unknown' && error.endsWith(': protocol-failed')) {
+        var diagnostic = error.match(/（诊断 [a-f0-9]+）/);
+        return translate('NOR 分区写入未确认，请先回读核对。') + ' · ' + progress.partition + (diagnostic ? ' ' + diagnostic[0] : '');
+      }
+      return error;
+    }
     function commandStage(event) {
       var command = event.command || '', phase = event.phase || '';
       if (/^(?:reboot|ACmd:)/i.test(command) || /^(?:resetting|ramboot-handoff)$/.test(phase)) return 'boot';
-      if (/^flash:|^(?:UCmd:)?(?:mtd (?:erase|write)|gpt write|(?:mmc|nvme|scsi|usb) (?:write|erase))\b/i.test(command)) return 'write';
+      if (/^(?:flash:|erase:|oem ec:flash\b)|^(?:UCmd:)?(?:mtd (?:erase|write)|gpt write|(?:mmc|nvme|scsi|usb) (?:write|erase))\b/i.test(command)) return 'write';
       if (/^verifying/.test(phase)) return 'verify';
       if (event.operation === 'prepare' || phase === 'preparing-loader' || /^continue$/.test(command)) return 'loader';
       if (event.operation === 'ram-boot') return 'boot';
@@ -2512,11 +2624,7 @@
       return 'read';
     }
     function isKeyCommand(event) {
-      return /^(?:flash:|continue$|reboot|ACmd:|UCmd:(?:gpt write|mtd (?:erase|write)|(?:mmc|nvme|scsi|usb) (?:write|erase))\b)/i.test(event.command || '');
-    }
-    function rememberKey(entry) {
-      keyCommands.push(entry);
-      if (keyCommands.length > 8) keyCommands.shift();
+      return /^(?:flash:|erase:|oem ec:flash\b|continue$|reboot|ACmd:|UCmd:(?:gpt (?:write|verify)|mtd (?:erase|write)|(?:mmc|nvme|scsi|usb) (?:write|erase))\b)/i.test(event.command || '');
     }
     function renderEventSummary() {
       var list = $('fl-event-summary'); list.textContent = '';
@@ -2535,7 +2643,7 @@
         text('span', entry.replies.join(' → ') || translate('发送中'), row).dataset.i18nIgnore = '';
       });
       $('fl-key-commands').hidden = !keyCommands.length;
-      $('fl-event-caption').textContent = translate('完整命令与应答') + (commandCount ? ' · ' + commandCount + ' ' + translate('条命令') : '');
+      $('fl-event-caption').textContent = translate('完整协议日志') + (commandCount ? ' · ' + commandCount + ' ' + translate('条命令') : '');
     }
     function resetEventLog() {
       cursor = 0; eventLines = []; pendingCommand = null; fastFirmwareTables.clear();
@@ -2567,7 +2675,7 @@
                 var stage = commandStage(event);
                 commandTotals[stage] = (commandTotals[stage] || 0) + 1;
                 commandCount++;
-                if (isKeyCommand(event)) rememberKey(pendingCommand);
+                if (isKeyCommand(event)) keyCommands.push(pendingCommand);
                 eventLines.push('');
               }
               if (event.status && event.status !== 'issuing') pendingCommand.replies.push(reply ? translate(reply) : event.status);
@@ -2582,7 +2690,7 @@
             if (event.event === 'loader-material') {
               var material = translate('加载文件到板上 RAM') + ' · ' + event.partition;
               eventLines.push([number, material].join(' · '));
-              rememberKey({command:material,replies:[translate('开始传输')]});
+              keyCommands.push({command:material,replies:[translate('开始传输')]});
               return;
             }
             if (event.event === 'firmware-skipped') {
@@ -2956,7 +3064,7 @@
         }
         uploading = false; busy = false; updateControls();
         downloadReference(selected, null); downloadRequest = null;
-        if (downloadTask.state !== 'completed') throw new Error(downloadTask.error || '镜像下载未完成');
+        if (downloadTask.state !== 'completed') throw new Error(global.DeckLabTasks.errorMessage(downloadTask.error) || '镜像下载未完成');
         var artifact = (downloadTask.result || {}).artifact;
         if (!artifact || artifact.state !== 'ready') throw new Error('镜像尚未准备好');
         artifact.preparation_task = (downloadTask.result || {}).preparation_task;
@@ -3309,7 +3417,7 @@
           summary.textContent = [new Date(record.created * 1000).toLocaleString(), translate(names[record.kind]),
             translate(states[record.state] || record.state), (record.board_targets || []).join(', ')].filter(Boolean).join(' · ');
           text('small', record.id, row).dataset.i18nIgnore = '';
-          if (record.error) text('p', record.error, row);
+          if (record.error) text('p', taskError(record), row);
           if (record.kind === 'flash-preview') return;
           var log = text('pre', '', row), more = text('button', translate('更多命令'), row);
           more.type = 'button'; more.hidden = true;

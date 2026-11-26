@@ -398,7 +398,8 @@
   .fl-source-actions>.fl-more[open]{flex-basis:100%}
   #fl-package-contents:empty{display:none}
   @media(min-width:900px){
-    .flash-dialog[data-flow="normal"] #fl-setup:not([hidden]){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:12px;padding-block:12px}
+    .flash-dialog[data-flow="normal"] #fl-setup:not([hidden]){display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start;gap:12px;padding-block:12px}
+    .flash-dialog[data-flow="normal"][data-entry="device"] #fl-setup:not([hidden]){grid-template-columns:minmax(0,2fr) minmax(0,3fr)}
     .flash-dialog[data-flow="normal"] #fl-setup>*{grid-column:1/-1;margin:0;min-width:0}
     .flash-dialog[data-flow="normal"] #fl-setup>:is(#fl-image-section,#fl-connect){grid-column:auto}
     #fl-sources{margin-block:0}
@@ -526,10 +527,11 @@
   .fl-event-summary span,.fl-key-commands li>span{color:var(--ink-3);white-space:nowrap}
   .fl-key-commands{padding:10px 12px;background:var(--ground);border-radius:6px}
   .fl-key-commands>strong{font-size:13px}
-  .fl-key-commands ol{list-style:none;margin:6px 0 0;padding:0}
+  .fl-key-commands ol{list-style:none;margin:6px 0 0;padding:0;max-height:15rem;overflow:auto}
   .fl-key-commands li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 10px;padding:4px 0}
   .fl-key-commands code{overflow-wrap:anywhere;font:12px var(--font-mono)}
   .fl-event-raw{margin-top:12px;font-size:12px}
+  .fl-event-raw .fl-event-summary{margin:8px 0 0}
   .fl-event-raw .ft-actions{margin-top:8px}
   #fl-events{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 var(--font-mono);margin:10px 0 0;padding:10px;background:var(--term);color:var(--term-ink);border-radius:6px}
   .fl-actions{position:sticky;bottom:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px -22px 0;padding:12px 22px;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -8px 20px -16px rgba(0,0,0,.35)}
@@ -544,8 +546,16 @@
   #fl-stream-progress progress{width:100%;height:8px;accent-color:var(--accent);margin:0 0 8px}
   #fl-stream-progress span{color:var(--ink-2);font-variant-numeric:tabular-nums}
   #fl-write-count{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+  #fl-firmware-steps:not([hidden]){display:flex;flex-wrap:wrap;gap:6px 12px;margin:9px 0 0;padding:0;list-style:none;font-size:12px}
+  #fl-firmware-steps li{color:var(--ink-3)}
+  #fl-firmware-steps li::before{content:'';display:inline-block;width:6px;height:6px;margin-inline-end:5px;border-radius:50%;border:1px solid currentColor;vertical-align:1px}
+  #fl-firmware-steps [data-state="running"]{color:var(--accent);font-weight:650}
+  #fl-firmware-steps [data-state="completed"]{color:var(--live)}
+  #fl-firmware-steps :is([data-state="running"],[data-state="completed"])::before{background:currentColor}
   #fl-partition-progress::-webkit-progress-value{background:var(--live)}
   #fl-partition-progress::-moz-progress-bar{background:var(--live)}
+  #fl-write-partition[data-estimated="true"] progress::-webkit-progress-value{background:var(--accent)}
+  #fl-write-partition[data-estimated="true"] progress::-moz-progress-bar{background:var(--accent)}
   .fl-risk-summary{margin-block:8px;font-weight:600}
   .fl-messages{flex:1 1 220px;min-width:0;overflow-wrap:anywhere}
   .fl-messages p{margin:0}.fl-messages p:empty{display:none}
@@ -958,7 +968,8 @@
 #fl-image-stages [data-state="running"] { color:var(--accent); font-weight:600; }
 #fl-image-stages [data-state="completed"]::before,#fl-image-stages [data-state="running"]::before { background:currentColor; }
 #fl-image-information:not(:empty) { display:grid; gap:.6rem; margin-top:.8rem; }
-
+#fl-sources,#fl-image-information { grid-template-columns:minmax(0,1fr); }
+#fl-image-information select { max-width:100%; }
 #fl-image-information small { display:block; color:var(--ink-3); overflow-wrap:anywhere }
 .fl-image-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:13px }
 .fl-image-table th,.fl-image-table td { text-align:start; vertical-align:top; padding:8px 6px; border-bottom:1px solid var(--line); overflow-wrap:anywhere }
@@ -1078,8 +1089,8 @@
 }
 
 .fl-firmware-row { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; }
-.fl-firmware-row select { flex:1 1 18rem; min-width:0; max-width:100%; }
-.fl-firmware-row button { flex-shrink:0; }
+.fl-firmware-row select { flex:1 1 100%; min-width:0; max-width:100%; }
+.fl-firmware-row button { flex-shrink:0; font-size:12px; padding-inline:10px; }
 
 /* The same title and close affordance across the tool windows. */
 dialog[class]{border-radius:10px;box-shadow:var(--shadow)}
@@ -1135,4 +1146,3 @@ dialog :is(button,input,textarea,select){max-width:100%}
 
 .fl-board-media .fl-disk { margin: 0; padding: .65rem .75rem; border-bottom: 1px solid var(--border); }
 .fl-ec-medium { font-weight: 600; }
-.fl-firmware-version { overflow-wrap: anywhere; }

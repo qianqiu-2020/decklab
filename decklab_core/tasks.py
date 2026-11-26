@@ -345,7 +345,7 @@ class TaskStore:
                 raise TaskError('invalid task progress')
             counts, labels = {'done', 'total'}, {'phase'}
             if progress.get('phase') == 'writing':
-                counts.update(('partition_done', 'partition_total', 'bytes_per_second'))
+                counts.update(('partition_done', 'partition_total', 'bytes_per_second', 'step_started_ms'))
                 labels.update(('component', 'storage', 'partition'))
             if set(progress) - counts - labels:
                 raise TaskError('invalid task progress')

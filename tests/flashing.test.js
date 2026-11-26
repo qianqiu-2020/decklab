@@ -25,12 +25,13 @@ class Element {
   close() { this.open = false; }
   focus() { this.focused = true; }
 }
-function harness(storage, controls = {}) {
+function harness(storage, controls = {}, now = Date.now) {
   const elements = new Map(), requests = [], timers = new Map(); let timer = 0, imageChoice, imagePicker;
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('fl-setup').children = ['fl-preview-overall', 'fl-image-section', 'fl-connect', 'fl-fast', 'fl-tuning'].map(get);
   get('fl-mode').value = 'full'; get('fl-verify').value = 'none';
-  const sandbox = {document: {createElement: () => new Element()}, Uint8Array, Date, Math, URL,
+  const Clock = class extends Date { static now() { return now(); } };
+  const sandbox = {document: {createElement: () => new Element()}, Uint8Array, Date: Clock, Math, URL,
     btoa: value => Buffer.from(value, 'binary').toString('base64'),
     setTimeout: fn => { timers.set(++timer, fn); return timer; }, clearTimeout: id => timers.delete(id),
     crypto: {getRandomValues: values => values.fill(++timer)}};
@@ -181,16 +182,29 @@ test('paired image view groups NOR and OS with file sizes and independent versio
   for (let i=0;i<2;i++) {
     const request=h.take('/api/image-prepare'), isOS=request.payload.id===os.id;
     const part=isOS?'rootfs':'opensbi', file=isOS?'rootfs.ext4':'fw_dynamic.itb';
+    const sha='a'.repeat(64), cab='c'.repeat(64);
     request.resolve({task:{id:'job-'+request.payload.id,state:'completed',result:{preparation:{
-      catalogue:[{name:'layout.json',selected:true,format:isOS?'gpt':'mtd',partitions:[{name:part,payload:file}]}],
-      payload_metadata:[{partition:part,content:{size:80,version:isOS?'Debian 13':'OpenSBI 1.6'}}]}}}});
+      catalogue:[{name:'layout.json',selected:true,format:isOS?'gpt':'mtd',partitions:[{name:part,payload:file,sha256:sha},
+        ...(!isOS ? [{name:'other', payload:'other.itb', sha256:sha}, {name:'esos',payload:'esos.itb',sha256:'b'.repeat(64)}] : [])]}],
+      payload_metadata:[{partition:part,sha256:sha,content:{size:80,version:isOS?'Debian 13':'OpenSBI 1.6'}}],
+      ...(!isOS ? {ec:{member:'ec.bin', size:256, sha256:'e'.repeat(64), version_text:'V00.24'}, firmware_versions:[
+        {name:'OpenSBI',member:file,sha256:sha,version:18,cab_digests:[cab]},
+        {name:'ESOS',member:'esos.itb',sha256:'b'.repeat(64),version:13},
+        {name:'EC',member:'ec.bin',sha256:'e'.repeat(64),version:36,cab_digests:['d'.repeat(64)]},
+      ]} : {})}}}});
     await drain();
   }
-  const view=h.get('fl-image-information').textContent;
-  assert.match(view,/系统盘（OS）.*rootfs.ext4.*80 B.*Debian 13/);
-  assert.match(view,/NOR.*fw_dynamic.itb.*80 B.*OpenSBI 1.6/);
+  const view=h.get('fl-image-information'), [nor, ec, disk]=view.children;
+  const norRows=nor.children.at(-1).children.at(-1).children;
+  assert.match(norRows[1].textContent,/fw_dynamic.itb.*80 B.*OpenSBI 1.6.*CAB 版本 18/);
+  assert.match(norRows[1].children[2].children.at(-1).textContent,/^详细信息.*CAB SHA-256c{64}/);
+  assert.doesNotMatch(norRows[2].textContent,/CAB/);
+  assert.match(norRows[3].textContent,/esos.itb.*发布版本号 13/);
+  assert.match(ec.textContent,/^EC.*ec.bin.*V00.24.*CAB 版本 36/);
+  assert.match(disk.textContent,/^系统盘（OS）.*rootfs.ext4.*80 B.*Debian 13/);
+  assert.doesNotMatch(disk.textContent,/CAB/);
   h.get('fl-firmware').value=''; h.get('fl-firmware').emit('change');
-  assert.doesNotMatch(h.get('fl-image-information').textContent,/OpenSBI/);
+  assert.doesNotMatch(view.textContent,/OpenSBI|CAB 版本|ec.bin/);
 });
 
 test('a mixed OS package offers only its SPI NOR table as the optional firmware', async () => {
@@ -1101,22 +1115,71 @@ test('completed URL flash drains all trace pages and shows commands and skipped 
   assert.doesNotMatch(h.get('fl-task-id').textContent, /preparing-loader/);
 });
 
-test('current run shows compact key operations and retains the full trace behind a collapsed disclosure', async () => {
+test('current run shows writes in order and keeps bulk probes in the collapsed protocol log', async () => {
   const h = harness();
-  h.api.open(board, {id:'current-run',kind:'flash',state:'completed',created:1795500000,
-    flash:{operation:'stream'},result:{write_result:'completed'}});
+  h.api.open(board, {id:'current-run',kind:'flash',state:'failed',created:1795500000,
+    error:'flashing executor reported failure（诊断 3317962e9872）: protocol-failed',
+    progress:{phase:'writing',component:'Firmware',partition:'uboot'},
+    flash:{operation:'normal',write_result:'unknown'}});
   h.take('/api/flash-capabilities').resolve(capabilities); await drain();
   const read = {event:'command',operation:'storage-inventory',command:'getvar:version',status:'issuing'};
-  const write = {event:'command',operation:'execute',command:'flash:rootfs',status:'issuing'};
-  h.take('/api/flash-events').resolve({events:[
-    {...read,cursor:1},{...read,cursor:2,status:'OKAY'},{...write,cursor:3},{...write,cursor:4,status:'OKAY'}
-  ],next_after:4}); await drain();
+  const names=['oem ec:flash', ...Array.from({length:9},(_,i) => 'flash:part'+i),'UCmd:mtd erase uboot 0 329000'];
+  const operations=names.flatMap((command,i) => {
+    const event={event:'command',operation:'execute',command};
+    return [{...event,cursor:3+i*2,status:'issuing'},{...event,cursor:4+i*2,status:i===names.length-1?'read-error':'OKAY'}];
+  });
+  h.take('/api/flash-events').resolve({events:[{...read,cursor:1},{...read,cursor:2,status:'OKAY'},...operations],
+    next_after:operations.at(-1).cursor}); await drain();
   assert.match(h.get('fl-task-id').textContent,/任务 ID current-run/);
   assert.match(h.get('fl-event-summary').textContent,/读取与核对.*写入分区/);
-  assert.match(h.get('fl-key-command-list').textContent,/flash:rootfs.*OKAY/);
+  assert.deepEqual(h.get('fl-key-command-list').children.map(row=>row.children[0].textContent),names.map(name=>'Fastboot '+name));
+  assert.match(h.get('fl-key-command-list').children.at(-1).textContent,/uboot.*未收到完整应答/);
   assert.doesNotMatch(h.get('fl-key-command-list').textContent,/getvar/);
   assert.match(h.get('fl-events').textContent,/getvar:version/);
   assert.equal(h.get('fl-event-raw').open,false);
+  assert.match(h.get('fl-task-status').textContent,/NOR 分区写入未确认.*uboot.*3317962e9872/);
+});
+
+test('EC and NOR use timed steps without feeding firmware speed into the system-disk ETA', async () => {
+  const mib=1024**2, diskSize=12*1024*mib, total=diskSize+3*mib+512;
+  let now=1795662000000;
+  const h=harness(null, {}, () => now);
+  const firmware={component:'Firmware',storage:'NOR'}, disk={component:'OS',storage:'active'};
+  const plan={ec:{state:'selected'},writes:[{...firmware,partition:'bootinfo',size:512},
+    {...firmware,partition:'uboot',size:3*mib},{...disk,partition:'rootfs',size:diskSize}]};
+  const current={id:'mixed-write',kind:'flash',state:'running',flash:{write_result:'running',plan},
+    progress:{phase:'writing',done:0,total,storage:'EC',partition:'EC',step_started_ms:now-5000}};
+  h.api.open({...board,usb_link_speed:4}, current);
+  h.take('/api/flash-capabilities').resolve(capabilities); await drain();
+  h.take('/api/flash-events').resolve({events:[]}); await drain();
+  assert.equal(h.get('fl-write-target').textContent,'EC');
+  assert.match(h.get('fl-write-count').textContent,/已用 5 秒.*预计 20 秒/);
+  assert.equal(h.get('fl-partition-progress').value,.25);
+  assert.match(h.get('fl-progress-text').textContent,/预计剩余写入时间 3 分钟/);
+  assert.match(h.get('fl-results').textContent,/进行中/);
+  async function report(progress) {
+    const poll=[...h.timers.values()].at(-1); h.timers.clear(); poll(); await drain();
+    h.take('/api/task?id=mixed-write').resolve({task:{...current,progress:{phase:'writing',total,...progress}}});
+    await drain();h.take('/api/flash-events').resolve({events:[]});await drain();
+  }
+  now+=10000;
+  const uboot={component:'Firmware',storage:'active',partition:'uboot',done:512,partition_total:3*mib,partition_done:0,
+    bytes_per_second:128,step_started_ms:now-10000};
+  await report(uboot);
+  assert.equal(h.get('fl-write-target').textContent,'NOR · uboot');
+  assert.match(h.get('fl-write-count').textContent,/擦除并写入.*已用 10 秒/);
+  assert.equal(h.get('fl-progress').value,512);
+  assert.deepEqual(h.get('fl-firmware-steps').children.map(part=>part.dataset.state),['completed','completed','running']);
+  assert.match(h.get('fl-progress-text').textContent,/预计剩余写入时间 2 分钟/);
+  now+=60000;
+  await report(uboot);
+  assert.match(h.get('fl-write-count').textContent,/等待板卡确认/);
+  assert.doesNotMatch(h.get('fl-progress-text').textContent,/预计剩余/);
+  await report({...disk,partition:'rootfs',done:3*mib+512+100*mib,partition_total:diskSize,partition_done:100*mib,
+    bytes_per_second:200*mib,step_started_ms:now-4000});
+  assert.equal(h.get('fl-firmware-steps').hidden,true);
+  assert.match(h.get('fl-progress-text').textContent,/预计剩余写入时间 1 分钟/);
+  assert.match(h.get('fl-write-count').textContent,/平均写入速率/);
 });
 
 test('live Go partition names are submitted with their storage id when no synthetic id exists', async () => {

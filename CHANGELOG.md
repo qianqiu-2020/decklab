@@ -6,6 +6,19 @@
 
 ## [Unreleased]
 
+## [1.19.2] - 2026-11-26
+
+### Changed
+
+- 分别估算 EC、NOR 和系统盘的写入耗时。NOR 与 EC 显示当前步骤、已用时间及等待确认的状态。
+
+### Fixed
+
+- 刷机准备页在 NOR 分区的版本栏显示已核对的 CAB 版本，EC 版本显示在自己的区块。长文件名和版本信息可在栏内换行。
+- 本次刷机记录按顺序显示执行命令及应答，探测和分段进度可在完整协议日志中查看。
+- EC 更新后恢复刷机连接的默认等待时间，NOR 分区擦写使用独立超时。写入应答缺失时提示先回读核对。
+- 文件缓存达到额度上限时，下载错误说明如何复用或清理控制机上的镜像缓存。
+
 ## [1.19.0] - 2026-11-26
 
 ### Added
@@ -418,7 +431,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.19.2...HEAD
+[1.19.2]: https://github.com/qianqiu-2020/decklab/compare/v1.19.0...v1.19.2
 [1.19.0]: https://github.com/qianqiu-2020/decklab/compare/v1.18.7...v1.19.0
 [1.18.7]: https://github.com/qianqiu-2020/decklab/compare/v1.18.0...v1.18.7
 [1.18.0]: https://github.com/qianqiu-2020/decklab/compare/v1.17.74...v1.18.0
