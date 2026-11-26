@@ -7,6 +7,7 @@ request's authorization still decide whether an operation may run.
 API_VERSION = 1
 CONTRACT_NAME = 'decklab-execution'
 CONTRACT_REVISION = 1
+ADB_STDIN_MAX_BYTES = 1024 ** 2
 
 OUTCOMES = ('not-issued', 'issued', 'acknowledged', 'observed', 'verified', 'unknown')
 BASE_TASK_KINDS = ('identify', 'ssh-enable', 'ssh-connect', 'adb-connect', 'file-copy',
@@ -68,6 +69,7 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
                 '/api/image-prepare': ['image-prepare'],
             },
             'kind_aliases': {'nor-backup': 'flash'},
+            'adb_command_stdin': {'parameter': 'stdin_artifact', 'max_bytes': ADB_STDIN_MAX_BYTES},
             'request_dedup': {
                 'supported': True, 'parameter': 'request_id',
                 'scope': ['actor', 'request_id'], 'persistent': True,

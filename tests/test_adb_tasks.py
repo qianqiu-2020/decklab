@@ -1,4 +1,6 @@
+import hashlib
 import os
+import shlex
 from pathlib import Path
 import tempfile
 import time
@@ -85,6 +87,24 @@ else:
                     return self.actions.query(task_id, serial=self.device.serial).payload['task']
             time.sleep(.02)
         self.fail('fixture task did not finish')
+
+    def test_sealed_input_is_streamed_to_guarded_shell_and_replay_is_idempotent(self):
+        data = (b'#!/bin/sh\nprintf "hello"\n' * 4000)[:61440]
+        spool = self.manager.artifacts
+        serial = self.device.serial
+        ready = spool.create('upload', 'case.sh', len(data), 'web', serial)
+        spool.append(ready['id'], 0, data, 'web', serial)
+        spool.seal(ready['id'], 'web', serial)
+        destination = self.root / 'script-on-board'
+        payload = {'stdin_artifact': ready['id'], 'command': 'cat > ' + shlex.quote(str(destination))}
+        task = self.finish(**payload)
+        self.assertEqual(task['outcome'], 'observed')
+        self.assertEqual(task['result']['adb_receipt']['stdin_sha256'], hashlib.sha256(data).hexdigest())
+        self.assertEqual(destination.read_bytes(), data)
+        self.assertEqual(spool.get(ready['id'], 'web', serial)['state'], 'consumed')
+        replay = self.actions.start(dict(self.payload, **payload), self.device, 'web')
+        self.assertEqual(replay.payload['task']['id'], task['id'])
+        self.assertEqual((self.root / 'commands').read_text().splitlines(), ['9'])
 
     def test_interactive_task_registers_closes_and_deduplicates_session(self):
         import socket

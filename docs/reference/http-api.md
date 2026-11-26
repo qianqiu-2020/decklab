@@ -402,6 +402,12 @@ staging through `/api/artifact-create`, `/api/artifact-append`,
 `/api/artifact-download`. Downloads include `Content-Length` and
 `X-Checksum-SHA256`; verify both before publishing a local file.
 
+An `adb-command` may pass `stdin_artifact` through `POST /api/task-start`.
+Use a sealed upload of at most 1 MiB staged for the same board and actor.
+DeckLab checks the physical serial and boot ID before starting the shell.
+The task receipt records the input size and SHA-256. The command consumes
+the staged input only after a confirmed zero exit code.
+
 Low-level POST `/api/file-transfer/start`, `/api/file-transfer/chunk`,
 `/api/file-transfer/batch`, `/api/file-transfer/finish` and
 `/api/file-transfer/abort` remain available. They use a

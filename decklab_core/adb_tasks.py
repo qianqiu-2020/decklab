@@ -1,4 +1,5 @@
 """Run one identity-pinned ADB shell command as a durable board task."""
+from contextlib import nullcontext
 import os
 import re
 import secrets
@@ -8,6 +9,7 @@ import subprocess
 import threading
 import time
 
+from .api_contract import ADB_STDIN_MAX_BYTES
 from .board_cases import READ_IDENTITY, find_transport
 from .board_maintenance import maintenance_for
 from .agent_grants import GrantRevoked
@@ -45,7 +47,7 @@ class Output:
             return self.head[:size].decode('utf-8', 'replace'), max(0, size - len(self.head)), match
 
 
-def remote_command(command, serial, boot_id, marker):
+def remote_command(command, serial, boot_id, marker, *, stdin=False):
     # The ADB server can assign a new transport ID after a restart. Repeat
     # identity and boot checks in the shell that actually runs the command.
     return READ_IDENTITY + (
@@ -53,16 +55,17 @@ def remote_command(command, serial, boot_id, marker):
         'if [ "$serial" != ' + shlex.quote(serial) + ' ] || [ "$boot" != ' + shlex.quote(boot_id) + ' ]; then\n'
         "    printf '\\036" + marker + ":rejected\\n'; exit 0\n"
         'fi\n'
-        '/bin/sh -c ' + shlex.quote(command) + ' </dev/null\n'
-        "printf '\\036" + marker + ":%s\\n' \"$?\"\n")
+        '/bin/sh -c ' + shlex.quote(command) + ('\n' if stdin else ' </dev/null\n')
+        + "printf '\\036" + marker + ":%s\\n' \"$?\"\n")
 
 
 class AdbCommand:
-    def __init__(self, manager, device, executable, port, facts, registered, command, timeout):
+    def __init__(self, manager, device, executable, port, facts, registered, command, timeout, actor, stdin):
         self.manager, self.device, self.executable = manager, device, executable
         self.serial, self.connection, self.stop = device.serial, device.connection_id, device.stop
         self.port, self.boot_id, self.registered = port, facts['boot_id'], registered
         self.command, self.timeout = command, timeout
+        self.actor, self.stdin = actor, stdin
         self.maintenance = maintenance_for(manager)
 
     def check_board(self):
@@ -79,6 +82,9 @@ class AdbCommand:
         receipt = {'command': self.command, 'state': 'checking', 'usb_port': self.port,
                    'stdout': '', 'stderr': '', 'exit_code': None}
         result = {'adb_receipt': receipt}
+        claimed = False
+        if self.stdin is not None:
+            receipt.update(stdin_size=self.stdin['size'], stdin_sha256=self.stdin['sha256'])
 
         def save(outcome=None):
             context.store.update(context.id, result=result, outcome=outcome)
@@ -99,28 +105,43 @@ class AdbCommand:
             frame = re.compile(rb'\x1e' + marker.encode() + rb':(rejected|[0-9]{1,3})\r?\n\Z')
             receipt.update(state='running', started_at=time.time(), transport_id=endpoint,
                            serial_window=serial_window(self.device))
-            result['cleanup_confirmed'] = False
-            save()
-            context.issued()
-            try:
-                process = subprocess.Popen([self.executable, '-t', endpoint, 'shell', '-T',
-                    remote_command(self.command, self.serial, self.boot_id, marker)],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
-                    env={**os.environ, **ADB_ENV})
-            except OSError as error:
-                receipt['state'] = 'unavailable'
-                result['cleanup_confirmed'] = True
-                save('not-issued')
-                raise TaskError('控制机无法启动 ADB，命令未执行', 409) from error
-            confirmed = False
-            return self.wait(process, context, receipt, result, frame, save)
+            source = nullcontext(subprocess.DEVNULL)
+            if self.stdin is not None:
+                artifact = self.manager.artifacts.claim(self.stdin['id'], context.id, self.actor, self.serial)
+                claimed = True
+                if (artifact['sha256'], artifact['size']) != (self.stdin['sha256'], self.stdin['size']):
+                    raise TaskError('ADB 输入文件已变化', 409)
+                source = self.manager.artifacts.open(artifact['id'], self.actor, self.serial, context.id)
+            with source as input_stream:
+                context.check()
+                self.check_board()
+                result['cleanup_confirmed'] = False
+                save()
+                context.issued()
+                try:
+                    process = subprocess.Popen([self.executable, '-t', endpoint, 'shell', '-T',
+                        remote_command(self.command, self.serial, self.boot_id, marker, stdin=claimed)],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=input_stream,
+                        env={**os.environ, **ADB_ENV})
+                except OSError as error:
+                    receipt['state'] = 'unavailable'
+                    result['cleanup_confirmed'] = True
+                    save('not-issued')
+                    raise TaskError('控制机无法启动 ADB，命令未执行', 409) from error
+                confirmed = False
+                return self.wait(process, context, receipt, result, frame, save)
         except TaskError:
             if receipt['state'] == 'checking':
                 receipt.update(state='rejected', finished_at=time.time())
                 save()
             raise
         finally:
-            self.maintenance.release(context.id, confirmed=confirmed or result.get('cleanup_confirmed') is True)
+            try:
+                if claimed:
+                    self.manager.artifacts.finish_claim(self.stdin['id'], context.id,
+                        consumed=receipt['state'] == 'exited' and receipt['exit_code'] == 0)
+            finally:
+                self.maintenance.release(context.id, confirmed=confirmed or result.get('cleanup_confirmed') is True)
 
     def wait(self, process, context, receipt, result, frame, save):
         out, err = Output(), Output()
@@ -185,7 +206,7 @@ class AdbCommand:
 
 def start(manager, device, payload, actor):
     if set(payload) - {'kind', 'key', 'serial', 'connection_id', 'actor', 'client_id',
-                       'request_id', 'command', 'timeout', 'execution_lease'}:
+                       'request_id', 'command', 'timeout', 'execution_lease', 'stdin_artifact'}:
         raise TaskError('invalid ADB command parameters')
     if device is None or not device.serial or payload.get('serial') != device.serial:
         raise TaskError('ADB 命令需要已识别的板卡', 409)
@@ -196,13 +217,26 @@ def start(manager, device, payload, actor):
             or type(timeout) is not int or not 1 <= timeout <= 3600):
         raise TaskError('请填写不超过 2048 字节的命令，等待时限为 1–3600 秒')
     request_id = payload.get('request_id')
-    digest = manager.tasks.store.request_digest(
-        {'kind': 'adb-command', 'serial': device.serial, 'connection_id': payload.get('connection_id'),
-         'command': command, 'timeout': timeout})
+    identity = {'kind': 'adb-command', 'serial': device.serial, 'connection_id': payload.get('connection_id'),
+                'command': command, 'timeout': timeout}
+    stdin = None
+    if 'stdin_artifact' in payload:
+        artifact_id = payload['stdin_artifact']
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise TaskError('ADB 输入需要已暂存的文件')
+        if getattr(manager, 'artifacts', None) is None:
+            raise TaskError('ADB 输入文件暂存不可用', 503)
+        stdin = manager.artifacts.get(artifact_id, actor, device.serial)
+        if (stdin['direction'] != 'upload' or not stdin.get('sha256') or stdin['size'] > ADB_STDIN_MAX_BYTES):
+            raise TaskError('ADB 输入需要已封存且不超过 1 MiB 的上传文件', 409)
+        identity['stdin_sha256'] = stdin['sha256']
+    digest = manager.tasks.store.request_digest(identity)
     validate_request(request_id, digest)
     previous = manager.tasks.store.find_request(actor, request_id, digest)
     if previous is not None:
         return manager.tasks.store.get(previous)
+    if stdin is not None and stdin['state'] != 'ready':
+        raise TaskError('ADB 输入文件未就绪', 409)
     if not device.present or device.stop.is_set() or payload.get('connection_id') != device.connection_id:
         raise TaskError('板卡串口连接已变化', 409)
     if manager.store.has_conflict(device.serial):
@@ -220,7 +254,7 @@ def start(manager, device, payload, actor):
         raise TaskError(str(error), 409) from error
     except (OSError, subprocess.TimeoutExpired) as error:
         raise TaskError('控制机暂时无法读取 USB 调试连接', 409) from error
-    operation = AdbCommand(manager, device, executable, port, facts, registered, command, timeout)
+    operation = AdbCommand(manager, device, executable, port, facts, registered, command, timeout, actor, stdin)
     if payload['connection_id'] != operation.connection:
         raise TaskError('板卡串口连接已变化', 409)
     operation.check_board()
