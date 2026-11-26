@@ -384,7 +384,9 @@
         +(result.current_command?' · 命令 '+result.current_command+' / '+result.total_commands:''),box);
       if (task.cancel_requested && active()) text('p',result.current_command
         ? '等待当前命令的串口结果，随后停止。' : '等待本轮观察结束，随后停止。',box);
-      if (task.flash?.recovery_required && result.service) {
+      if (task.flash?.recovery_required && task.kind === 'team-plan') {
+        text('p','先在 TitanX 核对原计划及板端操作是否结束，再解除复测限制。',box);
+      } else if (task.flash?.recovery_required && result.service) {
         text('p','板卡仍保留给本任务。确认板端服务 '+result.service+' 已结束后释放。',box);
       }
       const issue = result.first_issue;
@@ -471,7 +473,7 @@
         cases = definitions.cases;
         canCreate = true;
         populateCases();
-        const runs=history.tasks.filter(t=>t.kind==='board-test');
+        const runs=history.tasks.filter(t => t.kind === 'board-test' || t.kind === 'team-plan');
         const running = runs.find(run=>['queued','running'].includes(run.state));
         runningId = running?.id;
         for(const run of runs) rememberRun(run);
@@ -590,7 +592,9 @@
     });
     $('board-tests-release').addEventListener('click',async()=>{
       if (!task?.flash?.recovery_required || pending) return;
-      const reason=global.prompt('核实原用例已结束后，填写释放板卡的依据。');
+      const reason = global.prompt(task.kind === 'team-plan'
+        ? '核实 TitanX 原计划及板端操作已结束后，填写解除复测限制的依据。'
+        : '核实原用例已结束后，填写释放板卡的依据。');
       if (!reason?.trim()) return;
       const gen=sequence, id=task.id;
       pending=true;

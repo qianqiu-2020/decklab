@@ -39,6 +39,35 @@ def mapping(serial):
         raise TaskError('控制机的团队测试槽位配置无效', 503) from error
 
 
+def board_mapping(platform, serial):
+    return mapping(serial) or archived_mapping(platform, serial)
+
+
+def archived_mapping(platform, serial):
+    data = platform.request('/deviceBoard/listVO', {'decklabSerial': serial, 'pageNo': 1, 'pageSize': 2})
+    rows = data['list']
+    if data['total'] != 1 or len(rows) != 1:
+        return None
+    row = rows[0]
+    code, slot = row.get('code'), row.get('deviceId')
+    if (row.get('decklabSerial') != serial or type(row.get('decklabSlot')) is not int
+            or not isinstance(code, str) or not code or not isinstance(slot, str)
+            or not re.fullmatch(r'[\w.-]+:[0-9]+', slot)
+            or int(slot.rsplit(':', 1)[1]) != row['decklabSlot']):
+        return None
+    return {'code': code, 'device_id': slot, 'require_decklab': True}
+
+
+def uses_decklab_reservation(row, serial, configured):
+    reported_serial, reported_slot = row.get('decklabSerial'), row.get('decklabSlot')
+    if reported_serial is None and reported_slot is None and not configured.get('require_decklab'):
+        return False
+    if (reported_serial != serial or type(reported_slot) is not int
+            or reported_slot != int(configured['device_id'].rsplit(':', 1)[1])):
+        raise TaskError('TitanX 的 DeckLab 板号或槽位与本板不符', 409)
+    return True
+
+
 def match_board(platform, manager, board, serial, generation, configured):
     if board.serial != serial or board.connection_id != generation:
         raise TaskError('当前板卡连接已变化', 409)
@@ -100,19 +129,28 @@ def start(manager, device, payload, actor):
     previous = manager.tasks.store.find_request(actor, request_id, digest)
     if previous is not None:
         return manager.tasks.store.get(previous)
-    platform, configured = TeamCases.configured(), mapping(serial)
-    if not platform or not configured:
+    platform = TeamCases.configured()
+    configured = board_mapping(platform, serial) if platform else None
+    if not configured:
         raise TaskError('本板尚未关联 TitanX 设备编号和节点槽位', 409)
     case = case_plan(platform, case_id)
     coordinator = maintenance_for(manager)
     code = configured['code']
+    initial = match_board(platform, manager, device, serial, generation, configured)
+    delegated = uses_decklab_reservation(initial, serial, configured)
+
+    def current_board():
+        row = match_board(platform, manager, device, serial, generation, configured)
+        if uses_decklab_reservation(row, serial, configured) != delegated:
+            raise TaskError('TitanX 板卡托管方式已变化，请重新选择设备', 409)
+        return row
 
     def run(context):
         running = False
         result = {'source':'titanx', 'case_name':case['name'], 'platform_device':code,
                   'platform_plan':'DeckLab-' + context.id}
         try:
-            row = match_board(platform, manager, device, serial, generation, configured)
+            row = current_board()
             owner = platform.request('/userInfo/detail')['id']
             info = {'name':result['platform_plan'], 'owner':owner, 'follower':'', 'imageUrl':'',
                     'restartDeviceBeforeTest':False, 'aiAutoHeal':False, 'debugMode':False,
@@ -134,10 +172,17 @@ def start(manager, device, payload, actor):
                     or actual.get('imageUrl') or [d['deviceId'] for d in devices] != [code]
                     or [(c['caseId'], c['times']) for c in cases] != [(case_id, repeats)]):
                 raise TaskError('平台保存的计划与选择不一致', 409)
-            match_board(platform, manager, device, serial, generation, configured)
+            current_board()
             context.issued()
             running = True
-            platform.request(f'/taskInfo/start?taskId={tid}')
+            try:
+                platform.request(f'/taskInfo/start?taskId={tid}')
+            except TaskError as error:
+                if error.status < 500:
+                    raise
+                original = platform.request(f'/taskInfo/{tid}')
+                if original.get('id') != tid or original.get('status') not in (1, 2, -2, -3):
+                    raise error
             deadline = time.monotonic() + 65 * 60
             cancel_sent = False
             while time.monotonic() < deadline:
@@ -172,6 +217,7 @@ def start(manager, device, payload, actor):
             else:
                 coordinator.release(context.id, confirmed=True)
 
-    return manager.tasks.start_board('board-test', actor, payload.get('client_id', ''), serial, run,
-                                     request_id=request_id, input_digest=digest, maintenance=coordinator,
+    return manager.tasks.start_board('team-plan' if delegated else 'board-test', actor, payload.get('client_id', ''),
+                                     serial, run, request_id=request_id, input_digest=digest,
+                                     details={'attempt_id': request_id}, maintenance=coordinator,
                                      connection_id=generation, tracks_outcome=True)

@@ -247,11 +247,11 @@ class Handler(LegacyRequest, http.server.BaseHTTPRequestHandler):
                     return self._json(200, {'configured': False})
                 result = platform.browse(q)
                 if q.get('view') == ['detail'] and q.get('key'):
-                    from .team_run import mapping
+                    from .team_run import board_mapping
                     device = self._dev(q)
                     if not device or not device.present or not device.serial or q.get('connection_id') != [device.connection_id]:
                         raise TaskError('当前板卡连接已变化', 409)
-                    result['mapped'] = mapping(device.serial) is not None
+                    result['mapped'] = board_mapping(platform, device.serial) is not None
                 return self._json(200, result)
             except TaskError as error:
                 return self._json(error.status, {'error': str(error)})

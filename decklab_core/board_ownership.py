@@ -166,7 +166,7 @@ class BoardInputOwnership:
         if self.maintenance._active.get(resource, 0) or self.maintenance.holds(serial):
             raise self._error('开发板仍有操作或恢复占用', 'busy')
         active = self.store.db.execute(
-            "SELECT 1 FROM tasks t WHERE t.state IN ('queued','running') AND ("
+            "SELECT 1 FROM tasks t WHERE t.state IN ('queued','running') AND t.kind != 'team-plan' AND ("
             'EXISTS(SELECT 1 FROM task_targets x WHERE x.task_id=t.id AND x.serial=?) OR '
             'EXISTS(SELECT 1 FROM task_board_targets x WHERE x.task_id=t.id AND x.serial=?)) LIMIT 1',
             (serial, serial)).fetchone()

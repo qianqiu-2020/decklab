@@ -57,6 +57,25 @@ class BoardOwnershipTests(unittest.TestCase):
             self.assertEqual(denied.status, 423)
             self.assertEqual(write.call_count, 3)
 
+    def test_platform_tracker_allows_execution_claim_and_fences_second_plan(self):
+        from decklab_core.board_maintenance import maintenance_for
+        from decklab_core.tasks import TaskError
+
+        maintenance = maintenance_for(self.manager)
+        task_store = self.manager.tasks.store
+        with maintenance.team_plan_admission('BOARD-A') as resources:
+            task_id = task_store.create_board('team-plan', 'web', '', 'BOARD-A', 'plan-request',
+                                              'a' * 64, {}, resources, self.device.connection_id)
+        self.assertEqual(task_store.get(task_id)['state'], 'queued')
+        with self.assertRaises(TaskError):
+            with maintenance.team_plan_admission('BOARD-A'):
+                self.fail('two plans reserved the same board')
+        proof = self.claim()
+        with self.assertRaises(TransactionError):
+            self.claim('other')
+        self.owner.release('BOARD-A', 'platform', '', proof)
+        self.assertIsNone(self.owner.current('BOARD-A'))
+
     def test_concurrent_claims_have_one_winner(self):
         gate = threading.Barrier(3)
         results = []

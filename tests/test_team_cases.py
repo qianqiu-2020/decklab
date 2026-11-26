@@ -126,6 +126,29 @@ class ExecutionTests(unittest.TestCase):
         with self.assertRaises(TaskError):
             self.submit()
 
+    def test_decklab_board_tracks_plan_without_claiming_execution(self):
+        self.row.update(decklabSerial='S', decklabSlot=0)
+        self.assertEqual(self.submit()['completed_rounds'], 1)
+        self.assertEqual(self.manager.tasks.start_board.call_args.args[0], 'team-plan')
+
+    def test_archived_board_requires_exact_serial_and_slot(self):
+        self.row.update(decklabSerial='S', decklabSlot=0)
+        self.assertEqual(team_run.archived_mapping(self.platform, 'S')['device_id'], 'edge:0')
+        self.assertIsNone(team_run.archived_mapping(self.platform, 'OTHER'))
+        self.row['decklabSlot'] = 1
+        self.assertIsNone(team_run.archived_mapping(self.platform, 'S'))
+
+    def test_accepted_start_with_lost_ack_reads_original_plan(self):
+        def lost(path, body=None):
+            result = self.call(path, body)
+            if path.startswith('/taskInfo/start?'):
+                raise TaskError('lost response', 502)
+            return result
+        self.platform.request.side_effect = lost
+        self.assertEqual(self.submit()['completed_rounds'], 1)
+        self.assertEqual(self.started, 1)
+        self.maintenance.release.assert_called_once()
+
     def test_existing_request_observes_original_task(self):
         self.manager.tasks.store.find_request.return_value = 'previous'
         self.submit()

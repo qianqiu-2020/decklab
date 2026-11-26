@@ -178,7 +178,7 @@ class TaskStore:
         """Atomically bind one execution, idempotency key and durable resource holds."""
         from .flash_store import encode_document, validate_request
         validate_request(request_id, input_digest)
-        if kind not in ('flash', 'flash-inspect', 'ram-boot', 'board-test', 'adb-command') or not isinstance(actor, str) or not actor or len(actor) > 80:
+        if kind not in ('flash', 'flash-inspect', 'ram-boot', 'board-test', 'adb-command', 'team-plan') or not isinstance(actor, str) or not actor or len(actor) > 80:
             raise TaskError('invalid board task kind or actor')
         if not isinstance(client_id, str) or len(client_id) > 80:
             raise TaskError('invalid board task client')
@@ -581,8 +581,12 @@ class TaskManager:
             if len(self._active) >= self.max_active:
                 raise TaskError('too many active tasks', 429)
             run = self._execution_runner(run, actor, client_id)
-            admission = (maintenance.target_admission(target_id, target_generation, serial, resources, actor, client_id)
-                         if target_id is not None else maintenance.admission(serial, resources, actor, client_id))
+            if kind == 'team-plan':
+                admission = maintenance.team_plan_admission(serial, actor, client_id)
+            elif target_id is not None:
+                admission = maintenance.target_admission(target_id, target_generation, serial, resources, actor, client_id)
+            else:
+                admission = maintenance.admission(serial, resources, actor, client_id)
             with admission as selected:
                 task_id = self.store.create_board(kind, actor, client_id, serial, request_id, input_digest,
                     details if details is not None else {}, selected, connection_id,

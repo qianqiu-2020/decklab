@@ -112,7 +112,7 @@
     var $ = options.byId, client = createClient(options.fetch), request = client.request;
     var selection = '', offset = 0, sequence = 0;
     var names = { 'desktop-input': '桌面输入', identify: '识别设备', 'ssh-enable': '启用 SSH', 'ssh-connect': '建立 SSH', 'file-copy': '板间复制',
-                  'board-test': '板卡用例', 'adb-command': 'ADB 命令', 'adb-connect': '建立 ADB 终端',
+                  'board-test': '板卡用例', 'team-plan': 'TitanX 用例', 'adb-command': 'ADB 命令', 'adb-connect': '建立 ADB 终端',
                   'file-upload': '上传文件', 'file-download': '下载文件', 'image-download': '下载刷机镜像', 'image-prepare': '准备刷机镜像',
                   'hardware-power-on': '硬件上电', 'hardware-power-off': '硬件断电',
                   'hardware-reset': '硬件复位', 'hardware-enter-download': '进入下载模式', 'hardware-flash': '外部刷机', flash: '刷机', 'flash-inspect': '刷机预检', 'flash-preview': '预览刷写范围', 'ram-boot': '内存启动' };
@@ -145,7 +145,7 @@
           + (task.cancel_requested ? ' · 已请求取消' : '');
         main.appendChild(title); main.appendChild(detail);
         var reported = task.progress || {};
-        if (task.kind === 'board-test' && options.openBoardTest) {
+        if ((task.kind === 'board-test' || task.kind === 'team-plan') && options.openBoardTest) {
           var testResult = document.createElement('button'); testResult.type = 'button'; testResult.textContent = '查看轮次';
           testResult.addEventListener('click', function () { if (sameSelection(selected)) options.openBoardTest(task); });
           row.appendChild(testResult);

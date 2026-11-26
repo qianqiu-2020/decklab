@@ -45,7 +45,7 @@ class BoardMaintenance:
                                   (time.time(),))
             self.store.db.execute("UPDATE flash_details SET document=json_set(document,'$.recovery_required',json('true')) "
                 "WHERE task_id IN (SELECT t.id FROM tasks t JOIN flash_resource_holds h ON h.task_id=t.id "
-                "WHERE t.kind IN ('image-prepare','board-test') AND t.state='interrupted')")
+                "WHERE t.kind IN ('image-prepare','board-test','team-plan') AND t.state='interrupted')")
 
     @staticmethod
     def resources(serial, resources=()):
@@ -118,6 +118,14 @@ class BoardMaintenance:
             self._check_resources(selected)
             self._check_attachment(serial, actor, client_id)
             yield selected
+
+    @contextmanager
+    def team_plan_admission(self, serial, actor='web', client_id=''):
+        # This task follows the platform plan. Edge opens the actual execution
+        # lease before executing any step; the monitor only owns plan tracking.
+        resource = 'team-plan:' + serial
+        with self.admission(serial, (resource,), actor, client_id):
+            yield [resource]
 
     def target_resources(self, target_id, serial='', resources=()):
         if (not isinstance(target_id, str) or not target_id or len(target_id) > 80
@@ -456,7 +464,7 @@ class BoardMaintenance:
             tasks, flashes = TaskStore(self.store), FlashStore(self.store)
             task = tasks.get(task_id)
             details = flashes.details(task_id)
-            if (task['kind'] not in ('flash', 'flash-inspect', 'image-prepare', 'ram-boot', 'board-test') or not isinstance(expected_attempt_id, str)
+            if (task['kind'] not in ('flash', 'flash-inspect', 'image-prepare', 'ram-boot', 'board-test', 'team-plan') or not isinstance(expected_attempt_id, str)
                     or not expected_attempt_id or details.get('attempt_id') != expected_attempt_id):
                 raise TaskError('flash recovery execution attempt changed', 409)
             if task['state'] not in ('failed', 'cancelled', 'interrupted', 'completed'):
