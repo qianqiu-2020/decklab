@@ -66,12 +66,11 @@ class ConsoleVisibilityTests(unittest.TestCase):
     def test_serial_diagnosis_requires_an_idle_unowned_shell(self):
         device = self.device
         with mock.patch.object(device, 'ensure_shell') as login, \
-                mock.patch.object(device, '_write', side_effect=self.shell_write) as write:
+                mock.patch.object(device, '_run_cmd_locked', return_value=(True, 'adbd=running\n')) as run:
             ok, output = device.console.run_idle_command('echo adbd=running',
                                                         expected_connection=device.connection_id)
             self.assertTrue(ok)
-            self.assertIn('\nadbd=running\n', '\n' + output)
-            write.reset_mock()
+            self.assertEqual(output, 'adbd=running\n')
             with mock.patch.object(device.transactions, 'ownership', return_value={'actor': 'web'}):
                 self.assertFalse(device.console.run_idle_command(
                     'echo adbd=running', expected_connection=device.connection_id)[0])
@@ -79,7 +78,7 @@ class ConsoleVisibilityTests(unittest.TestCase):
             self.assertFalse(device.console.run_idle_command(
                 'echo adbd=running', expected_connection=device.connection_id)[0])
             login.assert_not_called()
-            write.assert_not_called()
+            run.assert_called_once_with('echo adbd=running', 5, ensure_shell=False)
 
     def test_setup_echo_is_hidden_but_geometry_raw_capture_and_user_commands_remain(self):
         def write(text):

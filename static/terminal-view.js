@@ -608,11 +608,13 @@
         if (!terminalVisible(ctx) || ctx.readonly) return;
         var dimensions = ctx.screenManaged ? preferredGrid(ctx) : {cols: ctx.term.cols, rows: ctx.term.rows};
         if (!dimensions) return;
-        var signature = dimensions.cols + ':' + dimensions.rows;
+        // SSH and ADB PTYs require at least five rows even in a short viewport.
+        var rows = Math.max(5, dimensions.rows);
+        var signature = dimensions.cols + ':' + rows;
         if (signature === ctx.lastSizeRequest) return;
         ctx.lastSizeRequest = signature;
         fetch('/api/session-resize', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: ctx.key, serial: ctx.serial, sid: ctx.sid, cols: dimensions.cols, rows: dimensions.rows })
+          body: JSON.stringify({ key: ctx.key, serial: ctx.serial, sid: ctx.sid, cols: dimensions.cols, rows: rows })
         }).catch(function () { ctx.lastSizeRequest = null; });
       }, 250);
     }

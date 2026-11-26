@@ -256,9 +256,14 @@ const server = http.createServer((req, res) => {
   }
   if (u.pathname === '/api/tasks') return json({tasks:flashRecords});
   const route = u.pathname === '/' ? '/index.html' : u.pathname;
-  if (!['/index.html', '/static/i18n.js', '/static/app.js', '/static/desktop.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/board-tests.js', '/static/control-slots.js', '/static/board-control.js', '/static/app.css', '/static/icons.svg', '/static/decklab.svg', '/static/decklab.png', '/vendor/xterm.js', '/vendor/addon-fit.js', '/vendor/xterm.css'].includes(route)) { res.statusCode=404; res.end(); return; }
+  const file = path.join(root, route);
+  // Like the application, serve bundled assets as index.html adds modules.
+  if ((route !== '/index.html' && !/^\/(?:static|vendor)\/(?:[\w-]+\/)*[\w.-]+\.(?:js|css|svg|png)$/.test(route))
+      || !fs.statSync(file, {throwIfNoEntry:false})?.isFile()) {
+    res.statusCode=404; res.end(); return;
+  }
   res.setHeader('Content-Type', route.endsWith('.js') ? 'application/javascript' : route.endsWith('.css') ? 'text/css' : route.endsWith('.svg') ? 'image/svg+xml' : route.endsWith('.png') ? 'image/png' : 'text/html');
-  res.end(fs.readFileSync(path.join(root, route)));
+  res.end(fs.readFileSync(file));
 });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let chrome, ws;
