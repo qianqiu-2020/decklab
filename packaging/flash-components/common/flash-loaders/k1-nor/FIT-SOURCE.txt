@@ -1,0 +1,48 @@
+/dts-v1/;
+
+/ {
+    description = "MUSE-Pi-Pro temporary U-Boot with the reference OpenSBI";
+    #address-cells = <2>;
+
+    images {
+        opensbi {
+            description = "Reference K1 OpenSBI";
+            data = /incbin/("opensbi.bin");
+            type = "firmware";
+            arch = "riscv";
+            os = "opensbi";
+            compression = "none";
+            load = <0 0>;
+            entry = <0 0>;
+            hash-1 { algo = "crc32"; };
+        };
+        uboot {
+            description = "Volatile download U-Boot";
+            data = /incbin/("temporary-uboot.bin");
+            type = "standalone";
+            arch = "riscv";
+            os = "u-boot";
+            compression = "none";
+            load = <0 0x00200000>;
+            hash-1 { algo = "crc32"; };
+        };
+        fdt_14 {
+            description = "MUSE-Pi-Pro control tree";
+            data = /incbin/("temporary-muse-pi-pro.dtb");
+            type = "flat_dt";
+            arch = "riscv";
+            compression = "none";
+            hash-1 { algo = "crc32"; };
+        };
+    };
+
+    configurations {
+        default = "conf_14";
+        conf_14 {
+            description = "k1-x_MUSE-Pi-Pro";
+            firmware = "opensbi";
+            loadables = "uboot";
+            fdt = "fdt_14";
+        };
+    };
+};

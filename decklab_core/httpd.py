@@ -1,5 +1,6 @@
 """Bounded HTTP servers for TCP control traffic and the local Unix API."""
 import os
+import socket
 import socketserver
 import threading
 
@@ -37,6 +38,27 @@ class BoundedThreadingTCPServer(_BoundedMixIn, socketserver.ThreadingTCPServer):
     def __init__(self, *args, **kwargs):
         self._init_workers()
         super().__init__(*args, **kwargs)
+
+
+class WebTCPServer(BoundedThreadingTCPServer):
+    """Share one Web listener across IPv4 and IPv6 in all-interface mode."""
+
+    def __init__(self, address, handler):
+        host, port = address
+        self.bind_host = host
+        self.dual_stack = host in ('0.0.0.0', '::') and socket.has_dualstack_ipv6()
+        if self.dual_stack:
+            host = '::'
+        self.address_family = socket.AF_INET6 if ':' in host else socket.AF_INET
+        if host == '::' and not self.dual_stack:
+            host = '0.0.0.0'
+            self.address_family = socket.AF_INET
+        super().__init__((host, port), handler)
+
+    def server_bind(self):
+        if self.address_family == socket.AF_INET6:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, int(not self.dual_stack))
+        super().server_bind()
 
 
 if hasattr(socketserver, 'ThreadingUnixStreamServer'):

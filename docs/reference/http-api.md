@@ -71,6 +71,11 @@ credential can access it; Agent tokens and webpage-share credentials cannot.
 An open-access installation retains its existing open-owner semantics.
 Responses use `Cache-Control: no-store`.
 
+The `activation` receipt keeps the most recent apply attempt across process
+restart. It reports the target revision, restart scope, current phase, and
+timestamped steps. An interrupted or unknown attempt has no confirmed result.
+The receipt contains no configuration values.
+
 `POST /api/settings` requires `application/json`, UTF-8, `Content-Length`, and a
 body of at most 2 MiB. Supported actions:
 
@@ -174,6 +179,7 @@ begun: a truncated download or dropped SSE connection requires client recovery.
 | Method and route | Parameters / behavior |
 | --- | --- |
 | GET `/healthz` | Control-process health, not proof of board health |
+| GET `/api/update-check` | Primary Web credential. Returns the current and latest stable GitHub versions and matching versioned installer metadata. The controller performs the request. |
 | GET `/api/health` | Collector uptime, version, device counts, disk and logging status; unavailable to single-board grants |
 | GET `/api/capabilities` | Protocol version/features; no board commands |
 | GET `/api/devices` | Online, pending and historical device snapshots; grants filter by serial or live connection |
@@ -676,9 +682,10 @@ K1/K3. `refresh=1` bypasses the 60-second metadata cache. Responses contain
 `entries` with `name`, `path`, `kind` and, for images, `url`, available size/date
 metadata and `validation: preview-required`. Repository failures return 502;
 no image download or board action occurs. See [image store](../modules/image-store.md).
-`GET /api/image-library` returns ready shared uploads and existing active global
-image-download tasks. These catalog/library routes and URL import require a human
-Web operator; Agent grants cannot access them.
+`GET /api/image-library` returns ready uploads and active image tasks.
+`GET /api/image-library?history=1` returns the most recent 20 scoped download and
+preparation tasks, including failed or interrupted tasks. Scoped callers see
+the artifacts and tasks visible to their grant. URL import requires a Web operator.
 
 `POST /api/image-download` accepts an optional Web-operated device/USB target scope,
 `url`, required stable `request_id`, optional `name` and `sha256`. During prepared

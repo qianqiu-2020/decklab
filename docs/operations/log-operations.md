@@ -1,5 +1,12 @@
 # Log retention and diagnostics
 
+Click the connection status in the page header to see the Web service and
+collector separately, including log storage and write errors. On a device page,
+open **Device → Device diagnostics** to see the current UART connection, receive
+count and timestamps, log status, the most recent serial health check, and any
+input owner. The details are loaded on demand from the current records. Opening
+or refreshing the dialog does not send commands to the board.
+
 ## Unidentified serial connections
 
 Before a board serial is confirmed, each connection is stored separately under

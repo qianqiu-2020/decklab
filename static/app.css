@@ -81,10 +81,18 @@
     color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);border-radius:16px;
     padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.28)}
   .agent-share-dialog::backdrop{background:rgba(9,23,25,.6)}
+  #diagnostics-body h3{font-size:14px;margin:16px 0 8px}
+  #diagnostics-body dl{display:grid;grid-template-columns:minmax(98px, 1fr) minmax(0, 2fr);
+    margin:0;overflow:hidden;border:1px solid var(--line);border-radius:8px;font-size:12px}
+  #diagnostics-body dt,#diagnostics-body dd{margin:0;padding:7px 10px;border-bottom:1px solid var(--line)}
+  #diagnostics-body dt{color:var(--ink-2);background:var(--surface-2)}
+  #diagnostics-body dd{overflow-wrap:anywhere}
+  #diagnostics-body dl>:nth-last-child(-n+2){border-bottom:0}
   .probe-settings-dialog{width:min(720px,calc(100vw - 28px));max-height:calc(100dvh - 28px);overflow:auto;
     padding:22px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);color:var(--ink)}
   .probe-settings-dialog::backdrop{background:rgba(9,23,25,.6)}
   .probe-settings-dialog p{color:var(--ink-2);font-size:12px;line-height:1.6}
+  #probe-settings-default-command{max-height:12rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
   .probe-settings-field{display:grid;gap:6px;margin:12px 0;color:var(--ink-2);font-size:12px}
   .probe-settings-field select,.probe-settings-field textarea{width:100%;padding:10px;border:1px solid var(--line-strong);
     border-radius:8px;background:var(--surface-2);color:var(--ink)}
@@ -248,6 +256,7 @@
   .terminal-tools #terminal-search-status{font:11.5px var(--font-mono);color:var(--ink-3);white-space:nowrap}
   .terminal-status{flex:none;padding:5px 14px;color:var(--ink-2);font-size:11px;background:var(--accent-soft);border-bottom:1px solid var(--line)}
   .terminal-status:empty{display:none}
+  .terminal-status button,#board-control-status button{margin-inline-start:8px;padding:2px 6px;color:var(--accent);font-size:inherit}
   .console-layout{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;min-height:0;flex:1;overflow:hidden}
   .console-layout.records-open{grid-template-columns:minmax(0,1fr) minmax(300px,360px)}
   .console-main{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column}
@@ -439,7 +448,8 @@
   .fl-partition:last-child{border-bottom:0}
   .fl-partition:hover{background:color-mix(in srgb,var(--surface-2) 55%,transparent)}
   .fl-partition:has(>label input:checked){background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
-  #fl-partitions>p{margin:0;padding:22px 14px;color:var(--ink-3);font-size:12px;text-align:center}
+  .fl-partition-setup{padding:18px 14px;display:grid;gap:12px;justify-items:start}
+  .fl-partition-setup .fl-hint{margin:0}
   .fl-partition label{display:flex;align-items:start;gap:10px;cursor:pointer;font-weight:600;font-size:13px}
   .fl-partition label>span{font-family:var(--font-mono)}
   .fl-partition input[type="checkbox"]{margin-top:2px;flex:none}

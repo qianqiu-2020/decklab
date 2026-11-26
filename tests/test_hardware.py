@@ -144,6 +144,10 @@ class HardwareTaskTests(unittest.TestCase):
         task = self.finish(self.start('agent'))
         self.assertEqual(task['state'], 'completed', task)
         self.assertEqual(task['outcome'], 'acknowledged')
+        self.assertEqual(task['result']['control'], {'provider': 'command', 'observation': 'not-checked', 'acknowledged': True})
+        self.assertEqual([step['phase'] for step in task['progress']['stages']],
+                         ['checking-board-control-target', 'preparing-board-controller', 'sending-board-control',
+                          'board-controller-acknowledged', 'board-control-finished'])
         self.assertEqual(json.loads(output.read_text()), [self.device.serial, self.device.dev, self.device.by_path])
         self.assertEqual(task['result']['action'], 'reset')
         self.assertNotIn('secret', json.dumps(task))

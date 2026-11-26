@@ -226,11 +226,18 @@ class DesktopSessions:
 
     def open(self, device, actor, client_id, quick=False):
         stage = ''
+        serial = device.serial
+        decision = '使用已配置的桌面入口'
+
+        def record(detail):
+            self.setup.log_activity(serial, actor, 'desktop-connection', decision + ' · ' + detail)
+
         if actor != 'web':
             from .desktop_setup import connection_fields
             approved = self.config(device, actor)
+            fields = connection_fields(approved)
             quick = (approved.get('certificate_policy') == 'accept'
-                     and self.setup.quick_eligible(device, connection_fields(approved)))
+                     and fields.get('port') == 3389 and self.setup.quick_eligible(device, fields))
         if quick:
             self.setup.identified(device)
             previous = self.book.boards.get(device.serial)
@@ -239,10 +246,15 @@ class DesktopSessions:
             config, stage = self.setup.quick_config(device, previous, actor=actor)
             if config is None:
                 if previous is None or stage in ('no-user', 'initial', 'finishing', 'lxqt-unavailable'):
+                    decision = '自动检查后转到连接设置'
+                    record('需要手动确认' + (' · ' + stage if stage else ''))
                     if actor != 'web':
                         raise TaskError('请先在设备页确认桌面服务已就绪', 409)
                     return {'manual': True, 'login_stage': stage}
                 config = previous
+                decision = '自动检查后使用已保存的桌面入口'
+            else:
+                decision = '使用 USB 检查获得的桌面入口'
         else:
             config = self.config(device, actor)
             previous = config
@@ -269,19 +281,23 @@ class DesktopSessions:
         try:
             with session['lock']:
                 session['provider'] = self.provider_factory(config)
-            if 'usb_vnc_argv' in config:
-                self.setup.log_adb(session['serial'], actor, 'adb shell · wayvnc · USB 桌面已连接')
-            return {'session': self.public(session)}
         except Exception as error:
             if 'usb_vnc_argv' in config:
-                self.setup.log_adb(session['serial'], actor, 'adb shell · wayvnc · USB 桌面连接失败')
+                self.setup.log_activity(serial, actor, 'desktop-adb', 'adb shell · wayvnc · USB 桌面连接失败')
             with self.lock:
                 self.sessions.pop(session['id'], None)
             from .desktop_errors import connection_error
             failure = connection_error(config, 'connect', error)
+            record(config['provider'].upper() + ' · 连接失败 · ' + failure.code)
             reported = TaskError(str(failure), 502)
             reported.code, reported.details = failure.code, failure.details
+            if actor == 'web' and stage:
+                reported.login_stage = stage
             raise reported from None
+        if 'usb_vnc_argv' in config:
+            self.setup.log_activity(serial, actor, 'desktop-adb', 'adb shell · wayvnc · USB 桌面已连接')
+        record(config['provider'].upper() + ' · 连接已建立' + (' · ' + stage if stage else ''))
+        return {'session': self.public(session)}
 
     def frame(self, device, sid, actor, client_id=''):
         session = self.get(device, sid, actor, client_id)
@@ -425,7 +441,7 @@ class DesktopSessions:
                 if session['provider'] is not None:
                     session['provider'].close()
                     if not already_closed and 'usb_vnc_argv' in session['config']:
-                        self.setup.log_adb(session['serial'], session['actor'], 'USB 桌面通道已关闭')
+                        self.setup.log_activity(session['serial'], session['actor'], 'desktop-adb', 'USB 桌面通道已关闭')
             finally:
                 self.release_input(session)
                 with self.lock:
@@ -491,6 +507,8 @@ class DesktopSessions:
             result = {'error': str(error), 'code': getattr(error, 'code', 'desktop-error')}
             if isinstance(getattr(error, 'details', None), dict):
                 result['details'] = error.details
+            if getattr(error, 'login_stage', ''):
+                result['login_stage'] = error.login_stage
             return response(error.status, result)
         except Exception:
             return response(502, {'error': '远程桌面不可用，请检查服务端连接；输入结果不明时先截图核对'})

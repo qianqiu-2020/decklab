@@ -29,6 +29,7 @@ _TRAINING_ENTRIES = 64
 _EMBEDDED = {}
 K1_RAM_BOOT_PROTOCOL = 'spacemit-k1-ramboot-v1'
 K3_RAM_BOOT_PROTOCOL = 'spacemit-k3-ramboot-v1'
+K1_NOR_PROTOCOL = 'spacemit-k1-nor-v1'
 RAM_BOOT_PROTOCOLS = {'k1': K1_RAM_BOOT_PROTOCOL, 'k3': K3_RAM_BOOT_PROTOCOL}
 
 
@@ -188,6 +189,17 @@ def k1_ram_boot_installed():
     return ram_boot_installed('k1')
 
 
+def k1_nor_installed():
+    try:
+        path, _, families = _manifest()
+        material = families.get('k1', {}).get('nor', {})
+        return material.get('protocol') == K1_NOR_PROTOCOL and all(
+            (path.parent / _loader_entry(material.get(name))['file']).is_file()
+            for name in ('fsbl', 'uboot'))
+    except (OSError, ValueError, AttributeError, TypeError, TaskError):
+        return False
+
+
 def ram_boot_installed(family):
     try:
         material = _manifest()[2].get(family, {}).get('ram_boot', {})
@@ -214,7 +226,7 @@ def _staged(target, check):
     return target.stat().st_size, digest.hexdigest()
 
 
-def prepare_materials(binding, workspace, check, root=None, *, ram_boot=False):
+def prepare_materials(binding, workspace, check, root=None, *, ram_boot=False, nor=False):
     """Stage the RAM loaders; `root` is the flashing work directory that keeps
     per-board DDR training results."""
     family = binding.profile_data.get('chip_family')
@@ -224,6 +236,9 @@ def prepare_materials(binding, workspace, check, root=None, *, ram_boot=False):
     if ram_boot:
         material = material.get('ram_boot') if isinstance(material, dict) else None
         protocols = (RAM_BOOT_PROTOCOLS[family],)
+    elif nor and family == 'k1':
+        material = material.get('nor') if isinstance(material, dict) else None
+        protocols = (K1_NOR_PROTOCOL,)
     if not isinstance(material, dict) or material.get('protocol') not in protocols:
         raise TaskError('预备刷机环境不支持当前芯片', 409)
     bundle = path.parent.resolve()

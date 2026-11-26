@@ -138,7 +138,7 @@ def local_control_url(server):
     """Reach this listener locally even when it binds one specific LAN address."""
     host, port = server.server_address[:2]
     if host in ('0.0.0.0', '::', ''):
-        host = '::1' if host == '::' else '127.0.0.1'
+        host = '::1' if host == '::' and not getattr(server, 'dual_stack', False) else '127.0.0.1'
     return 'http://%s:%d' % (('[' + host + ']') if ':' in host else host, port)
 
 

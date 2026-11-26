@@ -58,6 +58,11 @@ def publish(source, destination):
             if not isinstance(alternate, dict) or set(alternate) != {'protocol', 'fsbl', 'uboot'}:
                 raise ValueError('invalid RAM boot loader manifest')
             validate(family, alternate, (f'spacemit-{family}-ramboot-v1',))
+        if 'nor' in material:
+            alternate = material['nor']
+            if family != 'k1' or not isinstance(alternate, dict) or set(alternate) != {'protocol', 'fsbl', 'uboot'}:
+                raise ValueError('invalid K1 NOR loader manifest')
+            validate(family, alternate, ('spacemit-k1-nor-v1',))
     for path in source.rglob('*'):
         if path.is_symlink():
             raise ValueError('RAM loader bundle must not contain symbolic links')
@@ -208,11 +213,13 @@ if __name__ == '__main__':
     manifest = publish(args.source, args.destination)
     if k1:
         material, files, receipt = k1
-        ram_boot = manifest['families'].get('k1', {}).get('ram_boot')
-        if ram_boot:
-            if {entry['file'] for entry in (ram_boot['fsbl'], ram_boot['uboot'])} & set(files):
-                raise ValueError('K1 RAM boot loader files must not be replaced by firmware loaders')
-            material['ram_boot'] = ram_boot
+        previous = manifest['families'].get('k1', {})
+        for name in ('ram_boot', 'nor'):
+            alternate = previous.get(name)
+            if alternate:
+                if {alternate[member]['file'] for member in ('fsbl', 'uboot')} & set(files):
+                    raise ValueError('Alternate K1 loader files must not be replaced by firmware loaders')
+                material[name] = alternate
         for name, data in files.items():
             target = args.destination / name
             target.parent.mkdir(exist_ok=True)

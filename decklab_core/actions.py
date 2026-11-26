@@ -57,21 +57,21 @@ class DeviceActions:
         transactions = transactions_for(device)
         return response(200, {'operation': transactions.snapshot(), 'input_owner': transactions.ownership()})
 
-    def execute(self, action, payload, device, actor='web'):
+    def execute(self, action, payload, device, actor='web', *, on_stage=None):
         from .board_ownership import ownership_for
         ownership = ownership_for(self.manager)
         if ownership is None or not isinstance(payload, dict):
-            return self._execute(action, payload, device, actor)
+            return self._execute(action, payload, device, actor, on_stage)
         client = payload.get('client_id', '') if actor == 'web' else ''
         try:
             with ownership.scope(actor, client, payload.get('execution_lease')):
                 if action not in ('operation-cancel', 'session-close', 'input-release'):
                     ownership.check(device.serial, actor, client)
-                return self._execute(action, payload, device, actor)
+                return self._execute(action, payload, device, actor, on_stage)
         except TransactionError as error:
             return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
 
-    def _execute(self, action, payload, device, actor='web'):
+    def _execute(self, action, payload, device, actor='web', on_stage=None):
         if not isinstance(payload, dict):
             return response(400, {'error': 'JSON object required'})
         if not isinstance(actor, str) or not actor or len(actor) > 80:
@@ -85,7 +85,7 @@ class DeviceActions:
                     from .board_maintenance import maintenance_for
                     maintenance = maintenance_for(self.manager)
                     with maintenance.operation(device.serial) if maintenance is not None else nullcontext():
-                        return self._dispatch(action, payload, device, actor)
+                        return self._dispatch(action, payload, device, actor, on_stage)
                 except TransactionError as error:
                     return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
             if action in ('send', 'probe', 'identify', 'ssh-enable', 'rescue') or (
@@ -94,9 +94,9 @@ class DeviceActions:
                     transactions_for(device).check_owner(actor)
                 except TransactionError as error:
                     return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
-            return self._dispatch(action, payload, device, actor)
+            return self._dispatch(action, payload, device, actor, on_stage)
 
-    def _dispatch(self, action, payload, d, actor):
+    def _dispatch(self, action, payload, d, actor, on_stage=None):
         if action == 'probe-settings':
             # Persisting a command changes future identity probes. This is a
             # human configuration operation, never delegated by an AI grant.
@@ -254,13 +254,16 @@ class DeviceActions:
             return response(200, {'ok': ok, 'recovered': recovered, 'requires_setup': requires_setup,
                                     'note': note, 'hint': hint, 'mode': mode})
 
+        stage_options = {'on_stage': on_stage} if on_stage is not None else {}
         if action == 'adb-connect':
             import subprocess
             from .adb_session import connect
             try:
-                session = connect(self.manager, d, payload, actor)
-            except (OSError, subprocess.TimeoutExpired) as error:
+                session = connect(self.manager, d, payload, actor, **stage_options)
+            except ConnectionError as error:
                 return response(409, {'ok': False, 'error': str(error)})
+            except (OSError, subprocess.TimeoutExpired):
+                return response(409, {'ok': False, 'error': '控制机暂时无法读取 USB 调试连接'})
             return response(200, {'ok': True, 'sid': session.sid, 'ip': session.ip,
                                   'device_key': d.key, 'serial': d.serial})
 
@@ -274,7 +277,7 @@ class DeviceActions:
                 return response(400, {'ok': False, 'error': 'ssh_password must be a single-line string of at most 4096 characters'})
             try:
                 s, err = d.ssh_connect(actor=actor, title=str(payload.get('title') or '')[:2048],
-                                      ssh_user=ssh_user, ssh_password=ssh_password)
+                                      ssh_user=ssh_user, ssh_password=ssh_password, **stage_options)
             except SSHAuthenticationError as error:
                 return response(502, {'ok': False, 'code': error.code,
                                       'ssh_user': error.user, 'error': str(error)})
@@ -385,10 +388,12 @@ class DeviceActions:
             if invalid is not None:
                 return invalid
             init_marker = payload.get('init_boot_marker', False)
+            probe_options = stage_options
             if 'association' in payload:
-                info = d.run_probe(association=payload['association'], actor=actor)
-            else:
-                info = d.run_probe(init_boot_marker=True) if init_marker else d.run_probe()
+                probe_options.update(association=payload['association'], actor=actor)
+            elif init_marker:
+                probe_options['init_boot_marker'] = True
+            info = d.run_probe(**probe_options)
             if actor != 'web':
                 info = dict(info)
                 info.pop('identity_confirmation', None)

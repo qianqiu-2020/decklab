@@ -134,13 +134,21 @@ class TaskActions:
                 context.check()
                 if device.connection_id != connection or device.stop is not stop or stop.is_set():
                     raise TaskError('device connection changed', 409)
-                context.progress(0, 1, kind)
+
+                start_phase = {'identify': 'checking-probe-settings', 'ssh-connect': 'checking-session-target',
+                               'adb-connect': 'checking-session-target'}.get(kind)
+                if start_phase:
+                    context.stage(start_phase, total=1)
+                    action_options = {'on_stage': lambda phase, endpoint=None: context.stage(phase, endpoint, total=1)}
+                else:
+                    context.progress(0, 1, kind)
+                    action_options = {}
                 with device.sessions_lock:
                     existing_sessions = set(device.ssh_sessions)
                 try:
                     with transactions.task_scope(context.cancelled, connection, stop):
                         context.issued()
-                        result = DeviceActions(self.manager).execute(kind, request, device, actor)
+                        result = DeviceActions(self.manager).execute(kind, request, device, actor, **action_options)
                 except TransactionError:
                     context.check()
                     raise
@@ -177,7 +185,10 @@ class TaskActions:
                     'serial_source', 'sid', 'ip', 'auto_configured', 'already_connected',
                     'ssh_credentials_saved', 'ssh_credentials_note')}
                 # Preserve a completed result if cancellation races the final response.
-                self.tasks.store.update(context.id, progress={'done': 1, 'total': 1, 'phase': kind})
+                if start_phase:
+                    context.stage('probe-finished' if kind == 'identify' else 'session-ready', done=1, total=1)
+                else:
+                    self.tasks.store.update(context.id, progress={'done': 1, 'total': 1, 'phase': kind})
                 context.mark_outcome('observed' if kind in ('identify', 'ssh-connect', 'adb-connect') else 'acknowledged')
                 return output
             task = self.tasks.start(kind, actor, client, [

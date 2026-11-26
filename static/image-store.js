@@ -10,6 +10,7 @@
     var platform = 'k3', operatingSystem = '', channel = 'version', version = '', variant = '';
     var guided = false, directories = Object.create(null), folderChoices = Object.create(null);
     var viewKey = '', restoreScroll = null, views = {};
+    var historyRevision = 0;
     try {
       var storedViews = JSON.parse(global.localStorage.getItem('decklab-image-store-views'));
       if (storedViews && typeof storedViews === 'object') views = storedViews;
@@ -398,10 +399,42 @@
       } catch (error) { if (seq === generation) status(error.message); }
       finally { if (seq === generation) $('is-refresh').disabled = false; }
     }
+    function showTaskDetails(row, id) {
+      if (options.openTaskDetails) button('任务详情', row, function () { options.openTaskDetails(id); });
+    }
+    function taskName(task) {
+      return task.result?.artifact?.name || task.result?.download?.name || task.result?.image?.name
+        || (task.kind === 'image-download' ? '下载镜像' : '准备镜像');
+    }
+    async function loadTaskHistory() {
+      var history = $('is-task-history');
+      if (!history.open || !$('image-store-dialog').open) return;
+      var revision = ++historyRevision, list = $('is-task-list');
+      function current() { return revision === historyRevision && history.open && $('image-store-dialog').open; }
+      list.textContent = '正在读取镜像任务…';
+      try {
+        var data = await client.request('/api/image-library?history=1');
+        if (!current()) return;
+        var states = {queued:'等待执行', running:'执行中', completed:'已完成', failed:'失败', cancelled:'已取消', interrupted:'已中断'};
+        list.textContent = '';
+        (data.tasks || []).forEach(function (task) {
+          var row = text('div', '', list); row.className = 'activity-row';
+          var name = text('strong', taskName(task), row);
+          name.dataset.i18nIgnore = '';
+          text('span', states[task.state] || task.state, row);
+          if (task.created > 0) text('time', new Date(task.created * 1000).toLocaleString(), row);
+          showTaskDetails(row, task.id);
+        });
+        if (!list.children.length) list.textContent = '尚无镜像任务记录';
+      } catch (error) {
+        if (current()) list.textContent = error.message;
+      }
+    }
     function follow(task, name) {
       if (followed[task.id]) return followed[task.id];
       var box = text('div', '', $('is-downloads'));
       var preparing = task.kind === 'image-prepare';
+      name = name || taskName(task);
       var progress = text('span', preparing ? '正在准备镜像…' : '正在下载…', box);
       var cancel = button(preparing ? '取消准备' : '取消下载', box, function () {
         cancel.disabled = true;
@@ -409,18 +442,21 @@
           status(error.message); cancel.disabled = false;
         });
       });
+      showTaskDetails(box, task.id);
       var complete = false;
       followed[task.id] = client.watch(task, {key:''}, function (current) {
         var p = current.progress || {};
-        var phases = {'checking-image-sha256':'校验镜像', 'expanding-image':'解压镜像', 'checking-payloads':'校验包内文件', 'reading-payload-metadata':'读取基本信息'};
-        progress.textContent = (name ? name + ' · ' : '') + (preparing ? (phases[p.phase] || '准备镜像') + '：' : '控制机下载：') + options.formatBytes(p.done || 0)
-          + (p.total ? ' / ' + options.formatBytes(p.total) : '');
+        progress.textContent = name + ' · ' + (global.DeckLabTasks.phaseLabel?.(p.phase) || (preparing ? '准备镜像' : '控制机下载'))
+          + (p.done > 0 || p.total > 0 ? '：' + options.formatBytes(p.done || 0) + (p.total ? ' / ' + options.formatBytes(p.total) : '') : '');
       }).then(function (result) {
         complete = true;
         if (source === 'local' && $('image-store-dialog').open) loadLibrary();
         return result;
       }).catch(function (error) { progress.textContent = (name ? name + ' · ' : '') + error.message; })
-        .finally(function () { delete followed[task.id]; if (complete) box.remove(); else cancel.remove(); });
+        .finally(function () {
+          delete followed[task.id]; if (complete) box.remove(); else cancel.remove();
+          loadTaskHistory();
+        });
       return followed[task.id];
     }
     async function startDownload(item, button, firmware, norFirmware) {
@@ -481,6 +517,8 @@
         if (option.value === 'local') option.hidden = option.disabled = !!picker.streamURL;
       });
       $('is-downloads').hidden = !!picker.streamURL && !picker.streamFirmware;
+      ++historyRevision;
+      $('is-task-history').open = false;
       $('is-download-note').hidden = !!picker.streamURL;
       $('is-search').value = saved.search || '';
       restoreScroll = saved.scroll || {};
@@ -492,7 +530,8 @@
     $('image-store-dialog').addEventListener('cancel', function () { saveView(); ++generation; ++selectionSession; });
     if (global.addEventListener) global.addEventListener('pagehide', saveView);
     $('is-source').addEventListener('change', function () { source = $('is-source').value; path = ''; version = ''; directories = Object.create(null); load(); });
-    $('is-refresh').addEventListener('click', function () { load(true); });
+    $('is-task-history').addEventListener('toggle', loadTaskHistory);
+    $('is-refresh').addEventListener('click', function () { load(true); loadTaskHistory(); });
     $('is-search').addEventListener('input', draw);
     $('is-platform').addEventListener('change', function () { platform = $('is-platform').value; path = ''; version = ''; operatingSystem = ''; load(); });
     $('is-version').addEventListener('change', function () { version = $('is-version').value; folderChoices = Object.create(null); load(); });

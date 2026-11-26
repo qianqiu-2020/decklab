@@ -128,9 +128,11 @@ class DemoDevice(Device):
             self.append(''.join(echo))
         return True, ''
 
-    def run_probe(self, init_boot_marker=False):
+    def run_probe(self, init_boot_marker=False, association=None, actor='web', *, on_stage=None):
         if not self.present:
             return {'ok': False, 'error': 'Demo board is offline'}
+        if on_stage is not None:
+            on_stage('reading-probe-result')
         return dict(self.probe_info, ok=True)
 
     def configure_root_ssh(self):
@@ -180,7 +182,7 @@ class DemoDevice(Device):
             return True, 'SD_SIZE=%d\nSD_SHA=%s\nSD_GZIP=1\n' % (len(data), _digest(data))
         return False, 'Unsupported demo protocol command'
 
-    def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None):
+    def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None, *, on_stage=None):
         if not self.present:
             return None, 'Demo board is offline'
         self.reap_sessions()

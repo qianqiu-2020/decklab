@@ -166,23 +166,44 @@ class ConsoleProtocol:
             device._say(self.login_error)
         return (bool(match and re.search(RE_PROMPT, match.group(0))), device.now_off())
 
-    def run_command(self, cmd, timeout=30.0, expected_connection=None):
+    def run_command(self, cmd, timeout=30.0, expected_connection=None, *, on_stage=None):
         """一个事务覆盖登录、完整发送和带 nonce 的响应,禁止其他写入口插队。"""
         device = self.connection
         if device.file_transfer.active:
             return False, '串口文件传输中，请完成或取消后再操作'
+        if on_stage is not None:
+            on_stage('acquiring-console')
         try:
             with device.transactions.begin('console-command', timeout,
                                            expected_connection=expected_connection):
                 device.probing = True
                 try:
-                    return device._run_cmd_locked(cmd, timeout)
+                    options = {'on_stage': on_stage} if on_stage is not None else {}
+                    return device._run_cmd_locked(cmd, timeout, **options)
                 finally:
                     device.probing = False
         except TransactionError as error:
             return False, str(error)
 
-    def run_locked(self, cmd, timeout, ensure_shell=True):
+    def run_idle_command(self, cmd, *, expected_connection):
+        """Observe through an already open Linux shell without claiming input or logging in."""
+        device = self.connection
+        try:
+            with device.transactions.begin('console-diagnosis', 5, expected_connection=expected_connection):
+                with device.cv:
+                    if (device.transactions.ownership() or device.profile.probe != 'linux'
+                            or device.terminal.input_pending or not device.terminal.prompt()
+                            or not device.newline or device.visibility.active):
+                        return False, '串口未停在可用的空闲 Linux Shell'
+                device.probing = True
+                try:
+                    return device._run_cmd_locked(cmd, 5, ensure_shell=False)
+                finally:
+                    device.probing = False
+        except TransactionError as error:
+            return False, str(error)
+
+    def run_locked(self, cmd, timeout, ensure_shell=True, *, on_stage=None):
         """Run one framed console command while operation_lock is held.
 
         A transfer checks the shell once at start; every later chunk still
@@ -192,6 +213,8 @@ class ConsoleProtocol:
         if device.fd is None or device.stop.is_set():
             return False, '设备未打开(串口没接上或已被拔掉)'
         if ensure_shell:
+            if on_stage is not None:
+                on_stage('checking-shell')
             ok, base = device.ensure_shell(device.now_off())
             if not ok:
                 return False, self.login_error or '板子不在 shell 提示符,且自动登录失败(可能需要手动处理)'
@@ -201,9 +224,13 @@ class ConsoleProtocol:
         begin, end = '__SD_B_' + nonce + '__', '__SD_E_' + nonce + '__'
         framed = frame_command(cmd, nonce, device.newline)
         base = device.now_off()
+        if on_stage is not None:
+            on_stage('sending-probe')
         ok, err = device._write(framed)
         if not ok:
             return False, err
+        if on_stage is not None:
+            on_stage('waiting-probe-response')
         # A long echoed upload line can interleave with printf output, leaving
         # echo characters directly before a marker. The random marker is split
         # in the command text, so an echo cannot contain it in full.

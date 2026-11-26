@@ -14,7 +14,7 @@ import unittest
 from unittest import mock
 from types import SimpleNamespace
 
-from decklab_core.settings_restart import configure_collector, configure_control
+from decklab_core.settings_restart import SettingsActivation, activation_status, configure_collector, configure_control
 from decklab_core.web_settings import WebSettings, SettingsError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,6 +129,18 @@ class RestartAdmissionTests(unittest.TestCase):
         self.assertEqual(calls, [('GET', '/api/settings-health'), ('POST', '/api/settings-activate')])
         self.assertEqual(len(attempts), 4)
         self.assertFalse(self.server.restart_requested)
+        attempt = activation_status(self.server)
+        self.assertEqual((attempt['phase'], attempt['state'], attempt['http_status']),
+                         ('requesting-collector-restart', 'unknown', 503))
+        self.assertEqual(SettingsActivation(self.settings, 'web', saved['revision']).record, attempt)
+
+    def test_loading_same_revision_does_not_confirm_an_interrupted_preflight(self):
+        receipt = SettingsActivation(self.settings, 'web', self.revision)
+        with receipt.attempt(self.revision, 'web'):
+            receipt.phase('checking-service-paths')
+        recovered = SettingsActivation(self.settings, 'web', self.revision).record
+        self.assertEqual(recovered['state'], 'interrupted')
+        self.assertEqual(recovered['phase'], 'checking-service-paths')
 
 
 @unittest.skipUnless(os.name == 'posix', 'private Unix socket activation')
@@ -188,6 +200,13 @@ class RestartProcessTests(unittest.TestCase):
                 status, result = exchange('POST', {'action': 'activate', 'revision': revision})
                 self.assertEqual(status, 202, result)
                 after = wait_ready(revision)
+                self.assertEqual(after['activation']['state'], 'applied')
+                self.assertEqual(after['activation']['mode'], 'web-and-collector')
+                self.assertEqual(after['activation']['revision'], revision)
+                self.assertEqual([step['phase'] for step in after['activation']['steps']], [
+                    'validating-settings', 'checking-service-paths', 'waiting-collector-ready',
+                    'requesting-collector-restart', 'waiting-collector-revision', 'collector-revision-active',
+                    'restarting-web', 'revision-active'])
                 self.assertEqual(after['configuration']['environment']['BAUD'], '9600')
                 self.assertEqual(after['configuration']['environment']['PORT'], str(port))
                 self.assertTrue(all(process.poll() is None for process in processes))

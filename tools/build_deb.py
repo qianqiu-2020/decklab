@@ -164,6 +164,9 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
                                     ('decklab-backend', '-m decklab_core.backend_server')]:
             write('usr/bin/' + command, '#!/bin/sh\nexport PYTHONPATH=/usr/lib/decklab\nexec /usr/bin/python3 ' + invocation + ' "$@"\n', 0o755)
         put('rescue.sh', 'usr/libexec/decklab/rescue.sh', 0o755)
+        write('usr/bin/decklab-update',
+              '#!/bin/sh\nexec /usr/bin/python3 -I -c \'import sys; sys.path.insert(0, "/usr/lib/decklab"); from decklab_core.updates import main; sys.exit(main())\' "$@"\n',
+              0o755)
         put('packaging/decklab.service', 'lib/systemd/system/decklab.service')
         put('packaging/decklab-collector.service', 'lib/systemd/system/decklab-collector.service')
         put('packaging/decklab-web.service', 'lib/systemd/system/decklab-web.service')
@@ -214,7 +217,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             if lz4 is None:
                 flash_dependency += ', lz4'
         desktop_dependency = ', libstdc++6, libgcc-s1' if desktop_runtime.is_dir() else ''
-        write('DEBIAN/control', 'Package: decklab\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nConflicts: seriald\nReplaces: seriald\nMaintainer: DeckLab contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), python3-cryptography, nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers%s%s\nRecommends: adb\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
+        write('DEBIAN/control', 'Package: decklab\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nConflicts: seriald\nReplaces: seriald\nMaintainer: DeckLab contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), python3-cryptography, nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers, iproute2%s%s\nRecommends: adb\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
         compression = ['-Zgzip', '-z1'] if local_fast else []
         with tempfile.TemporaryDirectory(dir=output) as package_dir:
             candidate = Path(package_dir) / artifact.name

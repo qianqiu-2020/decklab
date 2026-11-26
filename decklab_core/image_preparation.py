@@ -89,6 +89,7 @@ class ImagePreparations:
             maintenance.check_preparation()
         FlashActions(self.manager).expire()
         def prepare(context):
+            context.store.update(context.id, result={'image': {'name': source['name']}})
             # This pin protects the source upload, not a USB endpoint or board.
             guard = getattr(executor, 'image_guard', lambda source, check: nullcontext())
             with guard(source, context.check):
@@ -122,21 +123,27 @@ class ImagePreparations:
                         if (phase == last_progress[0] and now - last_progress[1] < .2
                                 and value.get('done', 0) != value.get('total', -1)):
                             return
-                        last_progress[:] = [phase, now]
                         if timing:
                             timing.event(value)
-                        context.progress(value.get('done', 0), value.get('total', 0), value.get('phase', 'preparing-image'))
+                        done, total = value.get('done', 0), value.get('total', 0)
+                        if phase == last_progress[0]:
+                            context.progress(done, total, phase)
+                        else:
+                            context.stage(phase, done=done, total=total)
+                        last_progress[:] = [phase, now]
                     try:
                         result = executor.prepare_image(argv, source, event, context.check)
                     except ImagePreparationQuotaError as error:
                         context.check()
                         if not error.reclaim_bytes:
                             raise
-                        context.progress(0, 0, 'reclaiming-image-cache')
+                        context.stage('reclaiming-image-cache')
+                        last_progress[0] = ''
                         if not FlashActions(self.manager).expire(reclaim_bytes=error.reclaim_bytes):
                             raise
                         result = executor.prepare_image(argv, source, event, context.check)
                     success = True
+                    context.stage('image-preparation-ready')
                     return {'artifact': {k: row[k] for k in ('id', 'name', 'size', 'sha256', 'serial', 'state')},
                             'preparation': public_plan(result)}
                 except BaseException as error:

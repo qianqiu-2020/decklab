@@ -193,6 +193,10 @@ class Device:
         result = {'mode': profile.probe, 'command': profile.probe_command}
         if include_default:
             result['default_command'] = PROBE_CMD
+            family = self.login_os_family()
+            result['login_os_family'] = family
+            result['console_login_override'] = (profile.console_login_override
+                or (profile.console_user, profile.console_password) != ('root', 'bianbu'))
         return result
 
     def login_os_family(self):
@@ -599,13 +603,14 @@ class Device:
     def ensure_shell(self, base):
         return self.console.ensure_shell(base)
 
-    def _run_cmd(self, cmd, timeout=30.0, expected_connection=None):
-        return self.console.run_command(cmd, timeout, expected_connection=expected_connection)
+    def _run_cmd(self, cmd, timeout=30.0, expected_connection=None, *, on_stage=None):
+        return self.console.run_command(cmd, timeout, expected_connection=expected_connection,
+                                        on_stage=on_stage)
 
-    def _run_cmd_locked(self, cmd, timeout, ensure_shell=True):
-        return self.console.run_locked(cmd, timeout, ensure_shell)
+    def _run_cmd_locked(self, cmd, timeout, ensure_shell=True, *, on_stage=None):
+        return self.console.run_locked(cmd, timeout, ensure_shell, on_stage=on_stage)
 
-    def run_probe(self, init_boot_marker=False, association=None, actor='web'):
+    def run_probe(self, init_boot_marker=False, association=None, actor='web', *, on_stage=None):
         """Read identity metadata; create a /boot marker only on explicit request."""
         profile = self.profile
         if profile.probe == 'manual':
@@ -625,9 +630,12 @@ class Device:
                              + "printf '\\n__SD_PROBE_EXIT=%s\\n' \"$__sd_probe_status\"; "
                              + 'unset __sd_probe_status')
         cmd = (init_command() + ' && { ' + probe_command + '; }') if init_boot_marker else probe_command
-        ok, raw = self._run_cmd(cmd, timeout=30, expected_connection=origin_connection)
+        progress = {'on_stage': on_stage} if on_stage is not None else {}
+        ok, raw = self._run_cmd(cmd, timeout=30, expected_connection=origin_connection, **progress)
         if not ok:
             return {'ok': False, 'error': raw}
+        if on_stage is not None:
+            on_stage('reading-probe-result')
         if profile.probe == 'custom':
             statuses = re.findall(r'^__SD_PROBE_EXIT=(\d+)\r?$', raw, re.M)
             if len(statuses) != 1:
@@ -654,6 +662,8 @@ class Device:
         metadata_only = profile.probe == 'custom' and not has_identity
         if metadata_only:
             info['identified'] = False
+        if on_stage is not None:
+            on_stage('applying-probe-result')
         with self.operation_lock:
             if self.stop is not origin or origin.is_set() or self.connection_id != origin_connection:
                 return {'ok': False, 'error': '识别期间设备已重新枚举'}
@@ -709,7 +719,7 @@ class Device:
             result.update(user='', needs_credentials=True)
         return result
 
-    def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None):
+    def ssh_connect(self, actor='web', title='', ssh_user=None, ssh_password=None, *, on_stage=None):
         """Connect an independent SSH session without changing board credentials.
 
         没有 IP 就先识别一次 —— 这正是"识别设备"存在的意义:串口负责拿到
@@ -718,11 +728,14 @@ class Device:
         grants = getattr(self.manager, 'agent_grants', None)
         if grants is not None:
             grants.check_actor(actor)
+        stage = on_stage or (lambda *args: None)
         self.transactions.check_context()
         origin = self.stop
         connection_id = self.connection_id
         info = self.probe_info
+        stage('selecting-ssh-address')
         if not info.get('ips') or (self.manager and not self.serial):
+            stage('reading-ssh-address-from-console')
             r = self.run_probe()
             if not r.get('ok'):
                 return None, '需要先拿到 IP,但识别失败: %s' % r.get('error')
@@ -736,6 +749,7 @@ class Device:
             break
         if not ip:
             return None, '没找到可用 IP(只看到 docker0 之类的内部地址)'
+        stage('found-ssh-address', ip)
         self.reap_sessions()
         registry = self._sessions
         # A named agent gets one long-lived shell per board.  Reusing the PTY
@@ -745,13 +759,15 @@ class Device:
         persistent = bool(actor and actor != 'web')
         if persistent:
             with self.sessions_lock:
-                for existing in self.ssh_sessions.values():
-                    if (getattr(existing, 'kind', 'ssh') == 'ssh' and getattr(existing, 'actor', '') == actor
-                            and not getattr(existing, 'closed', True)
-                            and getattr(existing, 'fd', None) is not None):
-                        if title:
-                            existing.title = title
-                        return existing, ''
+                existing = next((candidate for candidate in self.ssh_sessions.values()
+                                 if (getattr(candidate, 'kind', 'ssh') == 'ssh' and getattr(candidate, 'actor', '') == actor
+                                     and not getattr(candidate, 'closed', True)
+                                     and getattr(candidate, 'fd', None) is not None)), None)
+                if existing and title:
+                    existing.title = title
+            if existing:
+                stage('reusing-ssh-session')
+                return existing, ''
         with registry.lock:
             if self._sessions is not registry:
                 return None, '设备身份已变化，请重新建立 SSH 会话'
@@ -779,6 +795,7 @@ class Device:
                 return None, '设备已重新枚举,请重新识别 IP'
             profile = self.profile
             explicit = ssh_user is not None or ssh_password is not None
+            stage('reading-ssh-settings')
             if credential_serial and credential_store_available:
                 try:
                     stored = store.get_ssh_credentials(credential_serial)
@@ -798,6 +815,7 @@ class Device:
                         else stored['ssh_password'] if stored else profile.ssh_password)
             family = self.login_os_family() if not explicit and stored is None else ''
             if self._needs_ssh_credentials(family, profile):
+                stage('ssh-credentials-needed')
                 raise SSHAuthenticationError('', needs_credentials=True)
             if not valid_ssh_user(user) or not valid_ssh_password(password):
                 return None, 'SSH 用户或密码格式无效'
@@ -805,6 +823,8 @@ class Device:
             if not explicit and stored is None and not family:
                 candidates.extend(candidate for candidate in ('bianbu', 'debian')
                                   if candidate not in candidates)
+            stage('authenticating-ssh-explicit' if explicit else 'authenticating-ssh-saved' if stored
+                  else 'authenticating-ssh-default', ip)
             for candidate in candidates:
                 self.transactions.check_context()
                 if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
@@ -825,6 +845,7 @@ class Device:
                 # Authentication failure returns control to the user; service
                 # setup is separate. Never write credentials to the console.
                 raise SSHAuthenticationError(user)
+            stage('opening-ssh-terminal', ip)
             session_args = {'user': user, 'password': password}
             session = SshSession(sid, ip, self.label, self.stable_dir(), **session_args)
             session.auto_configured = False

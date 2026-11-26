@@ -347,8 +347,17 @@ class TaskStore:
             if progress.get('phase') == 'writing':
                 counts.update(('partition_done', 'partition_total', 'bytes_per_second', 'step_started_ms'))
                 labels.update(('component', 'storage', 'partition'))
-            if set(progress) - counts - labels:
+            if set(progress) - counts - labels - {'stages'}:
                 raise TaskError('invalid task progress')
+            if 'stages' in progress:
+                stages = progress['stages']
+                if not isinstance(stages, list) or not 1 <= len(stages) <= 16 or any(
+                        not isinstance(stage, dict) or set(stage) - {'phase', 'at_ms', 'endpoint'}
+                        or not isinstance(stage.get('phase'), str) or not 1 <= len(stage['phase']) <= 80
+                        or type(stage.get('at_ms')) is not int or stage['at_ms'] < 0
+                        or ('endpoint' in stage and (not isinstance(stage['endpoint'], str)
+                            or not re.fullmatch(r'[A-Za-z0-9.:_%\-]{1,80}', stage['endpoint']))) for stage in stages):
+                    raise TaskError('invalid task progress stages')
             for name in counts:
                 if name in progress and (type(progress[name]) is not int or progress[name] < 0):
                     raise TaskError('invalid task progress count')
@@ -450,6 +459,7 @@ class TaskContext:
         self.actor_check, self.tracks_outcome = actor_check, tracks_outcome
         self.cancelled = threading.Event()
         self._lock, self._hooks = threading.Lock(), []
+        self._stages = []
 
     def check(self):
         if self.cancelled.is_set():
@@ -470,6 +480,21 @@ class TaskContext:
 
     def progress(self, done, total, phase='', **details):
         self.check()
+        self._progress(done, total, phase, details)
+
+    def stage(self, phase, endpoint=None, *, done=0, total=0):
+        # A receipt can arrive as cancellation is requested. Recording what
+        # reached this point does not grant permission to continue the work.
+        step = {'phase': phase, 'at_ms': time.time_ns() // 1_000_000}
+        if isinstance(endpoint, str) and re.fullmatch(r'[A-Za-z0-9.:_%\-]{1,80}', endpoint):
+            step['endpoint'] = endpoint
+        self._stages.append(step)
+        del self._stages[:-16]
+        self._progress(done, total, phase, {})
+
+    def _progress(self, done, total, phase, details):
+        if self._stages:
+            details = dict(details, stages=self._stages)
         self.store.update(self.id, progress=dict(details, done=done, total=total, phase=phase))
 
     def on_cancel(self, hook):

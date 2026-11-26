@@ -238,6 +238,21 @@ class ControlSlots:
         client_id = payload.get('client_id', '')
 
         def run(context):
+            from .board_control import record_control_outcome
+            receipt = {'provider': 'home-assistant', 'controller': live['name'], 'slot': live['number'],
+                       'observation': 'waiting'}
+            context.store.update(context.id, result={'control': receipt})
+            context.stage('checking-board-control-target')
+
+            def verified_target(identity_task=None):
+                receipt['observation'] = 'usb-identity-verified'
+                context.stage('board-usb-identity-verified', done=1, total=1)
+                context.mark_outcome('observed')
+                result = {'serial': device.serial, 'key': device.key, 'control_result': 'acknowledged', 'control': receipt}
+                if identity_task:
+                    result['identity_task_id'] = identity_task
+                return result
+
             def check():
                 context.check()
                 if device.connection_id != connection_id or not device.present or device.stop.is_set():
@@ -255,14 +270,14 @@ class ControlSlots:
                     raise TaskError('控制机未安装 USB 刷机执行器', 409)
                 with transactions.actor_scope('web', client_id), transactions.begin('hardware-enter-download', 31, require_open=False):
                     check()
+                    context.stage('recording-existing-usb-targets')
                     before = {target['target_generation'] for target in discovery.refresh()['targets'] if target['present']}
                     def check_before_control():
                         check()
                         if prior_serial and self._online(prior_serial):
                             raise TaskError('该槽位的原板卡已上线，未触发下载模式', 423)
-                    command.run(check_before_control, outcome=lambda value: context.issued() if value == 'issued' else context.mark_outcome(value))
-                context.store.update(context.id, result={'control_result': 'acknowledged'})
-                context.progress(0, 0, 'checking-usb-identity')
+                    command.run(check_before_control, outcome=lambda value: record_control_outcome(context, value, receipt))
+                context.stage('checking-usb-identity')
                 seen, deadline = set(), time.monotonic() + 15
                 while time.monotonic() < deadline:
                     check()
@@ -283,7 +298,7 @@ class ControlSlots:
                         if link.get('connection_id') != connection_id:
                             continue
                         if link.get('state') == 'linked' and device.serial and device.serial == probed['serial']:
-                            return {'serial': device.serial, 'key': device.key, 'control_result': 'acknowledged'}
+                            return verified_target()
                         if link.get('state') != 'paired' or probed['mode'] != 'bootrom' or probed['serial']:
                             raise TaskError('刷机 USB 与当前串口身份不一致，请核对接线', 409)
                         result = FlashActions(self.manager).backup({'target_id': target_id, 'target_generation': generation,
@@ -292,8 +307,8 @@ class ControlSlots:
                         if result.status != 202:
                             raise TaskError(result.payload['error'], result.status)
                         identity_task = result.payload['task']['id']
-                        context.store.update(context.id, result={'identity_task_id': identity_task, 'control_result': 'acknowledged'})
-                        context.progress(0, 0, 'reading-board-serial')
+                        context.store.update(context.id, result={'identity_task_id': identity_task, 'control_result': 'acknowledged', 'control': receipt})
+                        context.stage('reading-board-serial')
                         while True:
                             identity = tasks.store.get(identity_task)
                             if identity['state'] not in ('queued', 'running'):
@@ -304,10 +319,9 @@ class ControlSlots:
                             raise TaskError(identity['error'] or '未能从下载设备读取序列号', 409)
                         if not device.serial or device.serial != (identity.get('result') or {}).get('serial'):
                             raise TaskError('已读取 USB 序列号，但无法关联到当前串口', 409)
-                        return {'serial': device.serial, 'key': device.key, 'control_result': 'acknowledged',
-                                'identity_task_id': identity_task}
+                        return verified_target(identity_task)
                     context.cancelled.wait(.5)
-                raise TaskError('槽位已进入下载模式，但未能用串口确认新 USB 连接，请核对两根线', 409)
+                raise TaskError('控制器已确认请求，尚未核实板卡的下载 USB 与串口关联。请核对两根线', 409)
             finally:
                 with self.lock:
                     self.onboarding.discard(resource)

@@ -127,7 +127,7 @@ class SettingsTests(unittest.TestCase):
     def test_invalid_input_and_preview_leave_original_file_unchanged(self):
         self.save(self.patch(PORT='9000'))
         before = self.path.read_bytes()
-        for document in [self.patch(PORT='0'), self.patch(BAUD='49'), self.patch(BASE='relative'),
+        for document in [self.patch(PORT='0'), self.patch(HTTPS_PORT='65536'), self.patch(BAUD='49'), self.patch(BASE='relative'),
                          self.patch(STOP_BITS='3'), self.patch(MCP_ENABLED='no'),
                          self.patch(PROBE='custom', PROBE_COMMAND='echo x', AUTO_CONFIGURE_SSH='1'),
                          self.patch(SSH_USER='-bad'), self.patch(LOG_RETENTION_DAYS='36501'),
@@ -141,6 +141,13 @@ class SettingsTests(unittest.TestCase):
         result = self.save(self.patch(PORT='9001'), preview=True)
         self.assertEqual(result['changes'], ['PORT'])
         self.assertEqual(self.path.read_bytes(), before)
+
+    def test_https_port_can_be_disabled_for_an_external_proxy(self):
+        self.assertEqual(self.settings.effective()['environment']['HTTPS_PORT'], '8443')
+        self.save(self.patch(HTTPS_PORT='0'))
+        with mock.patch.dict(os.environ):
+            load_environment(self.path)
+            self.assertEqual(os.environ['DECKLAB_HTTPS_PORT'], '0')
 
     def test_proposed_environment_validates_profiles_without_mutating_process(self):
         with mock.patch.dict(os.environ, {'DECKLAB_PROBE': 'linux', 'DECKLAB_BAUD': '115200'}):

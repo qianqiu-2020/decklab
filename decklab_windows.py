@@ -24,6 +24,10 @@ if len(sys.argv) > 1 and sys.argv[1] == 'admin':
     sys.argv.pop(1)
     raise SystemExit(admin_main())
 
+if len(sys.argv) > 1 and sys.argv[1] == 'update':
+    from decklab_core.updates import main as update_main
+    raise SystemExit(update_main(sys.argv[2:]))
+
 # The bundled MCP worker is a separate process and must never discover COM
 # ports or create a second collector. The public host proxies /mcp to it.
 if len(sys.argv) > 1 and sys.argv[1] == 'mcp':
@@ -56,14 +60,14 @@ if SETTINGS.effective()['environment'].get('BACKEND_URL'):
     # when an operator uses the ordinary desktop shortcut.
     from decklab_core.control_server import main as remote_main
     raise SystemExit(remote_main())
-from decklab_core.settings_restart import configure_collector, preflight_listener, preflight_storage, reexecute
+from decklab_core.settings_restart import SettingsActivation, configure_collector, preflight_listener, preflight_storage, reexecute
 from decklab_core.control_server import (ControlHandler, configured_agent_tokens,
                                          RevocationReconciler, collector_connection)
 from decklab_core.agent_grants import AgentGrantStore, attach_agent_grants
 from decklab_core.collector_lock import CollectorLock
 from decklab_core.handoff import consume as consume_handoff, write as write_handoff
 from decklab_core.web_tls import https_listener
-from decklab_core.httpd import BoundedThreadingTCPServer
+from decklab_core.httpd import BoundedThreadingTCPServer, WebTCPServer
 from decklab_core.storage import Store
 from decklab_core.windows_manager import WindowsManager
 from decklab_core.profiles import ProfileBook
@@ -88,7 +92,7 @@ def main():
     SETTINGS.environment.update({'DECKLAB_PORT': str(args.port), 'DECKLAB_BIND': args.bind})
     profiles = ProfileBook.from_env()
     # Bind the public port first, so a second copy never takes ownership of COM ports.
-    with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as control, \
+    with WebTCPServer((args.bind, args.port), ControlHandler) as control, \
             MCPHost(local_control_url(control)) as mcp, CollectorLock(BASE):
         control.mcp_host = mcp
         os.makedirs(LOG_ROOT, exist_ok=True)
@@ -102,24 +106,29 @@ def main():
                 collector.manager = manager
                 configure_collector(collector, SETTINGS)
                 control.settings_revision = collector.settings_revision
-                control.settings_activation = {'state': 'idle'}
+                control.settings_restart_revision = collector.settings_restart_revision
+                receipt = control.settings_activation_log = SettingsActivation(SETTINGS, 'web', control.settings_revision)
                 def activate_settings(revision):
-                    environment = SETTINGS.validate(SETTINGS.effective())['environment']
-                    preflight_listener(control, environment)
-                    preflight_storage(environment)
-                    with collector.configuration_gate:
-                        if collector.configuration_posts:
-                            from decklab_core.web_settings import SettingsError
-                            raise SettingsError('还有 API 操作未完成，请稍后重试', 423)
-                        result = collector.activate_settings(revision)
-                        collector.activation_reply.set()
-                        control.settings_activation = {'state': 'applying', 'revision': revision}
-                        control.activation_reply = threading.Event()
-                    def shutdown():
-                        control.activation_reply.wait(2)
-                        control.shutdown()
-                    threading.Thread(target=shutdown, daemon=True).start()
-                    return result
+                    with receipt.attempt(revision, 'windows'):
+                        environment = SETTINGS.validate(SETTINGS.effective())['environment']
+                        receipt.phase('checking-web-listener')
+                        preflight_listener(control, environment)
+                        receipt.phase('checking-service-paths')
+                        preflight_storage(environment)
+                        with collector.configuration_gate:
+                            receipt.phase('checking-collector-idle')
+                            if collector.configuration_posts:
+                                from decklab_core.web_settings import SettingsError
+                                raise SettingsError('还有 API 操作未完成，请稍后重试', 423)
+                            result = collector.activate_settings(revision)
+                            collector.activation_reply.set()
+                            control.activation_reply = threading.Event()
+                        def shutdown():
+                            receipt.phase('restarting-windows')
+                            control.activation_reply.wait(2)
+                            control.shutdown()
+                        threading.Thread(target=shutdown, daemon=True).start()
+                        return result
                 control.activate_settings = activate_settings
                 ControlHandler.collector_link = None
                 ControlHandler.collector_socket = ('127.0.0.1', collector.server_address[1])

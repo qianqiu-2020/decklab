@@ -1,7 +1,7 @@
 'use strict';
 const assert=require('node:assert/strict'), fs=require('node:fs'), vm=require('node:vm');
 class Element {
-  constructor(){this.children=[];this.events={};this.value='';this.disabled=false;this.open=false;this._text='';}
+  constructor(){this.children=[];this.events={};this.dataset={};this.value='';this.disabled=false;this.open=false;this._text='';}
   set textContent(value){this._text=value;this.children=[];} get textContent(){return this._text+this.children.map(c=>c.textContent).join('');}
   appendChild(node){node.parent=this;this.children.push(node);} remove(){this.parent.children=this.parent.children.filter(n=>n!==this);}
   setAttribute(name,value){this[name]=value;}
@@ -10,17 +10,28 @@ class Element {
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function setup(request, storage=new Map()){
-  const ids={};for(const id of ['is-version-caption','is-catalog','is-platform','is-os','is-channel','is-version','is-variants','is-title','image-store-dialog','is-list','is-search','is-path','is-status','is-refresh','is-downloads','is-download-note','is-source','is-close'])ids[id]=new Element();
-  ids['is-source'].value='public';let consent=false;const watches=[];
+  const ids={};for(const id of ['is-version-caption','is-catalog','is-platform','is-os','is-channel','is-version','is-variants','is-title','image-store-dialog','is-list','is-search','is-path','is-status','is-refresh','is-downloads','is-download-note','is-source','is-close','is-task-history','is-task-list'])ids[id]=new Element();
+  ids['is-source'].value='public';let consent=false;const watches=[],opened=[];
   const window={crypto:{randomUUID:()=> 'fixture-request'}, confirm:()=>consent,
     localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},
     DeckLabTasks:{createClient:()=>({request,watch:(task,ctx,update)=>new Promise((resolve,reject)=>watches.push({task,update,resolve,reject}))})}};
   vm.runInNewContext(fs.readFileSync('static/image-store.js','utf8'),{window,document:{createElement:()=>new Element()}});
-  const store=window.DeckLabImageStore.create({byId:id=>ids[id],formatBytes:n=>n+' bytes'});
+  const store=window.DeckLabImageStore.create({byId:id=>ids[id],formatBytes:n=>n+' bytes',openTaskDetails:id=>opened.push(id)});
   function buttons(node=ids['is-list']){return node.children.flatMap(n=>[n,...buttons(n)]).filter(n=>n.events.click);}
-  return {ids,store,buttons,watches,consent:value=>{consent=value;},source:async value=>{ids['is-source'].value=value;ids['is-source'].fire('change');await flush();}};
+  return {ids,store,buttons,watches,opened,consent:value=>{consent=value;},source:async value=>{ids['is-source'].value=value;ids['is-source'].fire('change');await flush();}};
 }
 (async()=>{
+  const historyRequests=[];
+  const history=setup(url=>{ historyRequests.push(url); return Promise.resolve(url.endsWith('history=1')
+    ? {tasks:[{id:'failed-download',kind:'image-download',state:'failed',result:{download:{name:'firmware.itb'}}}]}
+    : {entries:[]}); });
+  history.store.open();await flush();
+  assert.equal(history.ids['is-task-history'].open,false);
+  assert.ok(!historyRequests.some(url=>url.endsWith('history=1')));
+  history.ids['is-task-history'].open=true;await history.ids['is-task-history'].fire('toggle');
+  assert.match(history.ids['is-task-list'].textContent,/firmware\.itb.*失败/);
+  history.buttons(history.ids['is-task-list'])[0].fire();
+  assert.deepEqual(history.opened,['failed-download']);
   const organization=setup(()=>Promise.resolve({sources:[{id:'public'}],entries:[]}));
   const option=new Element();option.value='internal';organization.ids['is-source'].appendChild(option);
   organization.store.open();await flush();assert.equal(option.disabled,true);

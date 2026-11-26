@@ -3,6 +3,39 @@
   'use strict';
   var states = { queued: '等待执行', running: '执行中', completed: '已完成', failed: '失败',
                  cancelled: '已取消', interrupted: '已中断' };
+  var stages = {'checking-probe-settings':'检查探测设置', 'acquiring-console':'获取串口输入权限',
+    'checking-shell':'确认 shell 提示符或自动登录', 'sending-probe':'发送探测命令',
+    'waiting-probe-response':'等待探测命令完整响应', 'reading-probe-result':'解析探测结果',
+    'applying-probe-result':'核对身份并保存结果', 'probe-finished':'探测结束',
+    'checking-session-target':'核对当前板卡和会话目标', 'selecting-ssh-address':'选择板卡的 SSH 地址',
+    'reading-ssh-address-from-console':'通过串口读取 IP 地址', 'found-ssh-address':'选定 SSH 地址',
+    'reusing-ssh-session':'复用已有 SSH 会话', 'reading-ssh-settings':'读取 SSH 连接设置',
+    'ssh-credentials-needed':'等待用户提供 SSH 凭据', 'authenticating-ssh-explicit':'使用本次填写的账号验证 SSH',
+    'authenticating-ssh-saved':'使用已保存的账号验证 SSH', 'authenticating-ssh-default':'使用默认连接设置验证 SSH',
+    'opening-ssh-terminal':'打开 SSH 终端', 'listing-adb-usb':'枚举 ADB 连接（显示登记端口）',
+    'matching-adb-board':'从 ADB 回读板卡序列号和启动编号', 'verified-adb-port':'确认 ADB 端口',
+    'verified-moved-adb-port':'核实板卡已换到新 USB 端口', 'opening-adb-terminal':'打开 ADB 终端',
+    'checking-adbd-over-serial':'通过串口检查板端 ADB 服务',
+    'adb-serial-evidence-unavailable':'未取得板端 ADB 诊断证据',
+    'adbd-running':'板端 adbd 正在运行', 'adbd-not-running':'板端 adbd 服务未运行',
+    'adb-gadget-configured':'板端 USB 设备控制器已完成配置',
+    'adb-gadget-detached':'板端 USB 设备控制器未连接',
+    'adb-usb-transport-closed':'本次启动最近的 ADB USB 日志显示连接关闭',
+    'session-ready':'终端会话已建立',
+    'resolving-image-host':'解析镜像服务器', 'connecting-image-server':'连接镜像服务器',
+    'checking-image-tls':'验证服务器证书', 'connecting-organization-tls':'连接组织镜像服务器',
+    'waiting-image-response':'等待镜像服务器响应', 'following-image-redirect':'跟随镜像重定向',
+    'reserving-image-cache':'预留镜像缓存', 'image-download':'接收镜像文件',
+    'sealing-image-cache':'计算 SHA-256 并保存镜像', 'image-ready':'镜像已缓存',
+    'checking-image-sha256':'校验镜像', 'expanding-image':'解压镜像', 'checking-payloads':'校验包内文件',
+    'reading-payload-metadata':'读取基本信息', 'reclaiming-image-cache':'回收镜像准备缓存',
+    'image-preparation-ready':'镜像准备完成',
+    'checking-board-control-target':'核对板卡和控制权限', 'preparing-board-controller':'准备控制器',
+    'sending-board-control':'交付控制请求', 'board-controller-acknowledged':'收到控制器回执',
+    'board-control-finished':'控制请求结束', 'recording-existing-usb-targets':'记录操作前的 USB 设备',
+    'checking-usb-identity':'等待新 USB 连接并核对串口关联', 'reading-board-serial':'读取板载序列号',
+    'board-usb-identity-verified':'已核对板卡的 USB 和串口'};
+  function phaseLabel(phase) { return Object.hasOwn(stages, phase) ? stages[phase] : ''; }
   function active(task) { return task.state === 'queued' || task.state === 'running'; }
   function errorMessage(message) {
     if (message === 'artifact quota exceeded') {
@@ -42,7 +75,7 @@
           if (current.state === 'completed') resolve(current.result || { ok: true });
           else {
             var failure = new Error(errorMessage(current.error) || states[current.state] || '任务失败');
-            failure.result = current.result; failure.permanent = true; reject(failure);
+            failure.result = current.result; failure.taskId = id; failure.permanent = true; reject(failure);
           }
           return true;
         }
@@ -134,7 +167,7 @@
         output.textContent = task.error || task.result && (task.result.artifact ? task.result.artifact.name + ' · ' + task.result.artifact.size + ' B'
           : task.result.sid ? '会话 ' + task.result.sid
           : task.result.serial ? 'SN ' + task.result.serial
-          : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || reported.phase || '';
+          : task.result.path ? task.result.path + ' · ' + task.result.size + ' B' : '') || phaseLabel(reported.phase) || reported.phase || '';
         main.appendChild(output); row.appendChild(main);
         if (['flash','flash-inspect','flash-preview','ram-boot'].includes(task.kind) && options.openFlash) {
           var inspect = document.createElement('button'); inspect.type = 'button'; inspect.textContent = '查看刷机';
@@ -183,6 +216,14 @@
           var open = document.createElement('button'); open.type = 'button'; open.textContent = '打开会话';
           open.addEventListener('click', function () { if (sameSelection(selected)) options.openSession(task); });
           row.appendChild(open);
+        }
+        if (options.openDetails) {
+          var details = document.createElement('button'); details.type = 'button'; details.textContent = '任务详情';
+          details.setAttribute('aria-haspopup', 'dialog');
+          details.addEventListener('click', function () {
+            if (sameSelection(selected)) options.openDetails(ctx, task.id);
+          });
+          row.appendChild(details);
         }
         box.appendChild(row);
       });
@@ -367,5 +408,5 @@
     });
     return {open: open};
   }
-  global.DeckLabTasks = { create: create, createClient: createClient, createAdb: createAdb, errorMessage: errorMessage };
+  global.DeckLabTasks = { create: create, createClient: createClient, createAdb: createAdb, errorMessage: errorMessage, phaseLabel: phaseLabel };
 })(window);

@@ -12,7 +12,7 @@ const vm = require('node:vm');
 require('./i18n.test.js');
 const { TextDecoder } = require('node:util');
 
-const script = ['ui-common.js', 'terminal-policy.js', 'serial-progress.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'tasks.js'].map(name =>
+const script = ['ui-common.js', 'terminal-policy.js', 'serial-progress.js', 'terminal-navigation.js', 'terminal-view.js', 'archives.js', 'devices.js', 'tasks.js', 'diagnostics.js'].map(name =>
   fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8')).join('\n');
 const appScript = fs.readFileSync(path.join(__dirname, '..', 'static', 'app.js'), 'utf8');
 
@@ -190,6 +190,7 @@ function harness(options = {}) {
     return options.prompt ? options.prompt(text, value) : '新编号';
   };
   vm.runInNewContext(script, sandbox, { filename: 'index.html' });
+  if (options.onActivation) sandbox.DeckLabSettings = {setActivationDetails: options.onActivation};
   const flashCalls = []; let taskOptions;
   if (options.flashCapture) {
     const createTasks = sandbox.DeckLabTasks.create;
@@ -243,6 +244,21 @@ test('header shows the running Web version from the existing access response', a
   const unknown=harness();unknown.get('decklab-version').textContent='版本未知';
   unknown.take('/api/access').resolve({version:'<img src=x onerror=bad()>'});await drain();
   assert.equal(unknown.get('decklab-version').textContent,'版本未知');
+});
+
+test('version dialog selects the host installer and does not offer a downgrade', async () => {
+  const h = harness();
+  h.get('decklab-version').click();
+  assert.equal(h.get('update-dialog').open, true);
+  h.take('/api/update-check').resolve({current:'1.19.7',latest:'1.20.0',available:true,platform:'windows',package:{}});
+  await drain();
+  assert.equal(h.get('update-install').hidden, false);
+  assert.equal(h.get('update-command').textContent, '.\\decklab.exe update 1.20.0');
+  h.get('update-check').click();
+  h.take('/api/update-check').resolve({current:'1.19.7',latest:'1.19.2',available:false,platform:'windows',package:{}});
+  await drain();
+  assert.equal(h.get('update-install').hidden, true);
+  assert.match(h.get('update-status').textContent, /暂无更新/);
 });
 
 test('low log-disk space is visible without disabling terminal access', async () => {
@@ -947,6 +963,14 @@ test('SSH network failures and lost submissions do not ask for passwords or repl
     error: 'SSH 连接超时', result: null}});
   await drain();
   assert.notEqual(h.get('ssh-credentials-dialog').open, true);
+  h.get('d-status').children.find(child => child.textContent === '任务详情').click();
+  h.take('/api/task', request => request.url.includes('id=network-failure')).resolve({task: {
+    id: 'network-failure', kind: 'ssh-connect', state: 'failed',
+    progress: {phase: 'authenticating-ssh-saved', stages: [{phase: 'authenticating-ssh-saved',
+      endpoint: '192.0.2.23', at_ms: 1700000000000}]}}});
+  await drain();
+  assert.match(h.get('diagnostics-body').textContent, /使用已保存的账号验证 SSH.*192\.0\.2\.23/);
+  h.get('diagnostics-close').click();
   h.get('d-tabs').children.at(-1).children[1].click();
   submitSshCredentials(h);
   h.take('/api/task-start').reject(new Error('lost response')); await drain();
@@ -962,7 +986,7 @@ test('SSH authentication task history offers a credential retry only for the cur
     error: 'SSH 认证失败', result: {code: 'ssh-authentication-failed', ssh_user: 'ubuntu'},
     targets: [{serial: 'SN-A', connection_id: 'connection-A'}]};
   h.take('/api/tasks').resolve({tasks: [task]}); await drain();
-  const retry = h.get('d-tasks').children[0].children.at(-1);
+  const retry = h.get('d-tasks').children[0].children.find(child => child.textContent === '使用该账号重试');
   assert.equal(retry.textContent, '使用该账号重试');
   retry.click();
   assert.equal(h.get('ssh-credentials-dialog').open, true);
@@ -2665,15 +2689,95 @@ test('tasks awaiting cancellation show unknown progress and cannot be cancelled 
   assert.equal(h.get('task-pager').hidden, true);
 });
 
+test('runtime diagnostics are on demand and separate the web and collector status', async () => {
+  const h = harness();
+  assert.equal(h.requests.some(r => ['/healthz', '/api/health'].includes(r.url)), false);
+  h.get('b-system-diagnostics').click();
+  h.take('/healthz').resolve({version: '1.19.8', backend_transport: 'local',
+    listeners:{http_port:8898, https:{state:'failed', port:8443, phase:'bind'}}});
+  h.take('/api/health').resolve({}, 502);
+  await drain();
+  const report = h.get('diagnostics-body').textContent;
+  assert.match(report, /网页服务.*1\.19\.8.*采集与归档.*HTTP 502/);
+  assert.match(report, /HTTP 监听端口8898.*启动失败.*8443.*绑定端口/);
+  assert.equal(h.get('diagnostics-refresh').disabled, false);
+});
+
+test('settings activation diagnostics read the requested node without showing configuration values', async () => {
+  let openDetails;
+  const h = harness({onActivation: open => { openDetails = open; }});
+  assert.equal(h.requests.some(r => r.url.startsWith('/api/settings')), false);
+  openDetails('backend');
+  h.take('/api/settings', r => r.url === '/api/settings?target=backend').resolve({
+    revision:'saved', active_revision:'active', configuration:{environment:{STATIC:'/fixture/private'}},
+    activation:{state:'unknown', mode:'backend', revision:'saved', phase:'waiting-collector-revision',
+      http_status:504, steps:[{phase:'requesting-collector-restart', at_ms:1700000000000}]},
+  });
+  await drain();
+  const report = h.get('diagnostics-body').textContent;
+  assert.match(report, /保存的配置修订saved.*当前生效的配置修订active.*结果未知.*504.*请求采集器重启/);
+  assert.doesNotMatch(report, /fixture\/private/);
+});
+
+test('device diagnostics read the selected connection and discard late responses after switching', async () => {
+  const h = await associationFixture();
+  const scoped = r => new URL(r.url, 'http://fixture').searchParams.get('connection_id') === 'connection-A';
+  h.get('b-device-diagnostics').click();
+  h.take('/api/sessions', scoped).resolve({sessions: []});
+  await drain();
+  assert.match(h.get('diagnostics-body').textContent, /COM5.*本次连接尚未收到数据/);
+  h.get('diagnostics-refresh').click();
+  const old = h.take('/api/sessions', scoped);
+  h.select('B');
+  old.resolve({}, 502);
+  await drain();
+  assert.equal(h.get('diagnostics-dialog').open, false);
+  assert.doesNotMatch(h.get('diagnostics-body').textContent, /HTTP 502/);
+});
+
+test('task diagnostics show original scope, uncertain outcome and recorded execution stages', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: [{key: 'A', serial: 'SN-A', connection_id: 'current', alive: true}]});
+  await drain(); h.select('A');
+  const task = {id: 'inspect', kind: 'identify', actor: 'web', state: 'interrupted', outcome: 'unknown',
+    request_id: 'original-request', targets: [{serial: 'SN-A', connection_id: 'previous'}],
+    progress: {phase: 'waiting-probe-response', stages: [{phase: 'sending-probe', at_ms: 1700000000000}]}};
+  h.take('/api/tasks').resolve({tasks: [task]});
+  await drain();
+  h.get('d-tasks').children[0].children.find(child => child.textContent === '任务详情').click();
+  const request = h.take('/api/task');
+  const params = new URL(request.url, 'http://fixture').searchParams;
+  assert.equal(params.get('id'), task.id);
+  assert.equal(params.has('serial') || params.has('connection_id'), false);
+  request.resolve({task});
+  await drain();
+  assert.match(h.get('diagnostics-body').textContent, /original-request.*结果未知.*previous.*执行经过.*发送探测命令/);
+});
+
+test('board control task details show controller confirmation independently from board evidence', async () => {
+  const h = harness();
+  h.take('/api/devices').resolve({devices: [{key: 'A', serial: 'SN-A', connection_id: 'current', alive: true}]});
+  await drain(); h.select('A');
+  const task = {id: 'board-reset', kind: 'hardware-reset', actor: 'web', state: 'completed', outcome: 'acknowledged',
+    result: {control: {provider:'home-assistant', controller:'Fixture controller',slot:0,acknowledged:true,observation:'not-checked'}}};
+  h.take('/api/tasks').resolve({tasks: [task]}); await drain();
+  h.get('d-tasks').children[0].children.find(child => child.textContent === '任务详情').click();
+  h.take('/api/task').resolve({task}); await drain();
+  assert.match(h.get('diagnostics-body').textContent, /Home Assistant.*Fixture controller \/ 0.*控制器回执已确认.*板卡响应未核对/);
+});
+
 test('custom probe settings work before identification and save without running a command', async () => {
   const h = await associationFixture();
   h.get('b-probe-settings').click();
   assert.equal(h.get('probe-settings-dialog').open, true);
   const load = h.take('/api/probe-settings');
   assert.match(load.url, /connection_id=connection-A/);
-  load.resolve({mode: 'linux', command: '', default_command: 'printf HOST=buildroot'});
+  load.resolve({mode: 'linux', command: '', default_command: 'printf HOST=buildroot', login_os_family: 'debian'});
   await drain();
   assert.equal(h.get('probe-settings-command').readOnly, true);
+  assert.equal(h.get('probe-settings-os').textContent, '当前识别为 Debian');
+  assert.match(h.get('probe-settings-login-policy').textContent, /Debian/);
+  assert.equal(h.get('probe-settings-command-field').hidden, true);
   h.get('probe-settings-mode').value = 'custom'; h.get('probe-settings-mode').emit('change');
   assert.equal(h.get('probe-settings-save').disabled, true, 'empty custom command is invalid');
   h.get('probe-settings-command').value = "printf 'HOST=buildroot\\n'\necho MODEL=K3";

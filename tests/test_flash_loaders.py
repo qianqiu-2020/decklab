@@ -9,8 +9,8 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from decklab_core.flash_loaders import (K1_RAM_BOOT_PROTOCOL, K3_RAM_BOOT_PROTOCOL,
-                                       k1_ram_boot_installed, prepare_materials, ram_boot_installed)
+from decklab_core.flash_loaders import (K1_NOR_PROTOCOL, K1_RAM_BOOT_PROTOCOL, K3_RAM_BOOT_PROTOCOL,
+                                       k1_nor_installed, k1_ram_boot_installed, prepare_materials, ram_boot_installed)
 from decklab_core.flash_runner import FlashRunnerError, LocalFlashExecutor
 from decklab_core.tasks import TaskError
 from tools.package_flash_loaders import publish
@@ -66,6 +66,33 @@ class FlashLoaderTests(unittest.TestCase):
             self.assertEqual(set(materials), {'chip_family', 'protocol', 'fsbl', 'uboot'})
             publish(manifest.parent, root / 'installed')
             self.assertEqual((root / 'installed/uboot.bin').read_bytes(), b'RAM only uboot')
+
+    def test_k1_nor_loader_is_copied_and_kept_separate_from_stock_loader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.bundle(root / 'bundle')
+            document = json.loads(manifest.read_bytes())
+            document['families']['k1'] = dict(document['families']['k3'], protocol='stock')
+            nor = {'protocol': K1_NOR_PROTOCOL}
+            for key in ('fsbl', 'uboot'):
+                payload = ('K1 NOR ' + key).encode()
+                name = 'nor-' + key + '.bin'
+                (manifest.parent / name).write_bytes(payload)
+                nor[key] = {'file': name, 'sha256': hashlib.sha256(payload).hexdigest()}
+            document['families']['k1']['nor'] = nor
+            manifest.write_text(json.dumps(document))
+            installed = root / 'installed'
+            publish(manifest.parent, installed)
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            with mock.patch.dict(os.environ, {'DECKLAB_FLASH_LOADERS': str(installed / 'manifest.json')}):
+                self.assertTrue(k1_nor_installed())
+                binding = SimpleNamespace(profile_data={'chip_family': 'k1'})
+                result = prepare_materials(binding, workspace, lambda: None, nor=True)
+                self.assertEqual(result['protocol'], K1_NOR_PROTOCOL)
+                self.assertEqual(Path(result['uboot']['path']).read_bytes(), b'K1 NOR uboot')
+                (installed / nor['uboot']['file']).unlink()
+                self.assertFalse(k1_nor_installed())
 
     def test_compatible_download_loader_is_isolated_by_port_and_operation(self):
         with tempfile.TemporaryDirectory() as directory:

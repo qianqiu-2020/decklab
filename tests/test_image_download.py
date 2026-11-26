@@ -2,6 +2,7 @@
 from contextlib import closing, contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import socket
 import tempfile
 import threading
@@ -79,6 +80,14 @@ class ImageDownloadTests(unittest.TestCase):
         with fixture() as (manager, url):
             task = self.start(manager, url + '/redirect?secret=do-not-record', sha256=hashlib.sha256(DATA).hexdigest())
             self.assertEqual(task['state'], 'completed', task)
+            self.assertEqual(task['outcome'], 'verified')
+            self.assertEqual(task['result']['download'], {'name': 'opensbi.itb', 'transport': 'http',
+                                                          'redirects': 1, 'http_status': 200, 'checksum': 'matched',
+                                                          'declared_bytes': len(DATA), 'cache_reservation_bytes': len(DATA)})
+            stages = [step['phase'] for step in task['progress']['stages']]
+            self.assertIn('following-image-redirect', stages)
+            self.assertEqual(stages[-3:], ['image-download', 'sealing-image-cache', 'image-ready'])
+            self.assertNotIn('do-not-record', json.dumps(task))
             row = task['result']['artifact']
             self.assertEqual(row['size'], len(DATA))
             self.assertEqual(row['sha256'], hashlib.sha256(DATA).hexdigest())
@@ -140,11 +149,19 @@ class ImageDownloadTests(unittest.TestCase):
                 self.assertEqual(fetch.call_count, 1)
 
     def test_bad_checksum_truncated_denied_and_redirect_loop_never_publish(self):
-        for path, checksum in (('/image', '0' * 64), ('/truncated', None), ('/denied?token=private', None), ('/loop', None)):
+        for path, checksum, phase in (('/image', '0' * 64, 'sealing-image-cache'),
+                                      ('/truncated', None, 'image-download'),
+                                      ('/denied?token=private', None, 'waiting-image-response'),
+                                      ('/loop', None, 'following-image-redirect')):
             with self.subTest(path=path), fixture() as (manager, url):
                 task = self.start(manager, url + path, sha256=checksum)
                 self.assertEqual(task['state'], 'failed', task)
-                self.assertNotIn('private', task['error'])
+                self.assertEqual(task['progress']['phase'], phase)
+                self.assertEqual(task['progress']['stages'][-1]['phase'], phase)
+                self.assertNotIn('private', json.dumps(task))
+                from decklab_core.image_catalog import library
+                self.assertEqual([row['id'] for row in library(manager, history=True)['tasks']], [task['id']])
+                self.assertEqual(library(manager, 'other-actor', history=True)['tasks'], [])
                 self.assertEqual(manager.store.db.execute("SELECT COUNT(*) FROM transfer_artifacts WHERE state='ready'").fetchone()[0], 0)
                 self.assertEqual(list(manager.artifacts.root.glob('*.part')), [])
 

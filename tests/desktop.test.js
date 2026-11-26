@@ -89,6 +89,9 @@ function fixture(configuration = {}) {
       configuration.failNextOpen = false;
       return {ok:false,status:502,json:async()=>({code:'desktop-connection-refused',error:'starting'})};
     }
+    else if (url === '/api/desktop/quick-open' && configuration.quickFailure) {
+      return {ok:false,status:502,json:async()=>configuration.quickFailure};
+    }
     else if (url === '/api/desktop/quick-open') data = {session:{id:'session-'+serial, serial, login_stage:configuration.stage || 'initial'}};
     else if (url === '/api/desktop/open') {
       if (configuration.connectionFailure && connection.certificate_policy !== 'accept') return {ok:false,status:502,json:async()=>configuration.connectionFailure};
@@ -182,6 +185,21 @@ function fixture(configuration = {}) {
   firstBoot.switchBoard();
   assert.equal(firstBoot.$('desktop-move-wizard').hidden, true);
   assert.equal(firstBoot.$('desktop-login-guide').hidden, true);
+  const unavailable = fixture({setup:true,quick:true,quickFailure:{
+    code:'desktop-authentication-failed', error:'authentication failed', login_stage:'usb-unavailable'
+  }});
+  unavailable.desktop.refresh({key:'board-a',serial:'SERIAL-A'});
+  await tick(); unavailable.$('b-desktop').fire('click'); await tick(); await tick();
+  assert.match(unavailable.$('desktop-overlay').textContent,/入口凭据/);
+  assert.match(unavailable.$('desktop-login-stage').textContent,/USB ADB 未就绪/);
+  assert.equal(unavailable.$('desktop-login-guide').hidden,false);
+  assert.equal(unavailable.$('desktop-move-wizard').hidden,true);
+  assert.equal(unavailable.sockets.length,0);
+  const fallback = fixture({setup:true,quick:true,stage:'usb-unavailable'});
+  await fallback.open();
+  assert.match(fallback.$('desktop-login-stage').textContent,/USB ADB 未就绪/);
+  assert.equal(fallback.$('desktop-move-wizard').hidden,true);
+  fallback.desktop.close();
   const failure=fixture({connectionFailure:{error:'证书不受信任 · ERRCONNECT_TLS_CONNECT_FAILED',code:'desktop-certificate-rejected',
     details:{stage:'certificate',native_code:'0x00020008',traceback:'File "/server/desktop.py", line 10\nTLS failed <script>'}}});
   failure.desktop.refresh({key:'board-a',serial:'SERIAL-A'});await tick();failure.$('b-desktop').fire('click');await tick();await tick();

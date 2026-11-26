@@ -28,7 +28,7 @@ if (Test-Path $tokenFile) {
         ConvertFrom-SecureString | Set-Content -Path $tokenFile -Encoding ASCII
 }
 
-Write-Host "decklab LAN: listening on 0.0.0.0:$Port"
+Write-Host "DeckLab LAN: HTTP port $Port on all network interfaces"
 Write-Host 'Other computers only need a browser. Keep this window open.'
 # Keep the original process handle so Windows PowerShell can read its exit code.
 $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -55,7 +55,7 @@ try {
     if ($ready) {
         $access = Invoke-RestMethod "http://127.0.0.1:$Port/api/access" -Headers @{Authorization="Bearer $token"} -TimeoutSec 15
         $profilePath = Join-Path $root 'lan-firewall.json'
-        if ($access.share_enabled -eq $true -and $listener.LocalAddress -contains '0.0.0.0' -and
+        if ($access.share_enabled -eq $true -and ($listener.LocalAddress | Where-Object { $_ -in @('0.0.0.0','::') }) -and
             (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
             try {
                 $ports = @(Get-NetTCPConnection -State Listen -OwningProcess $process.Id |
@@ -93,7 +93,10 @@ try {
         }
         $share = Invoke-RestMethod "http://127.0.0.1:$Port/api/share-link" -Method Post -Headers @{Authorization="Bearer $token"} -TimeoutSec 3
         Write-Host 'Open one of these links in the remote browser; no client or pairing configuration is needed:'
-        foreach ($address in $access.lan_hosts) { Write-Host ("  http://" + $address + ':' + $Port + $share.path) }
+        foreach ($address in $access.lan_hosts) {
+            $authority = if ($address.Contains(':')) { "[$address]" } else { $address }
+            Write-Host ("  http://" + $authority + ':' + $Port + $share.path)
+        }
         Write-Host ("  Local: http://127.0.0.1:" + $Port + $share.path)
         Write-Host ('Link authorization expires in ' + ($share.expires_in / 3600) + ' hours. New links are available from Share access in the page.')
     } else { Write-Warning 'Access links are not ready. Open the local page and use Share access after startup.' }

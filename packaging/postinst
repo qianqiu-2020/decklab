@@ -108,6 +108,7 @@ case "$1" in
 import re
 from pathlib import Path
 from decklab_core.control_server import lan_hosts
+from decklab_core.network import url_host
 
 config = Path('/etc/decklab/decklab.env').read_text(encoding='utf-8')
 def setting(name, default):
@@ -117,16 +118,16 @@ def setting(name, default):
 port = setting('DECKLAB_PORT', '8898')
 bind = setting('DECKLAB_BIND', '0.0.0.0')
 print('decklab: web and agent access:')
-if bind in ('0.0.0.0', '127.0.0.1', 'localhost'):
+if bind in ('0.0.0.0', '::', '127.0.0.1', 'localhost'):
     print(f'  local: http://127.0.0.1:{port}/')
-if bind == '0.0.0.0':
+if bind in ('0.0.0.0', '::'):
     hosts = lan_hosts()
     for host in hosts:
-        print(f'  LAN:   http://{host}:{port}/')
+        print(f'  LAN:   http://{url_host(host)}:{port}/')
     if not hosts:
-        print('  LAN:   no private IPv4 address detected; check network configuration')
+        print('  LAN:   no shareable address detected; check network configuration')
 elif bind not in ('127.0.0.1', 'localhost'):
-    print(f'  bind:  http://{bind}:{port}/')
+    print(f'  bind:  http://{url_host(bind)}:{port}/')
 PY
     # Reuse the running service's existing share-link/cookie protocol. No node
     # enrollment, collector restart, key copying or extra client installation.

@@ -57,6 +57,17 @@
           "file": "k1-ram-boot/u-boot.itb",
           "sha256": "8f359d09e448d8d7dea8ed5ed89fefb8eadbbc63414a95aff146a6ce8db233d8"
         }
+      },
+      "nor": {
+        "protocol": "spacemit-k1-nor-v1",
+        "fsbl": {
+          "file": "k1-nor/FSBL.bin",
+          "sha256": "c6cec4f04276373aec5d8c98e58d85e419da2527a45f922757a30ad146ced54b"
+        },
+        "uboot": {
+          "file": "k1-nor/u-boot.itb",
+          "sha256": "75c761d9ef82647737adc913641233faa8f53d5448aca4691aa36bb19270f35a"
+        }
       }
     }
   }

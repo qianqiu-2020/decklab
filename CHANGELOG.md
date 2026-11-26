@@ -6,6 +6,28 @@
 
 ## [Unreleased]
 
+## [1.19.15] - 2026-11-26
+
+### Added
+
+- 从设备页打开 ADB 时，如果找不到当前板卡的在线连接，通过空闲串口检查板端 ADB 服务和 USB 事件。连接提示和任务详情记录诊断证据。
+- K1 MUSE-Pi-Pro 支持读取并备份 NOR，以及单独预览和写入 OpenSBI。单分区写入要求整片回读校验。
+- 点击版本号可检查 GitHub 正式版，获取版本化安装包和带 SHA-256 校验的 Linux 安装命令。
+- 网页可查看 Web 和采集服务、HTTP 和 HTTPS 监听、配置修订及最近一次应用结果。设备页提供串口采集、输入占用、板卡身份和工位接线的诊断入口。
+- 任务详情记录设备识别、SSH 和 ADB 建连、镜像下载与准备、电源控制及工位配对的执行阶段。远程桌面的关键操作记录自动发现、登录阶段和连接结果。
+
+### Changed
+
+- 普通刷机切换到指定分区时，在分区区域直接引导读取存储。需要重启进下载模式时先确认。
+- 探测设置显示当前系统和自动登录策略，内置探测命令可按需展开。
+- 板卡控制请求成功后自动关闭确认窗口，设备页保留回执。失败或结果待确认时保留窗口。
+
+### Fixed
+
+- 新建 ADB 会话、执行命令和启动板卡用例时，可按已核对的板号跟随新的 USB 端口。已提交操作继续使用原连接。
+- 局域网模式的 HTTP 和 HTTPS 支持 IPv4 和 IPv6，分享地址覆盖 Wi-Fi、以太网和 Tailscale。内置 HTTPS 端口可单独配置，使用外部代理时可关闭内置监听。
+- 保存 Debian 的 RDP 入口后，仍可通过 USB 检查首次设置状态。USB 调试不可用时显示检测失败的原因。
+
 ## [1.19.2] - 2026-11-26
 
 ### Changed
@@ -431,7 +453,8 @@
 - Allow vertical wheel scrolling over boot comparison text and inline highlights
   while preserving horizontal scrolling for long lines.
 
-[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.19.2...HEAD
+[Unreleased]: https://github.com/qianqiu-2020/decklab/compare/v1.19.15...HEAD
+[1.19.15]: https://github.com/qianqiu-2020/decklab/compare/v1.19.2...v1.19.15
 [1.19.2]: https://github.com/qianqiu-2020/decklab/compare/v1.19.0...v1.19.2
 [1.19.0]: https://github.com/qianqiu-2020/decklab/compare/v1.18.7...v1.19.0
 [1.18.7]: https://github.com/qianqiu-2020/decklab/compare/v1.18.0...v1.18.7

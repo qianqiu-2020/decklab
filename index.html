@@ -16,7 +16,8 @@
 <div class="wrap">
   <div class="top">
     <h1><img class="brand-logo" src="/static/decklab.svg" width="32" height="32" alt="">DeckLab</h1>
-    <span id="decklab-version" class="mono" aria-label="DeckLab Web 版本">版本未知</span>
+    <button id="decklab-version" type="button" class="mono" aria-label="检查 DeckLab 更新"
+      title="检查 DeckLab 更新" aria-haspopup="dialog">版本未知</button>
     <button id="b-image-store" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-building-store"/></svg>镜像商店</button>
     <button type="button" class="menu-trigger" popovertarget="platform-menu" aria-controls="platform-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg>全站分享</button>
     <div id="platform-menu" class="action-menu" popover aria-label="全站分享">
@@ -27,7 +28,7 @@
     <button id="b-settings" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>系统配置</button>
     <select id="language-select" aria-label="Language / 语言" title="Language / 语言" data-language-select data-i18n-ignore><option value="zh-CN">中文</option><option value="en">English</option></select>
     <span id="share-status" role="status"></span>
-    <span class="conn"><span class="dot" id="conn-dot"></span><span id="conn-txt">连接中…</span></span>
+    <button class="conn" id="b-system-diagnostics" type="button" title="运行状态" aria-haspopup="dialog"><span class="dot" id="conn-dot"></span><span id="conn-txt">连接中…</span></button>
   </div>
   <div class="directory-heading">
     <h2>设备工作台</h2>
@@ -77,6 +78,7 @@
         <button type="button" class="menu-trigger" popovertarget="device-menu" aria-controls="device-menu"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-devices"/></svg>设备</button>
         <div id="device-menu" class="action-menu" popover aria-label="设备">
           <button id="b-info" type="button" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-info"/></svg>设备信息</button>
+          <button id="b-device-diagnostics" type="button" aria-haspopup="dialog"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-radar"/></svg>设备诊断</button>
           <button id="b-identify" type="button" title="自动登录并读取板子序列号 / IP / sshd"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-scan"/></svg>识别设备</button>
           <button id="b-probe-settings" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-radar"/></svg>探测设置</button>
           <button id="b-device-share" type="button" hidden title="链接默认打开此设备；网页授权仍可访问全部设备"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-link"/></svg>此设备链接（全站权限）</button>
@@ -484,6 +486,10 @@ PasswordAuthentication yes</code></pre>
   <nav id="is-path" class="is-path" aria-label="镜像目录"></nav>
   <div id="is-list" class="is-list"></div>
   <p id="is-status" class="log-note" role="status"></p><div id="is-downloads" class="log-note" role="status"></div>
+  <details id="is-task-history" class="fl-details">
+    <summary>镜像任务记录</summary>
+    <div id="is-task-list"></div>
+  </details>
   <p id="is-download-note" class="log-note">镜像下载到控制机；刷写前仍需核对板型、预览范围并确认。</p>
 </dialog>
 <dialog id="flash-dialog" class="flash-dialog" aria-labelledby="fl-title">
@@ -557,6 +563,7 @@ PasswordAuthentication yes</code></pre>
       <div><strong id="fl-board-name" data-i18n-ignore></strong><small id="fl-board-identity" data-i18n-ignore></small>
         <span id="fl-board-link" role="status"></span></div>
       <button id="fl-prepare-board" class="pri" type="button" hidden>进入下载模式并读取设备存储</button>
+      <p id="fl-storage-limit" class="fl-hint" hidden></p>
     </div>
     <div id="fl-target-picker" class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label></div>
     <div id="fl-fast-connect" class="ft-actions" hidden>
@@ -612,10 +619,16 @@ PasswordAuthentication yes</code></pre>
     </div>
     <label id="fl-ec-field" class="ft-check" hidden><input id="fl-write-ec" type="checkbox" checked><span id="fl-ec-label">更新 EC 固件</span></label>
     <fieldset id="fl-partitions-field" hidden><legend class="visually-hidden">分区内容与替换文件</legend>
-      <div id="fl-partition-tools" class="fl-partition-tools"><label><input id="fl-all-partitions" type="checkbox"><span id="fl-all-label">全选分区</span></label></div>
-      <div class="fl-partition-heading" aria-hidden="true"><span>分区</span><span id="fl-current-heading">板上现有内容</span><span>将写入的文件</span></div>
-      <div id="fl-current-layout"></div>
-      <div id="fl-partitions"></div>
+      <div id="fl-partition-setup" class="fl-partition-setup" hidden>
+        <p id="fl-partition-setup-note" class="fl-hint" role="status"></p>
+        <button id="fl-partition-read" class="pri" type="button" hidden>读取设备存储</button>
+      </div>
+      <div id="fl-partition-list">
+        <div id="fl-partition-tools" class="fl-partition-tools"><label><input id="fl-all-partitions" type="checkbox"><span id="fl-all-label">全选分区</span></label></div>
+        <div class="fl-partition-heading" aria-hidden="true"><span>分区</span><span id="fl-current-heading">板上现有内容</span><span>将写入的文件</span></div>
+        <div id="fl-current-layout"></div>
+        <div id="fl-partitions"></div>
+      </div>
     </fieldset>
   </section>
       <details id="fl-tuning" class="fl-details" hidden>
@@ -715,13 +728,43 @@ PasswordAuthentication yes</code></pre>
   </div>
   <div class="iw-footer"><button id="iw-fork" type="button">创建可编辑副本</button></div>
 </dialog>
+<dialog id="diagnostics-dialog" class="agent-share-dialog" aria-labelledby="diagnostics-title">
+  <div class="agent-share-head"><strong id="diagnostics-title">诊断详情</strong><button id="diagnostics-close" type="button">关闭</button></div>
+  <p id="diagnostics-status" role="status"></p>
+  <div id="diagnostics-body"></div>
+  <div class="agent-share-actions">
+    <button id="diagnostics-refresh" type="button">刷新详情</button>
+    <button id="diagnostics-copy" type="button" disabled>复制详情</button>
+  </div>
+</dialog>
+<dialog id="update-dialog" class="agent-share-dialog" aria-labelledby="update-title">
+  <div class="agent-share-head"><strong id="update-title">DeckLab 更新</strong><button id="update-close" type="button">关闭</button></div>
+  <p id="update-status" role="status"></p>
+  <section id="update-install" hidden>
+    <p>请先结束正在运行的板卡任务，再在运行 DeckLab 的控制机上安装。</p>
+    <p id="update-instructions"></p>
+    <p><code id="update-command" data-i18n-ignore></code></p>
+    <div class="agent-share-actions"><button id="update-copy" type="button">复制安装命令</button>
+      <a id="update-download" rel="noopener noreferrer">下载安装包</a></div>
+  </section>
+  <div class="agent-share-actions"><button id="update-check" type="button">检查更新</button>
+    <a id="update-release" target="_blank" rel="noopener noreferrer" hidden>查看发布说明</a></div>
+</dialog>
 <dialog id="probe-settings-dialog" class="probe-settings-dialog" aria-labelledby="probe-settings-title">
   <div class="agent-share-head"><strong id="probe-settings-title">探测设置</strong><button id="probe-settings-close" type="button">关闭</button></div>
   <p id="probe-settings-target" data-i18n-ignore></p>
   <p>设置保存在当前串口位置，换板后仍沿用。识别不是终端访问或分享给 AI 的前提。</p>
-  <label class="probe-settings-field">探测方式<select id="probe-settings-mode"><option value="linux">内置 Linux / Buildroot 探测</option><option value="custom">自定义 shell 命令</option><option value="manual">仅使用终端，不自动探测</option></select></label>
-  <label class="probe-settings-field">探测命令<textarea id="probe-settings-command" spellcheck="false" maxlength="16384" data-i18n-ignore></textarea></label>
-  <p>自定义命令在板端 POSIX shell 中执行，可输出 HOST=、SERIAL=、MODEL=、SSHD= 和 IP= 字段。不输出序列号也能保留探测结果；不会据此合并设备档案。</p>
+  <label class="probe-settings-field">探测方式<select id="probe-settings-mode"><option value="linux">内置 Linux 探测</option><option value="custom">自定义 shell 命令</option><option value="manual">仅使用终端，不自动探测</option></select></label>
+  <section id="probe-settings-login" hidden>
+    <p id="probe-settings-os"></p>
+    <p id="probe-settings-login-policy"></p>
+  </section>
+  <div id="probe-settings-default" hidden>
+    <p>内置探测在登录后读取设备身份和系统信息。</p>
+    <details><summary>查看内置探测命令</summary><pre id="probe-settings-default-command" data-i18n-ignore></pre></details>
+  </div>
+  <label id="probe-settings-command-field" class="probe-settings-field">探测命令<textarea id="probe-settings-command" spellcheck="false" maxlength="16384" data-i18n-ignore></textarea></label>
+  <p id="probe-settings-custom-help">自定义命令在板端 POSIX shell 中执行，可输出 HOST=、SERIAL=、MODEL=、SSHD= 和 IP= 字段。不输出序列号也能保留探测结果；不会据此合并设备档案。</p>
   <div class="agent-share-actions"><button class="pri" id="probe-settings-save" type="button" disabled>保存设置</button><span id="probe-settings-status" role="status"></span></div>
   <p>保存不会发送命令；点击“识别设备”时执行。其他控制台可选择仅使用终端。</p>
 </dialog>
@@ -782,6 +825,7 @@ Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\decklab-mcp.exe'</code></pre>
 <script src="/static/archives.js"></script>
 <script src="/static/devices.js"></script>
 <script src="/static/tasks.js"></script>
+<script src="/static/diagnostics.js"></script>
 <script src="/static/image-store.js"></script>
 <script src="/static/control-slots.js"></script>
 <script src="/static/board-control.js"></script>

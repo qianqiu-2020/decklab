@@ -261,8 +261,15 @@ class HardwareOperation:
         self.bound = self.command.bind(device)
 
     def run(self, context):
+        from .board_control import record_control_outcome
         device = self.device
         transactions = transactions_for(device)
+        receipt = {'provider': self.command.provider, 'observation': 'not-checked'}
+        wiring = self.book.wiring(self.serial)
+        if wiring and self.command.provider == 'home-assistant':
+            receipt.update(controller=wiring['name'], slot=wiring['number'])
+        context.store.update(context.id, result={'control': receipt})
+        context.stage('checking-board-control-target')
         lease = None
         context.on_cancel(transactions._wake)
         def check():
@@ -279,9 +286,7 @@ class HardwareOperation:
         def outcome(value):
             if value == 'issued':
                 check()
-                context.issued()
-            else:
-                context.mark_outcome(value)
+            record_control_outcome(context, value, receipt)
         slots = getattr(self.manager, 'control_slots', None)
         guard = slots.using(self.serial, self.action, self.command) if slots else nullcontext()
         with guard, transactions.actor_scope(self.actor, self.client_id), \
@@ -289,7 +294,7 @@ class HardwareOperation:
                 transactions.begin('hardware-' + self.action, self.command.timeout + 1, require_open=False) as lease:
             check()
             self.manager.store.event(self.serial, self.actor, 'hardware-start', self.action)
-            context.progress(0, 1, self.action)
+            context.stage('preparing-board-controller')
             try:
                 handoff = (self.manager.exclusive_serial(device, check)
                            if self.command.exclusive_serial else nullcontext())
@@ -302,8 +307,11 @@ class HardwareOperation:
                         cleanup_failed, outcome)
                 check()
                 self.manager.store.event(self.serial, self.actor, 'hardware-complete', self.action)
-                context.progress(1, 1, self.action)
-                return dict(result, ok=True, action=self.action)
+                context.stage('board-control-finished', done=1, total=1)
+                output = dict(result, ok=True, action=self.action, control=receipt)
+                if receipt.get('acknowledged'):
+                    output['control_result'] = 'acknowledged'
+                return output
             except Exception as error:
                 self.manager.store.event(self.serial, self.actor, 'hardware-stopped', self.action)
                 if isinstance(error, TransactionError) and error.code == 'cancelled':

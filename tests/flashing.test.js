@@ -1497,7 +1497,7 @@ for (const supported of [true, false]) test('BootROM image preparation is explic
   assert.equal(h.get('fl-files').disabled, false);
   assert.match(h.get('fl-status').textContent, /BootROM.*不写存储/);
   assert.match(h.get('fl-connections').textContent, /回读支持待确认/);
-  assert.match(h.get('fl-partitions').textContent, /准备阶段将读取现场布局/);
+  assert.match(h.get('fl-partition-setup-note').textContent, /选择待刷镜像.*预览刷机准备步骤/);
   h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change');
   assert.equal(h.get('fl-plan').disabled, false);
   assert.match(h.get('fl-plan').textContent, /准备步骤/);
@@ -1681,7 +1681,7 @@ test('unavailable USB connection shows its diagnostic and unknown readback witho
   assert.match(h.get('fl-connections').textContent, /flush read error: -1/);
   assert.match(h.get('fl-connections').textContent, /回读支持待确认/);
   assert.doesNotMatch(h.get('fl-connections').textContent, /已进入下载模式|不支持写后回读/);
-  assert.match(h.get('fl-partitions').textContent, /USB 连接尚未就绪/);
+  assert.match(h.get('fl-partition-setup-note').textContent, /USB 连接尚未就绪/);
   h.get('fl-artifact').value=artifact.id; h.get('fl-artifact').emit('change');
   assert.equal(h.get('fl-plan').disabled,true);
   assert.equal(h.get('fl-start').disabled,true);
@@ -2016,15 +2016,38 @@ test('URL store firmware selection moves to the standard NOR review without star
   assert.equal(h.requests.some(entry => entry.payload),false);
 });
 
+test('K1 firmware packages explain the unsupported NOR partition workflow before submitting a preview', async () => {
+  const h = harness();
+  const firmware = {id:'k1-fw', name:'Debian-Firmware-K1.tar.gz', size:200};
+  h.api.open(board);
+  h.take('/api/flash-capabilities').resolve({...capabilities, chip:'k1', artifacts:[firmware],
+    preparable:true, loader_sources:['builtin'], nor_workspace_supported:false});
+  await drain(); h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.get('fl-artifact').value = firmware.id; h.get('fl-artifact').emit('change');
+  h.get('fl-mode').value = 'partitions'; h.get('fl-mode').emit('change');
+  assert.equal(h.get('fl-plan').disabled, true);
+  assert.equal(h.get('fl-storage-limit').hidden, false);
+  assert.match(h.get('fl-firmware-only-note').textContent, /不支持读取 NOR/);
+  h.get('fl-plan').click();
+  assert.equal(h.requests.some(request => request.url === '/api/flash-plan'), false);
+  h.get('fl-mode').value = 'full'; h.get('fl-mode').emit('change');
+  assert.equal(h.get('fl-plan').disabled, false);
+  h.get('fl-store').click();
+  h.chooseImage({id:'k1-opensbi',name:'opensbi.itb',size:256});
+  assert.equal(h.get('fl-mode').value, 'partitions');
+  assert.equal(h.get('fl-plan').disabled, true);
+  assert.equal(h.get('fl-firmware-only-note').hidden, false);
+});
+
 const controlledBoard = {...board, connection_id:'uart-generation-1'};
 const scopedUSB = {target_id:'confirmed-usb', target_generation:'usb-generation-2', serial:board.serial, present:true};
 const otherUSB = {target_id:'unrelated-usb', target_generation:'usb-generation-1', serial:'OTHER-SN', present:true};
 const usbCapabilities = {...capabilities, stream_flash_supported:true, ram_boot_supported:true,
   nor_workspace_supported:true, storage_inventory_supported:true};
 
-async function openWithoutUSB(h, operation) {
+async function openWithoutUSB(h, operation, initialCapabilities = capabilities) {
   h.api.open(controlledBoard, null, false, operation);
-  h.take('/api/flash-capabilities').resolve({...capabilities, supported:false}); await drain();
+  h.take('/api/flash-capabilities').resolve({...initialCapabilities, supported:false}); await drain();
   h.take('/api/tasks').resolve({tasks:[]}); await drain();
   h.take('/api/flash-discover').resolve({targets:[otherUSB]}); await drain();
   h.take('/api/hardware').resolve({actions:['enter-download'],wiring:{revision:'revision-1'}}); await drain();
@@ -2102,6 +2125,32 @@ test('ordinary flash enters download and reads storage without a write plan', as
   assert.equal(read.payload.read_system,true);
   assert.ok(!('artifact_id' in read.payload));
   assert.equal(h.requests.some(r => r.payload),false);
+});
+
+test('partition mode offers storage read in place and confirms before entering download mode', async () => {
+  const h = harness();
+  await openWithoutUSB(h, 'normal', {...capabilities, storages:[]});
+  h.get('fl-mode').value = 'partitions';
+  h.get('fl-mode').emit('change');
+  assert.equal(h.get('fl-partition-setup').hidden, false);
+  assert.equal(h.get('fl-partition-list').hidden, true);
+  assert.equal(h.get('fl-prepare-board').hidden, true);
+  assert.equal(h.get('fl-plan').hidden, true);
+  assert.equal(h.get('fl-partition-read').textContent, '进入下载模式并读取设备存储');
+  assert.equal(h.requests.some(r => r.payload), false);
+  await confirmDownload(h, 'fl-partition-read', {...usbCapabilities, storages:[], chip:'k1',
+    storage_inventory_supported:false});
+  const read = h.take('/api/task-start');
+  assert.equal(read.payload.kind, 'nor-backup');
+  assert.equal(read.payload.target_id, scopedUSB.target_id);
+  assert.equal('artifact_id' in read.payload, false);
+  assert.equal('read_system' in read.payload, false);
+  read.resolve({task:{id:'k1-partition-read', kind:'flash', state:'running',
+    progress:{phase:'reading-nor'}, flash:{operation:'nor-workspace',write_result:'not-started',k1_nor_only:true}}});
+  await drain();
+  assert.equal(h.get('fl-partition-read').hidden, true);
+  assert.match(h.get('fl-partition-setup-note').textContent, /正在准备设备并读取分区布局/);
+  assert.equal(h.requests.some(r => r.payload), false);
 });
 
 test('normal preview asks before reset and resumes preview for the original image and USB target', async () => {
@@ -2426,6 +2475,24 @@ test('unified storage read starts once from full mode and requests system metada
   h.get('fl-read-nor').click();const request=h.take('/api/task-start');assert.equal(request.payload.kind,'nor-backup');
   assert.equal(request.payload.read_system,true);assert.equal('artifact_id' in request.payload,false);
   h.get('fl-read-nor').click();assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('K1 NOR read switches from full mode to partition selection with mandatory verification', async () => {
+  const h = harness();
+  h.api.open(norTarget);
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-target').resolve({target:norTarget, capabilities:{...capabilities, chip:'k1',
+    nor_workspace_supported:true, storage_inventory_supported:false, preparable:true, modes:['full','partitions']}});
+  await drain();
+  assert.equal(h.get('fl-mode').value, 'full');
+  assert.equal(h.get('fl-read-nor').hidden, false);
+  assert.equal(h.get('fl-read-nor').textContent, '读取并备份 NOR');
+  h.get('fl-read-nor').click();
+  const request = h.take('/api/task-start');
+  assert.equal(request.payload.kind, 'nor-backup');
+  assert.equal('read_system' in request.payload, false);
+  assert.equal(h.get('fl-mode').value, 'partitions');
+  assert.equal(h.get('fl-verify').value, 'required');
 });
 
 test('system storage metadata uses the proven default and changing views never changes write selections', async () => {

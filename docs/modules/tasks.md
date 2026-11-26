@@ -83,6 +83,12 @@ States are `queued`, `running`, `completed`, `failed`, `cancelled` and
 `interrupted`. Only queued/running rows accept progress or final-state updates.
 Terminal rows cannot be overwritten by late callbacks. Progress has `done`,
 `total` and `phase`; individual operation adapters choose units and phases.
+Identification and SSH/ADB session setup record `progress.stages` as ordered
+entries with `phase`, `at_ms` (the control host's Unix time in milliseconds), and
+`endpoint` when a stage selects an SSH address or USB path. The SSH record shows
+whether the connection used entered, saved or default settings. ADB shows the
+registered path and the path where identity was verified. A failed task keeps
+the last stage it reached. Connection stages carry no passwords or raw output.
 Historical `targets[].serial` and connection IDs remain immutable submission
 snapshots. Registry schema 5 separately records a proven connection-to-board
 association. Task targets include `resolved_serial` when such proof exists;
@@ -127,6 +133,11 @@ request open until the operation finishes. The terminal toolbar's task button
 opens paginated history with progress, result/error, cancellation and an existing
 SSH-session shortcut. Reopening or reloading the page retrieves history without
 replaying the operation. Visible history refreshes every five seconds.
+Use **Task details** on a row to see its original connection, request ID, reported
+outcome and any recorded stages. After a device reconnects, historical tasks
+retain the connection used for the original operation.
+SSH or ADB session failures also link to the original task from the terminal's
+status line when the control host returned a task ID.
 
 A submitted operation is checked every second; network failures retry after two
 seconds without starting another task. Authentication failures, revoked access or
@@ -140,6 +151,10 @@ the Android Debug Bridge (ADB) client installed on its host. It resolves the
 current transport ID from the USB topology and checks the board's hardware
 serial and Linux boot ID again in the shell that runs the command. ADB's
 reported device serial alone is insufficient because cloned images can share it.
+When an operator opens a new ADB shell or submits a new ADB command after moving
+the USB cable, DeckLab can use another online port after it reads and uniquely
+matches the board identity. The port chosen for an existing task remains fixed.
+USB enumeration alone does not establish an online ADB connection.
 
 CLI `adb-command` and the MCP tool `execute_adb_command` submit the same
 `adb-command` task. Use the regular task history or query the original request

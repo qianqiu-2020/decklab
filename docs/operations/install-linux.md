@@ -32,6 +32,8 @@ sudo decklab-access
 
 将新版 Debian 包安装到原控制机。开始之前结束正在写盘或执行的任务，并保存要保留的启动记录。
 
+点击网页顶部的版本号可检查 GitHub 正式版。网页显示与当前控制机匹配的安装包和命令。在控制机上运行 `sudo decklab-update <版本号>`，例如网页显示的新版本为 `1.20.0` 时运行 `sudo decklab-update 1.20.0`。命令会重新核对所选版本，下载版本化 Debian 包并校验大小、SHA-256、包名、版本和架构，然后交给 dpkg 安装。仅检查更新可运行 `decklab-update`，无需 sudo。
+
 从旧包更名升级时，apt 用 `decklab` 替换旧包。安装脚本沿用原服务账户的数字标识，将已有环境变量转换成 `DECKLAB_*`。默认数据目录迁移后留有旧路径别名供历史任务引用，自定义数据位置按原配置使用。Web 和硬件后端分离的部署应在各自节点上升级，随后核对 HTTPS 后端状态。
 
 升级后依次检查服务状态、`decklab-access` 的 URL、已知板卡和一份历史归档。若服务启动失败，查看 `journalctl -u decklab -u decklab-collector -b`，确认端口占用、数据目录权限和配置是否匹配。安装或卸载不会自动清理操作员的运行数据。[存储升级与恢复](storage-upgrades.md)

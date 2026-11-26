@@ -219,7 +219,7 @@ def catalog(source='public', path='', refresh=False):
     return json.loads(json.dumps(result))
 
 
-def library(manager, actor='web', serial=None):
+def library(manager, actor='web', serial=None, *, history=False):
     artifact_scope, task_scope, arguments = "1=1", "1=1", ()
     if actor != 'web':
         artifact_scope, task_scope, arguments = 'actor=?', 't.actor=?', (actor,)
@@ -227,6 +227,12 @@ def library(manager, actor='web', serial=None):
             artifact_scope += ' AND serial=?'
             task_scope += ' AND s.serial=?'
             arguments += (serial,)
+    if history:
+        with manager.store.lock:
+            ids = [row[0] for row in manager.store.db.execute(
+                'SELECT DISTINCT t.id FROM tasks t JOIN task_targets s ON s.task_id=t.id WHERE ' + task_scope +
+                " AND t.kind IN ('image-download','image-prepare') ORDER BY t.created DESC,t.id DESC LIMIT 20", arguments)]
+        return {'tasks': [manager.tasks.store.get(task_id) for task_id in ids]}
     with manager.store.lock:
         ids = [row[0] for row in manager.store.db.execute(
             "SELECT id FROM transfer_artifacts WHERE " + artifact_scope +

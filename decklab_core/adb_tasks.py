@@ -215,9 +215,11 @@ def start(manager, device, payload, actor):
         raise TaskError('控制机缺少 adb', 409)
     registered = manager.hardware.board_tests.get(device.serial)
     try:
-        port, _, facts = find_transport(executable, device.serial, registered)
-    except (OSError, ConnectionError, subprocess.TimeoutExpired) as error:
-        raise TaskError('未找到与当前板卡匹配的在线 USB 调试连接', 409) from error
+        port, _, facts = find_transport(executable, device.serial, registered, allow_relocation=True)
+    except ConnectionError as error:
+        raise TaskError(str(error), 409) from error
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise TaskError('控制机暂时无法读取 USB 调试连接', 409) from error
     operation = AdbCommand(manager, device, executable, port, facts, registered, command, timeout)
     if payload['connection_id'] != operation.connection:
         raise TaskError('板卡串口连接已变化', 409)

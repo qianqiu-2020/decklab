@@ -753,8 +753,20 @@
       $('fl-all-label').textContent = nor ? '全选 NOR 分区' : '全选分区';
       var canResolve = pageBoard && pageBoard.serial && !hasDownloadTarget();
       var fast = !!(board && board.target_id && capabilities && capabilities.stream_flash_supported && !board.observingTask);
-      var storageReadable = capabilities && capabilities.nor_workspace_supported
-        && (capabilities.storage_inventory_supported || $('fl-mode').value === 'partitions');
+      var storageReadable = canReadBoardStorage();
+      var rows = $('fl-partitions').children;
+      var checks = Array.from(rows).filter(function (row) { return row.checkbox; });
+      var k1NorUnavailable = capabilities?.chip === 'k1' && capabilities.nor_workspace_supported === false;
+      var k1NorOnly = task?.flash?.k1_nor_only === true && !!active;
+      if (k1NorOnly) {
+        $('fl-mode').value = 'partitions';
+        $('fl-verify').value = 'required';
+      }
+      var partitionSetup = flow === 'normal' && $('fl-mode').value === 'partitions'
+        && (!checks.length || nor && !selecting && !active);
+      var readingStorage = !!(active && task.flash?.operation === 'nor-workspace'
+        && task.flash.write_result === 'not-started' && !selecting);
+      var canReadPartitions = partitionSetup && (canResolve || storageReadable);
       $('fl-fast').hidden = flow !== 'fast';
       $('fl-target-picker').hidden = !!pageBoard && !manualUSBChoices;
       $('fl-board-context').hidden = !pageBoard;
@@ -775,10 +787,12 @@
       $('fl-fast-connect').hidden = !pageBoard || hasDownloadTarget() || $('fl-fast-bind').hidden;
       $('fl-connection-details').hidden = !capabilities && !board?.target_id;
       var prepare = $('fl-prepare-board');
-      prepare.hidden = flow !== 'normal' || !pageBoard || !(canResolve || storageReadable);
+      prepare.hidden = flow !== 'normal' || !pageBoard || !(canResolve || storageReadable) || canReadPartitions;
       prepare.disabled = busy || uploading || preparingBoard || submissionUnknown || !!active || !!(board && board.observingTask);
       prepare.textContent = canResolve ? downloadWiring && !downloadControl ? '进入下载模式并读取设备存储'
-        : '检测 USB 并读取设备存储' : '读取设备存储';
+        : '检测 USB 并读取设备存储' : capabilities?.chip === 'k1' ? '读取并备份 NOR' : '读取设备存储';
+      $('fl-storage-limit').hidden = flow !== 'normal' || !k1NorUnavailable;
+      setMessage('fl-storage-limit', '当前 K1 加载器不支持此处的设备存储读取和 NOR 单分区替换。');
       var tuning = !!(board && board.target_id && capabilities && capabilities.calibrate_supported && !board.observingTask);
       $('fl-tuning').hidden = !tuning || flow !== 'normal';
       $('fl-tuning-storage-field').hidden = !$('fl-tuning-write').checked;
@@ -831,7 +845,12 @@
       if (!choices.includes(loader.value)) loader.value = choices[0] || '';
       loader.disabled = busy || preparingBoard || uploading || !!active || submissionUnknown || !choices.length;
       var onlyNOR = norOnlySource(primary);
-      $('fl-firmware-only-note').hidden = !onlyNOR;
+      var isOpenSBI = /^(opensbi|fw_dynamic)(?:[._-][^/]+)?\.itb$/i.test(primary?.name || '');
+      var unsupportedK1NOR = k1NorUnavailable && (onlyNOR || isOpenSBI) && $('fl-mode').value === 'partitions';
+      $('fl-firmware-only-note').hidden = !onlyNOR && !unsupportedK1NOR;
+      $('fl-firmware-only-note').textContent = translate(unsupportedK1NOR
+        ? '当前 K1 刷机加载器不支持读取 NOR 或只替换其中一个分区。'
+        : '本次只预览和写入 NOR 固件。');
       $('fl-firmware-field').hidden = $('fl-mode').value !== 'full' || !packageFile(primary) || onlyNOR;
       var companion = artifacts.find(function (item) { return item.id === selectedFirmware; });
       var ecId = companion ? companion.id : primary && primary.id;
@@ -858,7 +877,7 @@
       updateBootControls();
       $('fl-task-details').hidden = !task;
       $('fl-read-nor').disabled = busy || uploading || !!active || submissionUnknown || !!(board && board.observingTask) || !storageReadable;
-      $('fl-read-nor').hidden = !!pageBoard || !nor || !storageReadable;
+      $('fl-read-nor').hidden = !!pageBoard || !nor || !storageReadable || canReadPartitions;
       var storageTask = task && task.flash;
       $('fl-storage-details').hidden = $('fl-read-nor').hidden && $('fl-live-gpt').hidden
         && !(storageTask && (storageTask.storage_inventory || storageTask.nor_before || storageTask.nor_after
@@ -879,6 +898,7 @@
       });
       $('fl-mode').disabled = busy || preparingBoard || submissionUnknown || !!active && !workspace || !workspace && !!preparable && !(capabilities.modes || []).includes('full');
       if (selecting) $('fl-verify').disabled = busy || uploading || submissionUnknown;
+      if (k1NorOnly) $('fl-mode').disabled = $('fl-verify').disabled = true;
       if (workspace) $('fl-target-storage').disabled = busy || uploading || submissionUnknown;
       $('fl-reset-after').disabled = busy || preparingBoard || uploading || submissionUnknown || !!active && !selecting
         || (capabilities ? !capabilities.reset_after_supported : !!active);
@@ -900,11 +920,12 @@
         || !(canResolve || capabilities && capabilities.ram_boot_supported) || !ramSource(primary) || !!mismatched.length;
       ramBoot.title = capabilities && capabilities.ram_boot_reason || '';
       var missingDisk = diskSelectionMessage(primary);
-      $('fl-plan').disabled = !!missingDisk || busy || uploading || preparingBoard || submissionUnknown || !!active || !!(board && board.observingTask)
+      $('fl-plan').disabled = unsupportedK1NOR || !!missingDisk || busy || uploading || preparingBoard || submissionUnknown || !!active || !!(board && board.observingTask)
         || !(available || preparable || canResolve) || !$('fl-artifact').value || !imageReady() || !!mismatched.length;
       if (nor && $('fl-mode').value === 'partitions' && !active) $('fl-plan').disabled = true;
       $('fl-plan').textContent = preparable ? ($('fl-mode').value === 'full' ? '准备设备并预览写入范围' : '预览刷机准备步骤') : '预览写入范围';
       if (!primary) $('fl-plan').textContent = '请先选择镜像';
+      else if (unsupportedK1NOR) $('fl-plan').textContent = '当前不支持 K1 NOR 单分区';
       else if (missingDisk) $('fl-plan').textContent = missingDisk;
       $('fl-start').disabled = busy || uploading || !!active || !plan || submissionUnknown;
       $('fl-start').textContent = plan && plan.confirm_after_prepare && plan.ready === false
@@ -938,8 +959,22 @@
       $('fl-recovery-reason').disabled = busy || !!active;
       $('fl-release').disabled = busy || !!active || !recovery || !task.flash.attempt_id
         || !$('fl-recovery-reason').value.trim();
-      var rows = $('fl-partitions').children;
-      var checks = Array.from(rows).filter(function (row) { return row.checkbox; });
+      var inlineRead = $('fl-partition-read');
+      $('fl-partition-setup').hidden = !partitionSetup;
+      $('fl-partition-list').hidden = partitionSetup;
+      inlineRead.hidden = !canReadPartitions || readingStorage;
+      inlineRead.disabled = prepare.disabled || !!recovery || !!previewTask;
+      inlineRead.textContent = prepare.textContent;
+      if (partitionSetup) {
+        setMessage('fl-partition-setup-note', readingStorage || preparingBoard
+          ? '正在准备设备并读取分区布局…'
+          : canReadPartitions ? '先读取板上的分区布局，再选择要写入的分区和文件。'
+          : !pageBoard && !board?.target_id ? '请先在上方选择下载模式设备。'
+          : capabilities && ['target-unavailable', 'probe-protocol-failed', 'download-capability-unavailable'].includes(capabilities.reason)
+            ? 'USB 连接尚未就绪，尚未读取存储和分区；请先恢复连接并重新检测。'
+          : preparable ? '选择待刷镜像后，点「预览刷机准备步骤」读取现场分区布局。'
+          : '当前下载环境无法读取分区布局。');
+      }
       $('fl-all-partitions').checked = !!checks.length && checks.every(function (row) { return row.checkbox.checked; });
       $('fl-all-partitions').indeterminate = checks.some(function (row) { return row.checkbox.checked; }) && !$('fl-all-partitions').checked;
       $('fl-all-partitions').disabled = busy || uploading || submissionUnknown || !checks.length || !!active && !selecting || nor && !selecting;
@@ -957,6 +992,7 @@
         if (row.chooseFile) row.chooseFile.disabled = busy || uploading || submissionUnknown || !!active && !selecting || nor && !selecting;
       });
       renderStage(active, selecting);
+      if (canReadPartitions || readingStorage) $('fl-plan').hidden = true;
     }
     function awaitingSelection(current) {
       return (current.progress || {}).phase === 'awaiting-selection'
@@ -1487,11 +1523,6 @@
           box.appendChild(row);
         });
       });
-      if (!box.children.length) text('p', preparationPending()
-        ? (norContext() ? '先读取并备份 NOR，完成后在此查看各分区内容。' : '准备阶段将读取现场布局，完成后在同一任务选择实际分区和载荷。')
-        : capabilities && ['target-unavailable', 'probe-protocol-failed', 'download-capability-unavailable'].indexOf(capabilities.reason) >= 0
-        ? 'USB 连接尚未就绪，尚未读取存储和分区；请先恢复连接并重新检测。'
-        : '执行器尚未提供可靠的现场分区布局，不能指定分区刷写。', box);
     }
     function renderStorages() {
       var select = $('fl-target-storage'), previous = select.value;
@@ -2840,10 +2871,17 @@
         && capabilities.storage_inventory_supported && capabilities.nor_workspace_supported
         && (capabilities.supported !== false || preparationPending());
     }
+    function canReadBoardStorage() {
+      return !!(capabilities?.nor_workspace_supported && (capabilities.storage_inventory_supported
+        || capabilities.chip === 'k1' || $('fl-mode').value === 'partitions'));
+    }
     async function readNOR(inventoryOnly) {
       if (!board || busy || uploading || submissionUnknown || task && ['queued', 'running'].includes(task.state)
-          || !capabilities || !capabilities.nor_workspace_supported
-          || !capabilities.storage_inventory_supported && $('fl-mode').value !== 'partitions') return;
+          || !canReadBoardStorage()) return;
+      if (capabilities.chip === 'k1') {
+        $('fl-mode').value = 'partitions';
+        $('fl-verify').value = 'required';
+      }
       var selected = board, seq = sequence;
       invalidatePlan(); requestId = id(); busy = true; updateControls();
       sourceInspection=null;sourceCatalogue=null;sourceAnalysedId='';
@@ -3471,13 +3509,15 @@
     $('fl-fast-bind').addEventListener('click', function () {
       if (pageBoard && !$('fl-fast-bind').hidden && !$('fl-fast-bind').disabled) options.bindControl(pageBoard);
     });
-    $('fl-prepare-board').addEventListener('click', async function () {
-      if ($('fl-prepare-board').hidden || $('fl-prepare-board').disabled) return;
+    async function readDeviceStorage(button) {
+      if (button.hidden || button.disabled) return;
       if (!hasDownloadTarget()
           && !await prepareDevice('normal', '当前开发板还未进入下载模式。确认后将重启此板、核对 USB 连接，再读取设备存储。')) return;
-      if (capabilities && capabilities.nor_workspace_supported
-          && (capabilities.storage_inventory_supported || $('fl-mode').value === 'partitions')) await readNOR();
+      if (canReadBoardStorage()) await readNOR();
       else status('已进入下载模式；当前加载器无法读取设备存储。请使用整包刷写预览。');
+    }
+    ['fl-prepare-board', 'fl-partition-read'].forEach(function (id) {
+      $(id).addEventListener('click', function () { readDeviceStorage($(id)); });
     });
     $('fl-edit').addEventListener('click', function () {
       if ($('fl-edit').hidden || $('fl-edit').disabled) return;

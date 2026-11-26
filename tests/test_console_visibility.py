@@ -53,6 +53,34 @@ class ConsoleVisibilityTests(unittest.TestCase):
         return '\n'.join(path.read_text(encoding='utf-8')
                          for path in Path(self.device.stable_dir()).glob('*.log'))
 
+    def test_probe_reports_the_stage_where_the_console_stopped(self):
+        stages = []
+        with mock.patch.object(self.device, 'ensure_shell', return_value=(True, 0)), \
+                mock.patch.object(self.device, '_write', return_value=(True, '')), \
+                mock.patch.object(self.device, '_wait', return_value=None):
+            result = self.device.run_probe(on_stage=stages.append)
+        self.assertEqual(result, {'ok': False, 'error': '等待板子完整响应超时'})
+        self.assertEqual(stages, ['acquiring-console', 'checking-shell',
+                                  'sending-probe', 'waiting-probe-response'])
+
+    def test_serial_diagnosis_requires_an_idle_unowned_shell(self):
+        device = self.device
+        with mock.patch.object(device, 'ensure_shell') as login, \
+                mock.patch.object(device, '_write', side_effect=self.shell_write) as write:
+            ok, output = device.console.run_idle_command('echo adbd=running',
+                                                        expected_connection=device.connection_id)
+            self.assertTrue(ok)
+            self.assertIn('\nadbd=running\n', '\n' + output)
+            write.reset_mock()
+            with mock.patch.object(device.transactions, 'ownership', return_value={'actor': 'web'}):
+                self.assertFalse(device.console.run_idle_command(
+                    'echo adbd=running', expected_connection=device.connection_id)[0])
+            device.append(b'\r\nfixture login: ')
+            self.assertFalse(device.console.run_idle_command(
+                'echo adbd=running', expected_connection=device.connection_id)[0])
+            login.assert_not_called()
+            write.assert_not_called()
+
     def test_setup_echo_is_hidden_but_geometry_raw_capture_and_user_commands_remain(self):
         def write(text):
             geometry = b'\x1b[8;52;205t' if text.startswith('stty ') else b''

@@ -31,7 +31,7 @@
     if (!response.ok) throw Object.assign(new Error(result.error || '工位请求失败'), {status:response.status});
     return result;
   }
-  async function open(serial, unrecognized) {
+  async function open(serial, unrecognized, openTaskDetails) {
     if (current) return;
     const dialog = current = element('dialog', '', document.body);
     dialog.className = 'wiring-dialog';
@@ -190,6 +190,7 @@
       const requestId = Array.from(ids, n => n.toString(16).padStart(2, '0')).join('');
       busy=true; save.disabled=true; body.inert=true;
       status.textContent='正在等待板卡进入下载模式并核对串口…';
+      let taskId;
       try {
         let started;
         try {
@@ -199,6 +200,7 @@
           started = await client.request('/api/task?request_id='+encodeURIComponent(requestId))
             .catch(() => { throw new Error('控制回执未收到，请查看原任务和板卡状态。'); });
         }
+        taskId = started.task?.id;
         const result = await client.watch(started.task, {key:''}, task => {
           if (current===dialog && task.progress?.phase==='reading-board-serial')
             status.textContent='USB 和串口已核对，正在读取板载序列号…';
@@ -210,7 +212,15 @@
         stageBoard(row); show();
         status.textContent='已识别 '+serial+'。核对槽位后点击保存接线。';
       } catch(e) { if (current===dialog) status.textContent=e.message; }
-      finally { busy=false; body.inert=false; save.disabled=!scanId || !serial; }
+      finally {
+        busy=false; body.inert=false; save.disabled=!scanId || !serial;
+        if (current===dialog && taskId && openTaskDetails) {
+          const details = document.createElement('button');
+          details.type = 'button'; details.textContent = '任务详情';
+          details.addEventListener('click', () => openTaskDetails(taskId));
+          status.appendChild(details);
+        }
+      }
     }
     async function commit() {
       if (busy || !scanId) return;

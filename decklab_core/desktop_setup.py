@@ -131,11 +131,11 @@ class DesktopSetup:
         self.desktop, self.settings = desktop, settings
         self.cache, self.lock = {}, threading.Lock()
 
-    def log_adb(self, serial, actor, detail):
+    def log_activity(self, serial, actor, action, detail):
         try:
-            self.desktop.manager.store.event(serial, actor, 'desktop-adb', detail)
+            self.desktop.manager.store.event(serial, actor, action, detail)
         except sqlite3.Error:
-            logging.getLogger(__name__).exception('Cannot persist desktop ADB activity')
+            logging.getLogger(__name__).exception('Cannot persist desktop activity')
 
     def identified(self, device):
         if not device or not device.serial:
@@ -158,11 +158,11 @@ class DesktopSetup:
         return (bool(device.present and shutil.which('adb'))
                 and (not self.desktop.book.boards.get(device.serial)
                      or fields.get('provider') == 'rdp' and fields.get('host') in hosts_for(device)
-                     and fields.get('port') == 3389 and fields.get('username') == 'rdp'))
+                     and fields.get('port') in (3389, 3390) and fields.get('username') == 'rdp'))
 
     def quick_config(self, device, previous, *, stage_only=False, actor='web'):
         from .adb_session import usb_endpoints
-        from .board_cases import READ_IDENTITY, adb_command, find_transport
+        from .board_cases import READ_IDENTITY, USB_PORT, adb_command, find_transport
         fields = connection_fields(previous)
         if not self.quick_eligible(device, fields):
             return None, ''
@@ -173,10 +173,11 @@ class DesktopSetup:
         step = 'adb devices -l · 匹配 USB 连接并核对板卡身份'
 
         def receipt(result):
-            self.log_adb(serial, actor, f'{step} · {result} · {time.monotonic() - started:.1f} 秒')
+            self.log_activity(serial, actor, 'desktop-adb', f'{step} · {result} · {time.monotonic() - started:.1f} 秒')
 
         try:
-            _, endpoint, facts = find_transport(executable, serial, registered, usb_endpoints=usb_endpoints)
+            port, endpoint, facts = find_transport(executable, serial, registered, usb_endpoints=usb_endpoints,
+                                                   allow_relocation=True)
             lxqt = Path(__file__).with_name('desktop_lxqt_target.py').read_text(encoding='utf-8')
             gnome = Path(__file__).with_name('desktop_gnome_target.py').read_text(encoding='utf-8')
             guard = (READ_IDENTITY + '[ "$serial" = ' + shlex.quote(serial)
@@ -188,14 +189,19 @@ class DesktopSetup:
             if stage_only:
                 command = guard + "exec python3 -I - --stage-only <<'GNOME_SETUP_PY'\n" + gnome + '\nGNOME_SETUP_PY'
             step = ('adb shell · 查询首次设置状态' if stage_only else 'adb shell · 读取桌面类型、登录阶段和连接设置')
+            if port == 'USB' or USB_PORT.fullmatch(port):
+                step += ' · ' + port
             reply = adb_command(executable, '-t', endpoint, 'shell', '-T', command, timeout=12)
             if reply.returncode:
                 receipt(f'失败，ADB 退出码 {reply.returncode}')
                 return None, ''
             data = json.loads(reply.stdout)
+        except ConnectionError:
+            receipt('失败，ConnectionError')
+            return None, 'usb-unavailable'
         except subprocess.TimeoutExpired:
             receipt('等待 ADB 回执超时')
-            return None, ''
+            return None, 'usb-unavailable'
         except (ValueError, OSError, subprocess.SubprocessError) as error:
             receipt('失败，' + type(error).__name__)
             return None, ''
@@ -225,6 +231,8 @@ class DesktopSetup:
         receipt('ADB 退出码 0，' + (stages.get(stage, '未识别桌面状态') if isinstance(stage, str) else '无效的桌面状态'))
         if stage_only:
             return None, stage if stage in ('initial', 'finishing', 'login', 'no-user') else ''
+        if fields.get('port') == 3390 and stage not in ('initial', 'finishing', 'login', 'no-user'):
+            return None, ''
         if stage == 'lxqt-unavailable':
             return None, stage
         if stage in ('lxqt-initial', 'lxqt-finishing', 'lxqt-greeter', 'lxqt-desktop'):

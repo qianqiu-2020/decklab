@@ -4,6 +4,52 @@
   var fetch = UI.fetch;
   function ownsInput(owner) { return owner && owner.scope !== 'board' && owner.actor === 'web' && owner.client_id === UI.clientId; }
   var boardRecoveryAuthorized = false;
+  var updateCheckPending = false;
+  function checkUpdate() {
+    if (updateCheckPending) return;
+    updateCheckPending = true;
+    var check = $('update-check'), status = $('update-status'), install = $('update-install'), link = $('update-release');
+    check.disabled = true;
+    install.hidden = link.hidden = true;
+    status.textContent = '正在检查 GitHub 更新…';
+    fetch('/api/update-check', { cache: 'no-store' }).then(async function (response) {
+      var update = await response.json();
+      if (!response.ok) throw new Error(update.error || '检查更新失败');
+      var translate = window.DeckLabI18n ? window.DeckLabI18n.translate : function (text) { return text; };
+      var format = /^[0-9]{1,6}(?:\.[0-9]{1,6}){2}$/;
+      if (!format.test(update.latest) || !format.test(update.current)) throw new Error('检查更新失败');
+      var project = 'https://github.com/qianqiu-2020/decklab/releases';
+      link.href = project + '/tag/v' + update.latest;
+      link.hidden = false;
+      status.textContent = translate('当前版本') + ' v' + update.current + ' · ' + translate('GitHub 正式版') + ' v' + update.latest;
+      if (!update.available) {
+        status.textContent += ' · ' + translate('暂无更新');
+        return;
+      }
+      var windows = update.platform === 'windows';
+      if (!update.package || !['windows', 'linux'].includes(update.platform)) {
+        status.textContent += ' · ' + translate('当前平台暂无可校验的安装包');
+        return;
+      }
+      var filename = windows ? 'decklab-' + update.latest + '-windows-x64-setup.exe' : 'decklab_' + update.latest + '_amd64.deb';
+      $('update-download').href = project + '/download/v' + update.latest + '/' + filename;
+      $('update-command').textContent = (windows ? '.\\decklab.exe update ' : 'sudo decklab-update ') + update.latest;
+      $('update-instructions').textContent = windows
+        ? '在 DeckLab 安装目录打开 PowerShell，运行下方命令。安装器会提示管理员确认。'
+        : '在控制机终端运行下方命令，校验安装包后会升级现有 Debian 包。';
+      install.hidden = false;
+    }).catch(function (error) { status.textContent = error.message; }).finally(function () {
+      updateCheckPending = false;
+      check.disabled = false;
+    });
+  }
+  $('decklab-version').addEventListener('click', function () {
+    $('update-dialog').showModal();
+    checkUpdate();
+  });
+  $('update-check').addEventListener('click', checkUpdate);
+  $('update-close').addEventListener('click', function () { $('update-dialog').close(); });
+  $('update-copy').addEventListener('click', function () { copyText($('update-command').textContent); });
   fetch('/api/access', {cache: 'no-store'}).then(function (response) { return response.json(); }).then(function (access) {
     if (typeof access.version === 'string' && /^[0-9][A-Za-z0-9.+~_-]{0,79}$/.test(access.version)) {
       $('decklab-version').textContent = 'v' + access.version;
@@ -38,6 +84,7 @@
     session: function (sid) { return sessions.find(function (session) { return session.sid === sid; }); },
     takenOver: function (sid) { return !!takenOver[sid]; },
     onSelect: function (key, sid) {
+      if (diagnostics) diagnostics.selectionChanged();
       closeIdentityAssociation(); closeProbeSettings(); closeSshCredentials(); deviceDirectory.selectionChanged(key); curSid = sid;
     },
     clearTerminalSearch: function (focus) { clearTerminalSearch(focus); },
@@ -75,6 +122,12 @@
     openArchive: openArchivedLog, searchTerminal: searchTerminal
   });
   var loadLogs = archives.load, searchBootLogs = archives.search, clearBootSearch = archives.clearSearch;
+  var diagnostics = window.DeckLabDiagnostics.create({
+    byId:$, fetch:fetch, getBoard:deviceDirectory.find, isCurrent:isCurrent, formatBytes:fmt, copyText:copyText
+  });
+  $('b-system-diagnostics').addEventListener('click', diagnostics.system);
+  window.DeckLabSettings?.setActivationDetails(diagnostics.activation);
+  $('b-device-diagnostics').addEventListener('click', function () { diagnostics.device(terminalView.current); });
   var taskUI = window.DeckLabTasks.create({
     byId: $, fetch: fetch, age: ago,
     getView: function () { return terminalView.current; },
@@ -91,6 +144,7 @@
     },
     openBoardTest: function (task) { if (boardTests) boardTests.open(task); },
     openAdbReceipt: function (task) { if (adbUI) adbUI.open(task); },
+    openDetails: function (ctx, id) { diagnostics.task(ctx, id); },
     openFlash: function (task) {
       var target = task.flash_targets && task.flash_targets[0];
       if (target && flashing) {
@@ -117,7 +171,8 @@
       return ctx && {key:ctx.key, serial:ctx.serial, connectionId:ctx.connectionId, label:deviceDirectory.find(ctx.key)?.label};
     }
   });
-  var imageStore = window.DeckLabImageStore && window.DeckLabImageStore.create({byId:$,fetch:fetch,formatBytes:fmt});
+  var imageStore = window.DeckLabImageStore && window.DeckLabImageStore.create({byId:$,fetch:fetch,formatBytes:fmt,
+    openTaskDetails: function (id) { diagnostics.task(null, id); }});
   $('b-image-store').addEventListener('click', function () { if (imageStore) imageStore.open(); });
   var imageWorkspaces = window.DeckLabImageWorkspaces && window.DeckLabImageWorkspaces.create({byId:$,fetch:fetch,copyText:copyText,formatBytes:fmt});
   var flashing = window.DeckLabFlashing && window.DeckLabFlashing.create({
@@ -137,6 +192,8 @@
   var boardControl = window.DeckLabBoardControl && window.DeckLabBoardControl.create({
     byId: $, fetch: fetch, getView: function () { return terminalView.current; },
     canBind: function () { return boardRecoveryAuthorized; },
+    notice: function (message, ctx, taskId) { showTaskStatus(ctx, message, taskId); },
+    openTaskDetails: function (ctx, id) { diagnostics.task(ctx, id); },
     onTask: function () { taskUI.refresh(); }
   });
   var desktop = window.DeckLabDesktop && window.DeckLabDesktop.create({byId:$,fetch:fetch,
@@ -453,6 +510,18 @@
     bar.appendChild(sp);
   }
 
+  function showTaskStatus(ctx, message, taskId) {
+    var status = $('d-status');
+    status.textContent = message;
+    if (!taskId) return;
+    var details = document.createElement('button');
+    details.type = 'button'; details.textContent = '任务详情';
+    details.addEventListener('click', function () {
+      if (isCurrent(ctx)) diagnostics.task(ctx, taskId);
+    });
+    status.appendChild(details);
+  }
+
   async function connectAdb(ctx) {
     if (ctx.adbConnecting || !isCurrent(ctx)) return;
     ctx.adbConnecting = true;
@@ -468,7 +537,7 @@
       }
       switchSession(result.sid);
     } catch (error) {
-      if (sshConnectionCurrent(ctx, connection)) $('d-status').textContent = error.message;
+      if (sshConnectionCurrent(ctx, connection)) showTaskStatus(ctx, error.message, error.taskId);
     } finally {
       ctx.adbConnecting = false;
       if (isCurrent(ctx)) renderTabs();
@@ -577,8 +646,8 @@
         ctx.connecting = false;
         if (!sshConnectionCurrent(ctx, connectionId)) return;
         renderTabs();
-        $('d-status').textContent = error.submissionUnknown
-          ? ' 连接可能仍在后台执行，请先查看任务记录' : ' 失败：' + error.message;
+        showTaskStatus(ctx, error.submissionUnknown
+          ? ' 连接可能仍在后台执行，请先查看任务记录' : ' 失败：' + error.message, error.taskId);
         if (!error.submissionUnknown && error.result && ['ssh-authentication-failed','ssh-credentials-required'].includes(error.result.code)) {
           ctx.sshUserHint = error.result.ssh_user || ctx.sshUserHint;
           openSshCredentials(ctx, error.result.code === 'ssh-credentials-required' ? '' : ctx.sshUserHint,
@@ -797,7 +866,7 @@
         setPager('activity', sessionPage, sessionTotal, d.sessions.length);
 
         var eventBox = $('d-events'); eventBox.textContent = '';
-        var actionNames = { 'desktop-adb': '远程桌面 · ADB', identified: '识别完成', identify: '识别请求',
+        var actionNames = { 'desktop-adb': '远程桌面 · ADB', 'desktop-connection': '远程桌面 · 连接决策', identified: '识别完成', identify: '识别请求',
           'identity-promoted': '身份升级', 'identity-corrected': '身份更正',
           'identity-confirmed': '身份确认', 'identity-conflict-resolved': '解除身份冲突',
           'boot-marker-initialized': '初始化 /boot 标记',
@@ -1207,6 +1276,21 @@
     if (!probeEditor) return;
     var mode = $('probe-settings-mode').value;
     var command = $('probe-settings-command');
+    var builtin = mode === 'linux';
+    $('probe-settings-login').hidden = mode === 'manual';
+    $('probe-settings-default').hidden = !builtin;
+    $('probe-settings-command-field').hidden = mode !== 'custom';
+    $('probe-settings-custom-help').hidden = mode !== 'custom';
+    var families = {debian:'Debian', bianbu:'Bianbu', buildroot:'Buildroot'};
+    var family = families[probeEditor.loginFamily];
+    var labels = {Debian:'自动登录按 Debian 的默认账号处理。', Bianbu:'自动登录按 Bianbu 的默认账号处理。',
+                  Buildroot:'自动登录按 Buildroot 的默认账号处理。'};
+    $('probe-settings-os').textContent = ({Debian:'当前识别为 Debian', Bianbu:'当前识别为 Bianbu',
+      Buildroot:'当前识别为 Buildroot'})[family] || '当前系统类型待识别';
+    $('probe-settings-login-policy').textContent = probeEditor.loginOverride
+      ? '自动登录使用已配置的串口凭据。'
+      : labels[family] || '自动登录会先根据启动输出判断系统。';
+    $('probe-settings-default-command').textContent = probeEditor.defaultCommand;
     command.readOnly = mode !== 'custom';
     command.disabled = mode === 'manual';
     command.value = mode === 'linux' ? probeEditor.defaultCommand
@@ -1225,6 +1309,10 @@
     $('probe-settings-mode').disabled = true;
     $('probe-settings-command').value = '';
     $('probe-settings-command').readOnly = true;
+    $('probe-settings-login').hidden = true;
+    $('probe-settings-default').hidden = true;
+    $('probe-settings-command-field').hidden = true;
+    $('probe-settings-custom-help').hidden = true;
     $('probe-settings-save').disabled = true;
     $('probe-settings-status').textContent = '正在读取探测设置…';
     $('probe-settings-dialog').showModal();
@@ -1238,6 +1326,8 @@
         if (probeEditor !== state || !probeSettingsCurrent(state)) return;
         state.defaultCommand = result.default_command || '';
         state.customCommand = result.command || '';
+        state.loginFamily = result.login_os_family;
+        state.loginOverride = result.console_login_override === true;
         $('probe-settings-mode').value = result.mode || 'linux';
         $('probe-settings-mode').disabled = false;
         $('probe-settings-status').textContent = '';
@@ -1458,6 +1548,7 @@
   deviceFilter.addEventListener('change', syncStatusFilters);
   syncStatusFilters();
   $('b-close').addEventListener('click', function () {
+    diagnostics.selectionChanged();
     if (boardControl) boardControl.close();
     if (desktop) desktop.close();
     closeIdentityAssociation(); closeSshCredentials();

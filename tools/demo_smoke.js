@@ -63,6 +63,26 @@ async function until(check, description) {
   await rpc('Emulation.setDeviceMetricsOverride', {width: 1440, height: 960, deviceScaleFactor: 1, mobile: false});
   await until(() => evaluate('document.querySelectorAll(".dev").length === 3'), 'device list');
   await evaluate('DeckLabI18n.setLocale("zh-CN")');
+  await evaluate('document.querySelector("#b-system-diagnostics").click()');
+  await until(() => evaluate('document.querySelector("#diagnostics-body").textContent.includes("日志磁盘剩余")'), 'system diagnostics');
+  await evaluate('document.querySelector("#diagnostics-close").click()');
+  const imageImport = await fetch(address + 'api/image-download', {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({url:address+'fixture.itb',name:'fixture.itb',request_id:'demo-image-observation'})});
+  assert.equal(imageImport.status, 202);
+  const imageTask = (await imageImport.json()).task;
+  await until(async () => (await (await fetch(address+'api/task?id='+imageTask.id)).json()).task.state === 'failed', 'local image rejected');
+  await evaluate(`window.originalImageFetch=window.fetch;
+    window.fetch=(url,init)=>String(url).startsWith('/api/image-catalog')
+      ? Promise.resolve(Response.json({entries:[],sources:[{id:'public',name:'Fixture'}]})) : originalImageFetch(url,init);
+    document.querySelector('#b-image-store').click();`);
+  assert.equal(await evaluate('document.querySelector("#is-task-history").open'), false);
+  await evaluate('document.querySelector("#is-task-history summary").click()');
+  await until(() => evaluate('document.querySelector("#is-task-list").textContent.includes("fixture.itb")'), 'image task history');
+  await evaluate('document.querySelector("#is-task-list button").click()');
+  await until(() => evaluate('document.querySelector("#diagnostics-body").textContent.includes("解析镜像服务器")'), 'durable failed image stage');
+  assert.match(await evaluate('document.querySelector("#diagnostics-body").textContent'), /fixture\.itb/);
+  await evaluate(`document.querySelector('#diagnostics-close').click();document.querySelector('#is-close').click();
+    window.fetch=window.originalImageFetch;`);
   const bounds = selector => evaluate(`(() => { const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
     return {left:r.left, width:r.width, height:r.height, right:r.right}; })()`);
   const meta = await bounds('.dev .meta'), header = await bounds('.directory-columns span:nth-child(2)');
@@ -84,6 +104,9 @@ async function until(check, description) {
   const contents = `Array.from({length: demoTerm.buffer.active.length}, (_,i) =>
     demoTerm.buffer.active.getLine(i).translateToString()).join('\\n')`;
   await until(() => evaluate('!!window.demoTerm && ' + contents + '.includes("DeckLab demo")'), 'serial output');
+  await evaluate('document.querySelector("#b-device-diagnostics").click()');
+  await until(() => evaluate('document.querySelector("#diagnostics-body").textContent.includes("DEMO-001")'), 'device diagnostics');
+  await evaluate('document.querySelector("#diagnostics-close").click()');
   // Use Chromium key events with the real xterm focused. Switching must never send the chord to a board.
   async function chord(key, code, modifiers, repeat = false) {
     await rpc('Input.dispatchKeyEvent', {type:'keyDown',key,code,modifiers,autoRepeat:repeat});
@@ -226,6 +249,9 @@ async function until(check, description) {
   await until(() => evaluate('document.querySelector("#d-status").textContent.includes("识别完成")'), 'background identification');
   await evaluate('document.querySelector("#b-tasks").click()');
   await until(() => evaluate('document.querySelector("#d-tasks").textContent.includes("已完成")'), 'persisted task result');
+  await evaluate('Array.from(document.querySelector("#d-tasks").firstElementChild.querySelectorAll("button")).find(b => b.textContent === "任务详情").click()');
+  await until(() => evaluate('document.querySelector("#diagnostics-body").textContent.includes("探测结束")'), 'persisted task stages');
+  await evaluate('document.querySelector("#diagnostics-close").click()');
   const previousClient = await evaluate('DeckLabUI.clientId');
   await rpc('Page.reload');
   await until(() => evaluate('typeof DeckLabUI !== "undefined" && DeckLabUI.clientId !== ' + JSON.stringify(previousClient)

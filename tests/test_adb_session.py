@@ -7,9 +7,39 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from decklab_core.adb_session import AdbSession, packet, read_exact, usb_endpoints
+from decklab_core.adb_session import ADBD_DIAGNOSTIC, AdbSession, connect, packet, read_exact, usb_endpoints
+from decklab_core.board_cases import AdbTransportUnavailable
+
+
+class AdbDiagnosisTests(unittest.TestCase):
+    def test_web_connect_reports_board_evidence_after_usb_lookup_fails(self):
+        registry = SimpleNamespace(lock=threading.Lock(), sessions={}, pending=0)
+        device = SimpleNamespace(serial='fixture', connection_id='connection', stop=threading.Event(),
+                                 _sessions=registry, present=True, board=SimpleNamespace(),
+                                 transactions=Mock(), console=Mock(), reap_sessions=Mock())
+        device.board.connection = device
+        manager = SimpleNamespace(store=SimpleNamespace(has_conflict=lambda serial: False),
+                                  hardware=SimpleNamespace(board_tests={}))
+        device.console.run_idle_command.return_value = True, 'adbd=running\ngadget=configured\nusb_event=closed\n'
+        payload = {'serial': device.serial, 'connection_id': device.connection_id}
+        stage = Mock()
+        with patch('decklab_core.adb_session.shutil.which', return_value='/test/adb'), \
+                patch('decklab_core.adb_session.find_transport',
+                      side_effect=AdbTransportUnavailable('当前板卡没有在线连接')):
+            with self.assertRaisesRegex(ConnectionError, '没有在线连接。串口确认 adbd 正在运行.*连接已关闭'):
+                connect(manager, device, payload, 'web', on_stage=stage)
+            device.console.run_idle_command.assert_called_once_with(
+                ADBD_DIAGNOSTIC, expected_connection=device.connection_id)
+            self.assertEqual([call.args[0] for call in stage.call_args_list],
+                             ['checking-adbd-over-serial', 'adbd-running', 'adb-gadget-configured',
+                              'adb-usb-transport-closed'])
+            device.console.reset_mock()
+            with self.assertRaisesRegex(AdbTransportUnavailable, '当前板卡没有在线连接'):
+                connect(manager, device, payload, 'agent', on_stage=stage)
+            device.console.run_idle_command.assert_not_called()
+        self.assertEqual(registry.pending, 0)
 
 
 class AdbTerminalTests(unittest.TestCase):

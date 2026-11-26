@@ -269,21 +269,23 @@
     function translate(text) { return global.DeckLabI18n ? global.DeckLabI18n.translate(text) : text; }
     function status(text) { statusValue = text; $('desktop-status').textContent = translate(text); }
     function overlay(text) { overlayValue = text || ''; $('desktop-overlay').textContent = translate(overlayValue); $('desktop-overlay').hidden = !text; }
-    function loginGuide(stage) {
+    function loginGuide(stage, canMove) {
       var text = {'lxqt-initial':'Bianbu 首次设置。请在画面中选择语言并创建用户，进入桌面后可重新连接。',
         'lxqt-finishing':'Bianbu 用户已创建。请在向导中点击「重启系统」，重启后可再次打开桌面。',
         'lxqt-greeter':'Bianbu 登录界面。请使用板上的账号登录。',
         'lxqt-unavailable':'未找到可共享的 Bianbu Wayland 桌面。请核对板上的图形登录服务和 wayvnc。',
         initial:'首次设置：按画面提示创建普通用户，完成后用新账号登录 Debian。',
         finishing:'普通用户已创建。请完成向导最后一步，画面将自动切换到 Debian 登录界面。',
-        'no-user':'板上尚无普通用户，未检测到活动的首次设置向导。请在板上显示器完成初始化，或检查 GDM 服务。'}[stage];
+        'no-user':'板上尚无普通用户，未检测到活动的首次设置向导。请在板上显示器完成初始化，或检查 GDM 服务。',
+        'usb-unavailable':'USB ADB 未就绪，无法判断板上是否处于首次设置。请检查 USB 数据线和板上的 adbd 服务，再重新连接。'}[stage];
       $('desktop-login-stage').textContent = text ? translate(text) : '';
-      $('desktop-move-wizard').hidden = stage !== 'initial' && stage !== 'finishing';
+      $('desktop-move-wizard').hidden = canMove === false || stage !== 'initial' && stage !== 'finishing';
       $('desktop-login-guide').hidden = !text;
       return text || '';
     }
     function connectionError(error) {
       var result = error.result || {};
+      if (result.login_stage) loginGuide(result.login_stage, false);
       $('desktop-error').hidden = false;
       $('desktop-error').open = false;
       $('desktop-error-details').textContent = result.details ? JSON.stringify(result.details, null, 2) : error.message;
@@ -804,7 +806,7 @@
         if (data.manual) {
           if (handoverAttempts && scheduleHandover()) return;
           handoverAttempts = 0; showSetup(true);
-          connectionMessage(loginGuide(data.login_stage) || '暂未能自动取得桌面入口，请选择服务并填写入口凭据。');
+          connectionMessage(loginGuide(data.login_stage, false) || '暂未能自动取得桌面入口，请选择服务并填写入口凭据。');
           return;
         }
         sessionStage = data.session.login_stage || ''; loginGuide(sessionStage);

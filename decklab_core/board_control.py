@@ -36,6 +36,18 @@ class ControlAction(Protocol):
     def bind(self, device) -> BoundControl: ...
 
 
+def record_control_outcome(context, value, receipt):
+    if value == 'issued':
+        context.issued()
+        context.stage('sending-board-control')
+        return
+    context.mark_outcome(value)
+    if value == 'acknowledged':
+        receipt['acknowledged'] = True
+        context.store.update(context.id, result={'control': receipt, 'control_result': 'acknowledged'})
+        context.stage('board-controller-acknowledged')
+
+
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, message, headers, new_url):
         return None

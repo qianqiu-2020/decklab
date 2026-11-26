@@ -1,0 +1,7 @@
+K1 MUSE-Pi-Pro NOR maintenance loader
+Uses the K1 RAM-startup U-Boot and OpenSBI source baseline and the unchanged
+FSBL recorded next to the K1 RAM startup loader. The temporary U-Boot uses
+the included configuration and Fastboot patch. Its packaged control DTB
+sets the SPI NOR receive and transmit bus widths to one before FIT assembly.
+This keeps probe-time SPI protection and quad-mode register writes disabled.
+The FIT image uses the same layout as K1 RAM startup.

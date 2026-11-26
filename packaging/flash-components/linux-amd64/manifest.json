@@ -3,7 +3,7 @@
   "platform": "linux-amd64",
   "executor": {
     "path": "decklab-flash",
-    "sha256": "22b11dce3a65c05cccfe54a385ffdfe24808ee5b20e3184c0ee41f326eefa34e"
+    "sha256": "4d7290bd30babb7bcd5c5789d2b855ef8e14eb0ef50e652af0b3c45e42fe1503"
   },
   "loaders": {
     "path": "flash-loaders",
@@ -32,26 +32,6 @@
         "sha256": "2ac81808c4748c7e0b875926d64478199035d711a1c3123771128071d4a65b27",
         "size": 158
       },
-      "k1-ram-boot/CONFIGURATION.txt": {
-        "sha256": "c903c3bc209b9e99a0ade97c6c66cfea1fe90ba2fbeafdc0f681c1299b3529bc",
-        "size": 57678
-      },
-      "k1-ram-boot/FIT-SOURCE.txt": {
-        "sha256": "3746222b256eb2feeb2547a9c9eaa38ef38595948812799c679aae2fbc2615ca",
-        "size": 1309
-      },
-      "k1-ram-boot/FSBL.bin": {
-        "sha256": "c6cec4f04276373aec5d8c98e58d85e419da2527a45f922757a30ad146ced54b",
-        "size": 198208
-      },
-      "k1-ram-boot/SOURCE-OFFER.txt": {
-        "sha256": "9c66d78202411fc132501bf22de430ccff8e52460970db7096541bd56f595e9b",
-        "size": 931
-      },
-      "k1-ram-boot/u-boot.itb": {
-        "sha256": "8f359d09e448d8d7dea8ed5ed89fefb8eadbbc63414a95aff146a6ce8db233d8",
-        "size": 1486328
-      },
       "k1/BUILD-INFO.txt": {
         "sha256": "782febc661ef5968d29bcebdeab8f7e19b90f59d860ba06ab48b912e4f3873c1",
         "size": 902
@@ -72,21 +52,53 @@
         "sha256": "78c411893db130c0a8b14f8aa12b10a02481f69297860139b7f22640a9b17035",
         "size": 1984406
       },
-      "k3-ram-boot/BUILD-INFO.txt": {
-        "sha256": "daeeb1783f22ca29d94b4ac526d720eabb8ac7ba73cd13aa0f034a64605b7cee",
-        "size": 532
+      "k1-nor/0001-fastboot-read-nor-as-fixed-medium.patch": {
+        "sha256": "52b1bb7fecb165407206aeb7f6e1fbb81f25614c2f5529fb897f605b47f60dac",
+        "size": 482
       },
-      "k3-ram-boot/FSBL.bin": {
-        "sha256": "9ba8e2c31d6dbb692a039d63703ddcadabb6519b12fd6e31faa19f11ba2971b1",
-        "size": 465504
+      "k1-nor/BUILD-INFO.txt": {
+        "sha256": "4673cfa5c8f656c5977e1bee3ed4212a755b8442194892e9422717497940542a",
+        "size": 470
       },
-      "k3-ram-boot/SOURCE-OFFER.txt": {
-        "sha256": "a80668930c1a522b3627e1ad974b80c8a1572cb97d3ae3966f4374c35a40a80a",
-        "size": 859
+      "k1-nor/CONFIGURATION.txt": {
+        "sha256": "ff7fd1c49f8e5d0e08320c7fe98e4f33dc14167746c7a78cecd803d198fab463",
+        "size": 57692
       },
-      "k3-ram-boot/u-boot.itb": {
-        "sha256": "acb32f12de373cdf2745bc0c2c7e566da2c0c5aafa3a1d69030dca8a09a3f65b",
-        "size": 1176365
+      "k1-nor/FIT-SOURCE.txt": {
+        "sha256": "3746222b256eb2feeb2547a9c9eaa38ef38595948812799c679aae2fbc2615ca",
+        "size": 1309
+      },
+      "k1-nor/FSBL.bin": {
+        "sha256": "c6cec4f04276373aec5d8c98e58d85e419da2527a45f922757a30ad146ced54b",
+        "size": 198208
+      },
+      "k1-nor/SOURCE-OFFER.txt": {
+        "sha256": "cde8fb4fa8cf6f03eaa43d9479abe8ab2f02415f24d614388df4fc64f8ace948",
+        "size": 931
+      },
+      "k1-nor/u-boot.itb": {
+        "sha256": "75c761d9ef82647737adc913641233faa8f53d5448aca4691aa36bb19270f35a",
+        "size": 1482212
+      },
+      "k1-ram-boot/CONFIGURATION.txt": {
+        "sha256": "c903c3bc209b9e99a0ade97c6c66cfea1fe90ba2fbeafdc0f681c1299b3529bc",
+        "size": 57678
+      },
+      "k1-ram-boot/FIT-SOURCE.txt": {
+        "sha256": "3746222b256eb2feeb2547a9c9eaa38ef38595948812799c679aae2fbc2615ca",
+        "size": 1309
+      },
+      "k1-ram-boot/FSBL.bin": {
+        "sha256": "c6cec4f04276373aec5d8c98e58d85e419da2527a45f922757a30ad146ced54b",
+        "size": 198208
+      },
+      "k1-ram-boot/SOURCE-OFFER.txt": {
+        "sha256": "9c66d78202411fc132501bf22de430ccff8e52460970db7096541bd56f595e9b",
+        "size": 931
+      },
+      "k1-ram-boot/u-boot.itb": {
+        "sha256": "8f359d09e448d8d7dea8ed5ed89fefb8eadbbc63414a95aff146a6ce8db233d8",
+        "size": 1486328
       },
       "k3/FSBL-CONFIGURATION.txt": {
         "sha256": "e061073d50ee3afc9e1c276347dbbec08bd50e579627bd0f6212d2c7515f64d5",
@@ -112,9 +124,25 @@
         "sha256": "287bb2f7adc31a236d65790e923cbe1e0d664c4b2149d46bba3489e87da4ef3a",
         "size": 1178133
       },
+      "k3-ram-boot/BUILD-INFO.txt": {
+        "sha256": "daeeb1783f22ca29d94b4ac526d720eabb8ac7ba73cd13aa0f034a64605b7cee",
+        "size": 532
+      },
+      "k3-ram-boot/FSBL.bin": {
+        "sha256": "9ba8e2c31d6dbb692a039d63703ddcadabb6519b12fd6e31faa19f11ba2971b1",
+        "size": 465504
+      },
+      "k3-ram-boot/SOURCE-OFFER.txt": {
+        "sha256": "a80668930c1a522b3627e1ad974b80c8a1572cb97d3ae3966f4374c35a40a80a",
+        "size": 859
+      },
+      "k3-ram-boot/u-boot.itb": {
+        "sha256": "acb32f12de373cdf2745bc0c2c7e566da2c0c5aafa3a1d69030dca8a09a3f65b",
+        "size": 1176365
+      },
       "manifest.json": {
-        "sha256": "f883f9d742aa69341d6c30bdac7bbe03375b969207c644263d656cc97cf5a9fe",
-        "size": 1870
+        "sha256": "7aa1a5d60f8e9d81718915f36d26fc5ab086335865d7955180549c5f8ab57b19",
+        "size": 2244
       },
       "patches/0002-k3-ram-fastboot-speed-follows-oem-speed.patch": {
         "sha256": "9e4d5de292b31fe3d68be1a993a147181890d6623e7de67076febd06716457cf",

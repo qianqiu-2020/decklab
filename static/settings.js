@@ -6,7 +6,7 @@
       ['网页登录', ['PORT', 'BIND', 'AUTH_TOKEN', 'UI_LANGUAGE', 'SHARE_SECONDS']],
       ['团队用例（TitanX）', ['TEAM_CATALOGUE_URL', 'TEAM_CATALOGUE_TOKEN']],
       ['AI 接入（MCP）', ['MCP_ENABLED']],
-      ['高级访问设置', ['TRUST_LOOPBACK', 'MCP_PYTHON', 'MCP_ALLOWED_HOSTS', 'AGENT_TOKENS_FILE'], true, ['agent_tokens']]
+      ['高级访问设置', ['HTTPS_PORT', 'TRUST_LOOPBACK', 'MCP_PYTHON', 'MCP_ALLOWED_HOSTS', 'AGENT_TOKENS_FILE'], true, ['agent_tokens']]
     ]],
     ['serial', '串口与登录', [
       ['串口连接', ['BAUD', 'DATA_BITS', 'PARITY', 'STOP_BITS', 'FLOW_CONTROL', 'NEWLINE']],
@@ -36,7 +36,7 @@
     FLASH_USB2_PORTS: 'K3 使用 USB 2.0 的刷机端口（填写 USB 路径，多个用逗号分隔）',
     FLASH_LOADERS: '预备刷机环境清单',
     UI_LANGUAGE: '默认界面语言', SCROLLBACK: '实时输出缓存（字节）', SSH_LIMIT: '每设备终端会话上限', SSH_IDLE: '终端会话空闲超时（秒）', SHARE_SECONDS: '网页分享有效期（秒）',
-    PORT: '监听端口', BIND: '监听地址', AUTH_TOKEN: '主访问密码', TRUST_LOOPBACK: '信任本机访问（Windows）',
+    PORT: '监听端口', HTTPS_PORT: '内置 HTTPS 端口', BIND: '监听地址', AUTH_TOKEN: '主访问密码', TRUST_LOOPBACK: '信任本机访问（Windows）',
     MCP_ENABLED: '启用服务端 MCP', MCP_PYTHON: 'MCP Python（留空使用内置运行时）', MCP_ALLOWED_HOSTS: 'MCP 代理域名（逗号分隔）',
     BAUD: '波特率', DATA_BITS: '数据位', PARITY: '校验位', STOP_BITS: '停止位', FLOW_CONTROL: '流控', NEWLINE: '换行方式',
     PROBE: '默认探测模式', PROBE_COMMAND: '自定义探测命令', AUTO_CONFIGURE_SSH: '允许显式配置 SSH',
@@ -63,6 +63,7 @@
   var snapshot, inputs = {}, editors = {}, pendingBrowser = null;
   var dialog, status, preview, save, activate, browserBox, body, saveState, selectPage, busy = false;
   var openGeneration = 0, settingsTarget = 'web', remoteBackendAvailable = false;
+  var openActivationDetails = null;
   var devicePreferences = null, preferenceEditor, preferenceSave, preferencePreview = '', preferenceStatus, includePreferences;
   function el(tag, text, parent) {
     var node = document.createElement(tag);
@@ -324,6 +325,7 @@
       el('small', '仅自定义浏览目录时填写。', wrapper);
     }
     if (name === 'BIND') el('small', '127.0.0.1 仅本机访问，0.0.0.0 监听所有网卡。', wrapper);
+    if (name === 'HTTPS_PORT') el('small', '使用外部 HTTPS 代理时填 0。', wrapper);
     if (name === 'AUTH_TOKEN') el('small', '清空后，能访问此地址的人可以直接打开 DeckLab。', wrapper);
     if (name === 'AUTO_CONFIGURE_SSH') el('small', '仅在内置 Linux 探测模式下可用。', wrapper);
     input.addEventListener('input', function () { delete input.dataset.clear; changed(); });
@@ -502,6 +504,9 @@
     saveState = el('strong', null, footer); saveState.className = 'settings-save-state'; saveState.setAttribute('role', 'status');
     status = el('p', null, footer); status.setAttribute('role', 'status'); status.className = 'settings-status';
     var actions = el('div', null, footer); actions.className = 'settings-actions';
+    if (openActivationDetails) {
+      button(actions, '应用详情', function () { openActivationDetails(settingsTarget); }).id = 'settings-activation-details';
+    }
     preview = button(actions, '查看改动', whileReady(doPreview));
     save = button(actions, '保存配置', whileReady(doSave)); save.className = 'pri';
     activate = button(actions, '重启并应用', whileReady(async function () {
@@ -511,7 +516,9 @@
         : '已请求重启。请稍后刷新，端口或密码修改后需使用新地址与凭证。');
     }));
     fill(snapshot.configuration);
-    if (snapshot.activation && snapshot.activation.state === 'failed') message(snapshot.activation.error, true);
+    if (['failed', 'unknown', 'interrupted'].includes(snapshot.activation?.state)) {
+      message(snapshot.activation.error || '上次应用还需核对。请打开应用详情。', true);
+    }
     view.showModal();
     tabs[0].focus();
   }
@@ -544,5 +551,6 @@
     }
   }
   if (document && UI) { var trigger = UI.byId('b-settings'); if (trigger) trigger.addEventListener('click', function () { open('web'); }); }
-  global.DeckLabSettings = {validateBrowser: validateBrowser};
+  global.DeckLabSettings = {validateBrowser: validateBrowser,
+    setActivationDetails: function (open) { openActivationDetails = open; }};
 })(window);

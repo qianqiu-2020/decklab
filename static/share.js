@@ -99,11 +99,11 @@
     return url.origin;
   }
   function lanUrl() {
-    var host = /^(localhost|127\.0\.0\.1|::1)$/.test(location.hostname)
+    var host = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
       ? lanHosts[0] : location.hostname;
     if (!host) return '';
     var url = new URL(location.origin);
-    url.hostname = host;
+    url.hostname = host.includes(':') && !host.startsWith('[') ? '[' + host + ']' : host;
     return url.origin;
   }
   function selectAddress() {

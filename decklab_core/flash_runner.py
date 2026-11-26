@@ -495,6 +495,9 @@ class LocalFlashExecutor:
 
     def prepare(self, binding, on_event=None, check=lambda: None, task_id='', attempt_id='', *, identity_only=False):
         request = dict(self._request(binding), task_id=task_id, attempt_id=attempt_id)
+        from .flash_loaders import K1_NOR_PROTOCOL
+        if binding.profile_data.get('ram_loader_protocol') == K1_NOR_PROTOCOL:
+            request['mode'] = 'partitions'
         if identity_only:
             request['identity_only'] = True
         return self._run(binding, 'prepare', request, on_event, check)
@@ -524,10 +527,12 @@ class LocalFlashExecutor:
             raise FlashRunnerError('prepared system storage changed')
         baseline_protocol = baseline.pop('ram_loader_protocol', None)
         protocol = candidate.pop('ram_loader_protocol', None)
-        from .flash_loaders import RAM_BOOT_PROTOCOLS
+        from .flash_loaders import K1_NOR_PROTOCOL, RAM_BOOT_PROTOCOLS, k1_nor_installed
         protocols = ('stock', 'spacemit-ram-v1')
         if baseline.get('bootrom_identity'):
             protocols += (RAM_BOOT_PROTOCOLS[baseline['chip_family']],)
+            if baseline['chip_family'] == 'k1' and k1_nor_installed():
+                protocols += (K1_NOR_PROTOCOL,)
         if protocol is not None and protocol not in protocols:
             raise FlashRunnerError('unsupported RAM loader protocol')
         if baseline_protocol and baseline_protocol != protocol:
@@ -568,7 +573,7 @@ class LocalFlashExecutor:
                     original_storages[0].pop('layout_target')
                 if k1_active_system:
                     storages[0]['sector_size'] = original_storages[0]['sector_size']
-        if protocol == 'spacemit-ram-v1' and storages == [nor_catalogue]:
+        if protocol in ('spacemit-ram-v1', K1_NOR_PROTOCOL) and storages == [nor_catalogue]:
             candidate['storages'] = baseline['storages']
         if (isinstance(storages, list) and len(storages) == 1 and isinstance(storages[0], dict)
                 and isinstance(original_storages, list) and len(original_storages) == 1
@@ -610,7 +615,7 @@ class LocalFlashExecutor:
                     or not re.fullmatch(r'[0-9a-f]{64}', step['sha256'])):
                 raise FlashRunnerError('invalid prepared loader reference')
             path = Path(step['path'])
-            inherited = (protocol == 'spacemit-ram-v1' and isinstance(original_steps, list)
+            inherited = (protocol in ('spacemit-ram-v1', K1_NOR_PROTOCOL) and isinstance(original_steps, list)
                          and len(original_steps) == 4 and step == original_steps[index])
             if not path.is_absolute():
                 raise FlashRunnerError('prepared loader is outside the managed image workspace')
@@ -1026,9 +1031,12 @@ class LocalFlashExecutor:
 
     def nor_workspace(self, binding, check=lambda: None):
         """Prepare a RAM-only read profile without importing a dummy image."""
+        from .flash_loaders import k1_nor_installed
+        profile = binding.profile_data
         if (not binding.target_id or binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
-                or binding.profile_data.get('chip_family') != 'k3'):
-            raise TaskError('NOR reading requires a detected K3 USB target', 409)
+                or not (profile.get('chip_family') == 'k3' or profile.get('chip_family') == 'k1'
+                        and profile.get('bootrom_identity') and k1_nor_installed())):
+            raise TaskError('NOR reading requires a detected USB target and its managed NOR loader', 409)
         return self._loader_workspace(binding, 'nor-read-profile', check)
 
     def ram_boot_workspace(self, binding, check=lambda: None):
@@ -1058,10 +1066,11 @@ class LocalFlashExecutor:
             request = dict(self._request(binding), mode='partitions', workspace=str(workspace),
                            max_cache_bytes=budget)
             if binding.profile_data.get('bootrom_identity'):
-                from .flash_loaders import RAM_BOOT_PROTOCOLS, prepare_materials
-                options = {'ram_boot': True} if ram_boot else {}
+                from .flash_loaders import K1_NOR_PROTOCOL, RAM_BOOT_PROTOCOLS, prepare_materials
+                family = binding.profile_data['chip_family']
+                options = {'ram_boot': True} if ram_boot else {'nor': True} if family == 'k1' else {}
                 request['boot_materials'] = prepare_materials(binding, workspace, check, self.root, **options)
-                protocol = RAM_BOOT_PROTOCOLS[binding.profile_data['chip_family']] if ram_boot else 'spacemit-ram-v1'
+                protocol = RAM_BOOT_PROTOCOLS[family] if ram_boot else K1_NOR_PROTOCOL if family == 'k1' else 'spacemit-ram-v1'
                 if request['boot_materials'].get('protocol') != protocol:
                     raise TaskError('RAM boot requires its managed loader' if ram_boot else
                                     'NOR backup requires the RAM-only NOR loader', 409)
@@ -1297,6 +1306,10 @@ class LocalFlashExecutor:
                     # browser gets a correlation ID, never an arbitrary host path.
                     diagnostic = event.get('message')
                     diagnostic_id = secrets.token_hex(6) if isinstance(diagnostic, str) else ''
+                    if (operation == 'image-plan' and event.get('code') == 'image-invalid'
+                            and diagnostic == 'unsupported NOR partition package binding'
+                            and binding.profile_data.get('chip_family') == 'k1'):
+                        message = '当前 K1 刷机加载器不支持读取 NOR 或只替换其中一个分区；本次未写入'
                     if event.get('code') == 'capacity-mismatch':
                         message = '目标容量与写入计划不符'
                     if operation == 'execute' and isinstance(diagnostic, str):

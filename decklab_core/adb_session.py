@@ -9,10 +9,63 @@ import struct
 import time
 from contextlib import nullcontext
 
-from .board_cases import READ_IDENTITY, find_transport
+from .board_cases import AdbTransportUnavailable, READ_IDENTITY, find_transport
 from .config import SSH_LIMIT
 from .session_base import SessionBase
 from .terminal_backend import control_session
+
+
+# Return only fixed observations. Journal lines can contain board-specific data.
+ADBD_DIAGNOSTIC = r"""(
+unit=$(systemctl show --no-pager -p LoadState -p ActiveState -p SubState adbd.service 2>/dev/null)
+if printf '%s\n' "$unit" | grep -qx 'SubState=running' || pidof adbd >/dev/null 2>&1; then
+    echo adbd=running
+    journalctl -b -u adbd.service -n 50 --no-pager -o cat 2>/dev/null | awk '
+        /FUNCTIONFS_ENABLE|UsbFfs: online/ { state="enabled" }
+        /UsbFfs: (connection terminated|offline)|FUNCTIONFS_(DISABLE|UNBIND)/ { state="closed" }
+        END { if (state != "") print "usb_event=" state }
+    '
+elif printf '%s\n' "$unit" | grep -qx 'LoadState=loaded' &&
+     printf '%s\n' "$unit" | grep -Eq '^ActiveState=(failed|inactive)$'; then
+    echo adbd=not-running
+fi
+set -- /sys/class/udc/*/state
+if [ "$#" -eq 1 ] && [ -r "$1" ]; then
+    case "$(cat "$1" 2>/dev/null)" in
+        'not attached') echo gadget=detached ;;
+        configured) echo gadget=configured ;;
+    esac
+fi
+)"""
+
+
+def diagnose_over_serial(device, connection, check, on_stage):
+    stage = on_stage or (lambda *args: None)
+    check()
+    stage('checking-adbd-over-serial')
+    ok, output = device.console.run_idle_command(ADBD_DIAGNOSTIC, expected_connection=connection)
+    check()
+    if not ok:
+        stage('adb-serial-evidence-unavailable')
+        return '串口暂时无法自动取证。请结束占用串口的操作，并让终端停在已登录的 Shell 提示符后重试。'
+    facts = set(output.splitlines())
+    if 'adbd=not-running' in facts:
+        stage('adbd-not-running')
+        return '串口确认板端 adbd 服务未运行，请检查该服务状态。'
+    if 'adbd=running' in facts:
+        stage('adbd-running')
+        if 'gadget=detached' in facts:
+            stage('adb-gadget-detached')
+            return '串口确认 adbd 正在运行，但板端 USB 设备控制器未连接，请检查调试线和端口。'
+        if 'gadget=configured' in facts:
+            stage('adb-gadget-configured')
+        if 'usb_event=closed' in facts:
+            stage('adb-usb-transport-closed')
+            return ('串口确认 adbd 正在运行。本次启动最近的 ADB USB 日志显示连接已关闭，'
+                    '控制机尚未识别到当前板卡在线。可在串口执行 systemctl restart adbd 后重试。')
+        return '串口确认 adbd 正在运行，暂未读到能解释当前故障的板端 USB 日志。'
+    stage('adb-serial-evidence-unavailable')
+    return '串口已响应，但没有读到可确认的 adbd 服务状态。'
 
 
 def read_exact(sock, length):
@@ -135,7 +188,7 @@ class AdbSession(SessionBase):
             self.fd.shutdown(socket.SHUT_RDWR)
 
 
-def connect(manager, device, payload, actor):
+def connect(manager, device, payload, actor, *, on_stage=None):
     serial, connection, stop = device.serial, device.connection_id, device.stop
     registry = device._sessions
 
@@ -160,8 +213,18 @@ def connect(manager, device, payload, actor):
     session = None
     try:
         registered = manager.hardware.board_tests.get(serial)
-        port, endpoint, facts = find_transport(executable, serial, registered, usb_endpoints=usb_endpoints)
+        stages = {'on_stage': on_stage} if on_stage is not None else {}
+        try:
+            port, endpoint, facts = find_transport(executable, serial, registered, usb_endpoints=usb_endpoints,
+                                                   allow_relocation=True, **stages)
+        except AdbTransportUnavailable as error:
+            if actor != 'web':
+                raise
+            diagnosis = diagnose_over_serial(device, connection, check, on_stage)
+            raise ConnectionError(str(error).rstrip('。') + '。' + diagnosis) from error
         check()
+        if on_stage is not None:
+            on_stage('opening-adb-terminal', port)
         session = AdbSession('adb' + secrets.token_hex(12), device, port, endpoint, facts)
         session.actor, session.title = actor, 'USB ADB'
         session._board_device = device

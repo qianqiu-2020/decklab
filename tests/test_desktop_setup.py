@@ -170,7 +170,7 @@ class SetupTests(unittest.TestCase):
                         queries=['show-seat', 'grdctl', secret])
             reply = SimpleNamespace(stdout=json.dumps(data), returncode=0)
             with mock.patch.object(desktop.setup, 'quick_eligible', return_value=True), mock.patch(
-                    'decklab_core.board_cases.find_transport', return_value=('usb', '5', {'boot_id':'boot'})), mock.patch(
+                    'decklab_core.board_cases.find_transport', return_value=('2-3.2', '5', {'boot_id':'boot'})), mock.patch(
                     'decklab_core.board_cases.adb_command', return_value=reply):
                 status, result = self.request(f, '/api/desktop/quick-open', body)
                 self.assertEqual(status, 200, result)
@@ -183,8 +183,62 @@ class SetupTests(unittest.TestCase):
             self.assertIn('退出码 3', rows[0]['detail'])
             self.assertIn('grdctl --system status', rows[1]['detail'])
             self.assertIn('GNOME 登录', rows[1]['detail'])
-            self.assertNotIn(secret, json.dumps(rows))
+            self.assertIn('2-3.2', rows[1]['detail'])
+            connection = [e for e in activity['events'] if e['action'] == 'desktop-connection']
+            self.assertEqual(connection[0]['detail'], '使用 USB 检查获得的桌面入口 · RDP · 连接已建立 · login')
+            self.assertNotIn(secret, json.dumps(activity))
             desktop.close_actor()
+
+    def test_saved_3390_rechecks_debian_initial_setup_and_uses_current_credentials(self):
+        with self.setup() as (f, device, settings, screen):
+            device.present = True
+            device.board.attach(device)
+            desktop = f.manager.desktop
+            body = dict(key=device.key, serial=device.serial)
+            status, data = self.request(f, '/api/desktop/configure', dict(body, **self.payload(settings,
+                provider='rdp', port=3390, username='rdp', certificate_policy='accept')))
+            self.assertEqual(status, 200, data)
+            original = deepcopy(desktop.book.boards[device.serial])
+            fresh = secrets.token_hex(12)
+            reply = SimpleNamespace(returncode=0, stdout=json.dumps(dict(
+                stage='initial', port=3390, pin='b'*64, username='rdp', password=fresh)))
+            with mock.patch('decklab_core.desktop_setup.shutil.which', return_value='adb'), mock.patch(
+                    'decklab_core.board_cases.find_transport', return_value=('usb', '5', {'boot_id':'boot'})), mock.patch(
+                    'decklab_core.board_cases.adb_command', return_value=reply):
+                self.assertTrue(desktop.setup.public(device)['quick_connect'])
+                status, result = self.request(f, '/api/desktop/quick-open', body)
+            self.assertEqual(status, 200, result)
+            self.assertEqual(result['session']['login_stage'], 'initial')
+            config = desktop.get(device, result['session']['id'], 'web')['config']
+            self.assertEqual(unquote(urlsplit(config['secret_url']).password), fresh)
+            self.assertEqual(config['certificate_sha256'], 'b'*64)
+            self.assertEqual(desktop.book.boards[device.serial], original)
+            self.assertNotIn(fresh, json.dumps(result))
+            desktop.close_actor()
+
+    def test_unavailable_adb_is_reported_when_saved_rdp_authentication_fails(self):
+        with self.setup() as (f, device, settings, screen):
+            device.present = True
+            device.board.attach(device)
+            desktop = f.manager.desktop
+            body = dict(key=device.key, serial=device.serial)
+            status, result = self.request(f, '/api/desktop/configure', dict(body, **self.payload(settings,
+                provider='rdp', port=3390, username='rdp', certificate_policy='accept')))
+            self.assertEqual(status, 200, result)
+            with mock.patch('decklab_core.desktop_setup.shutil.which', return_value='adb'), mock.patch(
+                    'decklab_core.board_cases.find_transport', side_effect=ConnectionError('USB link missing')):
+                status, result = self.request(f, '/api/desktop/quick-open', body)
+                self.assertEqual(status, 200, result)
+                self.assertEqual(result['session']['login_stage'], 'usb-unavailable')
+                desktop.close_actor()
+                with mock.patch.object(desktop, 'provider_factory', side_effect=RuntimeError('authentication failed')):
+                    status, result = self.request(f, '/api/desktop/quick-open', body)
+                self.assertEqual(status, 502, result)
+                self.assertEqual(result['login_stage'], 'usb-unavailable')
+                self.assertNotIn('private-pass', json.dumps(result))
+            _, activity = self.request(f, '/api/activity?key=' + device.key)
+            connection = next(e for e in activity['events'] if e['action'] == 'desktop-connection')
+            self.assertEqual(connection['detail'], '自动检查后使用已保存的桌面入口 · RDP · 连接失败 · desktop-authentication-failed')
 
     def test_web_can_set_up_an_unconfigured_board_without_restart_or_secret_response(self):
         with self.setup() as (f, device, settings, screen):

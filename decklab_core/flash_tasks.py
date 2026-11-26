@@ -351,10 +351,13 @@ class FlashActions:
                 if result['preparable']:
                     from .flash_loaders import installed_for
                     result['loader_sources'] = (['builtin'] if installed_for(profile.get('chip_family')) else []) + ['image']
+                from .flash_loaders import k1_nor_installed
+                family = profile.get('chip_family')
                 result['nor_workspace_supported'] = bool(
                     getattr(_services(self.manager)[1], 'supports_nor_snapshot', False)
-                    and profile.get('id') == 'auto-spacemit-gpt-v1' and profile.get('chip_family') == 'k3'
-                    and (profile.get('ram_loader_protocol') == 'spacemit-ram-v1' or result['preparable']))
+                    and profile.get('id') == 'auto-spacemit-gpt-v1'
+                    and (family == 'k3' and (profile.get('ram_loader_protocol') == 'spacemit-ram-v1' or result['preparable'])
+                         or family == 'k1' and profile.get('bootrom_identity') and result['preparable'] and k1_nor_installed()))
                 result['stream_flash_supported'] = bool(profile.get('id') == 'auto-spacemit-gpt-v1'
                     and profile.get('chip_family') in ('k1', 'k3')
                     and getattr(_services(self.manager)[1], 'supports_stream_flash', False))
@@ -367,7 +370,7 @@ class FlashActions:
                     except (OSError, ValueError, KeyError):
                         configuration = None
                     result['flash_configuration'] = configuration
-                result['storage_inventory_supported'] = bool(result['nor_workspace_supported']
+                result['storage_inventory_supported'] = bool(family == 'k3' and result['nor_workspace_supported']
                     and getattr(_services(self.manager)[1], 'supports_storage_metadata', False))
                 if device.serial and self.manager.store.has_conflict(device.serial):
                     result.update(supported=False, reason='conflicting USB board identity')
@@ -787,10 +790,13 @@ class FlashActions:
                 if read_system and not getattr(executor, 'supports_storage_metadata', False):
                     raise TaskError('system storage metadata requires an updated executor', 409)
                 family = binding.profile_data.get('chip_family')
+                from .flash_loaders import k1_nor_installed
+                supported = family == 'k3' or family == 'k1' and (identity_only or (
+                    not read_system and binding.profile_data.get('bootrom_identity') and k1_nor_installed()))
                 if (not binding.target_id or binding.profile_data.get('id') != 'auto-spacemit-gpt-v1'
-                        or family not in (('k1', 'k3') if identity_only else ('k3',))
+                        or not supported
                         or not identity_only and not getattr(executor, 'supports_nor_snapshot', False)):
-                    raise TaskError('NOR backup requires a detected K3 USB target and updated executor', 409)
+                    raise TaskError('NOR backup requires a detected USB target and its managed NOR loader', 409)
                 if (type(payload.get('binding_revision')) is not int
                         or payload['binding_revision'] != binding.binding_revision):
                     raise TaskError('flash binding changed; refresh capabilities', 409)
@@ -814,6 +820,7 @@ class FlashActions:
                     request_id=payload.get('request_id'), input_digest=input_digest,
                     details={'operation': 'usb-identity' if identity_only else 'storage-inventory' if inventory_only else 'nor-workspace',
                         'temporary_snapshot': temporary, 'plan_id': record['plan_id'],
+                        'k1_nor_only': family == 'k1' and not identity_only,
                         'plan_digest': record['digest'], 'binding_revision': binding.binding_revision,
                         'target_id': binding.target_id, 'target_generation': binding.target_generation,
                         'attempt_id': operation.attempt_id, 'executor': binding.endpoint,
@@ -1386,6 +1393,12 @@ class FlashActions:
                 if not actual or payload.get('layout_digest') != actual:
                     raise TaskError('flash target layout changed; refresh selection', 409)
                 if payload.get('preview') is True:
+                    k1_nor_only = details.get('k1_nor_only') is True
+                    if k1_nor_only and (payload.get('mode', 'partitions') != 'partitions'
+                            or payload.get('verify', 'required') != 'required'
+                            or payload.get('target_storage') or payload.get('firmware_artifact_id')
+                            or payload.get('firmware_table')):
+                        raise TaskError('K1 NOR 工作区仅支持 OpenSBI 单分区与强制回读校验', 409)
                     intent = dict(record['intent'], selections=payload.get('selections', []))
                     for option in ('verify', 'reset_after', 'skip_ec'):
                         if option in payload:
@@ -1723,7 +1736,7 @@ class FlashOperation:
             write_progress = FlashWriteProgress(plan)
             write_started = True
             execution_args = dict(task_id=context.id, attempt_id=self.attempt_id)
-            if getattr(self.executor, 'supports_skip_verification', False):
+            if getattr(self.executor, 'supports_skip_verification', False) and not details.get('k1_nor_only'):
                 store.update_details(context.id, {'can_skip_verification': True})
                 execution_args['skip_verification'] = lambda: store.details(context.id).get('verify_skip_requested') is True
             if record['intent'].get('reset_after'):

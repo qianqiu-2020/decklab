@@ -10,7 +10,8 @@ import sys
 import tempfile
 import threading
 
-from .httpd import BoundedThreadingTCPServer
+from .httpd import WebTCPServer
+from .network import ip_address, lan_hosts, url_host
 
 
 def local_certificate(folder, hosts):
@@ -84,11 +85,24 @@ def local_certificate(folder, hosts):
     return leaf, issuer.public_bytes(serialization.Encoding.DER)
 
 
-class WebTLSListener(BoundedThreadingTCPServer):
+class WebTLSListener(WebTCPServer):
+    def tls_context(self, request):
+        if self.local_identity:
+            destination = str(ip_address(request.getsockname()[0]))
+            if destination not in self.certificate_hosts:
+                with self.certificate_lock:
+                    if destination not in self.certificate_hosts:
+                        hosts = self.certificate_hosts | {destination}
+                        cert, _ = local_certificate(self.local_identity, hosts)
+                        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                        context.load_cert_chain(cert)
+                        self.context, self.certificate_hosts = context, hosts
+        return self.context
+
     def finish_request(self, request, client_address):
         # Run the TLS handshake inside the bounded worker, not the accept loop.
         try:
-            with self.context.wrap_socket(request, server_side=True) as secured:
+            with self.tls_context(request).wrap_socket(request, server_side=True) as secured:
                 self.RequestHandlerClass(secured, client_address, self.control)
         except (ssl.SSLError, ConnectionError, TimeoutError):
             pass
@@ -96,36 +110,49 @@ class WebTLSListener(BoundedThreadingTCPServer):
 
 @contextmanager
 def https_listener(control, base):
-    bind = control.server_address[0]
+    bind = getattr(control, 'bind_host', control.server_address[0])
     listener = None
+    phase, port = 'configuration', None
+    control.https_status = {'state': 'disabled', 'port': 0}
     try:
         port = int(os.environ.get('DECKLAB_HTTPS_PORT', '8443'))
         if port:
             if not 1 <= port <= 65535 or port == control.server_address[1]:
                 raise ValueError('HTTPS requires a separate port in 1..65535')
+            phase = 'bind'
             listener = WebTLSListener((bind, port), control.RequestHandlerClass)
             listener.control = control
+            phase = 'certificate'
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             cert = os.environ.get('DECKLAB_HTTPS_CERT')
             key = os.environ.get('DECKLAB_HTTPS_KEY')
             ca = None
             if bool(cert) != bool(key):
                 raise ValueError('set both DECKLAB_HTTPS_CERT and DECKLAB_HTTPS_KEY')
+            listener.local_identity = None
             if not cert:
-                from .control_server import lan_hosts
-                hosts = ['localhost', '127.0.0.1', socket.gethostname()]
-                hosts.extend(lan_hosts() if bind in ('', '0.0.0.0') else [bind])
-                cert, ca = local_certificate(Path(base) / 'web-tls', hosts)
+                hosts = {'localhost', '127.0.0.1', '::1', socket.gethostname()}
+                wildcard = bind in ('', '0.0.0.0', '::')
+                hosts.update(lan_hosts() if wildcard else [bind])
+                identity = Path(base) / 'web-tls'
+                cert, ca = local_certificate(identity, hosts)
+                if wildcard:
+                    listener.local_identity = identity
+                    listener.certificate_hosts = hosts
+                    listener.certificate_lock = threading.Lock()
             ctx.load_cert_chain(cert, key or None)
             listener.context = ctx
             control.https_port, control.https_ca = port, ca
             worker = threading.Thread(target=listener.serve_forever, name='decklab-https', daemon=True)
             worker.start()
-            print('decklab control on https://%s:%d/' % (bind, port), flush=True)
+            control.https_status = {'state': 'active', 'port': port,
+                                    'certificate': 'decklab-local' if ca else 'provided'}
+            print('decklab control on https://%s:%d/' % (url_host(bind), port), flush=True)
     except (OSError, ValueError, ImportError) as error:
         if listener:
             listener.server_close()
             listener = None
+        control.https_status = {'state': 'failed', 'port': port, 'phase': phase}
         print('decklab: native HTTPS unavailable (%s); HTTP remains active' % error, file=sys.stderr, flush=True)
     try:
         yield

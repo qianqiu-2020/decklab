@@ -112,20 +112,25 @@ def image_ssl_context():
 
 
 class ImageConnection(http.client.HTTPConnection):
-    def __init__(self, host, port, secure, verify_tls=True):
+    def __init__(self, host, port, secure, verify_tls=True, on_stage=None):
         super().__init__(host, port, timeout=15)
         self.secure = secure
         self.verify_tls = verify_tls
+        self.on_stage = on_stage
 
     def connect(self):
+        stage = self.on_stage or (lambda phase: None)
+        stage('resolving-image-host')
         entries = _addresses(self.host, self.port)
         last = None
+        stage('connecting-image-server')
         for family, kind, protocol, address in entries:
             stream = socket.socket(family, kind, protocol)
             stream.settimeout(self.timeout)
             try:
                 stream.connect(address)
                 if self.secure:
+                    stage('checking-image-tls' if self.verify_tls else 'connecting-organization-tls')
                     tls = image_ssl_context() if self.verify_tls else ssl._create_unverified_context()
                     stream = tls.wrap_socket(stream, server_hostname=self.host)
                 self.sock = stream
@@ -144,22 +149,35 @@ def fetch_image(artifacts, context, url, serial, name=None, sha256=None, actor='
     if sha256 is not None and (not isinstance(sha256, str) or not re.fullmatch('[a-f0-9]{64}', sha256)):
         raise TaskError('invalid expected image SHA-256')
     filename = name or unquote(original.path.rsplit('/', 1)[-1]) or 'image.bin'
+    receipt = {'name': filename} if (len(filename.encode()) <= 255 and filename.isprintable()
+                                      and '/' not in filename and '\\' not in filename) else {}
+    context.store.update(context.id, result={'download': receipt})
     artifact = None
     deadline = time.monotonic() + 3600
     try:
         for redirects in range(6):
             context.check()
             parsed = image_url(url)
+            verify_tls = not (organization and organization_download(parsed))
+            receipt['transport'] = ('http' if parsed.scheme == 'http' else 'verified-https' if verify_tls
+                                    else 'organization-https')
+            receipt['redirects'] = redirects
+            receipt.pop('http_status', None)
+            context.store.update(context.id, result={'download': receipt})
             connection = ImageConnection(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80),
-                                         parsed.scheme == 'https', verify_tls=not (organization and organization_download(parsed)))
+                                         parsed.scheme == 'https', verify_tls=verify_tls, on_stage=context.stage)
             context.on_cancel(connection.close)
             try:
                 path = parsed.path or '/'
                 if parsed.query:
                     path += '?' + parsed.query
                 connection.request('GET', path, headers={'Accept-Encoding': 'identity', 'User-Agent': 'DeckLab-image-import/1'})
+                context.stage('waiting-image-response')
                 incoming = connection.getresponse()
+                receipt['http_status'] = incoming.status
+                context.store.update(context.id, result={'download': receipt})
                 if incoming.status in (301, 302, 303, 307, 308):
+                    context.stage('following-image-redirect')
                     if redirects == 5 or not incoming.getheader('Location'):
                         raise TaskError('image redirect limit exceeded', 502)
                     following = urljoin(url, incoming.getheader('Location'))
@@ -178,10 +196,15 @@ def fetch_image(artifacts, context, url, serial, name=None, sha256=None, actor='
                 if length is not None and not 0 < length <= artifacts.policy.max_file:
                     raise TaskError('image exceeds the configured file size limit', 413)
                 limit = length if length is not None else artifacts.policy.max_file
+                receipt['cache_reservation_bytes'] = limit
+                if length is not None:
+                    receipt['declared_bytes'] = length
+                context.store.update(context.id, result={'download': receipt})
+                context.stage('reserving-image-cache', total=length or 0)
                 artifact = artifacts.create('upload', filename, limit, actor, serial, context.id)
                 artifacts._update(artifact['id'], state='writing')
                 received = 0
-                context.progress(0, length or 0, 'image-download')
+                context.stage('image-download', total=length or 0)
                 while True:
                     context.check()
                     if time.monotonic() > deadline:
@@ -196,9 +219,13 @@ def fetch_image(artifacts, context, url, serial, name=None, sha256=None, actor='
                     context.progress(received, length or 0, 'image-download')
                 if length is not None and received != length:
                     raise TaskError('image download was truncated', 502)
-                context.progress(received, received, 'image-ready')
+                context.stage('sealing-image-cache', done=received, total=received)
                 result = artifacts.finish_import(artifact['id'], context.id, sha256, context.check)
-                return {'artifact': {key: result[key] for key in ('id', 'name', 'size', 'sha256', 'serial', 'state')}}
+                receipt['checksum'] = 'matched' if sha256 is not None else 'calculated'
+                context.mark_outcome('verified' if sha256 is not None else 'observed')
+                context.stage('image-ready', done=received, total=received)
+                return {'artifact': {key: result[key] for key in ('id', 'name', 'size', 'sha256', 'serial', 'state')},
+                        'download': receipt}
             finally:
                 connection.close()
     except BaseException as error:
@@ -208,6 +235,8 @@ def fetch_image(artifacts, context, url, serial, name=None, sha256=None, actor='
             raise TaskCancelled('image download cancelled') from None
         if isinstance(error, TaskError):
             raise
+        if isinstance(error, ssl.SSLCertVerificationError):
+            raise TaskError('image server TLS certificate could not be verified', 502) from None
         # HTTP errors can include signed URLs or server-provided response text.
         raise TaskError('image download failed; check backend connectivity and TLS trust', 502) from None
 

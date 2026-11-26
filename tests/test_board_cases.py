@@ -8,7 +8,7 @@ import threading
 import unittest
 from unittest.mock import Mock, mock_open, patch
 
-from decklab_core.board_cases import BoardCase, SerialEvidence, config, library, resolve_connection, save_case, select_transport, verify_boot
+from decklab_core.board_cases import BoardCase, SerialEvidence, adb_binding, config, find_transport, library, resolve_connection, save_case, select_transport, verify_boot
 from decklab_core import board_case_target
 from decklab_core.board_case_target import run_command
 from decklab_core.board_maintenance import maintenance_for
@@ -185,6 +185,37 @@ class BoardCasesTests(unittest.TestCase):
                 resolve_connection('/fixture/adb', 'OFFLINE-BOARD', None)
             registered = {'usb_port':'2-1.3','uart':'/dev/ttyS0','cases':['reboot-aging']}
             self.assertEqual(resolve_connection('/fixture/adb', SERIAL, registered)['cases'], ['reboot-aging', 'rtc-wake'])
+
+    def test_new_adb_operation_follows_unique_board_identity_after_usb_move(self):
+        listing = ('cloned device usb:2-3.2 transport_id:81\n'
+                   'cloned device usb:2-3.3 transport_id:82\n')
+        reported = {'81': 'OTHER-BOARD', '82': SERIAL}
+
+        def execute(_executable, *args, **_kwargs):
+            output = listing if args[0] == 'devices' else f'serial={reported[args[1]]}\nboot_id={BOOT1}\nuid=0\n'
+            return SimpleNamespace(returncode=0, stdout=output)
+
+        registered = {'usb_port': '2-1.2.3', 'uart': '/dev/ttyS0', 'cases': ['reboot-aging']}
+        stages = []
+        with patch('decklab_core.board_cases.adb_command', side_effect=execute), \
+                patch('decklab_core.board_cases.usb_adb_interface', return_value=False):
+            self.assertEqual(find_transport('/fixture/adb', SERIAL, registered, allow_relocation=True,
+                                            on_stage=lambda *step: stages.append(step))[:2], ('2-3.3', '82'))
+            self.assertEqual(stages, [('listing-adb-usb', '2-1.2.3'), ('matching-adb-board',),
+                                      ('verified-moved-adb-port', '2-3.3')])
+            with self.assertRaisesRegex(ConnectionError, '已登记的 USB 路径'):
+                find_transport('/fixture/adb', SERIAL, registered)
+            row = resolve_connection('/fixture/adb', SERIAL, registered)
+            self.assertEqual(row, {'usb_port': '2-3.3', 'uart': '/dev/ttyS0', 'cases': ['reboot-aging', 'rtc-wake']})
+            self.assertEqual(registered['usb_port'], '2-1.2.3')
+            manager = SimpleNamespace(store=SimpleNamespace(has_conflict=lambda serial: False),
+                                      hardware=SimpleNamespace(board_tests={SERIAL: registered}))
+            device = SimpleNamespace(serial=SERIAL, connection_id='fixture', present=True)
+            with patch('decklab_core.board_cases.shutil.which', return_value='/fixture/adb'):
+                self.assertEqual(adb_binding(manager, device)['usb_port'], '2-3.3')
+            reported['81'] = SERIAL
+            with self.assertRaisesRegex(ConnectionError, '多个 USB 调试连接'):
+                find_transport('/fixture/adb', SERIAL, registered, allow_relocation=True)
 
     def test_rpmi_clock_uses_its_wakeup_event_counter_instead_of_the_shared_irq(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(board_case_target, 'RTC', directory):
@@ -418,12 +449,16 @@ class BoardCasesTests(unittest.TestCase):
             payload = {'kind':'board-test','serial':SERIAL,'connection_id':device.connection_id,
                        'case':custom['id'],'case_revision':1,'rounds':1,'request_id':'test-request-1'}
             actions = TaskActions(manager)
-            with patch('decklab_core.board_cases.BoardCase.run', run), patch('decklab_core.board_cases.shutil.which', return_value='/fixture/adb'):
+            with patch('decklab_core.board_cases.BoardCase.run', run), \
+                    patch('decklab_core.board_cases.shutil.which', return_value='/fixture/adb'), \
+                    patch('decklab_core.board_cases.find_transport', return_value=('2-3.3', '82', {'uid': '0'})) as transport:
                 first = actions.start(payload, device, 'web')
                 self.assertEqual(first.status, 202, first.payload)
                 self.assertTrue(started.wait(2))
                 self.assertEqual(manager.tasks.store.get(first.payload['task']['id'])['outcome'], 'not-issued')
                 self.assertTrue(maintenance_for(manager).holds(SERIAL))
+                transport.assert_called_once_with('/fixture/adb', SERIAL, manager.hardware.board_tests[SERIAL],
+                                                  allow_relocation=True)
                 self.assertEqual(cases_executed[0]['script'], fields['script'])
                 save_case(store, dict(fields, id=custom['id'], revision=1, script='exit 1'))
                 duplicate = actions.start(payload, device, 'web')

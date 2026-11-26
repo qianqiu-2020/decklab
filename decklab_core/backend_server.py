@@ -17,7 +17,7 @@ from .httpd import BoundedThreadingTCPServer
 from .profiles import ProfileBook
 from .remote_settings import node_snapshot, validate_scope
 from .request_json import load_object
-from .settings_restart import configure_collector, reexecute
+from .settings_restart import activation_status, configure_collector, reexecute
 from .storage import Store
 from .web_settings import SettingsError
 from .agent_grants import attach_agent_grants
@@ -56,7 +56,7 @@ class BackendHandler(web.Handler):
                 if not write:
                     result = node_snapshot(settings, 'backend')
                     result.update(active_revision=self.server.settings_revision, restart_available=True,
-                                  activation={'state': 'restarting' if self.server.restart_requested else 'idle'})
+                                  activation=activation_status(self.server))
                     if result['restart_revision'] == self.server.settings_restart_revision:
                         result['active_revision'] = result['revision']
                     return self._json(200, result)
@@ -146,7 +146,7 @@ def main():
                 manager = Manager(store, consume_handoff(HANDOFF), profiles=ProfileBook.from_env())
             grants = attach_agent_grants(manager, os.path.join(BASE, 'agent-grants.sqlite3'))
             server.manager, server.host_settings = manager, SETTINGS
-            configure_collector(server, SETTINGS)
+            configure_collector(server, SETTINGS, public_backend=True)
             def preflight(proposed):
                 validate_token(proposed['BACKEND_TOKEN'])
                 server_context(proposed['BACKEND_CERT'], proposed['BACKEND_KEY'])

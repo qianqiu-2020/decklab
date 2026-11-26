@@ -16,15 +16,17 @@ class Element {
 }
 const drain = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 function harness() {
-  const nodes = new Map(), requests = [];
+  const nodes = new Map(), requests = [], notices = [], shown = [], receipted = [];
   const get = id => { if (!nodes.has(id)) nodes.set(id, new Element()); return nodes.get(id); };
   const sandbox = {window: {}, document: {createElement: () => new Element()}, setTimeout() {}};
   vm.runInNewContext(source, sandbox);
   let ctx = {key: 'A', serial: 'SN-A', connectionId: 'A1'};
   const control = sandbox.window.DeckLabBoardControl.create({byId: get, getView: () => ctx,
-    fetch: (url, options) => new Promise(resolve => requests.push({url, body: options && options.body && JSON.parse(options.body),
+    notice: (message, view, id) => { notices.push(message); receipted.push([view.key, id]); },
+    openTaskDetails: (view, id) => shown.push([view.key, id]),
+    fetch: (url, options) => new Promise((resolve, reject) => requests.push({url, reject, body: options && options.body && JSON.parse(options.body),
       reply: data => resolve({ok: true, json: () => Promise.resolve(data)})}))});
-  return {get, requests, control, select(value) { ctx = value; control.refresh(ctx); }, ctx};
+  return {get, requests, notices, shown, receipted, control, select(value) { ctx = value; control.refresh(ctx); }, ctx};
 }
 (async () => {
   const h = harness(); h.control.refresh(h.ctx);
@@ -48,5 +50,35 @@ function harness() {
   h.get('board-control-status').textContent = 'new board';
   h.requests[2].reply({task: {id: 'task-B', state: 'completed', result: {control_result: 'acknowledged'}}}); await drain();
   assert.equal(h.get('board-control-status').textContent, 'new board', 'late task receipt cannot update another target');
-  console.log('ok - board controls preserve target scope, explicit confirmation and single submission');
+  assert.deepEqual(h.notices, [], 'late task receipt cannot announce success on another board');
+
+  const next = harness(); next.control.refresh(next.ctx);
+  next.requests[0].reply({supported: true, actions: ['enter-download']}); await drain();
+  next.get('b-board-control').click();
+  next.get('board-control-submit').click();
+  next.requests[1].reply({task: {id: 'download', state: 'running'}}); await drain();
+  assert.equal(next.get('board-control-dialog').open, true, 'wait for the controller receipt');
+  next.requests[2].reply({task: {id: 'download', state: 'completed', result: {control_result: 'acknowledged'}}}); await drain();
+  assert.equal(next.get('board-control-dialog').open, false, 'success closes the dialog');
+  assert.deepEqual(next.notices, ['控制请求已确认，请查看终端启动输出。']);
+  assert.deepEqual(next.receipted, [['A', 'download']]);
+
+  next.get('b-board-control').click();
+  next.get('board-control-submit').click();
+  next.requests[3].reply({task: {id: 'failed', state: 'failed', error: 'controller unavailable'}}); await drain();
+  next.control.refresh(next.ctx);
+  assert.equal(next.get('board-control-dialog').open, true);
+  assert.equal(next.get('board-control-status').textContent, 'controller unavailable');
+  next.get('board-control-status').children[0].click();
+  assert.deepEqual(next.shown, [['A', 'failed']]);
+  assert.equal(next.get('board-control-submit').disabled, true);
+  next.get('board-control-close').click();
+  next.control.refresh(next.ctx);
+  next.requests[4].reply({supported: true, actions: ['reset']}); await drain();
+  next.get('b-board-control').click();
+  next.get('board-control-submit').click();
+  next.requests[5].reject(new Error('connection closed')); await drain();
+  assert.equal(next.get('board-control-dialog').open, true);
+  assert.equal(next.get('board-control-status').textContent, '提交结果未知，请先在任务中检查记录。');
+  console.log('ok - board control closes on success, retains failures, and preserves target scope and explicit confirmation');
 })().catch(error => { console.error(error); process.exitCode = 1; });

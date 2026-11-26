@@ -31,6 +31,10 @@
 
 K1 与 K3 的下载流程、识别能力及可用存储范围有差异。临时加载器按芯片、设备能力和包内容选择。配置 `DECKLAB_FLASH_USB2_PORTS` 可在匹配的端口启用兼容路径。`DECKLAB_FLASH_EXECUTOR` 和 `DECKLAB_FLASH_LOADERS` 用于部署自定义执行器或加载材料。
 
+普通刷机工作区可读取 K3 的设备存储和 NOR。K1 MUSE-Pi-Pro 从 BootROM 下载模式可进入「读取并备份 NOR」，选择 OpenSBI 单独更新。工作区先核对板卡和活跃的 NOR 分区范围，强制保留整片备份并在写后回读，检查 OpenSBI 写入及其范围外的字节。K1 整包刷写继续使用常规流程。
+
+镜像工作目录的「替换文件」会把上传内容放到选中的包内路径。例如选中 `fw_dynamic.itb`，上传 `opensbi.itb` 后，镜像配置仍引用 `fw_dynamic.itb`。预览时核对载荷版本，以及本次要写入的分区。
+
 可在支持的 NOR 写入路径选择备份用于下载。按载荷长度计算的摘要只说明已核对范围的字节，任务回执中同时保留分区和介质范围。[后台任务](tasks.md) · [刷机性能](../reference/flash-performance.md)
 
 自动化通过原 [HTTP API](../reference/http-api.md) 或 [MCP](mcp.md) 使用相同的目标盘、预览、确认和结果接口。

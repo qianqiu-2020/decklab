@@ -7,12 +7,16 @@
     var selection = '', generation = 0, actions = [], wiring = null, target = null, pending = Object.create(null);
     function scope(ctx) { return ctx && ctx.connectionId ? (ctx.serial || ctx.key || '') + ':' + ctx.connectionId : ''; }
     function current(ctx) { return !!ctx && scope(options.getView()) === scope(ctx); }
-    function close() { $('board-control-dialog').close(); target = null; }
+    function close() {
+      if (target && target.failed) selection = '';
+      target = null;
+      $('board-control-dialog').close();
+    }
     function refresh(ctx) {
       var key = scope(ctx);
       var owner = !!(options.canBind && options.canBind());
       if (key + owner === selection) return;
-      selection = key + owner; generation++; actions = []; wiring = null; close(); $('b-board-control').hidden = true;
+      close(); selection = key + owner; generation++; actions = []; wiring = null; $('b-board-control').hidden = true;
       $('b-board-slot-bind').hidden = !key || !owner;
       if (!key) return;
       if (!ctx.serial) return;
@@ -50,23 +54,37 @@
       if (!current(ctx) || pending[scope(ctx)] || actions.indexOf(action) === -1) return;
       pending[scope(ctx)] = true; $('board-control-submit').disabled = true;
       $('board-control-status').textContent = '正在执行…';
+      var taskId = '';
       client.start({key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId,
-        kind: 'hardware-' + action, actor: 'web', wiring_revision: wiring ? wiring.revision : ''}, function () { if (options.onTask) options.onTask(); }).then(function (result) {
+        kind: 'hardware-' + action, actor: 'web', wiring_revision: wiring ? wiring.revision : ''}, function (task) {
+        taskId = task.id;
+        if (options.onTask) options.onTask();
+      }).then(function (result) {
         if (target !== ctx || !current(ctx)) return;
-        $('board-control-status').textContent = result.control_result === 'acknowledged'
-          ? '控制请求已确认，请查看终端启动输出。' : '操作已完成。';
+        close();
+        if (options.notice) options.notice(result.control_result === 'acknowledged'
+          ? '控制请求已确认，请查看终端启动输出。' : '操作已完成。', options.getView(), taskId);
       }).catch(function (error) {
         if (target !== ctx || !current(ctx)) return;
-        selection = '';
+        ctx.failed = true;
         $('board-control-status').textContent = error.submissionUnknown
           ? '提交结果未知，请先在任务中检查记录。' : error.message;
+        if (options.openTaskDetails && taskId) {
+          var details = document.createElement('button');
+          details.type = 'button'; details.textContent = '任务详情';
+          details.addEventListener('click', function () {
+            if (target === ctx && current(ctx)) options.openTaskDetails(options.getView(), taskId);
+          });
+          $('board-control-status').appendChild(details);
+        }
       }).finally(function () { delete pending[scope(ctx)]; });
       // One submission per dialog. Reopening is an explicit new operation;
       // late replies cannot re-enable a button or act on another board.
     }
     function bind(ctx) {
       if (!current(ctx) || !(options.canBind && options.canBind())) return;
-      global.DeckLabControlSlots.open(ctx.serial, ctx.serial ? null : {key:ctx.key, connection_id:ctx.connectionId});
+      global.DeckLabControlSlots.open(ctx.serial, ctx.serial ? null : {key:ctx.key, connection_id:ctx.connectionId},
+        options.openTaskDetails ? function (id) { options.openTaskDetails(null, id); } : null);
     }
     $('b-board-control').addEventListener('click', function () { open(options.getView()); });
     $('b-board-slot-bind').addEventListener('click', function () { bind(options.getView()); });

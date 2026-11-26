@@ -24,11 +24,12 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from .compat import BEARER_GRANT_PREFIXES, LegacyRequest
 from .config import AUTH_TOKEN, BASE, SOCKET, STATIC, SETTINGS, LAUNCH_ENVIRONMENT, SHARE_SECONDS, read_ui_language
 from .web_settings import SettingsError
-from .settings_restart import configure_control, reexecute
+from .settings_restart import activation_status, configure_control, reexecute
 from .agent_grants import AgentGrantStore
 from .artifact_actions import body_limit
 from .web_tls import https_listener
-from .httpd import BoundedThreadingTCPServer
+from .httpd import WebTCPServer
+from .network import ip_address, lan_hosts, url_host
 from . import __version__
 from .results import response as api_response
 from .request_json import load_object
@@ -136,30 +137,6 @@ class RevocationReconciler:
             self._thread.join()
 
 
-def lan_hosts():
-    """Suggest reachable IPv4 addresses without depending on platform commands."""
-    hosts = set()
-    try:
-        hosts.update(item[4][0] for item in socket.getaddrinfo(
-            socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM))
-    except OSError:
-        pass
-    for target in ('10.0.0.1', '172.16.0.1', '192.168.0.1'):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-                probe.connect((target, 80))
-                hosts.add(probe.getsockname()[0])
-        except OSError:
-            pass
-    def is_lan(host):
-        address = ipaddress.ip_address(host)
-        return any(address in network for network in (
-            ipaddress.ip_network('10.0.0.0/8'), ipaddress.ip_network('172.16.0.0/12'),
-            ipaddress.ip_network('192.168.0.0/16')))
-    return sorted((host for host in hosts if is_lan(host)),
-                  key=lambda host: (not host.startswith('10.'), host))
-
-
 def _mcp_authority(value):
     if not isinstance(value, str) or not value or any(char.isspace() for char in value) or value.endswith(':'):
         raise ValueError('invalid public MCP authority')
@@ -185,7 +162,10 @@ def public_mcp_host_allowed(server, authority):
         requested = _mcp_authority(authority)
     except ValueError:
         return False
+    checked_at = time.monotonic()
     allowed = getattr(server, '_mcp_public_hosts', None)
+    if checked_at - getattr(server, '_mcp_public_hosts_at', checked_at) >= 5:
+        allowed = None
     if allowed is None:
         address = getattr(server, 'server_address', ('127.0.0.1', 8898))
         bind, port = address[:2]
@@ -220,6 +200,7 @@ def public_mcp_host_allowed(server, authority):
         if ports.intersection((80, 443)):
             allowed.update((name, None) for name in names if name)
         server._mcp_public_hosts = frozenset(allowed)
+        server._mcp_public_hosts_at = checked_at
     return requested in allowed or (requested[0], '*') in allowed
 
 
@@ -235,7 +216,7 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
     share_seconds = SHARE_SECONDS
     default_language = ''
     settings = None
-    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js',
+    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/diagnostics.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js', '/vendor/ace/ace.js',
                                 '/vendor/ace/mode-json.js', '/vendor/ace/mode-yaml.js',
@@ -286,7 +267,7 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
             return True
         if self.trust_loopback and not value:
             try:
-                if ipaddress.ip_address(self.client_address[0]).is_loopback:
+                if ip_address(self.client_address[0]).is_loopback:
                     return True
             except (AttributeError, ValueError, IndexError):
                 pass
@@ -444,13 +425,13 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
                 if check_wiring and result['active_revision'] != result['revision'] and check_wiring(result['revision']):
                     result['active_revision'] = result['revision']
                 result['restart_available'] = callable(getattr(self.server, 'activate_settings', None))
-                result['activation'] = getattr(self.server, 'settings_activation', {'state': 'idle'})
+                result['activation'] = activation_status(self.server)
                 return self._json(200, result)
             if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
                 raise SettingsError('需要 application/json 请求')
             payload = self._small_json_body(2 * 1024 ** 2)
             action = payload.get('action', 'preview')
-            if (getattr(self.server, 'settings_activation', {}).get('state') == 'applying'
+            if (activation_status(self.server).get('state') == 'applying'
                     and action != 'export'):
                 raise SettingsError('正在应用配置，请稍候', 409)
             if action == 'export':
@@ -851,6 +832,14 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
             return proxy(self)
         if route == '/api/settings':
             return self._settings_request()
+        if route == '/api/update-check':
+            if not self._owner_authorized():
+                return self._json(403, {'error': '需要主访问凭证才能检查更新'})
+            from .updates import UpdateError, check_update
+            try:
+                return self._json(200, check_update())
+            except UpdateError as error:
+                return self._json(503, {'error': str(error)})
         if route in ('/api/device-preferences', '/api/control-slots', '/api/board-test-cases', '/api/team-test-cases'):
             if not self._owner_authorized():
                 return self._json(403, {'error': '只有主访问凭证可以管理此配置'})
@@ -872,10 +861,14 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
                 return self._json(403, {'error': '需要有效的网页访问凭证才能管理 Agent 授权'})
             return self._json(200, {'grants': self.grant_store.list()})
         if route == '/healthz':
+            server = getattr(self, 'server', None)
+            address = getattr(server, 'server_address', None)
             return self._json(200, {'ok': True, 'role': 'control', 'pid': os.getpid(),
                                     'version': __version__,
                                     'collector_socket': self.collector_socket if self.collector_link is None else None,
-                                    'backend_transport': 'https' if self.collector_link else 'local'})
+                                    'backend_transport': 'https' if self.collector_link else 'local',
+                                    'listeners': {'http_port': address[1] if isinstance(address, tuple) else None,
+                                                  'https': getattr(server, 'https_status', None)}})
         if route.startswith('/api/'):
             return self._proxy()
         if route in ('/', '/index.html'):
@@ -964,7 +957,7 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
         if urlparse(self.path).path.startswith('/vendor/novnc/'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
-                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
+                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/diagnostics.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()
 
@@ -1006,7 +999,7 @@ def main():
     except ValueError:
         parser.error('invalid DECKLAB_AGENT_TOKENS_FILE or missing DECKLAB_AUTH_TOKEN')
     try:
-        with BoundedThreadingTCPServer((args.bind, args.port), ControlHandler) as server:
+        with WebTCPServer((args.bind, args.port), ControlHandler) as server:
             reconciler = RevocationReconciler(ControlHandler.grant_store,
                 lambda timeout: collector_connection(ControlHandler.collector_socket,
                     ControlHandler.collector_link, timeout)).start()
@@ -1021,7 +1014,7 @@ def main():
                 server.mcp_host = mcp
                 signal.signal(signal.SIGTERM,
                     lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
-                print('decklab control on http://%s:%d/' % (args.bind, server.server_address[1]), flush=True)
+                print('decklab control on http://%s:%d/' % (url_host(args.bind), server.server_address[1]), flush=True)
                 try:
                     with https_listener(server, BASE):
                         server.serve_forever()

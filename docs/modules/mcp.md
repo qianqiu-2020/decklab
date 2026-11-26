@@ -242,7 +242,7 @@ Debian 包的依赖或内置程序损坏时，先确认没有遗留的 Python �
 | `close_ssh` | 关闭自己拥有的 SSH 会话 |
 | `list_desktop_sessions` / `open_desktop` / `close_desktop` | 查询并管理管理员绑定的远程桌面连接 |
 | `capture_desktop` | 直接返回 MCP 图片内容及设备、显示器、尺寸、缩放和采集时间 |
-| `desktop_input` | 基于观察画面点击、按键、文本输入或滚动，可附带操作后截图 |
+| `desktop_input` | 基于观察画面点击、拖动、按键、输入文本或滚动，可附带操作后截图 |
 | `list_flash_targets` / `probe_flash_target` / `flash_capabilities` | 发现 USB 下载模式设备，读取物理 EEPROM 身份和刷机能力 |
 | `read_device_storage` | 后台读取 NOR 整片备份、系统盘分区与版本信息 |
 | `preview_flash` / `start_flash` | 预览并启动整包或指定分区刷写 |

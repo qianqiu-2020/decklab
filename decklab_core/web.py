@@ -226,7 +226,8 @@ class Handler(LegacyRequest, http.server.BaseHTTPRequestHandler):
                 from .image_catalog import catalog, library, mark_downloads
                 actor = self.headers.get('X-DeckLab-Actor', 'web')
                 if route == '/api/image-library':
-                    result = library(self.manager, actor, (q.get('serial') or [None])[0])
+                    result = library(self.manager, actor, (q.get('serial') or [None])[0],
+                                     history=q.get('history') == ['1'])
                 else:
                     result = catalog((q.get('source') or ['public'])[0], (q.get('path') or [''])[0],
                                      (q.get('refresh') or [''])[0] == '1')

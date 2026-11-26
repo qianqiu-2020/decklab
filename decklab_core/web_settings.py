@@ -23,7 +23,7 @@ DEFAULTS = {
     'BACKEND_URL': '', 'BACKEND_TOKEN': '', 'BACKEND_CA': '',
     'BACKEND_BIND': '127.0.0.1', 'BACKEND_PORT': '8899', 'BACKEND_CERT': '', 'BACKEND_KEY': '',
     'BASE': '', 'STATIC': '', 'SOCKET': '', 'HANDOFF': '', 'BY_PATH': '',
-    'RESCUE_BIN': '/usr/local/sbin/decklab-rescue.sh', 'PORT': '8898',
+    'RESCUE_BIN': '/usr/local/sbin/decklab-rescue.sh', 'PORT': '8898', 'HTTPS_PORT': '8443',
     'BIND': '127.0.0.1', 'AUTH_TOKEN': '', 'AGENT_TOKENS_FILE': '',
     'TRUST_LOOPBACK': '0', 'MCP_ENABLED': '1', 'MCP_PYTHON': '',
     'MCP_ALLOWED_HOSTS': '', 'BAUD': '115200', 'DATA_BITS': '8', 'PARITY': 'N',
@@ -54,7 +54,7 @@ CHOICES = {'PARITY': ['N', 'E', 'O'], 'DATA_BITS': ['5', '6', '7', '8'],
 CHOICES['UI_LANGUAGE'] = ['auto', 'en', 'zh-CN']
 LIVE_FIELDS = {'TEAM_CATALOGUE_URL', 'TEAM_CATALOGUE_TOKEN', 'FLASH_USB2_PORTS'}
 SENSITIVE = {'TEAM_CATALOGUE_TOKEN', 'BACKEND_TOKEN', 'AUTH_TOKEN', 'SSH_PASSWORD', 'CONSOLE_PASSWORD'}
-CONTROL = {'BACKEND_URL', 'BACKEND_TOKEN', 'BACKEND_CA', 'PORT', 'BIND', 'AUTH_TOKEN', 'AGENT_TOKENS_FILE', 'TRUST_LOOPBACK',
+CONTROL = {'BACKEND_URL', 'BACKEND_TOKEN', 'BACKEND_CA', 'PORT', 'HTTPS_PORT', 'BIND', 'AUTH_TOKEN', 'AGENT_TOKENS_FILE', 'TRUST_LOOPBACK',
            'MCP_ENABLED', 'MCP_PYTHON', 'MCP_ALLOWED_HOSTS', 'STATIC', 'UI_LANGUAGE', 'SHARE_SECONDS'}
 SHARED = {'BASE', 'SOCKET'}
 PATHS = {'BACKEND_CA', 'BACKEND_CERT', 'BACKEND_KEY', 'BASE', 'STATIC', 'SOCKET', 'HANDOFF', 'BY_PATH', 'RESCUE_BIN',
@@ -260,7 +260,7 @@ class WebSettings:
                                 'DECKLAB_IMAGE_INTERNAL_DOWNLOAD': merged['IMAGE_INTERNAL_DOWNLOAD']})
         except TaskError as error:
             raise SettingsError(str(error)) from error
-        integer_limits = {'BACKEND_PORT': (1, 65535), 'PORT': (1, 65535), 'LOG_RETENTION_DAYS': (0, 36500),
+        integer_limits = {'BACKEND_PORT': (1, 65535), 'PORT': (1, 65535), 'HTTPS_PORT': (0, 65535), 'LOG_RETENTION_DAYS': (0, 36500),
                           'DISK_MIN_FREE_MB': (0, 1048576), 'DISK_MIN_FREE_PERCENT': (0, 100),
                           'SCROLLBACK': (4096, 16 * 1024 ** 2), 'SSH_LIMIT': (1, 128),
                           'SSH_IDLE': (60, 86400), 'SHARE_SECONDS': (60, 30 * 86400)}

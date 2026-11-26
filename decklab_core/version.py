@@ -4,7 +4,7 @@ import re
 import sys
 
 
-__version__ = '1.19.2'
+__version__ = '1.19.15'
 
 if getattr(sys, 'frozen', False) and sys.platform == 'win32':
     packaged_version = (Path(sys.executable).parent / 'package-version.txt').read_text(encoding='ascii').strip()

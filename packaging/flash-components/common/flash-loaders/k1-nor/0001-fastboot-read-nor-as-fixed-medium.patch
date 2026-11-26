@@ -1,0 +1,15 @@
+--- a/drivers/fastboot/fb_command.c
++++ b/drivers/fastboot/fb_command.c
+@@ -797,6 +797,12 @@
+ 
+ 	debug("get part:%s, offset:%x\n", part, off);
+ 
++	/* The host checks the physical NOR before requesting the fixed raw read. */
++	if (strcmp(part, "mtd") == 0) {
++		fastboot_bytes_expected = fastboot_mtd_flash_read(part, off,
++							       fastboot_buf_addr, response);
++		return;
++	}
+ 	boot_mode = get_boot_pin_select();
+ 	switch(boot_mode){
+ #ifdef CONFIG_FASTBOOT_SUPPORT_BLOCK_DEV

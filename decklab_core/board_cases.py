@@ -202,27 +202,48 @@ def adb_command(executable, *args, timeout=10):
                           env={**os.environ, 'ADB_SERVER_SOCKET': 'tcp:127.0.0.1:5037'})
 
 
-def find_transport(executable, serial, registered, *, usb_endpoints=None):
+class AdbTransportUnavailable(ConnectionError):
+    """No online transport could be identified for the requested board."""
+
+
+def find_transport(executable, serial, registered, *, usb_endpoints=None, allow_relocation=False, on_stage=None):
+    registered_port = registered['usb_port'] if registered else None
+    stage = on_stage or (lambda *args: None)
+    stage('listing-adb-usb', registered_port)
     listing = adb_command(executable, 'devices', '-l', timeout=3)
     if listing.returncode:
         raise ConnectionError('无法读取控制机的 USB 调试连接')
-    ports = {registered['usb_port']} if registered else {
+    online_ports = {
         field[4:] for fields in map(str.split, listing.stdout.splitlines()) if len(fields) >= 2 and fields[1] == 'device'
         for field in fields[2:]
         if field.startswith('usb:') and USB_PORT.fullmatch(field[4:])}
+    # Only a new operation can follow a moved board. Follow its confirmed
+    # identity, never the ADB serial or the first newly enumerated device.
+    inspect_other_ports = allow_relocation and bool(online_ports.difference({registered_port}))
+    ports = online_ports if not registered or inspect_other_ports else {registered_port}
     rows = [fields for fields in map(str.split, listing.stdout.splitlines()) if len(fields) >= 2
             and (fields[1] in ('device', 'offline', 'unauthorized') or fields[1:3] == ['no', 'permissions'])]
     relevant = [row for row in rows if len(row) >= 2 and
                 (not registered or 'usb:' + registered['usb_port'] in row[2:])]
+    if allow_relocation and not relevant and not online_ports:
+        visible = sorted({entry.name.split(':', 1)[0] for entry in Path('/sys/bus/usb/devices').glob('*:*')
+                          if USB_PORT.fullmatch(entry.name.split(':', 1)[0])})
+        interfaces = [port for port in visible if usb_adb_interface(port)]
+        if interfaces:
+            raise AdbTransportUnavailable('控制机在 USB ' + '、'.join(interfaces)
+                                           + ' 看到了 ADB 接口，当前没有在线会话可供核对板卡身份。')
     if not registered and not rows:
-        raise ConnectionError('控制机 ADB 列表为空。请检查 USB 调试线，并在板端串口确认 adbd 正在运行。')
-    if relevant and all(row[1] == 'no' for row in relevant):
+        raise AdbTransportUnavailable('控制机 ADB 列表为空，请检查 USB 调试线和板端 ADB 服务。')
+    if not inspect_other_ports and relevant and all(row[1] == 'no' for row in relevant):
         raise ConnectionError('控制机没有访问 ADB USB 设备的权限，请检查 USB 设备权限。')
-    if relevant and all(row[1] == 'unauthorized' for row in relevant):
+    if not inspect_other_ports and relevant and all(row[1] == 'unauthorized' for row in relevant):
         raise ConnectionError('USB 调试未授权，请在板端授权控制机的 ADB 密钥')
-    if relevant and all(row[1] == 'offline' for row in relevant):
-        raise ConnectionError('USB 调试连接离线，请等待板端 ADB 服务就绪')
-    candidates = [(port, select_transport(listing.stdout, port)) for port in sorted(ports)]
+    if not inspect_other_ports and relevant and all(row[1] == 'offline' for row in relevant):
+        raise AdbTransportUnavailable('登记端口的 USB 调试连接离线')
+    if allow_relocation and registered_port and not online_ports and not relevant:
+        raise AdbTransportUnavailable('控制机未发现可核对板号的在线 USB 调试连接。确认板端 adbd 正常运行后重试，换 USB 口时会自动查找。')
+    candidates = [(port, select_transport(listing.stdout, port))
+                  for port in sorted(ports, key=lambda p: (p != registered_port, p))]
     if usb_endpoints and not registered and any(row[1] == 'device' and not any(
             field.startswith('usb:') and USB_PORT.fullmatch(field[4:]) for field in row[2:]) for row in relevant):
         extra = usb_endpoints()
@@ -230,6 +251,8 @@ def find_transport(executable, serial, registered, *, usb_endpoints=None):
         candidates.extend((port, endpoint) for port, endpoint in extra if endpoint not in known)
     matches = []
     deadline = time.monotonic() + 8
+    if candidates:
+        stage('matching-adb-board')
     for port, endpoint in candidates:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -242,20 +265,27 @@ def find_transport(executable, serial, registered, *, usb_endpoints=None):
             continue
         facts = dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
         if not response.returncode and facts.get('serial') == serial and BOOT_ID.fullmatch(facts.get('boot_id', '')):
+            if port == registered_port:
+                stage('verified-adb-port', port)
+                return port, endpoint, facts
             matches.append((port, endpoint, facts))
     if len(matches) > 1:
         raise ConnectionError('多个 USB 调试连接报告同一板卡身份，请核对接线')
     if not matches:
-        raise ConnectionError('未找到与当前板卡匹配的在线 USB 调试连接，请检查数据线和板端 ADB 服务')
+        if relevant and all(row[1] == 'offline' for row in relevant):
+            message = '登记端口的 USB 调试连接离线' if registered else '控制机只发现离线的 USB 调试连接'
+            raise AdbTransportUnavailable(message)
+        raise AdbTransportUnavailable('未找到与当前板卡匹配的在线 USB 调试连接，请检查数据线和板端 ADB 服务')
+    stage('verified-moved-adb-port' if registered_port else 'verified-adb-port', matches[0][0])
     return matches[0]
 
 
 def resolve_connection(executable, serial, registered):
-    port, _, facts = find_transport(executable, serial, registered)
+    port, _, facts = find_transport(executable, serial, registered, allow_relocation=True)
     if facts.get('uid') != '0':
         raise ConnectionError('当前板卡的 USB 调试连接缺少 root 权限')
     if registered:
-        return dict(registered, cases=list(dict.fromkeys([*registered['cases'], 'rtc-wake'])))
+        return dict(registered, usb_port=port, cases=list(dict.fromkeys([*registered['cases'], 'rtc-wake'])))
     consoles = [name for name in facts.get('consoles', '').split() if UART.fullmatch(name)]
     if len(consoles) != 1:
         raise ConnectionError('无法唯一确认板端串口控制台，请在硬件配置中登记接线')
@@ -263,7 +293,7 @@ def resolve_connection(executable, serial, registered):
 
 
 def adb_binding(manager, device):
-    """Return a fresh co-located USB observation for a registered board."""
+    """Return the currently verified USB path for a board."""
     serial, generation = device.serial, device.connection_id
     if not serial or not device.present or manager.store.has_conflict(serial):
         raise TaskError('板卡尚未在线或身份有冲突', 409)
@@ -271,7 +301,7 @@ def adb_binding(manager, device):
     if not executable:
         raise TaskError('控制机缺少 adb', 503)
     try:
-        port, _, facts = find_transport(executable, serial, manager.hardware.board_tests.get(serial))
+        port, _, facts = find_transport(executable, serial, manager.hardware.board_tests.get(serial), allow_relocation=True)
     except ConnectionError as error:
         raise TaskError(str(error), 409) from error
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -686,19 +716,14 @@ def start(manager, device, payload, actor):
         return manager.tasks.store.get(previous)
     if not executable:
         raise TaskError('控制机缺少 adb', 409)
-    if registered:
-        row = registered
-        if case == 'reboot-aging' and case not in row['cases']:
-            raise TaskError('当前板卡尚未配置此用例', 409)
-    else:
-        if case == 'reboot-aging':
-            raise TaskError('软件重启老化用例需要配置预期的启动环境', 409)
-        try:
-            row = resolve_connection(executable, device.serial, None)
-        except ConnectionError as error:
-            raise TaskError(str(error), 409) from error
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise TaskError('USB 调试连接暂时不可用，请重试检测', 409) from error
+    if case == 'reboot-aging' and (not registered or case not in registered['cases']):
+        raise TaskError('软件重启老化用例需要配置预期的启动环境', 409)
+    try:
+        row = resolve_connection(executable, device.serial, registered)
+    except ConnectionError as error:
+        raise TaskError(str(error), 409) from error
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise TaskError('USB 调试连接暂时不可用，请重试检测', 409) from error
     custom = None
     if custom_case:
         with manager.store.lock:

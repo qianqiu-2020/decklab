@@ -83,14 +83,17 @@ class TaskActionTests(unittest.TestCase):
         failure = {'ok': False, 'error': 'review archive ownership',
                    'code': 'identity-confirmation-required', 'identity_confirmation': confirmation,
                    'raw': 'private probe dump'}
-        with mock.patch.object(self.device, 'run_probe', return_value=failure) as probe:
+        with mock.patch.object(self.device, 'run_probe', side_effect=lambda *, on_stage: (
+                on_stage('applying-probe-result') or failure)):
             result = self.start()
             self.wait_task(result.payload['task']['id'])
-        probe.assert_called_once_with()
         task = self.manager.tasks.store.get(result.payload['task']['id'])
         self.assertEqual(task['state'], 'failed')
         self.assertEqual(task['error'], failure['error'])
         self.assertEqual(task['result']['code'], 'identity-confirmation-required')
+        self.assertEqual(task['progress']['phase'], 'applying-probe-result')
+        self.assertEqual([stage['phase'] for stage in task['progress']['stages']],
+                         ['checking-probe-settings', 'applying-probe-result'])
         self.assertEqual(task['result']['identity_confirmation'], {
             key: value for key, value in confirmation.items() if key != 'password'})
         self.assertNotIn('must-not-persist', json.dumps(task))
@@ -145,6 +148,23 @@ class TaskActionTests(unittest.TestCase):
         self.assertEqual(task['state'], 'failed')
         self.assertIsNone(task['result'])
 
+    def test_ssh_network_failure_retains_selected_address_and_last_stage_without_credentials(self):
+        self.device.probe_info = {'ips': ['docker0 172.17.0.1/16', 'eth0 192.0.2.23/24']}
+        password = 'diagnostic-regression-password'
+        with mock.patch('decklab_core.device.check_password_login',
+                        return_value=(False, False, 'timeout ' + password)):
+            result = self.actions.start({'kind': 'ssh-connect', 'connection_id': self.device.connection_id,
+                                         'ssh_user': 'test', 'ssh_password': password}, self.device, 'web')
+            task_id = result.payload['task']['id']
+            self.wait_task(task_id)
+        task = self.manager.tasks.store.get(task_id)
+        self.assertEqual(task['state'], 'failed')
+        self.assertEqual([step['phase'] for step in task['progress']['stages']],
+                         ['checking-session-target', 'selecting-ssh-address', 'found-ssh-address',
+                          'reading-ssh-settings', 'authenticating-ssh-explicit'])
+        self.assertEqual(task['progress']['stages'][-1]['endpoint'], '192.0.2.23')
+        self.assertNotIn(password, json.dumps(task))
+
     def test_ssh_task_saves_verified_credentials_separately_from_task_history(self):
         self.device.probe_info = {'ips': ['eth0 192.0.2.1/24']}
         self.store.bind({'serial': 'SN1', 'serial_source': 'device-tree'},
@@ -183,7 +203,7 @@ class TaskActionTests(unittest.TestCase):
             result = self.start(association=association)
             self.wait_task(result.payload['task']['id'])
         self.assertEqual(result.status, 202)
-        probe.assert_called_once_with(association=association, actor='web')
+        probe.assert_called_once_with(association=association, actor='web', on_stage=mock.ANY)
         task = self.manager.tasks.store.get(result.payload['task']['id'])
         self.assertEqual(task['state'], 'completed')
         self.assertEqual(task['result']['serial'], 'SN1')
@@ -211,7 +231,7 @@ class TaskActionTests(unittest.TestCase):
     def test_task_cancel_wakes_real_transaction_wait_and_preserves_client_scope(self):
         ready = threading.Event()
         scopes = []
-        def probe():
+        def probe(*, on_stage):
             with self.device.transactions.begin('probe', 10) as lease:
                 scopes.append((lease.actor, lease.client_id))
                 ready.set()
@@ -231,7 +251,7 @@ class TaskActionTests(unittest.TestCase):
         self.assertIsNone(self.device.transactions.snapshot())
 
     def test_generation_change_between_leases_cannot_write_replacement_connection(self):
-        def probe():
+        def probe(*, on_stage):
             with self.device.transactions.begin('first', 1):
                 pass
             self.device.connection_id = 'replacement'
@@ -295,7 +315,7 @@ class TaskActionTests(unittest.TestCase):
         self.addCleanup(grants.close)
         _, grant = grants.issue('device', 'SN1')
         ready = threading.Event()
-        def probe():
+        def probe(*, on_stage):
             with self.device.transactions.begin('probe', 10) as lease:
                 ready.set()
                 with self.device.cv:
