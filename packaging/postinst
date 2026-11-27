@@ -10,6 +10,9 @@ case "$1" in
       echo 'DeckLab requires the decklab service group.' >&2
       exit 1
     fi
+    if [ -x /usr/libexec/decklab/titanx/edge ]; then
+      install -d -o decklab -g decklab -m 0700 /var/lib/decklab-workbench
+    fi
     adduser decklab dialout
     install -d -o decklab -g decklab -m 2770 /data/decklab-data
     if [ -z "${2:-}" ] || dpkg --compare-versions "$2" lt 1.3.2; then
@@ -104,7 +107,7 @@ case "$1" in
         fi
         service_action restart decklab.service
         if [ -e /lib/systemd/system/decklab-titanx.path ]; then
-          service_action start decklab-titanx.path
+          service_action restart decklab-titanx.path
         fi
       fi
       if $deferred; then exit 0; fi

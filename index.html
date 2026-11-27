@@ -357,6 +357,44 @@ PasswordAuthentication yes</code></pre>
   </div>
   <div class="ft-actions"><span id="shortcuts-status" role="status"></span><button id="shortcuts-reset" type="button">恢复默认快捷键</button></div>
 </dialog>
+<dialog id="titanx-setup" class="board-tests-dialog" aria-labelledby="titanx-title">
+  <header class="board-tests-head"><h2 id="titanx-title">TitanX 工位接入</h2><button type="button" id="titanx-close">关闭</button></header>
+  <div class="board-tests-body">
+    <form id="titanx-form" hidden>
+      <h3>目标实验室</h3>
+      <div class="settings-grid">
+        <label class="ft-field">TitanX 平台地址<input name="api_url" type="url" placeholder="https://titanx.example.test" required></label>
+        <label class="ft-field">平台访问令牌<input name="api_token" type="password" autocomplete="new-password" required></label>
+      </div>
+      <div class="board-tests-actions"><button type="button" id="titanx-labs">读取实验室</button>
+        <label class="ft-field">实验室<select name="lab_id" required><option value="">请先读取实验室</option></select></label>
+      </div>
+      <h3>工位连接</h3>
+      <div class="settings-grid">
+        <label class="ft-field">TitanX 节点 ID<input name="node_id" maxlength="80" required></label>
+        <label class="ft-field">MQTT 地址<input name="broker" placeholder="ssl://mqtt.example.test:8883" required></label>
+        <label class="ft-field">DeckLab 对外 HTTPS 地址<input name="web_origin" type="url" required></label>
+        <label class="ft-field">默认项目类型<input name="project" placeholder="如 K1" maxlength="80" required></label>
+      </div>
+      <details><summary>MQTT 账号与密码</summary><div class="settings-grid">
+        <label class="ft-field">MQTT 用户名<input name="username" autocomplete="off"></label>
+        <label class="ft-field">MQTT 密码<input name="password" type="password" autocomplete="new-password"></label>
+      </div></details>
+      <h3>登记板卡</h3>
+      <div class="board-tests-actions"><label><input type="checkbox" id="titanx-all" checked> 全选已确认板卡</label>
+        <label class="ft-field">起始 COM（服务器 100）<input name="first_com" type="number" min="1" max="65535" value="1" required></label>
+      </div>
+      <div id="titanx-boards"></div>
+      <p class="log-note">所有勾选的板卡登记到同一实验室。离线板保留槽位，待上线并核对身份后建档。</p>
+      <label><input name="accept_dispatch" type="checkbox"> 允许 TitanX 自动调度新登记的板卡</label>
+      <div class="board-tests-actions"><button type="submit" class="pri" id="titanx-submit">初始化并登记</button></div>
+    </form>
+    <section id="titanx-readback" hidden><p id="titanx-summary"></p><ul id="titanx-registered"></ul>
+      <button id="titanx-refresh" type="button">刷新登记状态</button>
+    </section>
+    <p role="status" id="titanx-message"></p>
+  </div>
+</dialog>
 <dialog id="board-tests-dialog" class="board-tests-dialog" aria-labelledby="board-tests-title">
   <header class="board-tests-head"><div><h2 id="board-tests-title">用例库</h2><small id="board-tests-board" data-i18n-ignore></small></div><button id="board-tests-close" type="button">关闭</button></header>
   <div class="board-tests-body">
@@ -365,6 +403,7 @@ PasswordAuthentication yes</code></pre>
       <button type="button" id="board-tests-team-tab" aria-pressed="false">TitanX 团队用例</button>
     </div>
     <section id="board-tests-team" hidden>
+      <button type="button" id="titanx-setup-open">TitanX 工位接入</button>
       <form id="board-tests-team-search" class="board-tests-actions">
         <label class="ft-field">用例组<select id="board-tests-team-group"><option value="">全部用例</option></select></label>
         <label class="ft-field">用例名称<input id="board-tests-team-name" type="search" maxlength="200"></label>
@@ -817,6 +856,7 @@ Join-Path $env:LOCALAPPDATA 'decklab-mcp\Scripts\decklab-mcp.exe'</code></pre>
 <script src="vendor/addon-fit.js"></script>
 <script src="/static/i18n.js"></script>
 <script src="/static/ui-common.js"></script>
+<script src="/static/titanx-setup.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/terminal-policy.js"></script>
 <script src="/static/serial-progress.js"></script>

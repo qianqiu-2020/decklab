@@ -54,11 +54,14 @@ def enroll(settings, slots, platform, journal):
     boards = matching[0].get('deviceBoards') or []
     reports = platform.request('/deviceBoard/unregistered', {'namespaceId': lab})
     complete = True
-    for key, serial in slots.items():
+    # Reconcile a pending POST before a newly online sibling can submit another.
+    pending_slot = (pending or {}).get('record', {}).get('decklabSlot')
+    for key, serial in sorted(slots.items(), key=lambda item: int(item[0]) != pending_slot):
         slot = int(key)
         com = settings.get('first_com', 1) + slot - 1
         code = '%s:%s' % (node, slot)
-        body = {'nodeId': node_id, 'code': code, 'name': code, 'project': project,
+        body = {'nodeId': node_id, 'code': code, 'name': code,
+                'project': settings.get('projects', {}).get(str(slot), project),
                 'decklabSlot': slot, 'decklabSerial': serial, 'remoteComserver': 100, 'remoteCom': com,
                 'noDispatch': not dispatch, 'autoRecoverDisabled': True}
         for other in registered:
@@ -78,6 +81,8 @@ def enroll(settings, slots, platform, journal):
             continue
         live = [r for r in reports if r.get('nodeId') == node and r.get('deviceId') == code]
         if not live:
+            if pending == {'site': settings['api_url'], 'path': '/deviceBoard/add', 'record': body}:
+                return False
             complete = False
             continue
         if len(live) != 1 or any(live[0].get(k) != body[k] for k in

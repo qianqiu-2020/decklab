@@ -2,7 +2,8 @@
 Description=Prepare TitanX station credentials
 After=decklab.service
 Requires=decklab.service
-ConditionPathExists=/etc/decklab/titanx.json
+ConditionPathExists=|/etc/decklab/titanx.json
+ConditionPathExists=|/var/lib/decklab-workbench/titanx.json
 
 [Service]
 Type=oneshot

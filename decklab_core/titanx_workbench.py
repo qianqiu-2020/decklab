@@ -12,7 +12,15 @@ from .agent_grants import AgentGrantStore
 CONFIG = Path('/etc/decklab/titanx.json')
 
 
-def read_config(path=CONFIG):
+GUI_CONFIG = Path('/var/lib/decklab-workbench/titanx.json')
+
+
+def config_path():
+    return CONFIG if CONFIG.exists() else GUI_CONFIG
+
+
+def read_config(path=None):
+    path = config_path() if path is None else path
     with path.open(encoding='utf-8') as stream:
         data = stream.read(65537)
     if len(data) > 65536:
@@ -20,7 +28,7 @@ def read_config(path=CONFIG):
     value = json.loads(data)
     if not isinstance(value, dict) or value.keys() - {
             'broker', 'node_id', 'username', 'password', 'slots', 'first_com', 'api_url', 'api_token',
-            'lab_id', 'project', 'web_origin', 'accept_dispatch'}:
+            'lab_id', 'project', 'projects', 'web_origin', 'accept_dispatch'}:
         raise ValueError('unknown TitanX configuration field')
     return value
 
@@ -65,7 +73,7 @@ def assignments(settings, saved, discover):
     return result
 
 
-def prepare(settings, state, origin, grants, discover):
+def connection_settings(settings):
     node = settings.get('node_id', '')
     broker = settings.get('broker', '')
     if not isinstance(node, str) or not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9._-]{0,79}', node):
@@ -82,6 +90,11 @@ def prepare(settings, state, origin, grants, discover):
             mqtt[key] = settings[key]
     if mqtt.get('password') and not mqtt.get('username'):
         raise ValueError('MQTT password requires a username')
+    return node, mqtt
+
+
+def prepare(settings, state, origin, grants, discover):
+    node, mqtt = connection_settings(settings)
     first = settings.get('first_com', 1)
     saved = json.loads(state.read_text()) if state.exists() else {}
     slots = assignments(settings, saved, discover)
@@ -145,7 +158,7 @@ def main():
                 content = prepare(read_config(), state, origin, grants, discover)
                 break
             except (BoardPending, ConnectionError, FileNotFoundError) as error:
-                if not CONFIG.exists():
+                if not config_path().exists():
                     raise
                 print('Waiting for DeckLab collector or board:', type(error).__name__, flush=True)
                 time.sleep(5)

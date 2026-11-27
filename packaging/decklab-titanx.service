@@ -3,7 +3,8 @@ Description=TitanX worker for DeckLab boards
 Wants=decklab-titanx-enroll.service
 Requires=decklab-titanx-prepare.service
 After=decklab-titanx-prepare.service
-ConditionPathExists=/etc/decklab/titanx.json
+ConditionPathExists=|/etc/decklab/titanx.json
+ConditionPathExists=|/var/lib/decklab-workbench/titanx.json
 
 [Service]
 DynamicUser=yes

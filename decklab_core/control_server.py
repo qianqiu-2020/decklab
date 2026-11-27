@@ -216,7 +216,7 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
     share_seconds = SHARE_SECONDS
     default_language = ''
     settings = None
-    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/diagnostics.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js',
+    allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/titanx-setup.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/diagnostics.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js',
                                 '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js', '/vendor/ace/ace.js',
                                 '/vendor/ace/mode-json.js', '/vendor/ace/mode-yaml.js',
@@ -434,6 +434,15 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
             if (activation_status(self.server).get('state') == 'applying'
                     and action != 'export'):
                 raise SettingsError('正在应用配置，请稍候', 409)
+            if action in ('titanx-status', 'titanx-labs', 'titanx-initialize'):
+                from . import titanx_setup
+                if self.collector_link or not titanx_setup.available():
+                    raise SettingsError('此入口需要在单机 DeckLab 上安装含 TitanX 组件的工位包', 409)
+                if action == 'titanx-labs':
+                    return self._json(200, {'labs': titanx_setup.labs(payload)})
+                if action == 'titanx-initialize':
+                    titanx_setup.initialize(payload.get('configuration'), self._collector_connection)
+                return self._json(200, titanx_setup.status(self._collector_connection, check_platform=action == 'titanx-status'))
             if action == 'export':
                 if type(payload.get('include_secrets', False)) is not bool:
                     raise SettingsError('include_secrets 必须为布尔值')
@@ -956,7 +965,7 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         if urlparse(self.path).path.startswith('/vendor/novnc/'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
-        if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
+        if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/titanx-setup.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
                                         '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/diagnostics.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()

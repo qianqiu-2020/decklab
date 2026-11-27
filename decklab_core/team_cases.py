@@ -33,9 +33,9 @@ class TeamCases:
         origin = os.environ.get('DECKLAB_TEST_PLATFORM_URL', '')
         path = os.environ.get('DECKLAB_TEST_PLATFORM_TOKEN_FILE', '')
         if not origin and not path:
-            from .titanx_workbench import CONFIG, read_config
+            from .titanx_workbench import read_config
             try:
-                station = read_config(CONFIG)
+                station = read_config()
             except FileNotFoundError:
                 return None
             except (ValueError, OSError) as error:

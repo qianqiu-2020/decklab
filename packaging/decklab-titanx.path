@@ -4,6 +4,7 @@ After=decklab.service
 
 [Path]
 PathChanged=/etc/decklab/titanx.json
+PathChanged=/var/lib/decklab-workbench/titanx.json
 Unit=decklab-titanx.service
 
 [Install]

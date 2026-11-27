@@ -373,6 +373,9 @@
       var section = el(part[2] ? 'details' : 'section', null, pane);
       section.className = 'settings-group';
       el(part[2] ? 'summary' : 'h4', part[0], section);
+      if (id === 'access' && part[1].includes('TEAM_CATALOGUE_URL') && !remoteBackendAvailable && global.DeckLabTitanX) {
+        button(section, 'TitanX 工位接入', global.DeckLabTitanX.open);
+      }
       if (part[0] === '组织镜像') el('p', '浏览地址用于列出镜像，下载地址用于获取文件。两个地址都使用 HTTPS，并以 / 结尾。', section);
       if (part[0] === '节点间连接') el('p', '仅在 Web 与板卡后端分开部署时填写。', section);
       var grid = el('div', null, section); grid.className = 'settings-grid';
