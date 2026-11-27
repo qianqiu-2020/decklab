@@ -31,6 +31,10 @@ def assemble(steps, artifact, base_profile=None):
         'components':[dict({key:step['result']['plan'].get('artifact',{}).get(key) for key in ('id','name','size','sha256')}, label=step['label'],ready=step['result']['plan'].get('ready') is not False) for step in steps],
         'pending_checks':sorted({value for step in steps for value in step['result']['plan'].get('pending_checks',[])}),
         'confirm_after_prepare':any(s['result']['plan'].get('confirm_after_prepare') for s in steps)}
+    os_plan = steps[-1]['result']['plan']
+    for field in ('target_storage', 'physical_storage'):
+        if field in os_plan:
+            plan[field] = os_plan[field]
     plan['layout_digest'] = hashlib.sha256(json.dumps([s['result']['plan'].get('layout_digest') for s in steps]).encode()).hexdigest()
     if steps[0]['result']['plan'].get('ec'):
         plan['ec'] = steps[0]['result']['plan']['ec']

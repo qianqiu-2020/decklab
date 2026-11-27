@@ -32,6 +32,7 @@ class BundleTests(unittest.TestCase):
     def test_combined_preview_retains_both_native_ranges_and_sources(self):
         with tempfile.TemporaryDirectory() as root:
             runner,binding,fw,os,steps=self.fixture(root)
+            steps[-1]['result']['plan'].update(target_storage='scsi:0', physical_storage='scsi:0')
             with mock.patch.object(runner,'plan',side_effect=[s['result'] for s in steps]) as native:
                 result=plan_bundle(runner,binding,os,fw,'full','required',lambda:None,target_storage='scsi:0')
             self.assertEqual([w['component'] for w in result['plan']['writes']],['Firmware','OS'])
@@ -39,6 +40,8 @@ class BundleTests(unittest.TestCase):
             self.assertEqual(native.call_args_list[0].kwargs.get('target_storage'),None)
             self.assertEqual(native.call_args_list[1].kwargs['target_storage'],'scsi:0')
             self.assertEqual(result['plan']['artifact']['id'],os['id'])
+            self.assertEqual(result['plan']['target_storage'], 'scsi:0')
+            self.assertEqual(result['plan']['physical_storage'], 'scsi:0')
 
     def test_executes_both_once_and_resets_only_after_last_component(self):
         with tempfile.TemporaryDirectory() as root:
