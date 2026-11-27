@@ -487,6 +487,7 @@
         if (current(gen)) render();
       } catch(error) { if(current(gen)) message(error.message); }
     }
+    $('titanx-setup-open').addEventListener('click', () => global.DeckLabTitanX.openBoard(selected));
     $('b-board-tests').addEventListener('click',()=>open());
     $('board-tests-retry-connection').addEventListener('click',()=>open());
     $('board-tests-close').addEventListener('click',()=>dialog.close());

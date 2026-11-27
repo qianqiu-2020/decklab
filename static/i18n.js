@@ -2,6 +2,8 @@
 (function (global) {
   'use strict';
   var dictionary = {
+    '当前板卡 · ':'Selected board · ', '尚未分配 TitanX 槽位和 COM':'No TitanX slot or COM assigned',
+    '本工位已配置板卡数 · ':'Boards configured on this station · ',
     '刷机记录':'Flash history', '控制机刷机记录':'Controller flash history', '正在读取刷机记录…':'Loading flash history…',
     '暂无刷机记录':'No flash history', '更多命令':'More events', '暂无执行事件':'No execution events',
     '整体写入':'Overall write progress', '平均写入速率':'Average write rate', '测速中…':'Measuring…', '按展开载荷字节计算':'Based on expanded payload bytes', '当前分区写入进度':'Current partition write progress',

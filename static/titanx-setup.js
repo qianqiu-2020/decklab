@@ -3,7 +3,7 @@
   const {byId: $, fetch} = global.DeckLabUI;
   const dialog = $('titanx-setup'), form = $('titanx-form'), fields = form.elements;
   const all = $('titanx-all'), labs = $('titanx-labs'), message = $('titanx-message');
-  let rows = [], generation = 0, labRequest = 0, saving = false;
+  let board = null, rows = [], generation = 0, labRequest = 0, saving = false;
 
   async function request(action, values) {
     const response = await fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -33,7 +33,16 @@
       $('titanx-summary').textContent = data.node_id + location + ' · 本机执行器' + (worker[data.worker_state] || '状态未知')
         + (data.platform_state ? ' · TitanX ' + data.platform_state : '');
       const list = $('titanx-registered'); list.replaceChildren();
-      for (const [slot, serial] of Object.entries(data.slots)) {
+      const slots = Object.entries(data.slots);
+      const visible = board ? slots.filter(([, serial]) => serial === board.serial) : slots;
+      const scope = $('titanx-scope');
+      if (board) {
+        scope.textContent = '当前板卡 · ' + (board.label || board.key || board.serial)
+          + (visible.length ? '' : ' · 尚未分配 TitanX 槽位和 COM');
+      } else {
+        scope.textContent = '本工位已配置板卡数 · ' + slots.length;
+      }
+      for (const [slot, serial] of visible) {
         const item = document.createElement('li');
         const state = !data.registered ? '待回查' : data.registered.includes(serial) ? '已登记' : '待登记';
         item.textContent = serial + ' · 槽位 ' + slot + ' · COM ' + (data.first_com + Number(slot) - 1) + ' · ' + state;
@@ -66,8 +75,9 @@
       if (dialog.open && gen === generation) display(data);
     } catch (error) { if (gen === generation) message.textContent = error.message; }
   }
-  function open() {
+  function open(selected) {
     if (dialog.open) return;
+    board = selected || null;
     form.reset(); rows = []; resetLabs(); form.hidden = true; $('titanx-readback').hidden = true;
     dialog.showModal(); load();
   }
@@ -112,10 +122,9 @@
     } catch (error) { if (gen === generation) message.textContent = error.message; }
     finally { saving = false; form.inert = false; }
   };
-  $('titanx-setup-open').onclick = open;
   $('titanx-refresh').onclick = load;
   $('titanx-close').onclick = () => { if (!saving) dialog.close(); };
   dialog.addEventListener('cancel', event => { if (saving) event.preventDefault(); });
   dialog.addEventListener('close', () => { ++generation; ++labRequest; form.reset(); });
-  global.DeckLabTitanX = {open};
+  global.DeckLabTitanX = {open: () => open(null), openBoard: open};
 })(window);

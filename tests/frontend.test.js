@@ -237,6 +237,39 @@ function chooseSSH(h, sid = 'ssh1') {
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
+test('TitanX shows only the selected board in the case library and every slot in settings', async () => {
+  const nodes = new Map();
+  function byId(id) {
+    if (!nodes.has(id)) nodes.set(id, new Element());
+    return nodes.get(id);
+  }
+  const dialog = byId('titanx-setup');
+  dialog.showModal = () => { dialog.open = true; };
+  const form = byId('titanx-form');
+  form.reset = () => {};
+  form.elements = Object.fromEntries(['lab_id','first_com','api_url','api_token'].map(k => [k, new Element()]));
+  form.elements.lab_id.replaceChildren = () => {};
+  const list = byId('titanx-registered');
+  list.replaceChildren = () => { list.textContent = ''; };
+  list.append = item => list.appendChild(item);
+  const data = {configured:true, first_com:4, slots:{1:'BOARD-A',3:'BOARD-C'}, registered:['BOARD-A','BOARD-C']};
+  const window = {DeckLabUI: {byId, fetch: async () => ({ok:true, json:async () => data})}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../static/titanx-setup.js'), 'utf8'),
+    {window, document:{createElement:tag => new Element(tag)}, Option:class {}});
+  async function view(serial) {
+    dialog.open = false;
+    dialog.emit('close');
+    if (serial) window.DeckLabTitanX.openBoard({serial});
+    else window.DeckLabTitanX.open();
+    await drain();
+    return list.children.map(row => row.textContent);
+  }
+  assert.deepEqual(await view('BOARD-C'), ['BOARD-C · 槽位 3 · COM 6 · 已登记']);
+  assert.deepEqual(await view('BOARD-B'), []);
+  assert.match(byId('titanx-scope').textContent, /BOARD-B.*尚未分配/);
+  assert.deepEqual(await view(), ['BOARD-A · 槽位 1 · COM 4 · 已登记', 'BOARD-C · 槽位 3 · COM 6 · 已登记']);
+});
+
 test('header shows the running Web version from the existing access response', async () => {
   const h=harness();h.take('/api/access').resolve({version:'1.13.7',board_recovery_authorized:true});await drain();
   assert.equal(h.get('decklab-version').textContent,'v1.13.7');
