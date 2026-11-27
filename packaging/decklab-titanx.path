@@ -1,0 +1,10 @@
+[Unit]
+Description=Start the configured DeckLab TitanX worker
+After=decklab.service
+
+[Path]
+PathChanged=/etc/decklab/titanx.json
+Unit=decklab-titanx.service
+
+[Install]
+WantedBy=decklab.service

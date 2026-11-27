@@ -85,7 +85,7 @@ def flash_notice_files(directory):
 
 
 def build(output, version, runtime=None, flash_executor=None, flash_notices=None, flash_loaders=None,
-          complete=False, components_manifest=None, local_fast=False):
+          complete=False, components_manifest=None, local_fast=False, titanx_tools=None):
     if runtime is None:
         architecture = {'x86_64': 'amd64', 'aarch64': 'arm64',
                         'riscv64': 'riscv64'}.get(platform.machine())
@@ -134,6 +134,28 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(text)
             destination.chmod(mode)
+        if titanx_tools:
+            bundle = Path(titanx_tools)
+            manifest = json.loads((bundle / 'manifest.json').read_text())
+            if not isinstance(manifest, dict) or set(manifest) != {'edge', 'case-cli'}:
+                raise ValueError('invalid TitanX component manifest')
+            for name, marker in [('edge', b'decklab-bundled-case-cli'), ('case-cli', b'CASE_CLI_BOARD_ENDPOINT')]:
+                binary = bundle / name
+                expected = manifest.get(name)
+                metadata = flash_executor_metadata(binary, architecture)
+                if expected != metadata['sha256'] or marker not in binary.read_bytes():
+                    raise ValueError('incompatible TitanX component or digest mismatch: ' + name)
+                target = 'usr/libexec/decklab/titanx/' + name
+                put(binary, target, 0o755)
+                if hashlib.sha256((stage / target).read_bytes()).hexdigest() != expected:
+                    raise ValueError('TitanX component changed while packaging')
+            for unit in ('decklab-titanx.service', 'decklab-titanx-prepare.service',
+                         'decklab-titanx-enroll.service', 'decklab-titanx.path'):
+                put('packaging/' + unit, 'lib/systemd/system/' + unit)
+            wants = stage / 'lib/systemd/system/decklab.service.wants'
+            wants.mkdir(exist_ok=True)
+            (wants / 'decklab-titanx.service').symlink_to('../decklab-titanx.service')
+            write('usr/share/doc/decklab/titanx-components.json', json.dumps(manifest, indent=2) + '\n')
         if lz4 is not None:
             put(lz4 / 'lz4', 'usr/lib/decklab/ramboot-tools/lz4', 0o755)
             (stage / 'usr/lib/decklab/ramboot-tools/lz4cat').symlink_to('lz4')
@@ -179,7 +201,7 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
                 write('usr/share/decklab/skills/decklab-board/' + str(path.relative_to(ROOT / 'skills/decklab-board')), text)
         publish_docs(stage / 'usr/share/doc/decklab', 'linux')
         write('usr/lib/decklab/installation.json', json.dumps({
-            'profile': 'complete' if complete else 'core', 'version': version,
+            'profile': 'complete' if complete else 'core', 'version': version, 'titanx_worker': bool(titanx_tools),
             'flash_executor': '/usr/libexec/decklab/decklab-flash' if flash_executor else '',
             'ram_loaders': '/usr/lib/decklab/flash-loaders/manifest.json' if flash_loaders else ''}, indent=2) + '\n')
         if flash_loaders is not None:
@@ -216,6 +238,8 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             flash_dependency = ', libusb-1.0-0, udev, e2fsprogs, device-tree-compiler, initramfs-tools-core, zstd'
             if lz4 is None:
                 flash_dependency += ', lz4'
+        if titanx_tools:
+            flash_dependency += ', adb'
         desktop_dependency = ', libstdc++6, libgcc-s1' if desktop_runtime.is_dir() else ''
         write('DEBIAN/control', 'Package: decklab\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nConflicts: seriald\nReplaces: seriald\nMaintainer: DeckLab contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), python3-cryptography, nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers, iproute2%s%s\nRecommends: adb\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
         compression = ['-Zgzip', '-z1'] if local_fast else []
@@ -231,6 +255,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'dist',
                         help='package output directory (default: dist/)')
+    parser.add_argument('--titanx-tools', type=Path,
+                        help='internal bundle containing edge, case-cli and their manifest.json SHA-256 values')
     parser.add_argument('--local-fast', action='store_true', help='use fast gzip compression for local installations')
     parser.add_argument('--version', default=__version__)
     parser.add_argument('--runtime', type=Path, help='prepared architecture-specific MCP runtime')
@@ -246,4 +272,4 @@ if __name__ == '__main__':
         parser.error('--core-only cannot be combined with flashing components')
     print(build(args.output, args.version, runtime=args.runtime, flash_executor=args.flash_executor,
                 flash_notices=args.flash_notices, flash_loaders=args.flash_loaders,
-                complete=not args.core_only, components_manifest=args.components_manifest, local_fast=args.local_fast))
+                complete=not args.core_only, components_manifest=args.components_manifest, local_fast=args.local_fast, titanx_tools=args.titanx_tools))

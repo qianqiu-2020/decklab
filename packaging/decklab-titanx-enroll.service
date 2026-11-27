@@ -1,0 +1,17 @@
+[Unit]
+Description=Register configured DeckLab boards in TitanX
+After=decklab-titanx.service
+PartOf=decklab-titanx.service
+ConditionPathExists=/etc/decklab/titanx.json
+
+[Service]
+Type=oneshot
+User=decklab
+Group=decklab
+EnvironmentFile=/etc/decklab/decklab.env
+Environment=PYTHONPATH=/usr/lib/decklab
+ExecStart=/usr/bin/python3 -m decklab_core.titanx_enroll
+TimeoutStartSec=infinity
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=full

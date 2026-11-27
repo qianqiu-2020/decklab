@@ -33,7 +33,15 @@ class TeamCases:
         origin = os.environ.get('DECKLAB_TEST_PLATFORM_URL', '')
         path = os.environ.get('DECKLAB_TEST_PLATFORM_TOKEN_FILE', '')
         if not origin and not path:
-            return None
+            from .titanx_workbench import CONFIG, read_config
+            try:
+                station = read_config(CONFIG)
+            except FileNotFoundError:
+                return None
+            except (ValueError, OSError) as error:
+                raise TaskError('无法读取 TitanX 工位配置', 503) from error
+            origin, token = station.get('api_url'), station.get('api_token')
+            return cls(origin, token) if origin or token else None
         try:
             with Path(path).open(encoding='ascii') as source:
                 token = source.read(4097)

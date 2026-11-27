@@ -1,0 +1,21 @@
+[Unit]
+Description=TitanX worker for DeckLab boards
+Wants=decklab-titanx-enroll.service
+Requires=decklab-titanx-prepare.service
+After=decklab-titanx-prepare.service
+ConditionPathExists=/etc/decklab/titanx.json
+
+[Service]
+DynamicUser=yes
+User=decklab-titanx
+StateDirectory=decklab-titanx
+WorkingDirectory=/var/lib/decklab-titanx
+LoadCredential=edge.yaml:/run/decklab-titanx-config/edge.yaml
+ExecStart=/usr/libexec/decklab/titanx/edge ${CREDENTIALS_DIRECTORY}/edge.yaml
+Restart=on-failure
+RestartSec=5
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+UMask=0077

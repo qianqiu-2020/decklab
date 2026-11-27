@@ -99,7 +99,13 @@ case "$1" in
           service_action start decklab-collector.service
           $deferred || echo "decklab: collector started (was not running)"
         fi
+        if [ -e /lib/systemd/system/decklab-titanx.path ]; then
+          deb-systemd-helper enable decklab-titanx.path >/dev/null
+        fi
         service_action restart decklab.service
+        if [ -e /lib/systemd/system/decklab-titanx.path ]; then
+          service_action start decklab-titanx.path
+        fi
       fi
       if $deferred; then exit 0; fi
       rm -f "$restart_marker"
