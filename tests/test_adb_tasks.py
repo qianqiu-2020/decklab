@@ -67,7 +67,7 @@ else:
     raise SystemExit(subprocess.run(['/bin/sh', '-c', args[4]], env=env).returncode)
 """)
         executable.chmod(0o700)
-        for override in (patch('decklab_core.adb_tasks.adb_executable', return_value=str(executable)),
+        for override in (patch('decklab_core.platform_tools.adb_executable', return_value=str(executable)),
                          patch('decklab_core.adb_tasks.READ_IDENTITY', 'serial=$TEST_BOARD\n')):
             override.start()
             self.addCleanup(override.stop)
@@ -144,7 +144,7 @@ else:
         facts = {'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(), 'host_keys': 'fixture'}
         try:
             with owner.scope('web', proof=proof), patch.dict(os.environ, TEST_BOARD=serial), \
-                    patch('decklab_core.adb_tasks.adb_executable', return_value=None), \
+                    patch('decklab_core.platform_tools.adb_executable', return_value=None), \
                     patch('decklab_core.adb_tasks.serial_ssh_identity', return_value=facts) as identity, \
                     patch('decklab_core.adb_tasks.command_channel', return_value=nullcontext(['/bin/sh', '-c'])) as channel:
                 task = self.finish(kind='ssh-command', request_id='ssh-without-adb')

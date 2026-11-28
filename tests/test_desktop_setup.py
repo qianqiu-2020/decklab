@@ -202,7 +202,7 @@ class SetupTests(unittest.TestCase):
             fresh = secrets.token_hex(12)
             reply = SimpleNamespace(returncode=0, stdout=json.dumps(dict(
                 stage='initial', port=3390, pin='b'*64, username='rdp', password=fresh)))
-            with mock.patch('decklab_core.desktop_setup.adb_executable', return_value='adb'), mock.patch(
+            with mock.patch('decklab_core.platform_tools.adb_executable', return_value='adb'), mock.patch(
                     'decklab_core.board_cases.find_transport', return_value=('usb', '5', {'boot_id':'boot'})), mock.patch(
                     'decklab_core.board_cases.adb_command', return_value=reply):
                 self.assertTrue(desktop.setup.public(device)['quick_connect'])
@@ -225,7 +225,7 @@ class SetupTests(unittest.TestCase):
             status, result = self.request(f, '/api/desktop/configure', dict(body, **self.payload(settings,
                 provider='rdp', port=3390, username='rdp', certificate_policy='accept')))
             self.assertEqual(status, 200, result)
-            with mock.patch('decklab_core.desktop_setup.adb_executable', return_value='adb'), mock.patch(
+            with mock.patch('decklab_core.platform_tools.adb_executable', return_value='adb'), mock.patch(
                     'decklab_core.board_cases.find_transport', side_effect=ConnectionError('USB link missing')):
                 status, result = self.request(f, '/api/desktop/quick-open', body)
                 self.assertEqual(status, 200, result)

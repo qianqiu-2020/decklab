@@ -41,7 +41,7 @@ class AdbDiagnosisTests(unittest.TestCase):
         device.console.run_idle_command.return_value = True, 'adbd=running\ngadget=configured\nusb_event=closed\n'
         payload = {'serial': device.serial, 'connection_id': device.connection_id}
         stage = Mock()
-        with patch('decklab_core.adb_session.adb_executable', return_value='/test/adb'), \
+        with patch('decklab_core.platform_tools.adb_executable', return_value='/test/adb'), \
                 patch('decklab_core.adb_session.find_transport',
                       side_effect=AdbTransportUnavailable('当前板卡没有在线连接')):
             with self.assertRaisesRegex(ConnectionError, '没有在线连接。串口确认 adbd 正在运行.*连接已关闭'):

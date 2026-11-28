@@ -8,7 +8,7 @@ import subprocess
 import threading
 import time
 
-from .platform_tools import adb_executable
+from . import platform_tools
 from .api_contract import ADB_STDIN_MAX_BYTES, RESERVED_COMMAND_MAX_SECONDS
 from .board_cases import READ_IDENTITY, find_transport
 from .board_maintenance import maintenance_for
@@ -308,7 +308,7 @@ def start(manager, device, payload, actor):
     client = payload.get('client_id', '') if actor == 'web' else ''
     if not isinstance(client, str) or not re.fullmatch(r'[A-Za-z0-9_-]{0,80}', client):
         raise TaskError('invalid task client')
-    executable = adb_executable()
+    executable = platform_tools.adb_executable()
     registered = manager.hardware.board_tests.get(device.serial)
     port = None
     try:
