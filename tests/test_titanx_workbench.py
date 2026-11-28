@@ -23,6 +23,17 @@ class TitanXWorkbenchTest(unittest.TestCase):
     def generate(self):
         return prepare(self.config, self.state, 'http://127.0.0.1:8898', self.grants, self.discover)
 
+    def test_pause_last_slot_and_restore_same_com(self):
+        self.config.update(slots={'7':'BOARD-A'}, first_com=2)
+        self.generate()
+        token = json.loads(self.state.read_text())['tokens']['BOARD-A']
+        self.config['paused_slots'] = ['7']
+        self.assertEqual(self.generate(), '')
+        self.assertIsNone(self.grants.lookup(token))
+        self.config['paused_slots'] = []
+        self.assertIn('7: 8', self.generate())
+        self.assertEqual(json.loads(self.state.read_text())['slots'], {'7':'BOARD-A'})
+
     def test_first_start_restart_and_explicit_board_selection(self):
         self.config.update(api_url='https://example.test', api_token='catalogue-secret')
         self.discover.return_value.append({'serial': 'OFFLINE', 'alive': False})
@@ -30,6 +41,8 @@ class TitanXWorkbenchTest(unittest.TestCase):
         saved = json.loads(self.state.read_text())
         token = saved['tokens']['BOARD-A']
         self.assertEqual(self.grants.lookup(token)['scope'], 'device')
+        self.assertIn('backend: decklab', config.splitlines())
+        self.assertNotIn('manage_boards', config)
         self.assertNotIn('catalogue-secret', config)
         self.assertEqual(self.state.stat().st_mode & 0o777, 0o600)
         self.discover.reset_mock()

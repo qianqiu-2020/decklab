@@ -572,6 +572,35 @@ class SavedSshCredentialTests(unittest.TestCase):
                 self.assertIsNone(self.store.get_ssh_credentials('SN2'))
                 self.assertEqual(device.ssh_pending, 0)
 
+    def test_manual_login_reidentifies_a_restored_archive_before_saving(self):
+        self.remember()
+        device = self.device
+        device.connection_id = 'after-collector-restart'
+        def identify():
+            info = dict(device.probe_info, ips=['eth0 192.0.2.58/24'])
+            self.store.bind(info, device.by_path, device.dev, connection_id=device.connection_id)
+            device.probe_info = info
+            return dict(info, ok=True)
+        with mock.patch.object(device, 'run_probe', side_effect=identify) as probe:
+            session, error = device.ssh_connect(ssh_user='new-user', ssh_password='new-password')
+            self.assertEqual(error, '')
+            self.assertTrue(session.ssh_credentials_saved)
+            self.assertEqual(self.store.get_ssh_credentials('SN1')['revision'], 2)
+            self.check.assert_called_once_with('192.0.2.58', 'new-user', 'new-password')
+            device.ssh_connect(ssh_user='new-user', ssh_password='new-password')
+            probe.assert_called_once()
+
+    def test_unconfirmed_restored_connection_does_not_authenticate_to_archived_address(self):
+        self.remember()
+        self.device.connection_id = 'unverified-generation'
+        for report in ({'ok': True}, {'ok': True, 'serial': 'OTHER'}, {'ok': False, 'error': 'busy'}):
+            with self.subTest(report=report), mock.patch.object(self.device, 'run_probe', return_value=report):
+                session, error = self.device.ssh_connect(ssh_user='new-user', ssh_password='new-password')
+                self.assertIsNone(session)
+                self.assertTrue(error)
+        self.check.assert_not_called()
+        self.assertEqual(self.store.get_ssh_credentials('SN1')['revision'], 1)
+
     def test_slow_manual_connection_cannot_replace_newer_saved_configuration(self):
         self.remember()
         session = FakeSession('slower')

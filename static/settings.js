@@ -35,19 +35,43 @@
     BACKEND_BIND: '后端监听地址', BACKEND_PORT: '后端监听端口', BACKEND_CERT: '后端 TLS 证书文件', BACKEND_KEY: '后端 TLS 私钥文件',
     FLASH_USB2_PORTS: 'K3 使用 USB 2.0 的刷机端口（填写 USB 路径，多个用逗号分隔）',
     FLASH_LOADERS: '预备刷机环境清单',
-    UI_LANGUAGE: '默认界面语言', SCROLLBACK: '实时输出缓存（字节）', SSH_LIMIT: '每设备终端会话上限', SSH_IDLE: '终端会话空闲超时（秒）', SHARE_SECONDS: '网页分享有效期（秒）',
+    UI_LANGUAGE: '默认界面语言', SCROLLBACK: '实时输出缓存', SSH_LIMIT: '每设备终端会话上限', SSH_IDLE: '终端会话空闲超时（秒）', SHARE_SECONDS: '网页分享有效期（秒）',
     PORT: '监听端口', HTTPS_PORT: '内置 HTTPS 端口', BIND: '监听地址', AUTH_TOKEN: '主访问密码', TRUST_LOOPBACK: '信任本机访问（Windows）',
     MCP_ENABLED: '启用服务端 MCP', MCP_PYTHON: 'MCP Python（留空使用内置运行时）', MCP_ALLOWED_HOSTS: 'MCP 代理域名（逗号分隔）',
     BAUD: '波特率', DATA_BITS: '数据位', PARITY: '校验位', STOP_BITS: '停止位', FLOW_CONTROL: '流控', NEWLINE: '换行方式',
     PROBE: '默认探测模式', PROBE_COMMAND: '自定义探测命令', AUTO_CONFIGURE_SSH: '允许显式配置 SSH',
     SSH_USER: 'SSH 用户', SSH_PASSWORD: 'SSH 密码', CONSOLE_USER: '串口用户', CONSOLE_PASSWORD: '串口密码',
     LOG_RETENTION_DAYS: '日志保留天数（0 为不清理）', DISK_MIN_FREE_MB: '磁盘最低剩余 MB', DISK_MIN_FREE_PERCENT: '磁盘最低剩余百分比',
-    TRANSFER_MAX_FILES: '缓存文件数上限', TRANSFER_MAX_FILE_BYTES: '单文件上限（字节）', TRANSFER_MAX_TOTAL_BYTES: '文件缓存总额度（字节）',
-    TRANSFER_MIN_FREE_BYTES: '暂存保留空闲（字节）', TRANSFER_IDLE_SECONDS: '未完成上传超时（秒）', TRANSFER_RETENTION_SECONDS: '暂存保留时间（秒）',
+    TRANSFER_MAX_FILES: '缓存文件数上限', TRANSFER_MAX_FILE_BYTES: '单文件上限', TRANSFER_MAX_TOTAL_BYTES: '文件缓存总额度',
+    TRANSFER_MIN_FREE_BYTES: '暂存保留空闲', TRANSFER_IDLE_SECONDS: '未完成上传超时（秒）', TRANSFER_RETENTION_SECONDS: '暂存保留时间（秒）',
     BASE: '运行数据目录', STATIC: '页面资源目录', SOCKET: '采集器通信路径（Linux）', HANDOFF: '重启接续文件',
     BY_PATH: '串口发现目录（Linux）', RESCUE_BIN: 'USB 恢复工具', AGENT_TOKENS_FILE: 'Agent 令牌文件',
     PROFILES: '板卡配置文件', HARDWARE: '硬件动作文件', FLASH: '刷机配置文件', FLASH_EXECUTOR: '自动刷机执行器'
   };
+  var sizeFields = new Set(['SCROLLBACK', 'TRANSFER_MAX_FILE_BYTES', 'TRANSFER_MAX_TOTAL_BYTES', 'TRANSFER_MIN_FREE_BYTES']);
+  var sizeUnits = {B: 1n, KiB: 1024n, MiB: 1024n ** 2n, GiB: 1024n ** 3n, TiB: 1024n ** 4n,
+    KB: 1000n, MB: 1000n ** 2n, GB: 1000n ** 3n, TB: 1000n ** 4n};
+  function displaySize(raw) {
+    if (!/^\d+$/.test(raw)) return raw;
+    var bytes = BigInt(raw);
+    for (var unit of ['TiB', 'TB', 'GiB', 'GB', 'MiB', 'MB', 'KiB', 'KB']) {
+      var factor = sizeUnits[unit];
+      if (bytes < factor || bytes * 100n % factor !== 0n) continue;
+      var fraction = String(bytes % factor * 100n / factor).padStart(2, '0').replace(/0+$/, '');
+      return String(bytes / factor) + (fraction ? '.' + fraction : '') + ' ' + unit;
+    }
+    return String(bytes) + ' B';
+  }
+  function parseSize(text) {
+    var match = /^(\d+)(?:\.(\d+))?\s*([a-z]+)?$/i.exec(text.trim());
+    if (!match || text.length > 100) return null;
+    var suffix = (match[3] || 'B').toLowerCase();
+    var unit = Object.keys(sizeUnits).find(function (name) { return name.toLowerCase() === suffix; });
+    if (!unit) return null;
+    var fraction = match[2] || '', scale = 10n ** BigInt(fraction.length);
+    var scaled = BigInt(match[1] + fraction) * sizeUnits[unit];
+    return scaled % scale === 0n ? String(scaled / scale) : null;
+  }
   var docs = {profiles: '板卡配置与分配', hardware: '硬件动作', flash: '刷机绑定', desktop: '图形接入', agent_tokens: '固定 Agent 令牌'};
   var labelsByChoice = {
     '0': '关闭', '1': '开启', 'true': '开启', 'false': '关闭', auto: '自动',
@@ -105,6 +129,10 @@
   }
   function fieldValue(field) {
     var input = inputs[field.name];
+    if (sizeFields.has(field.name)) {
+      if (input.value === input.defaultValue) return input.dataset.bytes;
+      return parseSize(input.value);
+    }
     if (field.secret && !input.value && !input.dataset.clear
         && (input.dataset.masked || redacted(snapshot.configuration.environment[field.name]))) return {$redacted: true};
     return input.value;
@@ -128,7 +156,13 @@
   }
   function configuration() {
     var result = {version: 1, environment: {}, documents: {}};
-    changedFields().forEach(function (field) { result.environment[field.name] = fieldValue(field); });
+    changedFields().forEach(function (field) {
+      var value = fieldValue(field);
+      if (sizeFields.has(field.name) && value === null) {
+        throw new Error(labels[field.name] + ' · 请输入可换算为整数字节的容量，例如 1.5 GiB。');
+      }
+      result.environment[field.name] = value;
+    });
     changedDocuments().forEach(function (key) {
       try { result.documents[key] = editors[key].value.trim() ? JSON.parse(editors[key].value) : {}; }
       catch (_) { throw new Error('JSON 格式错误：' + docs[key]); }
@@ -168,7 +202,11 @@
   function fill(data) {
     snapshot.fields.forEach(function (field) {
       var input = inputs[field.name], value = data.environment[field.name];
-      input.value = redacted(value) ? '' : value;
+      if (sizeFields.has(field.name)) {
+        input.dataset.bytes = value;
+        input.defaultValue = displaySize(value);
+        input.value = input.defaultValue;
+      } else input.value = redacted(value) ? '' : value;
       if (field.secret) input.placeholder = redacted(value) ? '已设置 · 留空保留' : '';
       if (redacted(value)) input.dataset.masked = '1'; else delete input.dataset.masked;
       delete input.dataset.clear;
@@ -375,6 +413,9 @@
       el(part[2] ? 'summary' : 'h4', part[0], section);
       if (id === 'access' && part[1].includes('TEAM_CATALOGUE_URL') && !remoteBackendAvailable && global.DeckLabTitanX) {
         button(section, 'TitanX 工位接入', global.DeckLabTitanX.open);
+      }
+      if (part[1].some(function (name) { return sizeFields.has(name) && available.has(name); })) {
+        el('p', '容量可直接填写为 512 MiB 或 1.5 GiB。', section);
       }
       if (part[0] === '组织镜像') el('p', '浏览地址用于列出镜像，下载地址用于获取文件。两个地址都使用 HTTPS，并以 / 结尾。', section);
       if (part[0] === '节点间连接') el('p', '仅在 Web 与板卡后端分开部署时填写。', section);

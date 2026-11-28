@@ -220,8 +220,12 @@ class FlashActions:
                     'target_id', 'target_generation', 'actor', 'client_id', 'serial'}):
                 raise TaskError('invalid USB capability detection request')
             self._device(None, payload, actor)
+            client = payload.get('client_id', '') if actor == 'web' else ''
+            if not isinstance(client, str) or client and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', client):
+                raise TaskError('invalid flash client')
             discovery = _discovery(self.manager)
-            target = discovery.probe(payload.get('target_id'), payload.get('target_generation'))
+            target = discovery.probe(payload.get('target_id'), payload.get('target_generation'),
+                actor=actor, client_id=client, expected_serial=payload.get('serial'))
             self._device(None, dict(payload, target_generation=target['target_generation']), actor)
             capabilities = self.capabilities(None, actor, target['target_id'], target['target_generation'])
             if capabilities.status != 200:
@@ -319,7 +323,7 @@ class FlashActions:
         binding = book.binding(device.serial, actor)
         return binding, executor
 
-    def capabilities(self, device, actor='web', target_id=None, target_generation=None, serial=None):
+    def capabilities(self, device, actor='web', target_id=None, target_generation=None, serial=None, *, resolve_target=False):
         try:
             target = None
             if target_id is not None:
@@ -379,6 +383,8 @@ class FlashActions:
                     raise TaskError('flashing requires a registered board', 404)
                 book, _ = _services(self.manager)
                 result = dict(book.available(device.serial, actor))
+                if resolve_target:
+                    result['automatic_target'] = _discovery(self.manager).current_for_board(device.serial)
             result.setdefault('board_serial', device.serial)
             result['reset_after_supported'] = bool(getattr(_services(self.manager)[1], 'supports_reset_after', False))
             result['skip_verification_supported'] = bool(getattr(_services(self.manager)[1], 'supports_skip_verification', False))
@@ -650,7 +656,12 @@ class FlashActions:
             maintenance = maintenance_for(self.manager)
             if payload.get('request_id') is not None:
                 if actor != 'web':
-                    raise TaskError('asynchronous flash preview requires a Web operator', 403)
+                    from .board_ownership import ownership_for
+                    ownership = ownership_for(self.manager)
+                    owner = ownership.current(device.serial) if device.serial else None
+                    if not owner or owner['state'] != 'active':
+                        raise TaskError('后台刷机预览需要当前板卡执行占用', 423)
+                    ownership.check(device.serial, actor, client)
                 from .flash_store import validate_request
                 original = {key: value for key, value in payload.items() if key != 'request_id'}
                 digest = _digest({'kind': 'flash-preview', 'input': original, 'serial': device.serial})
@@ -754,7 +765,7 @@ class FlashActions:
             if pins:
                 pins.close()
 
-    def backup(self, payload, device, actor='web', *, identity_only=False):
+    def backup(self, payload, device, actor='web', *, identity_only=False, expected_serial=''):
         """Start one durable read/selection/write task, initially without images."""
         try:
             if not isinstance(payload, dict) or set(payload) - {
@@ -780,6 +791,8 @@ class FlashActions:
                 identity['inventory_only'] = True
             if identity_only:
                 identity['identity_only'] = True
+            if expected_serial:
+                identity['expected_serial'] = expected_serial
             input_digest = _digest(dict(identity, operation='nor-workspace'))
             with self.manager._flash_plans_lock:
                 previous = self.store.find_request(actor, payload.get('request_id'), input_digest)
@@ -787,6 +800,12 @@ class FlashActions:
                     return response(202, {'ok': True, 'task': self.manager.tasks.store.get(previous)})
                 device = self._device(device, payload, actor)
                 binding, executor = self._target(device, actor, payload)
+                if expected_serial:
+                    from .board_ownership import ownership_for
+                    ownership_for(self.manager).check(expected_serial, actor, payload.get('client_id', ''))
+                    if not (identity_only and device.serial in ('', expected_serial)
+                            and binding.profile_data.get('bootrom_identity')):
+                        raise TaskError('目标已变化，无法核实 BootROM 板载序列号', 409)
                 if read_system and not getattr(executor, 'supports_storage_metadata', False):
                     raise TaskError('system storage metadata requires an updated executor', 409)
                 family = binding.profile_data.get('chip_family')
@@ -806,6 +825,7 @@ class FlashActions:
                 record = self.store.put_plan({
                     'operation': 'nor-workspace', 'actor': actor, 'serial': device.serial,
                     'read_system': read_system, 'inventory_only': inventory_only, 'identity_only': identity_only,
+                    'expected_serial': expected_serial,
                     'target_id': binding.target_id, 'target_generation': binding.target_generation,
                     'binding_revision': binding.binding_revision, 'binding_digest': _binding_digest(binding),
                     'intent': {'artifact_id': None, 'mode': 'partitions', 'verify': 'required',
@@ -816,6 +836,9 @@ class FlashActions:
                     'payload_candidates': [], 'executor_candidates': [], 'inspection': None,
                     'workspace': None, 'source_workspaces': [], 'created': time.time()})
                 operation = FlashOperation(self, binding, executor, record, actor)
+                resources = _resources(binding)
+                if expected_serial:
+                    resources.append('board:' + expected_serial)
                 task = self.manager.tasks.start_board('flash', actor, client, device.serial, operation.run,
                     request_id=payload.get('request_id'), input_digest=input_digest,
                     details={'operation': 'usb-identity' if identity_only else 'storage-inventory' if inventory_only else 'nor-workspace',
@@ -825,7 +848,7 @@ class FlashActions:
                         'target_id': binding.target_id, 'target_generation': binding.target_generation,
                         'attempt_id': operation.attempt_id, 'executor': binding.endpoint,
                         'write_result': 'not-started', 'verify_result': 'not-started',
-                        'boot_result': 'not-requested'}, resources=_resources(binding),
+                        'boot_result': 'not-requested'}, resources=resources,
                     maintenance=maintenance_for(self.manager), target_id=binding.target_id,
                     target_generation=binding.target_generation)
             return response(202, {'ok': True, 'task': task})
@@ -928,7 +951,7 @@ class FlashActions:
                     return result
                 task = self.manager.tasks.start_board('flash', actor, client, device.serial, run,
                     request_id=payload.get('request_id'), input_digest=input_digest,
-                    details={'operation': 'stream', 'source_url': url, 'system_storage': storage,
+                    details={'operation': 'stream', 'source_url': url, 'source_sha256': checksum, 'system_storage': storage,
                         'target_id': binding.target_id, 'target_generation': binding.target_generation,
                         'executor': binding.endpoint, 'write_result': 'not-started',
                         'verify_result': 'not-started', 'boot_result': 'not-requested'},
@@ -1565,7 +1588,7 @@ class FlashOperation:
             from .board_ownership import ownership_for
             ownership = ownership_for(self.manager)
             if ownership is not None:
-                ownership.check(self.resolved_serial or record.get('serial', ''), self.actor)
+                ownership.check(self.resolved_serial or record.get('serial') or record.get('expected_serial', ''), self.actor)
             if record.get('target_id'):
                 if self.preparing:
                     current = self.initial_binding
@@ -1637,15 +1660,19 @@ class FlashOperation:
                     if not isinstance(prepared, dict):
                         raise TaskError('automatic loader preparation returned an invalid receipt', 502)
                     final_device = _selector(prepared.get('final_device'))
-                    if record['serial'] and (prepared.get('final_identity') or {}).get('serialno') != record['serial']:
+                    identity = prepared.get('final_identity') or {}
+                    expected_serial = record.get('expected_serial')
+                    if expected_serial and (identity.get('serialno') != expected_serial
+                                            or identity.get('eeprom-serial') != expected_serial):
+                        raise TaskError('下载设备的 EEPROM 序列号与工位原板不一致', 409)
+                    if record['serial'] and identity.get('serialno') != record['serial']:
                         raise TaskError('prepared loader did not confirm the original board identity', 409)
                     previous_device = dict(self.binding.device)
                     self.final_generation = _discovery(self.manager).accept_prepared_target(
                         self.binding.target_id, self.binding.target_generation, final_device,
-                        context.id, self.attempt_id, record['serial'],
-                        (prepared.get('final_identity') or {}).get('eeprom-serial') or '')
+                        context.id, self.attempt_id, record['serial'] or expected_serial or '',
+                        identity.get('eeprom-serial') or '')
                     self.binding = replace(self.binding, device=final_device)
-                    identity = prepared.get('final_identity') or {}
                     self.resolved_serial = _discovery(self.manager).accept_eeprom_identity(
                         self.binding.target_id, self.final_generation, identity, context.id, self.attempt_id) or record['serial']
                     if identity.get('eeprom-serial') and identity.get('eeprom-serial') == identity.get('serialno'):
@@ -1671,7 +1698,8 @@ class FlashOperation:
                 if not self.resolved_serial:
                     raise TaskError('未从板卡读出已核验的序列号，请检查板载 EEPROM', 409)
                 context.mark_outcome('observed')
-                return {'serial': self.resolved_serial, 'write_result': 'not-started'}
+                return {'serial': self.resolved_serial, 'write_result': 'not-started',
+                        'target_generation': self.final_generation}
             if workspace_mode and record.get('inventory_only'):
                 inventory = self.executor.storage_inventory(self.binding, check, event, geometry_only=True)
                 result = {'storage_inventory': inventory, 'write_result': 'not-started',

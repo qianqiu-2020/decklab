@@ -252,6 +252,257 @@ def automatic_flashing(known=None):
 
 
 class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
+    def test_download_on_another_usb_path_requires_a_unique_echo_from_the_expected_console(self):
+        from decklab_core.flash_tasks import _discovery
+        from decklab_core.tasks import TaskError
+
+        serial = 'KNOWN-SERIAL-42'
+        for echo, multiple, accepted in ((serial, False, True), (None, False, False),
+                                         ('OTHER-BOARD-42', False, False), (serial, True, False)):
+            with self.subTest(echo=echo, multiple=multiple), automatic_flashing([(serial, 'fixture-board')]) as fixture:
+                candidate = usb_candidate(port=(3, 4, 2), serial=serial, strong=True)
+                candidate['link_sent'] = True
+                fixture.executor.candidates = [candidate]
+                if multiple:
+                    fixture.executor.candidates.append(usb_candidate(port=(3, 4, 3)))
+                links = fixture.manager.console_links = mock.Mock()
+                links.start.return_value = 'fixture-echo'
+                links.finish.return_value = [SimpleNamespace(serial=echo, connection_id='console', by_path='uart')] if echo else []
+                clock = SimpleNamespace(monotonic=mock.Mock(side_effect=[0, 16]), time=time.time)
+                discovery = _discovery(fixture.manager)
+                with mock.patch('decklab_core.flash_discovery.time', clock):
+                    if accepted:
+                        found = discovery.wait_for_download(serial, [[2, 3, 2]], set(), mock.Mock(),
+                                                            actor='web', client_id='')
+                        self.assertEqual(found['serial'], serial)
+                    else:
+                        with self.assertRaises(TaskError):
+                            discovery.wait_for_download(serial, [[2, 3, 2]], set(), mock.Mock(),
+                                                        actor='web', client_id='')
+                visible, *_ = discovery.refresh()['targets']
+                self.assertEqual(visible['serial'], serial if accepted else '')
+                if multiple:
+                    links.start.assert_not_called()
+                self.assertFalse(fixture.executor.executions)
+
+    def test_board_grant_reads_bootrom_eeprom_before_binding_download_target(self):
+        from decklab_core.demo import DemoDevice
+        from decklab_core.hardware import HardwareBook
+
+        class IdentityExecutor(FakeBootROMExecutor):
+            def nor_workspace(self, binding, check):
+                return {'workspace': str(self.local.root), 'execution_profile': binding.profile_data}
+
+            def execution_binding(self, binding, profile, workspace, check=None):
+                return binding
+
+            def prepare(self, binding, on_event=None, check=lambda: None, **identity):
+                holds = maintenance_for(self.manager).holds('KNOWN-SERIAL-42')
+                if len(holds) != 1 or holds[0]['task_id'] != identity['task_id']:
+                    raise AssertionError('EEPROM reader must hold the requested board until it exits')
+                result = super().prepare(binding, on_event, check, **identity)
+                final = dict(result['final_device'], port_path=[2, 1])
+                ready = usb_candidate(serial=self.eeprom, strong=True)
+                ready.update(device=final, serial_source='eeprom')
+                ready['identity']['eeprom-serial'] = self.eeprom
+                self.candidates[0] = ready
+                return dict(result, final_device=final, final_identity=ready['identity'])
+
+        serial = 'KNOWN-SERIAL-42'
+        for eeprom in ('ANOTHER-BOARD-42', serial):
+            with self.subTest(eeprom=eeprom), automatic_flashing([(serial, 'fixture-board')]) as fixture:
+                fixture.manager.flash_executor = fixture.executor = IdentityExecutor(
+                    fixture.manager.artifacts.root.parent / 'flashing')
+                fixture.executor.manager = fixture.manager
+                fixture.executor.eeprom = eeprom
+                bootrom = fixture.executor.candidates.pop()
+                device = DemoDevice('fixture-uart', fixture.manager, fixture.store.get(serial))
+                fixture.manager.boards[serial] = device.board
+                fixture.manager.devices[device.by_path] = device
+                device.board.attach(device)
+                fixture.manager.hardware = HardwareBook({'boards': {serial: {'enter-download': {
+                    'argv': [sys.executable, '-c', 'pass'], 'allow_agent': True,
+                }}}})
+                token, _ = fixture.grants.issue('device', serial)
+                code, claimed = self.request(fixture, '/api/input-claim',
+                    {'key': device.key, 'serial': serial, 'scope': 'board', 'ttl': 90}, token=token)
+                self.assertEqual(code, 200, claimed)
+
+                def control(argv, timeout, check, cleanup_failed, outcome=None):
+                    check()
+                    outcome('issued')
+                    fixture.executor.candidates.append(bootrom)
+                    outcome('acknowledged')
+                    return {'exit_code': 0}
+
+                data = {'key': device.key, 'serial': serial, 'connection_id': device.connection_id,
+                        'kind': 'hardware-enter-download', 'request_id': 'prepare-bootrom-with-lease',
+                        'resolve_flash_target': True, 'execution_lease': claimed['execution_lease']}
+                with mock.patch('decklab_core.board_cases.adb_binding', return_value={'usb_port': '3-4'}), \
+                        mock.patch('decklab_core.flash_discovery.download_ports', return_value=[[3, 4], [1, 4]]), \
+                        mock.patch('decklab_core.hardware.run_command', side_effect=control):
+                    code, accepted = self.request(fixture, '/api/task-start', data, token=token)
+                    self.assertEqual(code, 202, accepted)
+                    task = self.terminal(fixture, accepted['task']['id'])
+                identity = fixture.manager.tasks.store.get(task['result']['identity_task_id'])
+                self.assertEqual(len(fixture.executor.preparations), 1)
+                self.assertTrue(fixture.executor.preparations[0]['identity_only'])
+                self.assertFalse(fixture.executor.executions)
+                self.assertEqual(task['result']['control_result'], 'acknowledged')
+                if eeprom != serial:
+                    self.assertEqual(task['state'], 'failed', task)
+                    self.assertEqual(identity['state'], 'failed', identity)
+                    self.assertIsNone(fixture.store.get(eeprom))
+                    self.assertEqual(identity['flash']['write_result'], 'not-started')
+                    self.assertNotIn('flash_target', task['result'])
+                    continue
+                self.assertEqual(task['state'], 'completed', task)
+                self.assertEqual(identity['result']['write_result'], 'not-started')
+                self.assertEqual(task['result']['flash_target']['serial'], serial)
+                self.assertEqual(task['result']['flash_target']['target_generation'],
+                                 identity['result']['target_generation'])
+                download = fixture.manager.flash_discovery.get(task['result']['flash_target']['target_id'])
+                self.assertEqual(download['document']['device']['port_path'], [2, 1])
+                self.assertFalse(maintenance_for(fixture.manager).holds(serial))
+
+    def test_board_grant_keeps_one_lease_through_image_download_usb_probe_plan_and_flash(self):
+        from decklab_core.demo import DemoDevice
+        from decklab_core.hardware import HardwareBook
+        from test_image_download import DATA, fixture as image_server
+
+        serial = 'KNOWN-SERIAL-42'
+        with automatic_flashing([(serial, 'fixture-board')]) as fixture:
+            device = DemoDevice('fixture-uart', fixture.manager, fixture.store.get(serial))
+            fixture.manager.boards[serial] = device.board
+            fixture.manager.devices[device.by_path] = device
+            device.board.attach(device)
+            fixture.manager.hardware = HardwareBook({'boards': {serial: {'enter-download': {
+                'argv': [sys.executable, '-c', 'pass'], 'allow_agent': True,
+            }}}})
+            candidate = usb_candidate(serial=serial, strong=True)
+            candidate['modes'].append('full')
+            fixture.executor.candidates = []
+            token, _ = fixture.grants.issue('device', serial)
+            board = {'key': device.key, 'serial': serial}
+            code, claimed = self.request(fixture, '/api/input-claim',
+                dict(board, scope='board', ttl=90), token=token)
+            self.assertEqual(code, 200, claimed)
+            proof = claimed['execution_lease']
+            with image_server() as (_, origin):
+                code, imported = self.request(fixture, '/api/image-download', dict(board,
+                    url=origin + '/image', name='system.img', sha256=hashlib.sha256(DATA).hexdigest(),
+                    request_id='managed-image-download'), token=token)
+                self.assertEqual(code, 202, imported)
+                image = self.terminal(fixture, imported['task']['id'])
+                self.assertEqual(image['state'], 'completed', image)
+                artifact = image['result']['artifact']
+
+            def control(argv, timeout, check, cleanup_failed, outcome=None):
+                check()
+                outcome('issued')
+                fixture.executor.candidates.append(candidate)
+                outcome('acknowledged')
+                return {'exit_code': 0, 'duration_ms': 1}
+
+            transition = dict(board, kind='hardware-enter-download', connection_id=device.connection_id,
+                              request_id='prepare-leased-download', resolve_flash_target=True, execution_lease=proof)
+            with mock.patch('decklab_core.board_cases.adb_binding', return_value={'usb_port': '1-4'}), \
+                    mock.patch('decklab_core.hardware.run_command', side_effect=control) as sent:
+                code, accepted = self.request(fixture, '/api/task-start', transition, token=token)
+                self.assertEqual(code, 202, accepted)
+                ready = self.terminal(fixture, accepted['task']['id'])
+                self.assertEqual(ready['state'], 'completed', ready)
+                code, original_task = self.request(fixture, '/api/task', token=token,
+                    query={'request_id': transition['request_id']})
+                self.assertEqual(code, 200, original_task)
+                self.assertEqual(original_task['task']['id'], ready['id'])
+                sent.assert_called_once()
+
+            original = ready['result']['flash_target']
+            self.assertEqual(original['serial'], serial)
+            self.assertFalse(fixture.executor.executions)
+            target = self.scope(original)
+            code, _ = self.request(fixture, '/api/flash-target', target, token=token)
+            self.assertEqual(code, 423)
+            code, found = self.request(fixture, '/api/flash-target',
+                dict(target, execution_lease=proof), token=token)
+            self.assertEqual(code, 200, found)
+
+            preview = dict(target, artifact_id=artifact['id'], mode='full', binding_revision=1, verify='required',
+                           target_storage='emmc', request_id='managed-flash-preview')
+            code, _ = self.request(fixture, '/api/flash-plan', preview, token=token)
+            self.assertEqual(code, 423)
+            preview['execution_lease'] = proof
+            code, accepted = self.request(fixture, '/api/flash-plan', preview, token=token)
+            self.assertEqual(code, 202, accepted)
+            planned = self.terminal(fixture, accepted['task']['id'])
+            self.assertEqual(planned['state'], 'completed', planned)
+            self.assertEqual(planned['kind'], 'flash-preview')
+            code, recovered = self.request(fixture, '/api/task', query={'request_id': preview['request_id']}, token=token)
+            self.assertEqual(code, 200, recovered)
+            self.assertEqual(recovered['task']['id'], planned['id'])
+            self.assertEqual(self.request(fixture, '/api/flash-plan', preview, token=token)[1]['task']['id'], planned['id'])
+            code, _ = self.request(fixture, '/api/flash-plan', dict(preview, target_storage='nvme'), token=token)
+            self.assertEqual(code, 409)
+            self.assertEqual(len(fixture.executor.plans), 1)
+            self.assertFalse(fixture.executor.executions)
+            plan = planned['result']['plan']
+            self.assertEqual([write['storage'] for write in plan['writes']], ['emmc'])
+            request = dict(target, kind='flash', plan_id=plan['plan_id'], binding_revision=1,
+                           request_id='managed-flash-under-board-lease')
+            code, _ = self.request(fixture, '/api/task-start', request, token=token)
+            self.assertEqual(code, 423)
+            request['execution_lease'] = proof
+            code, accepted = self.request(fixture, '/api/task-start', request, token=token)
+            self.assertEqual(code, 202, accepted)
+            task_id = accepted['task']['id']
+            self.assertEqual(self.terminal(fixture, task_id)['state'], 'completed')
+            code, repeated = self.request(fixture, '/api/task-start', request, token=token)
+            self.assertEqual(code, 202, repeated)
+            self.assertEqual(repeated['task']['id'], task_id)
+            self.assertEqual(len(fixture.executor.executions), 1)
+            self.assertEqual(self.request(fixture, '/api/input-release',
+                dict(board, scope='board', execution_lease=proof), token=token)[0], 200)
+
+    def test_board_lookup_reuses_current_probed_usb_target_without_static_configuration(self):
+        serial = 'KNOWN-SERIAL-42'
+        with automatic_flashing([(serial, 'fixture-board'), ('OTHER-SERIAL-42', 'other-board')]) as fixture:
+            candidate = usb_candidate(serial=serial, strong=True)
+            fixture.executor.candidates = [candidate]
+            target = self.probe(fixture, self.discover(fixture)[0])['target']
+            query = {'key': 'fixture-board', 'serial': serial, 'resolve_target': '1'}
+            token, _ = fixture.grants.issue('device', serial)
+            other_token, _ = fixture.grants.issue('device', 'OTHER-SERIAL-42')
+            fixture.executor.discoveries.clear()
+
+            code, result = self.request(fixture, '/api/flash-capabilities', query=query, token=token)
+            self.assertEqual(code, 200, result)
+            self.assertFalse(result['supported'])
+            self.assertEqual(result['automatic_target'], dict(self.scope(target), serial=serial))
+            self.assertEqual([call['probe'] for call in fixture.executor.discoveries], [False])
+            self.assertFalse(fixture.manager.flash_book.boards)
+            self.assertFalse(fixture.executor.executions)
+            code, _ = self.request(fixture, '/api/flash-capabilities', query=query, token=other_token)
+            self.assertEqual(code, 404)
+
+            fixture.executor.candidates.clear()
+            code, result = self.request(fixture, '/api/flash-capabilities', query=query, token=token)
+            self.assertEqual(code, 200, result)
+            self.assertIsNone(result['automatic_target'])
+            fixture.executor.candidates.append(candidate)
+            code, result = self.request(fixture, '/api/flash-capabilities', query=query, token=token)
+            self.assertEqual(code, 200, result)
+            self.assertIsNone(result['automatic_target'])
+            new_target = self.probe(fixture, self.discover(fixture)[0])['target']
+            self.assertNotEqual(new_target['target_generation'], target['target_generation'])
+            code, result = self.request(fixture, '/api/flash-capabilities', query=query, token=token)
+            self.assertEqual(code, 200, result)
+            self.assertEqual(result['automatic_target'], dict(self.scope(new_target), serial=serial))
+            fixture.store.mark_conflict(serial)
+            code, result = self.request(fixture, '/api/flash-capabilities', query=query, token=token)
+            self.assertEqual(code, 200, result)
+            self.assertIsNone(result['automatic_target'])
+
     def test_loader_relocation_takes_over_endpoint_without_removing_historical_tasks(self):
         from decklab_core.flash_tasks import _discovery
         with automatic_flashing() as fixture:
@@ -385,15 +636,15 @@ class FlashDiscoveryHTTPIntegrationTests(unittest.TestCase):
         self.assertEqual(code, 200, result)
         return result
 
-    def image(self, fixture, target, data=b'fixture raw partition payload', name='rootfs.img'):
+    def image(self, fixture, target, data=b'fixture raw partition payload', name='rootfs.img', *, token=None):
         code, created = self.request(fixture, '/api/artifact-create',
-            dict(self.scope(target), name=name, size=len(data)))
+            dict(self.scope(target), name=name, size=len(data)), token=token)
         self.assertEqual(code, 200, created)
         artifact = created['artifact']
         for route, fields in (
                 ('/api/artifact-append', {'offset': 0, 'data_b64': base64.b64encode(data).decode()}),
                 ('/api/artifact-seal', {})):
-            code, result = self.request(fixture, route, dict(id=artifact['id'], **fields))
+            code, result = self.request(fixture, route, dict(id=artifact['id'], **fields), token=token)
             self.assertEqual(code, 200, result)
             artifact = result['artifact']
         return artifact

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import types
 import unittest
 from unittest import mock
@@ -50,6 +51,29 @@ class QueryTests(unittest.TestCase):
         self.assertIn('parts', self.boot)
         self.assertEqual(self.http('logs', {}), (result.status, result.payload))
         self.assertIn('parts', self.boot)
+
+    def test_task_window_checks_board_and_returns_only_the_task_time_range(self):
+        def stamp(second):
+            return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(second))
+
+        now = time.mktime((2026, 10, 1, 12, 0, 0, 0, 0, -1))
+        data = ''.join(f'{stamp(at)}  {label}\n' for at, label in
+                       [(now - 40, 'before'), (now - 10, 'during'), (now + 10, 'after')])
+        self.file.write_text(data, encoding='utf-8')
+        self.device.log_files.return_value = [{'name': self.file.name, 'kind': 'serial', 'date': stamp(now)[:10]}]
+        self.manager.tasks = mock.Mock()
+        store = self.manager.tasks.store
+        store.get.return_value = {'actor': 'web', 'created': now - 20, 'updated': now}
+        store.visible_serial.return_value = True
+        params = {'task_window': '1' * 24}
+        result = self.queries.execute('logs', params, self.device)
+        self.assertIn('during', result.payload['data'])
+        self.assertNotIn('before', result.payload['data'])
+        self.assertNotIn('after', result.payload['data'])
+        self.assertEqual(self.queries.execute('logs', params, self.device, actor='other').status, 404)
+        self.assertEqual(self.queries.execute('logs', params, self.device, allow_connection_history=False).status, 403)
+        store.visible_serial.return_value = False
+        self.assertEqual(self.queries.execute('logs', params, self.device).status, 404)
 
     def test_preview_full_read_and_boot_read_match_http(self):
         for action, params in [('log', {'file': self.file.name}),

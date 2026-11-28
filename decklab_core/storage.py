@@ -153,6 +153,12 @@ class Store:
                             'ON CONFLICT(port) DO UPDATE SET label=excluded.label', (port, label))
         return label
 
+    def connection_identified_as(self, connection_id, serial):
+        with self.lock:
+            return self.db.execute(
+                'SELECT 1 FROM connection_identities WHERE connection_id=? AND serial=?',
+                (connection_id, serial)).fetchone() is not None
+
     def get_ssh_credentials(self, serial):
         """Private connection input; never include this result in an API record."""
         if not isinstance(serial, str) or not serial:
@@ -457,6 +463,13 @@ class Store:
         with self.lock:
             return [dict(r) for r in self.db.execute(
                 'SELECT * FROM events WHERE serial=? ORDER BY id DESC LIMIT ?', (serial, limit))]
+
+    def serial_capture_events(self, serial):
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT detail FROM events WHERE serial=? AND actor='collector' AND action LIKE 'serial-%' "
+                "ORDER BY id DESC LIMIT 24", (serial,)).fetchall()
+        return [json.loads(row['detail']) for row in rows]
 
     def visible_events(self, serial, offset=0, limit=50):
         """Page human-level operations; per-keystroke writes remain in the audit database."""

@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply updated DeckLab board assignments to the TitanX worker
+
+[Service]
+Type=oneshot
+User=decklab
+Group=decklab
+EnvironmentFile=/etc/decklab/decklab.env
+Environment=PYTHONPATH=/usr/lib/decklab
+ExecStart=/usr/bin/python3 -m decklab_core.titanx_setup
+ExecStartPost=+/usr/bin/systemctl restart decklab-titanx.service
+TimeoutStartSec=infinity
+UMask=0077

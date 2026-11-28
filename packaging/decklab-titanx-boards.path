@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for additional DeckLab station boards
+After=decklab.service
+
+[Path]
+PathChanged=/var/lib/decklab-workbench/titanx-boards.json
+
+[Install]
+WantedBy=decklab.service

@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 
 from .board_maintenance import maintenance_for
@@ -206,22 +207,85 @@ class AdbTransportUnavailable(ConnectionError):
     """No online transport could be identified for the requested board."""
 
 
-def find_transport(executable, serial, registered, *, usb_endpoints=None, allow_relocation=False, on_stage=None):
+def adb_listing(executable):
+    result = adb_command(executable, 'devices', '-l', timeout=3)
+    if result.returncode:
+        raise ConnectionError('无法读取控制机的 USB 调试连接')
+    return result.stdout
+
+
+def transport_identity(executable, endpoint, timeout):
+    try:
+        response = adb_command(executable, '-t', endpoint, 'shell',
+            IDENTITY + "printf 'uid='; id -u; printf 'consoles='; cat /sys/class/tty/console/active",
+            timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    return {} if response.returncode else dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
+
+
+class AdbDiscoveryScan:
+    """One discovery pass. Each ADB transport in its listing is probed at most once."""
+    def __init__(self, executable):
+        self.listing = adb_listing(executable)
+        self.executable = executable
+        self._lock = threading.Lock()
+        self._endpoint_locks = {}
+        self._facts = {}
+
+    def identity(self, endpoint, timeout):
+        with self._lock:
+            lock = self._endpoint_locks.setdefault(endpoint, threading.Lock())
+        with lock:
+            if endpoint not in self._facts:
+                self._facts[endpoint] = transport_identity(self.executable, endpoint, timeout)
+            return self._facts[endpoint]
+
+
+class AdbDiscoveryScans:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._scans = {}
+
+    def start(self):
+        executable = shutil.which('adb')
+        if not executable:
+            raise TaskError('控制机缺少 adb', 503)
+        try:
+            scan = AdbDiscoveryScan(executable)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise TaskError('控制机暂时无法读取 USB 调试连接', 503) from error
+        key = secrets.token_hex(16)
+        with self._lock:
+            now = time.monotonic()
+            self._scans = {k: v for k, v in self._scans.items() if v[0] > now}
+            if len(self._scans) >= 16:
+                del self._scans[next(iter(self._scans))]
+            self._scans[key] = (now + 300, scan)
+        return key
+
+    def get(self, key):
+        with self._lock:
+            expires, scan = self._scans.get(key, (0, None))
+            if expires <= time.monotonic():
+                raise TaskError('ADB 发现轮次已结束', 409)
+            return scan
+
+
+def find_transport(executable, serial, registered, *, usb_endpoints=None, allow_relocation=False, on_stage=None, scan=None):
     registered_port = registered['usb_port'] if registered else None
     stage = on_stage or (lambda *args: None)
     stage('listing-adb-usb', registered_port)
-    listing = adb_command(executable, 'devices', '-l', timeout=3)
-    if listing.returncode:
-        raise ConnectionError('无法读取控制机的 USB 调试连接')
+    listing = scan.listing if scan is not None else adb_listing(executable)
     online_ports = {
-        field[4:] for fields in map(str.split, listing.stdout.splitlines()) if len(fields) >= 2 and fields[1] == 'device'
+        field[4:] for fields in map(str.split, listing.splitlines()) if len(fields) >= 2 and fields[1] == 'device'
         for field in fields[2:]
         if field.startswith('usb:') and USB_PORT.fullmatch(field[4:])}
     # Only a new operation can follow a moved board. Follow its confirmed
     # identity, never the ADB serial or the first newly enumerated device.
     inspect_other_ports = allow_relocation and bool(online_ports.difference({registered_port}))
     ports = online_ports if not registered or inspect_other_ports else {registered_port}
-    rows = [fields for fields in map(str.split, listing.stdout.splitlines()) if len(fields) >= 2
+    rows = [fields for fields in map(str.split, listing.splitlines()) if len(fields) >= 2
             and (fields[1] in ('device', 'offline', 'unauthorized') or fields[1:3] == ['no', 'permissions'])]
     relevant = [row for row in rows if len(row) >= 2 and
                 (not registered or 'usb:' + registered['usb_port'] in row[2:])]
@@ -242,7 +306,7 @@ def find_transport(executable, serial, registered, *, usb_endpoints=None, allow_
         raise AdbTransportUnavailable('登记端口的 USB 调试连接离线')
     if allow_relocation and registered_port and not online_ports and not relevant:
         raise AdbTransportUnavailable('控制机未发现可核对板号的在线 USB 调试连接。确认板端 adbd 正常运行后重试，换 USB 口时会自动查找。')
-    candidates = [(port, select_transport(listing.stdout, port))
+    candidates = [(port, select_transport(listing, port))
                   for port in sorted(ports, key=lambda p: (p != registered_port, p))]
     if usb_endpoints and not registered and any(row[1] == 'device' and not any(
             field.startswith('usb:') and USB_PORT.fullmatch(field[4:]) for field in row[2:]) for row in relevant):
@@ -257,14 +321,9 @@ def find_transport(executable, serial, registered, *, usb_endpoints=None, allow_
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise ConnectionError('USB 调试连接探测超时，请检查接线或登记板卡 USB 路径')
-        try:
-            response = adb_command(executable, '-t', endpoint, 'shell',
-                IDENTITY + "printf 'uid='; id -u; printf 'consoles='; cat /sys/class/tty/console/active",
-                timeout=min(3, remaining))
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        facts = dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
-        if not response.returncode and facts.get('serial') == serial and BOOT_ID.fullmatch(facts.get('boot_id', '')):
+        timeout = min(3, remaining)
+        facts = scan.identity(endpoint, timeout) if scan is not None else transport_identity(executable, endpoint, timeout)
+        if facts.get('serial') == serial and BOOT_ID.fullmatch(facts.get('boot_id', '')):
             if port == registered_port:
                 stage('verified-adb-port', port)
                 return port, endpoint, facts
@@ -292,7 +351,7 @@ def resolve_connection(executable, serial, registered):
     return {'usb_port':port, 'uart':'/dev/' + consoles[0], 'cases':['rtc-wake']}
 
 
-def adb_binding(manager, device):
+def adb_binding(manager, device, scan=None):
     """Return the currently verified USB path for a board."""
     serial, generation = device.serial, device.connection_id
     if not serial or not device.present or manager.store.has_conflict(serial):
@@ -301,7 +360,7 @@ def adb_binding(manager, device):
     if not executable:
         raise TaskError('控制机缺少 adb', 503)
     try:
-        port, _, facts = find_transport(executable, serial, manager.hardware.board_tests.get(serial), allow_relocation=True)
+        port, _, facts = find_transport(executable, serial, manager.hardware.board_tests.get(serial), allow_relocation=True, scan=scan)
     except ConnectionError as error:
         raise TaskError(str(error), 409) from error
     except (OSError, subprocess.TimeoutExpired) as error:

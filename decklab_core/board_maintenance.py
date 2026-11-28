@@ -125,6 +125,9 @@ class BoardMaintenance:
         # lease before executing any step; the monitor only owns plan tracking.
         resource = 'team-plan:' + serial
         with self.admission(serial, (resource,), actor, client_id):
+            from .board_ownership import ownership_for
+            if ownership_for(self.manager).current(serial):
+                raise TaskError('请先释放板卡执行占用，再由 TitanX 工位接管', 423)
             yield [resource]
 
     def target_resources(self, target_id, serial='', resources=()):
@@ -326,8 +329,9 @@ class BoardMaintenance:
             if (task['updated'] != expected_updated or task['state'] in ('queued', 'running')
                     or task_id in self.manager.tasks._active):
                 raise TaskError('operation changed or its worker has not stopped', 409)
-            adb = task['kind'] == 'adb-command'
-            if not (adb or task['kind'].startswith('hardware-')) or document.get('cleanup_confirmed') is not False:
+            adb = task['kind'] in ('adb-command', 'ssh-command')
+            if (not (adb or task['kind'] == 'serial-command' or task['kind'].startswith('hardware-'))
+                    or document.get('cleanup_confirmed') is not False):
                 raise TaskError('task has no operation cleanup recovery', 409)
             holds = self.store.db.execute('SELECT * FROM flash_resource_holds WHERE task_id=?', (task_id,)).fetchall()
             allowed = ('board:', 'board-test-usb:') if adb else ('board:',)

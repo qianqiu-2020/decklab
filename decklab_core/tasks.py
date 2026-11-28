@@ -178,7 +178,7 @@ class TaskStore:
         """Atomically bind one execution, idempotency key and durable resource holds."""
         from .flash_store import encode_document, validate_request
         validate_request(request_id, input_digest)
-        if kind not in ('flash', 'flash-inspect', 'ram-boot', 'board-test', 'adb-command', 'team-plan') or not isinstance(actor, str) or not actor or len(actor) > 80:
+        if kind not in ('flash', 'flash-inspect', 'ram-boot', 'board-test', 'adb-command', 'ssh-command', 'team-plan') or not isinstance(actor, str) or not actor or len(actor) > 80:
             raise TaskError('invalid board task kind or actor')
         if not isinstance(client_id, str) or len(client_id) > 80:
             raise TaskError('invalid board task client')
@@ -326,6 +326,78 @@ class TaskStore:
                 (*arguments, limit, offset))]
             return [self.get(task_id) for task_id in ids]
 
+    def titanx_case_receipts(self, serial, job_id, case_code, round_number, kind='adb-command', *, reservation=None):
+        # Match completed or incomplete commands from the original board.
+        # Include steps shared by the job, and the selected case and round.
+        root = {'adb-command': '$.adb_receipt', 'ssh-command': '$.ssh_receipt', 'serial-command': '$.serial_receipt'}[kind]
+        condition = f"json_extract(t.result, '{root}.titanx.job_id') = ?"
+        args = (job_id,)
+        if reservation:
+            lease, actor, start, end = reservation
+            condition = (f"json_extract(t.result, '{root}.titanx.job_id') IS NULL AND "
+                         f"json_extract(t.result, '{root}.reservation_id') = ? AND "
+                         f"json_extract(t.result, '{root}.stdin_sha256') IS NULL AND "
+                         "t.actor=? AND t.created BETWEEN ? AND ?")
+            args = (lease, actor, start, end)
+        with self.store.lock:
+            rows = self.store.db.execute(f"""
+                SELECT t.id, t.state, t.created,
+                       json_extract(t.result, '{root}.exit_code') AS exit_code,
+                       json_extract(t.result, '{root}.titanx.command_id') AS command_id,
+                       json_extract(t.result, '{root}.titanx.case_code') AS case_code,
+                       json_extract(t.result, '{root}.titanx.round') AS round
+                FROM tasks t
+                WHERE t.kind = ?
+                  AND (EXISTS (SELECT 1 FROM task_board_targets b WHERE b.task_id=t.id AND b.serial=?)
+                       OR EXISTS (SELECT 1 FROM task_targets d WHERE d.task_id=t.id AND d.serial=?))
+                  AND ({condition})
+                  AND (json_extract(t.result, '{root}.titanx.case_code') IS NULL
+                       OR upper(json_extract(t.result, '{root}.titanx.case_code')) = upper(?))
+                  AND (json_extract(t.result, '{root}.titanx.round') IS NULL
+                       OR json_extract(t.result, '{root}.titanx.round') = ?)
+                ORDER BY t.created DESC, t.id DESC
+                LIMIT 20
+                """, (kind, serial, serial, *args, case_code, round_number)).fetchall()
+            return [dict(row) for row in rows]
+
+    def case_script_upload(self, serial, actor, path, start, end):
+        # Uploads precede execution and share its generated, per-run remote path.
+        prefix = "file='" + path + "'\n"
+        with self.store.lock:
+            rows = self.store.db.execute("""
+                WITH uploads AS (
+                    SELECT t.id,t.kind,t.created,t.state,json_extract(t.result,'$._task_outcome') AS outcome,
+                        coalesce(json_extract(t.result,'$.adb_receipt'),
+                                 json_extract(t.result,'$.ssh_receipt'),
+                                 json_extract(t.result,'$.serial_receipt')) AS receipt
+                    FROM tasks t WHERE t.actor=? AND t.created BETWEEN ? AND ?
+                    AND t.kind IN ('adb-command','ssh-command','serial-command')
+                    AND (EXISTS (SELECT 1 FROM task_board_targets b WHERE b.task_id=t.id AND b.serial=?)
+                         OR EXISTS (SELECT 1 FROM task_targets d WHERE d.task_id=t.id AND d.serial=?)))
+                SELECT * FROM uploads WHERE instr(json_extract(receipt,'$.command'), ?) = 1
+                AND json_extract(receipt,'$.stdin_sha256') IS NOT NULL
+                ORDER BY created DESC LIMIT 2""", (actor, start, end, serial, serial, prefix)).fetchall()
+        if len(rows) == 1:
+            row = rows[0]
+            receipt = json.loads(row['receipt'])
+            script = {key: receipt[key] for key in ('stdin_sha256', 'stdin_size', 'script_preview') if key in receipt}
+            script['upload'] = {**{key:row[key] for key in ('id','kind','created','state','outcome')},
+                **{key:receipt.get(key) for key in ('command','identity_channel','exit_code','stdout','stderr',
+                    'stdout_truncated_bytes','stderr_truncated_bytes')}, 'path':path}
+            if 'script_preview' not in script and 0 < script.get('stdin_size', 0) <= 65536:
+                with self.store.lock:
+                    saved = self.store.db.execute("""
+                        SELECT json_extract(t.result,'$.adb_receipt.script_preview')
+                        FROM task_board_targets b JOIN tasks t ON t.id=b.task_id
+                        WHERE b.serial=? AND t.kind='adb-command' AND t.actor=?
+                        AND json_extract(t.result,'$.adb_receipt.stdin_sha256')=?
+                        AND json_extract(t.result,'$.adb_receipt.script_preview') IS NOT NULL LIMIT 1
+                        """, (serial, actor, script.get('stdin_sha256'))).fetchone()
+                if saved and hashlib.sha256(saved[0].encode()).hexdigest() == script['stdin_sha256']:
+                    script.update(script_preview=saved[0], matched_digest=True)
+            return script
+        return {}
+
     @staticmethod
     def visible_serial(task, serial):
         if task.get('board_targets'):
@@ -438,15 +510,20 @@ class TaskStore:
                 result = json.loads(row['result']) if row['result'] else {}
                 if not isinstance(result, dict):
                     result = {}
-                known_adb_exit = row['kind'] == 'adb-command' and result.get('cleanup_confirmed') is True
-                if result.get(_OUTCOME_FIELD) != 'not-issued' and not known_adb_exit:
+                known_command_exit = row['kind'] in ('adb-command', 'ssh-command', 'serial-command') and result.get('cleanup_confirmed') is True
+                if result.get(_OUTCOME_FIELD) != 'not-issued' and not known_command_exit:
                     result[_OUTCOME_FIELD] = 'unknown'
                 self.store.db.execute('UPDATE tasks SET result=? WHERE id=?', (json.dumps(result), row['id']))
+                if row['kind'] == 'serial-command' and result.get('cleanup_confirmed') is False:
+                    self.store.db.execute(
+                        "INSERT OR IGNORE INTO flash_resource_holds "
+                        "SELECT 'board:' || serial, task_id, 'recovery', ? FROM task_targets "
+                        "WHERE task_id=? AND serial<>''", (time.time(), row['id']))
             count = self.store.db.execute(
                 "UPDATE tasks SET state='interrupted',updated=?,error=? WHERE state IN ('queued','running')",
                 (time.time(), 'collector restarted; execution outcome may be partial; not automatically replayed')).rowcount
             self.store.db.execute("DELETE FROM flash_resource_holds WHERE task_id IN "
-                "(SELECT id FROM tasks WHERE kind='adb-command' AND state='interrupted' AND "
+                "(SELECT id FROM tasks WHERE kind IN ('adb-command','ssh-command') AND state='interrupted' AND "
                 "(json_extract(result,'$.cleanup_confirmed')=1 OR json_extract(result,'$._task_outcome')='not-issued'))")
             self.store.db.execute("UPDATE flash_resource_holds SET state='recovery',updated=? "
                                   "WHERE task_id IN (SELECT id FROM tasks WHERE state='interrupted')", (time.time(),))
@@ -616,7 +693,7 @@ class TaskManager:
             # Cancellation before the worker enters the adapter has no external
             # side effects. Once entered, only the adapter can confirm cleanup.
             try:
-                if not entered or kind == 'adb-command' and self.store.get(context.id)['outcome'] == 'not-issued':
+                if not entered or kind in ('adb-command', 'ssh-command') and self.store.get(context.id)['outcome'] == 'not-issued':
                     maintenance.release(context.id, confirmed=True)
             finally:
                 with self._lock:

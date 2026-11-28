@@ -171,22 +171,4 @@ go test examples/edge_task_lookup.go
 
 ## 团队用例与测试工位
 
-设备页的「用例库」提供本地 Shell 用例和 TitanX 团队用例。控制机读取团队目录、用例组和步骤。板卡关联到实际工位后，主访问者可以选择一项已评审且完成自动化的用例，输入轮数后在当前板上执行。TitanX 管理脚本、调度和执行。DeckLab 的任务历史保存平台计划名、任务编号、执行设备与逐轮结果。
-
-安装后，在「系统配置 → 访问与共享 → 团队用例（TitanX）」填写平台 HTTPS 地址与服务令牌并保存，即可在设备页浏览团队用例。更换站点时需重新输入令牌。多节点部署应在采集节点填写。
-
-自动部署也可以在采集服务的环境文件中配置以下变量。网页保存的凭据优先生效。平台令牌文件仅供采集服务读取，使用有权读取目录、管理本工位测试计划的服务身份。
-
-| 变量 | 用途 |
-| --- | --- |
-| `DECKLAB_TEST_PLATFORM_URL` | 平台 HTTPS 站点，例如 `https://platform.example.test` |
-| `DECKLAB_TEST_PLATFORM_TOKEN_FILE` | 平台令牌文件的绝对路径 |
-| `DECKLAB_TEST_PLATFORM_BOARDS_FILE` | 经工位负责人确认的板号映射 JSON 文件的绝对路径。仅浏览时可省略 |
-
-映射文件以 DeckLab 硬件序列号为键。每个工位和设备编号只能分配一次。
-
-```json
-{"SAMPLE-BOARD-001":{"code":"sample-board","device_id":"sample-edge:0"}}
-```
-
-在同机部署的 edge 上，按相同板号配置槽位。执行器可用已有的板级访问令牌读取 `GET /api/hardware?adb_binding=1&key=…&serial=…&connection_id=…`，返回本次连接的 `usb_port` 和 `boot_id`。派发前，DeckLab 将硬件板号、串口连接代次和 USB 接线与 TitanX 的设备编号、在线槽位交叉核对。网页只显示当前任务的结果。平台返回超时后，凭已记录的计划名和编号核查原任务；确认原任务停止后可释放保留的板卡占用。
+DeckLab 可接管 TitanX 工位的板卡管理，开发者可在设备页看现场、查日志和执行获授权的操作。设备页的「用例库」还可以派发已有 TitanX 团队用例。切换步骤、工位映射、结果回查和上位机 Agent 的桌面调用见 [TitanX 接入指南](titanx-integration.md)。

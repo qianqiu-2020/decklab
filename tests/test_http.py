@@ -980,6 +980,20 @@ class HandlerTests(unittest.TestCase):
                 self.assertEqual(self.result(handler)[0], 400)
                 collector.assert_not_called()
 
+    def test_team_case_grants_do_not_allow_local_cases_or_connection_only_dispatch(self):
+        for scope, source in [('device', 'local'), ('connection', 'titanx')]:
+            raw = json.dumps({'kind': 'board-test', 'source': source, 'key': 'test'}).encode()
+            handler = self.control_handler('/api/task-start')
+            handler.command = 'POST'
+            handler.headers = {'Content-Length': str(len(raw))}
+            handler.rfile = io.BytesIO(raw)
+            with self.subTest(scope=scope, source=source), mock.patch.object(handler, '_owner_authorized', return_value=False), \
+                    mock.patch.object(handler, '_agent_grant', return_value={'scope': scope, 'actor': 'shared-agent/test'}), \
+                    mock.patch.object(control, 'UnixHTTPConnection') as collector:
+                handler._proxy()
+                self.assertEqual(self.result(handler)[0], 403)
+                collector.assert_not_called()
+
     def test_invalid_lengths_fail_before_body_read(self):
         for length, expected in (('-1', 413), ('65537', 413), ('invalid', 400)):
             with self.subTest(length=length):

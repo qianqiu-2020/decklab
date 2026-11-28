@@ -3,7 +3,7 @@
   'use strict';
   function create(options) {
     var $ = options.byId, client = global.DeckLabTasks.createClient(options.fetch);
-    var names = {reset: '复位', 'power-on': '上电', 'power-off': '断电', 'enter-download': '进入下载模式'};
+    var supported = ['reset', 'enter-download', 'power-on', 'power-off'];
     var selection = '', generation = 0, actions = [], wiring = null, target = null, pending = Object.create(null);
     function scope(ctx) { return ctx && ctx.connectionId ? (ctx.serial || ctx.key || '') + ':' + ctx.connectionId : ''; }
     function current(ctx) { return !!ctx && scope(options.getView()) === scope(ctx); }
@@ -25,7 +25,7 @@
         + '&connection_id=' + encodeURIComponent(ctx.connectionId)).then(function (data) {
         if (version !== generation || scope(options.getView()) !== key) return;
         wiring = data.wiring || null;
-        actions = (data.actions || []).filter(function (action) { return Object.prototype.hasOwnProperty.call(names, action); });
+        actions = data.supported ? supported.filter(function (action) { return data.actions?.includes(action); }) : [];
         $('b-board-control').hidden = (!data.supported || !actions.length) && !owner;
         $('b-board-slot-bind').hidden = !owner || !!wiring && !data.slot_handoff;
         if ($('board-slot-bind')) $('board-slot-bind').textContent = data.slot_handoff ? '确认换板接线' : '绑定控制槽位';
@@ -35,24 +35,20 @@
       if (!scope(ctx) || (!actions.length && !(options.canBind && options.canBind())) || pending[scope(ctx)]) return;
       target = {key: ctx.key, serial: ctx.serial, connectionId: ctx.connectionId};
       $('board-control-target').textContent = (ctx.serial || ctx.key) + (wiring ? ' · ' + wiring.name + ' / ' + wiring.number : '');
-      $('board-control-action').textContent = '';
-      if ($('board-slot-bind')) {
-        $('board-slot-bind').hidden = !(options.canBind && options.canBind());
-        $('board-control-action-field').hidden = !actions.length;
-        $('board-control-submit').hidden = !actions.length;
-      }
-      actions.forEach(function (action) {
-        var item = document.createElement('option'); item.value = action; item.textContent = names[action];
-        $('board-control-action').appendChild(item);
+      $('board-slot-bind').hidden = !(options.canBind && options.canBind());
+      supported.forEach(function (action) {
+        var button = $('board-control-' + action);
+        button.hidden = !actions.includes(action);
+        button.disabled = false;
       });
-      $('board-control-action').value = actions[0];
-      $('board-control-submit').disabled = false; $('board-control-status').textContent = '';
+      $('board-control-status').textContent = '';
       $('board-control-dialog').showModal();
     }
-    function submit() {
-      var ctx = target, action = $('board-control-action').value;
-      if (!current(ctx) || pending[scope(ctx)] || actions.indexOf(action) === -1) return;
-      pending[scope(ctx)] = true; $('board-control-submit').disabled = true;
+    function submit(action) {
+      var ctx = target;
+      if (!current(ctx) || ctx.failed || pending[scope(ctx)] || !actions.includes(action)) return;
+      pending[scope(ctx)] = true;
+      supported.forEach(function (id) { $('board-control-' + id).disabled = true; });
       $('board-control-status').textContent = '正在执行…';
       var taskId = '';
       client.start({key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId,
@@ -93,8 +89,9 @@
       bind(options.getView());
     });
     $('board-control-close').addEventListener('click', close);
-    $('board-control-cancel').addEventListener('click', close);
-    $('board-control-submit').addEventListener('click', submit);
+    supported.forEach(function (action) {
+      $('board-control-' + action).addEventListener('click', function () { submit(action); });
+    });
     $('board-control-dialog').addEventListener('cancel', close);
     return {refresh: refresh, close: close, bind: bind, invalidate: function () { selection = ''; refresh(options.getView()); }};
   }

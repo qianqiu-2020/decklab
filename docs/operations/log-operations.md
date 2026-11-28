@@ -7,6 +7,14 @@ count and timestamps, log status, the most recent serial health check, and any
 input owner. The details are loaded on demand from the current records. Opening
 or refreshing the dialog does not send commands to the board.
 
+The serial continuity timeline shows capture start, interruption, pause,
+collector shutdown, and archive write failure or recovery. A browser replay
+gap belongs to the current browser view and indicates that it recovered the
+terminal screen from a snapshot. Use the archive to check the corresponding
+output. Task details can copy a redacted summary and separately read a raw
+serial excerpt from the last five minutes of the task. The page reports when
+the available excerpt is limited by archive scan or output size.
+
 ## Unidentified serial connections
 
 Before a board serial is confirmed, each connection is stored separately under

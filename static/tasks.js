@@ -21,6 +21,10 @@
     'adb-gadget-configured':'板端 USB 设备控制器已完成配置',
     'adb-gadget-detached':'板端 USB 设备控制器未连接',
     'adb-usb-transport-closed':'本次启动最近的 ADB USB 日志显示连接关闭',
+    'restarting-adbd-over-serial':'通过串口请求重启板端 adbd',
+    'adbd-restart-acknowledged':'板端已接受重启 adbd 请求',
+    'adbd-restart-unconfirmed':'串口未确认重启结果，正在回查 USB',
+    'waiting-adb-recovery':'等待原板卡的 ADB 连接',
     'session-ready':'终端会话已建立',
     'resolving-image-host':'解析镜像服务器', 'connecting-image-server':'连接镜像服务器',
     'checking-image-tls':'验证服务器证书', 'connecting-organization-tls':'连接组织镜像服务器',
@@ -37,6 +41,13 @@
     'board-usb-identity-verified':'已核对板卡的 USB 和串口'};
   function phaseLabel(phase) { return Object.hasOwn(stages, phase) ? stages[phase] : ''; }
   function active(task) { return task.state === 'queued' || task.state === 'running'; }
+  function adbRecoverable(task, ctx) {
+    return task?.kind === 'adb-connect' && task.state === 'failed' && !!ctx?.serial
+      && task.targets?.some(function (target) { return target.serial === ctx.serial && target.connection_id === ctx.connectionId; })
+      && task.progress?.stages?.some(function (step) {
+        return step.phase === 'adb-usb-transport-closed' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(step.endpoint);
+      });
+  }
   function errorMessage(message) {
     if (message === 'artifact quota exceeded') {
       return '控制机的文件缓存已达到额度上限。可从「已下载」复用镜像，或删除不用的镜像缓存后重试。';
@@ -75,7 +86,7 @@
           if (current.state === 'completed') resolve(current.result || { ok: true });
           else {
             var failure = new Error(errorMessage(current.error) || states[current.state] || '任务失败');
-            failure.result = current.result; failure.taskId = id; failure.permanent = true; reject(failure);
+            failure.result = current.result; failure.taskId = id; failure.task = current; failure.permanent = true; reject(failure);
           }
           return true;
         }
@@ -124,6 +135,7 @@
       var payload = { key: ctx.key, serial: ctx.serial, connection_id: ctx.connectionId,
         kind: kind, actor: 'web' };
       if (extra && Object.prototype.hasOwnProperty.call(extra, 'association')) payload.association = extra.association;
+      if (kind === 'adb-connect' && extra?.recover_from) payload.recover_from = extra.recover_from;
       if (kind === 'ssh-connect' && extra) {
         ['ssh_user', 'ssh_password'].forEach(function (name) {
           if (Object.prototype.hasOwnProperty.call(extra, name)) payload[name] = extra[name];
@@ -150,8 +162,8 @@
           testResult.addEventListener('click', function () { if (sameSelection(selected)) options.openBoardTest(task); });
           row.appendChild(testResult);
         }
-        if (options.openAdbReceipt && (task.kind === 'adb-command' || task.result?.adb_receipt)) {
-          var receipt = document.createElement('button'); receipt.type = 'button'; receipt.textContent = 'ADB 回执';
+        if (options.openAdbReceipt && (['adb-command','ssh-command','serial-command'].includes(task.kind) || task.result?.adb_receipt)) {
+          var receipt = document.createElement('button'); receipt.type = 'button'; receipt.textContent = task.kind === 'serial-command' ? '串口回执' : task.kind === 'ssh-command' ? 'SSH 回执' : 'ADB 回执';
           receipt.addEventListener('click', function () { if (sameSelection(selected)) options.openAdbReceipt(task); });
           row.appendChild(receipt);
         }
@@ -187,6 +199,11 @@
               });
           });
           row.appendChild(cancel);
+        } else if (options.retryADB && adbRecoverable(task, ctx)) {
+          var recover = document.createElement('button'); recover.type = 'button';
+          recover.textContent = '重启 ADB 服务并重连';
+          recover.addEventListener('click', function () { if (sameSelection(selected)) options.retryADB(task); });
+          row.appendChild(recover);
         } else if (task.kind === 'ssh-connect' && task.state === 'failed' && task.result
             && task.result.code === 'ssh-authentication-failed' && options.retrySSH) {
           var retry = document.createElement('button'); retry.type = 'button';
@@ -265,10 +282,10 @@
     var dialog = $('adb-command-dialog'), form = $('adb-command-form'), status = $('adb-command-status');
     var panel = $('adb-command-receipt'), serialPanel = $('adb-command-serial');
     var recover = $('adb-command-recover'), context = null, task = null, generation = 0;
-    var labels = {checking:'正在核对 USB 和板卡身份', running:'等待 ADB 回执', exited:'已收到退出回执',
-      disconnected:'ADB 已断开，板端结果未知', 'timed-out':'等待超时，板端结果未知',
+    var labels = {checking:'正在核对 USB 和板卡身份', exited:'已收到退出回执',
+      'auth-failed':'SSH 登录被拒绝，命令未执行', 'timed-out':'等待超时，板端结果未知',
       cancelled:'已停止等待，板端结果未知', unconfirmed:'未收到完整回执，请查看串口',
-      rejected:'板端已拒绝执行', unavailable:'ADB 暂不可用'};
+      rejected:'命令未执行', unavailable:'执行通道暂不可用'};
     var decoder, serialOffset, serialBusy;
     function current(seq) {
       var view = options.getView();
@@ -288,25 +305,31 @@
     }
     function render(record) {
       task = record;
-      var result = task.result || {}, latest = result.adb_receipt || {};
+      var result = task.result || {}, latest = result.serial_receipt || result.ssh_receipt || result.adb_receipt || {};
       panel.hidden = !latest.command;
       showText('adb-command-text', latest.command || '');
+      var fromSerial = task.kind === 'serial-command';
+      var transport = fromSerial ? '串口' : task.kind === 'ssh-command' ? 'SSH' : 'ADB';
+      showText('adb-command-output-title', fromSerial ? '串口输出' : '标准输出');
+      $('adb-command-error-output').hidden = fromSerial;
       showText('adb-command-stdout', output(latest, 'stdout'));
       showText('adb-command-stderr', output(latest, 'stderr'));
       $('adb-command-read-serial').disabled = !latest.serial_window || serialBusy;
-      recover.hidden = task.kind !== 'adb-command' || active(task) || result.cleanup_confirmed !== false
+      recover.hidden = !['adb-command','ssh-command','serial-command'].includes(task.kind) || active(task) || result.cleanup_confirmed !== false
         || !!result.recovery_confirmation || !options.canRecover();
       var receiptState = task.state === 'interrupted' && latest.state === 'running' ? 'unconfirmed' : latest.state;
       status.textContent = [latest.started_at && new Date(latest.started_at * 1000).toLocaleString(),
-        latest.round && '第 ' + latest.round + ' 轮启动回执', labels[receiptState] || states[task.state],
+        latest.round && '第 ' + latest.round + ' 轮启动回执', (task.kind === 'serial-command' && receiptState === 'checking' ? '正在核对串口和板卡身份'
+          : receiptState === 'running' ? '等待' + transport + '回执'
+          : receiptState === 'disconnected' ? transport + ' 已断开，板端结果未知' : labels[receiptState]) || states[task.state],
         Number.isInteger(latest.exit_code) && '板端退出码 ' + latest.exit_code,
-        !Number.isInteger(latest.exit_code) && Number.isInteger(latest.adb_exit_code)
-          && 'ADB 客户端退出码 ' + latest.adb_exit_code,
+        !Number.isInteger(latest.exit_code) && Number.isInteger(latest.ssh_exit_code ?? latest.adb_exit_code)
+          && transport + ' 客户端退出码 ' + (latest.ssh_exit_code ?? latest.adb_exit_code),
         task.error, '任务 ' + task.id].filter(Boolean).join(' · ');
     }
     function show(record, seq) {
       form.hidden = true;
-      $('adb-command-original').open = record.kind === 'adb-command';
+      $('adb-command-original').open = ['adb-command', 'ssh-command', 'serial-command'].includes(record.kind);
       render(record);
       if (active(record)) client.watch(record, context, function (latest) {
         render(latest);
@@ -314,7 +337,7 @@
         if (current(seq) && active(task)) status.textContent = error.message;
       });
     }
-    function open(record) {
+    function open(record, initialCommand) {
       var view = options.getView();
       if (!view || !view.serial || (!view.connectionId && !record)) {
         options.notice('请先连接并识别板卡的串口');
@@ -324,8 +347,9 @@
       var seq = ++generation;
       task = null; decoder = null; serialOffset = null; serialBusy = false;
       panel.hidden = true; serialPanel.hidden = true; form.hidden = !!record;
+      $('adb-command-title').textContent = record?.kind === 'serial-command' ? '串口命令回执' : record?.kind === 'ssh-command' ? 'SSH 命令回执' : 'ADB 命令';
       $('adb-command-board').textContent = options.boardLabel(view) + ' · SN ' + view.serial;
-      $('adb-command-input').value = ''; $('adb-command-run').disabled = false;
+      $('adb-command-input').value = initialCommand || ''; $('adb-command-run').disabled = false;
       $('adb-command-read-serial').textContent = '查看本次串口';
       $('adb-command-serial-output').textContent = ''; status.textContent = '';
       if (!dialog.open) dialog.showModal();
@@ -368,7 +392,7 @@
     });
     $('adb-command-read-serial').addEventListener('click', function () {
       var seq = generation, button = $('adb-command-read-serial');
-      var latest = task && task.result && task.result.adb_receipt;
+      var latest = task && task.result && (task.result.serial_receipt || task.result.ssh_receipt || task.result.adb_receipt);
       var cursor = latest && latest.serial_window, note = $('adb-command-serial-status');
       if (!current(seq) || !cursor || button.disabled || serialBusy) return;
       serialPanel.hidden = false;
@@ -408,5 +432,6 @@
     });
     return {open: open};
   }
-  global.DeckLabTasks = { create: create, createClient: createClient, createAdb: createAdb, errorMessage: errorMessage, phaseLabel: phaseLabel };
+  global.DeckLabTasks = { create: create, createClient: createClient, createAdb: createAdb, errorMessage: errorMessage,
+    phaseLabel: phaseLabel, adbRecoverable: adbRecoverable };
 })(window);

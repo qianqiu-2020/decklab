@@ -57,21 +57,21 @@ class DeviceActions:
         transactions = transactions_for(device)
         return response(200, {'operation': transactions.snapshot(), 'input_owner': transactions.ownership()})
 
-    def execute(self, action, payload, device, actor='web', *, on_stage=None):
+    def execute(self, action, payload, device, actor='web', *, on_stage=None, recovery_boot=None):
         from .board_ownership import ownership_for
         ownership = ownership_for(self.manager)
         if ownership is None or not isinstance(payload, dict):
-            return self._execute(action, payload, device, actor, on_stage)
+            return self._execute(action, payload, device, actor, on_stage, recovery_boot)
         client = payload.get('client_id', '') if actor == 'web' else ''
         try:
             with ownership.scope(actor, client, payload.get('execution_lease')):
                 if action not in ('operation-cancel', 'session-close', 'input-release'):
                     ownership.check(device.serial, actor, client)
-                return self._execute(action, payload, device, actor, on_stage)
+                return self._execute(action, payload, device, actor, on_stage, recovery_boot)
         except TransactionError as error:
             return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
 
-    def _execute(self, action, payload, device, actor='web', on_stage=None):
+    def _execute(self, action, payload, device, actor='web', on_stage=None, recovery_boot=None):
         if not isinstance(payload, dict):
             return response(400, {'error': 'JSON object required'})
         if not isinstance(actor, str) or not actor or len(actor) > 80:
@@ -85,7 +85,7 @@ class DeviceActions:
                     from .board_maintenance import maintenance_for
                     maintenance = maintenance_for(self.manager)
                     with maintenance.operation(device.serial) if maintenance is not None else nullcontext():
-                        return self._dispatch(action, payload, device, actor, on_stage)
+                        return self._dispatch(action, payload, device, actor, on_stage, recovery_boot)
                 except TransactionError as error:
                     return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
             if action in ('send', 'probe', 'identify', 'ssh-enable', 'rescue') or (
@@ -96,7 +96,7 @@ class DeviceActions:
                     return response(error.status, {'ok': False, 'error': str(error), 'code': error.code})
             return self._dispatch(action, payload, device, actor, on_stage)
 
-    def _dispatch(self, action, payload, d, actor, on_stage=None):
+    def _dispatch(self, action, payload, d, actor, on_stage=None, recovery_boot=None):
         if action == 'probe-settings':
             # Persisting a command changes future identity probes. This is a
             # human configuration operation, never delegated by an AI grant.
@@ -258,6 +258,8 @@ class DeviceActions:
         if action == 'adb-connect':
             import subprocess
             from .adb_session import connect
+            if recovery_boot:
+                stage_options['recovery_boot'] = recovery_boot
             try:
                 session = connect(self.manager, d, payload, actor, **stage_options)
             except ConnectionError as error:
@@ -351,6 +353,8 @@ class DeviceActions:
                         or type(payload.get('automatic', False)) is not bool
                         or type(payload.get('presentation', False)) is not bool):
                     return response(400, {'error': 'bad serial terminal dimensions or offset'})
+                if rows < 5 and (payload.get('automatic') or payload.get('presentation')):
+                    return response(200, {'ok': True, 'skipped': True})
                 try:
                     if payload.get('presentation') is True:
                         return response(200, d.terminal.presentation(cols, rows))

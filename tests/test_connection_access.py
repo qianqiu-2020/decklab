@@ -94,6 +94,16 @@ class ConnectionAccessTests(unittest.TestCase):
             token, _ = fixture.grant_store.issue('device', device.serial)
             query = {'key': device.key, 'serial': device.serial,
                      'connection_id': device.connection_id, 'adb_binding': '1'}
+            start = {k: v for k, v in query.items() if k != 'adb_binding'}
+            start['adb_discovery'] = 'start'
+            with mock.patch.object(fixture.manager.adb_discovery, 'start', return_value='round') as scan:
+                self.assertEqual(api_request(fixture.url, '/api/hardware', token, query=start),
+                                 (200, {'adb_scan': 'round', 'key': device.key}))
+                self.assertEqual(api_request(fixture.url, '/api/hardware', fixture.token, query=start)[0], 403)
+                self.assertEqual(api_request(fixture.url, '/api/hardware', token, query=dict(start, serial='other'))[0], 403)
+                scan.assert_called_once()
+            self.assertEqual(api_request(fixture.url, '/api/hardware', token,
+                                         query=dict(query, adb_scan='unknown'))[0], 409)
             with mock.patch('decklab_core.board_cases.adb_binding', return_value={'serial': device.serial}) as read:
                 status, data = api_request(fixture.url, '/api/hardware', token, query=query)
                 self.assertEqual(status, 200, data)

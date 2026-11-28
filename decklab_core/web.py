@@ -238,20 +238,48 @@ class Handler(LegacyRequest, http.server.BaseHTTPRequestHandler):
                 return self._json(getattr(error, 'status', 503), {'error': str(error) if isinstance(error, TaskError) else '镜像商店暂不可用'})
 
         if route == '/api/team-test-cases':
-            if self.headers.get('X-DeckLab-Actor', 'web') != 'web':
-                return self._json(403, {'error': '团队用例仅限主访问身份'})
+            agent = self.headers.get('X-DeckLab-Actor', 'web') != 'web'
             from .team_cases import TeamCases
             try:
                 platform = TeamCases.configured()
+                if (q.get('view') or [''])[0] == 'round':
+                    from .team_run import round_evidence
+                    device = self._dev(q)
+                    if not device or not device.serial or q.get('serial') != [device.serial]:
+                        raise TaskError('请选择原任务的板卡', 404)
+                    evidence = round_evidence(self.manager.tasks.store, device, platform,
+                        (q.get('task_id') or [''])[0], TeamCases.number((q.get('round') or [''])[0]),
+                        self.headers.get('X-DeckLab-Actor', 'web'))
+                    return self._json(200, evidence)
                 if not platform:
                     return self._json(200, {'configured': False})
-                result = platform.browse(q)
-                if q.get('view') == ['detail'] and q.get('key'):
-                    from .team_run import board_mapping
+                view = (q.get('view') or [''])[0]
+                if agent and view not in ('cases', 'detail'):
+                    raise TaskError('Agent 可查询团队用例列表和详情', 403)
+                if agent or view == 'retry' or view == 'detail' and q.get('key'):
+                    from .team_run import board_mapping, retry_context
                     device = self._dev(q)
                     if not device or not device.present or not device.serial or q.get('connection_id') != [device.connection_id]:
                         raise TaskError('当前板卡连接已变化', 409)
-                    result['mapped'] = board_mapping(platform, device.serial) is not None
+                    mapped = board_mapping(platform, device.serial) is not None
+                    if agent and not mapped:
+                        raise TaskError('当前板卡尚未接入 TitanX 工位', 403)
+                    if view == 'retry':
+                        ref = {key: (q.get(key) or [''])[0] for key in ('plan_id', 'job_id', 'record_id')}
+                        origin = retry_context(platform, device.serial, ref)
+                        result = platform.browse({'view': ['detail'], 'id': [str(origin['case_id'])]})
+                        result['retry_of'] = origin
+                        result['adb_receipts'] = self.manager.tasks.store.titanx_case_receipts(
+                            device.serial, origin['job_id'], result['case']['code'], origin['round'])
+                        result['ssh_receipts'] = self.manager.tasks.store.titanx_case_receipts(
+                            device.serial, origin['job_id'], result['case']['code'], origin['round'], 'ssh-command')
+                        result['serial_receipts'] = self.manager.tasks.store.titanx_case_receipts(
+                            device.serial, origin['job_id'], result['case']['code'], origin['round'], 'serial-command')
+                    else:
+                        result = platform.browse(q)
+                    result['mapped'] = mapped
+                else:
+                    result = platform.browse(q)
                 return self._json(200, result)
             except TaskError as error:
                 return self._json(error.status, {'error': str(error)})
@@ -400,11 +428,16 @@ class Handler(LegacyRequest, http.server.BaseHTTPRequestHandler):
                 return self._json(404, {'error': 'no such device'})
             actor = self.headers.get('X-DeckLab-Actor') or 'web'
             hardware = self.manager.hardware
-            if q.get('adb_binding') == ['1']:
+            if q.get('adb_binding') == ['1'] or q.get('adb_discovery') == ['start']:
                 if not q.get('serial', [''])[0] or not q.get('connection_id', [''])[0]:
                     return self._json(400, {'error': 'USB 接线查询需要确认板号和当前连接'})
                 from .board_cases import adb_binding
                 try:
+                    if q.get('adb_discovery') == ['start']:
+                        return self._json(200, {'adb_scan': self.manager.adb_discovery.start()})
+                    if 'adb_scan' in q:
+                        scan = self.manager.adb_discovery.get(q['adb_scan'][0])
+                        return self._json(200, {'adb_binding': adb_binding(self.manager, device, scan)})
                     return self._json(200, {'adb_binding': adb_binding(self.manager, device)})
                 except TaskError as error:
                     return self._json(error.status, {'error': str(error)})
@@ -431,13 +464,17 @@ class Handler(LegacyRequest, http.server.BaseHTTPRequestHandler):
 
         if route == '/api/flash-capabilities':
             target_id = (q.get('target_id') or [None])[0]
+            resolve_target = not target_id and q.get('resolve_target') == ['1']
+            if resolve_target and self.headers.get('X-DeckLab-Connection'):
+                return self._json(403, {'error': '刷机目标查询需要已登记板卡范围的授权'})
             device = self._dev(q) if not target_id else None
             # Flashing belongs to the registered board across UART generations.
             # Connection-scoped grants still fail _dev's explicit generation check.
             self._read_guard = None
             result = FlashActions(self.manager).capabilities(
                 device, self.headers.get('X-DeckLab-Actor') or 'web', target_id,
-                (q.get('target_generation') or [None])[0], (q.get('serial') or [None])[0])
+                (q.get('target_generation') or [None])[0], (q.get('serial') or [None])[0],
+                resolve_target=resolve_target)
             return self._json(result.status, result.payload)
 
         if route == '/api/flash-events':
@@ -485,7 +522,8 @@ class Handler(LegacyRequest, http.server.BaseHTTPRequestHandler):
                 return self._json(404, {'error': 'no such device'})
             result = self._archives().execute(route.removeprefix('/api/'),
                 {key: values[0] for key, values in q.items()}, device,
-                allow_connection_history=not bool(self.headers.get('X-DeckLab-Connection')))
+                allow_connection_history=not bool(self.headers.get('X-DeckLab-Connection')),
+                actor=self.headers.get('X-DeckLab-Actor', 'web'))
             if isinstance(result, ArchiveDownload):
                 return self._download_log(result.path, result.name)
             return self._json(result.status, result.payload)

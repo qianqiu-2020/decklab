@@ -28,7 +28,7 @@ class Element {
 function harness(storage, controls = {}, now = Date.now) {
   const elements = new Map(), requests = [], timers = new Map(); let timer = 0, imageChoice, imagePicker;
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
-  get('fl-setup').children = ['fl-preview-overall', 'fl-image-section', 'fl-connect', 'fl-fast', 'fl-tuning'].map(get);
+  get('fl-setup').children = ['fl-preview-overall', 'fl-image-section', 'fl-connect', 'fl-fast'].map(get);
   get('fl-mode').value = 'full'; get('fl-verify').value = 'none';
   const Clock = class extends Date { static now() { return now(); } };
   const sandbox = {document: {createElement: () => new Element()}, Uint8Array, Date: Clock, Math, URL,
@@ -1017,10 +1017,10 @@ test('lost flash submission locks start and queries original request rather than
 test('stale capabilities and events cannot replace a different board panel', async () => {
   const h = harness(); h.api.open(board); const old = h.take('/api/flash-capabilities');
   h.api.open({key: 'board-2', serial: 'SN-2', label: 'Second'}); const next = h.take('/api/flash-capabilities');
-  next.resolve({...capabilities, profile: 'second-profile'}); await drain(); h.take('/api/tasks').resolve({tasks: []}); await drain();
-  old.resolve({...capabilities, profile: 'old-profile'}); await drain();
-  assert.match(h.get('fl-connections').textContent, /second-profile/);
-  assert.doesNotMatch(h.get('fl-connections').textContent, /old-profile/);
+  next.resolve({...capabilities, artifacts:[{...artifact, name:'second-board.img'}]}); await drain(); h.take('/api/tasks').resolve({tasks: []}); await drain();
+  old.resolve({...capabilities, artifacts:[{...artifact, name:'old-board.img'}]}); await drain();
+  assert.match(h.get('fl-artifact').textContent, /second-board/);
+  assert.doesNotMatch(h.get('fl-artifact').textContent, /old-board/);
 });
 
 test('unknown live layout explicitly prepares once then previews selected writes in the original task', async () => {
@@ -1472,8 +1472,7 @@ test('automatic primary-GPT capacity and missing readback remain explicit capabi
     capacity_source: 'gpt-header', capacity_verified: false, verify: false, partitions: [{name:'ESP', offset:512, size:1024}]}]}}); await drain();
   assert.equal(h.get('fl-storage-details').hidden, false);
   assert.match(h.get('fl-live-gpt').textContent, /ESP/);
-  assert.match(h.get('fl-connections').textContent, /现场主 GPT.*容量尚未独立核验/);
-  assert.match(h.get('fl-connections').textContent, /不支持写后回读校验/);
+  assert.match(h.get('fl-verify').title, /不支持写后回读校验/);
   assert.match(h.get('fl-target-storage').textContent, /GPT 声明，容量待核验/);
   assert.equal(required.disabled, true);
   assert.equal(h.get('fl-verify').value, 'none');
@@ -1496,7 +1495,7 @@ for (const supported of [true, false]) test('BootROM image preparation is explic
   assert.equal(h.get('fl-mode').disabled, true);
   assert.equal(h.get('fl-files').disabled, false);
   assert.match(h.get('fl-status').textContent, /BootROM.*不写存储/);
-  assert.match(h.get('fl-connections').textContent, /回读支持待确认/);
+  assert.match(h.get('fl-verify').title, /回读支持待确认/);
   assert.match(h.get('fl-partition-setup-note').textContent, /选择待刷镜像.*预览刷机准备步骤/);
   h.get('fl-artifact').value = artifact.id; h.get('fl-artifact').emit('change');
   assert.equal(h.get('fl-plan').disabled, false);
@@ -1678,16 +1677,15 @@ test('unavailable USB connection shows its diagnostic and unknown readback witho
     reason:'target-unavailable', diagnostic:'flush read error: -1', can_upload:true,
     storages:[], modes:['partitions'], readback_supported:false, artifacts:[artifact]}}); await drain();
   assert.match(h.get('fl-status').textContent, /无法打开 USB 下载连接/);
-  assert.match(h.get('fl-connections').textContent, /flush read error: -1/);
-  assert.match(h.get('fl-connections').textContent, /回读支持待确认/);
-  assert.doesNotMatch(h.get('fl-connections').textContent, /已进入下载模式|不支持写后回读/);
+  assert.match(h.get('fl-status').textContent, /flush read error: -1/);
+  assert.match(h.get('fl-verify').title, /回读支持待确认/);
+  assert.doesNotMatch(h.get('fl-status').textContent, /已进入下载模式|不支持写后回读/);
   assert.match(h.get('fl-partition-setup-note').textContent, /USB 连接尚未就绪/);
   h.get('fl-artifact').value=artifact.id; h.get('fl-artifact').emit('change');
   assert.equal(h.get('fl-plan').disabled,true);
   assert.equal(h.get('fl-start').disabled,true);
   assert.equal(h.get('fl-files').disabled,false);
-  const raw=h.get('fl-connections').children.find(node=>node.textContent==='flush read error: -1');
-  assert.equal(Object.hasOwn(raw.dataset,'i18nIgnore'),true);
+  assert.equal(h.get('fl-discover').hidden,false);
 });
 
 test('URL import runs on backend and only a completed sealed image becomes selectable', async () => {
@@ -2060,11 +2058,15 @@ async function confirmDownload(h, button, detectedCapabilities = usbCapabilities
   h.get(button).click();
   h.take('/api/flash-discover').resolve({targets:[otherUSB]}); await drain();
   h.take('/api/hardware').resolve({actions:['enter-download'],wiring:{revision:'revision-2'}}); await drain();
-  assert.equal(h.get('fl-reenter-dialog').open,true);
-  assert.match(h.get('fl-reenter-board').textContent, new RegExp(board.serial));
-  assert.match(h.get('fl-reenter-description').textContent,/重启此板/);
-  assert.equal(h.requests.some(r=>['/api/task-start','/api/flash-plan','/api/flash-stream'].includes(r.url)),false);
-  h.get('fl-reenter-submit').click(); h.get('fl-reenter-submit').click(); await drain();
+  if (button === 'fl-prepare-board') {
+    assert.ok(!h.get('fl-reenter-dialog').open);
+  } else {
+    assert.equal(h.get('fl-reenter-dialog').open,true);
+    assert.match(h.get('fl-reenter-board').textContent, new RegExp(board.serial));
+    assert.match(h.get('fl-reenter-description').textContent,/重启此板/);
+    assert.equal(h.requests.some(r=>['/api/task-start','/api/flash-plan','/api/flash-stream'].includes(r.url)),false);
+    h.get('fl-reenter-submit').click(); h.get('fl-reenter-submit').click(); await drain();
+  }
   const control = h.take('/api/task-start');
   assert.equal(control.payload.kind,'hardware-enter-download');
   assert.equal(control.payload.serial,board.serial);
@@ -2096,6 +2098,22 @@ test('device fast flash enters download and submits exactly one stream with one 
   assert.equal(h.requests.some(r => r.payload),false);
 });
 
+test('a rejected streaming archive carries its original URL into standard flashing', async () => {
+  const h = harness(), checksum = 'a'.repeat(64);
+  const failed = {id:'stream-order',kind:'flash',state:'failed',error:'镜像布局不支持极速刷机: stream-layout-order',
+    flash:{operation:'stream',write_result:'not-started',source_url:'https://images.example/os.tar.gz',source_sha256:checksum}};
+  h.api.open(scopedUSB,failed,null,'fast'); await drain();
+  assert.equal(h.get('fl-stream-use-normal').hidden,false);
+  h.get('fl-stream-use-normal').click();
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-target').resolve({target:scopedUSB,capabilities:usbCapabilities}); await drain();
+  const download = h.take('/api/image-download');
+  assert.equal(download.payload.url,failed.flash.source_url);
+  assert.equal(download.payload.sha256,checksum);
+  assert.equal(h.get('flash-dialog').dataset.flow,'normal');
+  assert.equal(h.requests.some(r=>r.url==='/api/flash-stream'||r.url==='/api/task-start'),false);
+});
+
 test('device RAM boot keeps the chosen image through download mode and starts on one confirmation', async () => {
   const h = harness(); await openWithoutUSB(h,'ram');
   const os = {...artifact, name:'Debian-K3.tar.gz'};
@@ -2109,14 +2127,14 @@ test('device RAM boot keeps the chosen image through download mode and starts on
   assert.equal(h.requests.some(r => r.payload),false);
 });
 
-test('ordinary flash enters download and reads storage without a write plan', async () => {
+test('ordinary flash enters download on a single click and reads storage without a write plan', async () => {
   const h = harness(); await openWithoutUSB(h,'normal');
   assert.equal(h.get('fl-setup').children[1], h.get('fl-connect'));
   assert.equal(h.get('fl-board-name').textContent, board.label || board.key);
   assert.match(h.get('fl-board-identity').textContent, new RegExp(board.serial));
   assert.equal(h.get('fl-prepare-board').hidden, false);
   assert.equal(h.get('fl-prepare-board').disabled, false);
-  assert.equal(h.get('fl-prepare-board').textContent,'进入下载模式并读取设备存储');
+  assert.equal(h.get('fl-prepare-label').textContent,'进入下载模式');
   assert.doesNotMatch(h.get('fl-status').textContent, /可由 DeckLab/);
   await confirmDownload(h,'fl-prepare-board');
   const read = h.take('/api/task-start');
@@ -2127,18 +2145,18 @@ test('ordinary flash enters download and reads storage without a write plan', as
   assert.equal(h.requests.some(r => r.payload),false);
 });
 
-test('partition mode offers storage read in place and confirms before entering download mode', async () => {
+test('partition mode keeps the same download shortcut next to the board', async () => {
   const h = harness();
   await openWithoutUSB(h, 'normal', {...capabilities, storages:[]});
   h.get('fl-mode').value = 'partitions';
   h.get('fl-mode').emit('change');
   assert.equal(h.get('fl-partition-setup').hidden, false);
   assert.equal(h.get('fl-partition-list').hidden, true);
-  assert.equal(h.get('fl-prepare-board').hidden, true);
+  assert.equal(h.get('fl-prepare-board').hidden, false);
   assert.equal(h.get('fl-plan').hidden, true);
-  assert.equal(h.get('fl-partition-read').textContent, '进入下载模式并读取设备存储');
+  assert.equal(h.get('fl-partition-read').hidden, true);
   assert.equal(h.requests.some(r => r.payload), false);
-  await confirmDownload(h, 'fl-partition-read', {...usbCapabilities, storages:[], chip:'k1',
+  await confirmDownload(h, 'fl-prepare-board', {...usbCapabilities, storages:[], chip:'k1',
     storage_inventory_supported:false});
   const read = h.take('/api/task-start');
   assert.equal(read.payload.kind, 'nor-backup');
@@ -2149,8 +2167,22 @@ test('partition mode offers storage read in place and confirms before entering d
     progress:{phase:'reading-nor'}, flash:{operation:'nor-workspace',write_result:'not-started',k1_nor_only:true}}});
   await drain();
   assert.equal(h.get('fl-partition-read').hidden, true);
+  assert.equal(h.get('fl-prepare-board').hidden, true);
   assert.match(h.get('fl-partition-setup-note').textContent, /正在准备设备并读取分区布局/);
   assert.equal(h.requests.some(r => r.payload), false);
+});
+
+test('the download shortcut checks for an already-connected board before resetting', async () => {
+  const h = harness();
+  await openWithoutUSB(h, 'normal');
+  const target = {...scopedUSB,mode:'loader'};
+  h.get('fl-prepare-board').click();
+  h.take('/api/flash-discover').resolve({targets:[otherUSB,target]}); await drain();
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-target').resolve({target,capabilities:{...usbCapabilities,chip:'k3'}}); await drain();
+  assert.equal(h.take('/api/task-start').payload.kind,'nor-backup');
+  assert.equal(h.get('fl-prepare-board').hidden,true);
+  assert.equal(h.requests.some(r=>r.url.startsWith('/api/hardware') || r.url==='/api/task-start'),false);
 });
 
 test('normal preview asks before reset and resumes preview for the original image and USB target', async () => {
@@ -2210,9 +2242,7 @@ test('ordinary flash without remote control exposes binding and starts no board 
   h.take('/api/tasks').resolve({tasks:[]}); await drain();
   h.take('/api/flash-discover').resolve({targets:[]}); await drain();
   h.take('/api/hardware').resolve({actions:[]}); await drain();
-  h.get('fl-prepare-board').click();
-  h.take('/api/flash-discover').resolve({targets:[]}); await drain();
-  h.take('/api/hardware').resolve({actions:[]}); await drain();
+  assert.equal(h.get('fl-prepare-board').hidden,true);
   assert.ok(!h.get('fl-reenter-dialog').open);
   assert.equal(h.get('fl-fast-connect').hidden,false);
   assert.equal(h.get('fl-fast-bind').hidden,false);
@@ -2255,8 +2285,11 @@ test('a pre-write loader failure can re-enter download without leaving the flash
   probe.resolve({target:fresh,capabilities:usbCapabilities}); await drain();
   assert.equal(h.get('flash-dialog').open,true);
   assert.equal(h.get('fl-artifact').value,artifact.id);
-  assert.match(h.get('fl-status').textContent,/已重新进入下载模式/);
-  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+  assert.match(h.get('fl-status').textContent,/正在读取 NOR 和系统盘信息/);
+  const resumed = h.take('/api/task-start');
+  assert.equal(resumed.payload.kind,'nor-backup');
+  assert.equal(resumed.payload.target_generation,fresh.target_generation);
+  assert.notEqual(resumed.payload.inventory_only,true);
 });
 
 test('re-entry is only offered with a supported control and a confirmed no-write result', async () => {
@@ -2282,12 +2315,12 @@ test('a failed storage read can redetect the board in place without resetting or
   await openWithoutUSB(h,'normal');
   h.get('fl-cache').click(); h.chooseImage(artifact);
   await confirmDownload(h,'fl-prepare-board');
-  const error = {id:'storage-failure',kind:'flash',state:'failed',error:'flashing executor reported failure: protocol-failed',
-    progress:{phase:'reading-system-layout'},flash:{operation:'nor-workspace',write_result:'not-started'}};
+  const error = {id:'storage-failure',kind:'flash',state:'failed',error:'flashing executor reported failure（诊断 123456789abc）: target-not-found',
+    progress:{phase:'reading-system-metadata'},flash:{operation:'nor-workspace',write_result:'not-started',nor_before:norBackup}};
   h.take('/api/task-start').resolve({task:error}); await drain();
   h.take('/api/flash-events').resolve({events:[],details:error.flash}); await drain();
   assert.equal(h.get('flash-dialog').dataset.stage,'setup');
-  assert.match(h.get('fl-task-status').textContent,/protocol-failed/);
+  assert.match(h.get('fl-task-status').textContent,/读取系统盘版本信息.*已读完 NOR.*8388608 B.*本次未写盘.*重新检测设备.*123456789abc/);
   assert.equal(h.get('fl-new').hidden,false);
   assert.equal(h.get('fl-new').textContent,'重新检测设备');
   h.get('fl-new').click();
@@ -2302,6 +2335,17 @@ test('a failed storage read can redetect the board in place without resetting or
   assert.equal(h.get('flash-dialog').open,true);
   assert.equal(h.get('fl-read-nor').disabled,false);
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+});
+
+test('losing the USB target while writing does not suggest retrying an unknown write', async () => {
+  const h = harness();
+  const failure = {...norReady,state:'failed',progress:{phase:'writing-gpt'},
+    error:'找不到本次操作绑定的 USB 刷机设备（诊断 123456789abc）: target-not-found',
+    flash:{...norReady.flash,write_result:'partial-or-unknown',recovery_required:true}};
+  h.api.open(norTarget,failure); await drain();
+  assert.match(h.get('fl-task-status').textContent,/写入系统盘分区表.*原 USB.*写入结果需要核对.*恢复占用.*123456789abc/);
+  assert.doesNotMatch(h.get('fl-task-status').textContent,/本次未写盘|重新检测设备/);
+  assert.equal(h.get('fl-new').hidden,true);
 });
 
 test('a matching USB target already in download mode bypasses hardware control', async () => {
@@ -2404,28 +2448,45 @@ test('a physical USB and UART mismatch stops the one-click flow before reset or 
   assert.equal(h.requests.length,0);
 });
 
-test('benchmarks skip disk selection by default and send the disk chosen for a write test', async () => {
-  for (const measureWrite of [false, true]) {
-    const h = harness();
-    h.api.open(norTarget);
-    h.take('/api/tasks').resolve({tasks:[]}); await drain();
-    h.take('/api/flash-target').resolve({target:norTarget, capabilities:{...capabilities,calibrate_supported:true}});
-    await drain();
-    assert.equal(h.get('fl-tuning-storage-field').hidden, true);
-    h.get('fl-target-storage').value = 'scsi:0';
-    if (measureWrite) {
-      h.get('fl-tuning-write').checked = true; h.get('fl-tuning-write').emit('change');
-      assert.equal(h.get('fl-tuning-storage-field').hidden, false);
-      h.get('fl-tuning-storage').value = 'nvme:0'; h.get('fl-tuning-storage').emit('input');
-    }
-    h.get('fl-tuning-run').click();
-    const {payload} = h.take('/api/flash-calibrate');
-    assert.equal(payload.measure_write, measureWrite);
-    assert.equal(payload.system_storage, measureWrite ? 'nvme:0' : 'auto');
-  }
+test('downloading an image and reading the board keep independent progress', async () => {
+  const h = harness();
+  const target = {...norTarget, mode:'loader',chip:'k3',serial:'SN-K3'};
+  h.api.open(target);
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-target').resolve({target,capabilities:{...capabilities,chip:'k3',nor_workspace_supported:true,storage_inventory_supported:true}}); await drain();
+  const read = {...norReady,id:'storage-read',progress:{phase:'reading-nor',done:64,total:128},
+    flash:{operation:'nor-workspace',write_result:'not-started',request_serial:target.serial}};
+  h.take('/api/task-start').resolve({task:read}); await drain();
+  const pollRead = [...h.timers.values()].pop();
+
+  h.get('fl-url').value = 'https://images.example/board.ext4';
+  h.get('fl-download').click();
+  const download = {id:'image-download',kind:'image-download',state:'running'};
+  h.take('/api/image-download').resolve({task:download}); await drain();
+  h.take('/api/task?id=image-download').resolve({task:{...download,progress:{done:128,total:512}}}); await drain();
+  const pollDownload = [...h.timers.values()].pop();
+  assert.equal(h.get('fl-image-transfer').hidden,false);
+  assert.equal(h.get('fl-execution').hidden,true);
+  assert.match(h.get('fl-image-transfer-text').textContent,/下载镜像到控制机.*25%/);
+  assert.match(h.get('fl-read-status').textContent,/读取整片 NOR.*50%/);
+
+  pollRead();
+  h.take('/api/task?id=storage-read').resolve({task:{...read,progress:{phase:'reading-system-metadata',done:32,total:128}}}); await drain();
+  assert.equal(h.get('fl-image-transfer').hidden,false);
+  assert.equal(h.get('fl-execution').hidden,true);
+  assert.match(h.get('fl-image-transfer-text').textContent,/下载镜像到控制机.*25%/);
+  assert.match(h.get('fl-read-status').textContent,/读取系统盘版本信息.*25%/);
+
+  pollDownload();
+  const artifact = {id:'downloaded-image',name:'board.ext4',size:512,sha256:'a'.repeat(64),state:'ready'};
+  h.take('/api/task?id=image-download').resolve({task:{...download,state:'completed',result:{artifact}}}); await drain();
+  assert.equal(h.get('fl-image-transfer').hidden,true);
+  assert.equal(h.get('fl-execution').hidden,true);
+  assert.equal(h.get('fl-artifact').value,artifact.id);
+  assert.match(h.get('fl-read-status').textContent,/读取系统盘版本信息.*25%/);
 });
 
-test('selecting a K3 lists physical disks before preview, keeps the picker usable, and submits the selected disk', async () => {
+test('opening a K3 in download mode reads storage while the user selects an image', async () => {
   const h = harness();
   const target = {...norTarget, mode:'loader',chip:'k3',serial:'SN-K3'};
   const caps = {...capabilities,chip:'k3',nor_workspace_supported:true,storage_inventory_supported:true};
@@ -2433,36 +2494,42 @@ test('selecting a K3 lists physical disks before preview, keeps the picker usabl
   h.take('/api/tasks').resolve({tasks:[]}); await drain();
   h.take('/api/flash-target').resolve({target, capabilities:caps}); await drain();
   const read = h.take('/api/task-start');
-  assert.equal(read.payload.inventory_only, true);
+  assert.equal(read.payload.kind, 'nor-backup');
+  assert.equal(read.payload.inventory_only, undefined);
   assert.equal(read.payload.read_system, true);
   assert.equal(read.payload.artifact_id, undefined);
-  const running = {kind:'flash',id:'disk-list',state:'running',flash_targets:[{target_id:target.target_id,generation:target.target_generation}],
-    flash:{operation:'storage-inventory',write_result:'not-started',request_serial:target.serial}};
+  const running = {...norReady,id:'auto-storage-read',progress:{phase:'backing-up-nor'},
+    flash:{operation:'nor-workspace',write_result:'not-started',request_serial:target.serial}};
   read.resolve({task:running}); await drain();
+  assert.equal(h.get('fl-read-nor').hidden,true);
+  assert.equal(h.get('fl-read-status').hidden,false);
   assert.equal(h.get('fl-cache').disabled,false);
+  assert.equal(h.get('fl-files').disabled,false);
+  assert.equal(h.get('fl-url').disabled,false);
   h.get('fl-cache').click();
+  h.chooseImage({id:'os-disk',name:'os.tar.gz',size:1024, preparation_task:{id:'os-disk-preparation',state:'completed',result:{
+    preparation:{layout_version:2,catalogue:[{format:'gpt',name:'partition_universal.json'}]}}}});
+  assert.equal(h.get('fl-artifact').value,'os-disk');
+  assert.equal(h.get('fl-plan').disabled,true);
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'||r.url==='/api/flash-selection'),false);
+
   const poll = [...h.timers.values()].pop(); poll();
-  const updated = {...target,target_generation:'loader-after-listing'};
   const inventory = {default_storage:'scsi:0',storages:['scsi:0','nvme:0'].map(id=>({id,size:128000000000,capacity_verified:true}))};
-  h.take('/api/task?id=disk-list').resolve({task:{...running,state:'completed',result:{target_generation:updated.target_generation},
-    flash:{...running.flash, storage_inventory:inventory}}}); await drain();
-  h.take('/api/flash-discover').resolve({targets:[updated]}); await drain();
-  h.take('/api/flash-target').resolve({target:updated,capabilities:caps}); await drain();
-  h.chooseImage({id:'os-disk',name:'os.tar.gz',size:1024});
+  h.take('/api/task?id=auto-storage-read').resolve({task:{...norReady,id:running.id,
+    flash:{...norReady.flash,storage_inventory:inventory}}}); await drain();
   const disk=h.get('fl-target-storage');
+  assert.equal(h.get('fl-artifact').value,'os-disk');
+  assert.equal(h.get('fl-storage-details').open,true);
+  assert.equal(h.get('fl-system').hidden,false);
+  assert.equal(h.get('fl-nor-medium').hidden,false);
   assert.equal(disk.value,''); assert.equal(h.get('fl-target-storage-field').hidden,false);
   assert.match(disk.textContent,/SSD.*UFS|UFS.*SSD/);
-  assert.equal(h.get('fl-status').textContent,'请选择目标系统盘');
-  assert.equal(h.get('fl-plan').disabled,true);
+  assert.equal(h.get('fl-select').disabled,true);
   disk.value='nvme:0';disk.emit('change');
-  h.get('fl-plan').click();
-  const preview=h.take('/api/flash-plan');
+  const preview=h.take('/api/flash-selection');
   assert.equal(preview.payload.target_storage,'nvme:0');
-  assert.equal(preview.payload.target_generation,updated.target_generation);
-  preview.resolve({plan:{id:'os-nvme',writes:[{storage:'nvme:0',partition:'rootfs',size:512}]}});
-  await drain();
-  const media=h.get('fl-preview').children.filter(el=>el.className==='fl-projection');
-  assert.ok(media.some(el=>el.textContent.includes('UFS / SCSI · scsi:0本次保留')));
+  assert.equal(preview.payload.id,running.id);
+  assert.equal(preview.payload.preview,true);
   assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
 });
 
@@ -2477,7 +2544,7 @@ test('unified storage read starts once from full mode and requests system metada
   h.get('fl-read-nor').click();assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
 });
 
-test('K1 NOR read switches from full mode to partition selection with mandatory verification', async () => {
+test('K1 NOR reads automatically on entering partition mode and requires verification', async () => {
   const h = harness();
   h.api.open(norTarget);
   h.take('/api/tasks').resolve({tasks:[]}); await drain();
@@ -2487,12 +2554,27 @@ test('K1 NOR read switches from full mode to partition selection with mandatory 
   assert.equal(h.get('fl-mode').value, 'full');
   assert.equal(h.get('fl-read-nor').hidden, false);
   assert.equal(h.get('fl-read-nor').textContent, '读取并备份 NOR');
-  h.get('fl-read-nor').click();
+  assert.equal(h.requests.some(r=>r.url==='/api/task-start'),false);
+  h.get('fl-mode').value = 'partitions';
+  h.get('fl-mode').emit('change');
   const request = h.take('/api/task-start');
   assert.equal(request.payload.kind, 'nor-backup');
   assert.equal('read_system' in request.payload, false);
   assert.equal(h.get('fl-mode').value, 'partitions');
   assert.equal(h.get('fl-verify').value, 'required');
+});
+
+test('choosing an individual K1 payload also starts the NOR read', async () => {
+  const h = harness();
+  h.api.open(norTarget);
+  h.take('/api/tasks').resolve({tasks:[]}); await drain();
+  h.take('/api/flash-target').resolve({target:norTarget,capabilities:{...capabilities,
+    chip:'k1',nor_workspace_supported:true,preparable:true}}); await drain();
+  h.get('fl-cache').click();
+  h.chooseImage({id:'opensbi',name:'opensbi.itb',size:512});
+  assert.equal(h.get('fl-mode').value,'partitions');
+  assert.equal(h.get('fl-artifact').value,'opensbi');
+  assert.equal(h.take('/api/task-start').payload.kind,'nor-backup');
 });
 
 test('system storage metadata uses the proven default and changing views never changes write selections', async () => {

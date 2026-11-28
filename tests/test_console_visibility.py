@@ -80,6 +80,20 @@ class ConsoleVisibilityTests(unittest.TestCase):
             login.assert_not_called()
             run.assert_called_once_with('echo adbd=running', 5, ensure_shell=False)
 
+    def test_archive_failure_and_recovery_are_separate_from_uart_output(self):
+        device = self.device
+        received = device.bytes
+        with mock.patch.object(device.log, 'opener', side_effect=OSError('disk full')):
+            device.append(b'live-only\r\n')
+        device.append(b'archive-resumed\r\n')
+        events = list(device.capture_events)
+        self.assertEqual([event['event'] for event in events],
+                         ['serial-archive-write-failed', 'serial-archive-write-resumed'])
+        self.assertEqual(events[0]['received'], received)
+        self.assertEqual(events[1]['received'], received + len(b'live-only\r\n'))
+        self.assertIn(b'live-only\r\narchive-resumed', device.buf)
+        self.assertNotIn('live-only', self.archive())
+
     def test_setup_echo_is_hidden_but_geometry_raw_capture_and_user_commands_remain(self):
         def write(text):
             geometry = b'\x1b[8;52;205t' if text.startswith('stty ') else b''

@@ -9,6 +9,16 @@ from urllib.parse import urlsplit
 from .tasks import TaskError
 
 
+def execution_flags(item):
+    automated = item.get('isAutomated') is True and item.get('isAutomationCompleted') is True
+    status = item.get('reviewStatus')
+    # TitanX: pending, in review, passed, rejected.
+    if type(status) is not int or status not in (0, 1, 2, 3):
+        status = None
+    return {'automated': automated, 'reviewed': status == 2, 'review_status': status,
+            'runnable': automated and status in (0, 1, 2)}
+
+
 class TeamCases:
     def __init__(self, origin, token):
         try:
@@ -85,8 +95,7 @@ class TeamCases:
             if not isinstance(data['list'], list) or type(data['total']) is not int:
                 raise ValueError
             cases = [{'id': item['id'], 'name': item['caseName'], 'code': item['caseCode'],
-                      'automated': item.get('isAutomated') is True and item.get('isAutomationCompleted') is True,
-                      'reviewed': item.get('reviewStatus') == 2} for item in data['list']]
+                      **execution_flags(item)} for item in data['list']]
             return {'configured': True, 'page': int(page), 'page_size': 20, 'total': data['total'], 'cases': cases}
         except (TypeError, KeyError, ValueError) as error:
             raise TaskError('测试平台返回了无效的用例目录', 502) from error
@@ -120,9 +129,8 @@ class TeamCases:
             if case['id'] != key or any(s['caseId'] != key for s in steps):
                 raise ValueError
             return {'configured': True, 'case': {
-                'id': key, 'name': case['caseName'], 'code': case['caseCode'],
-                'automated': case.get('isAutomated') is True and case.get('isAutomationCompleted') is True,
-                'reviewed': case.get('reviewStatus') == 2, 'prerequisite': case.get('testPreCondition') or '',
+                'id': key, 'name': case['caseName'], 'code': case['caseCode'], 'script_url': case.get('scriptUrl') or '',
+                **execution_flags(case), 'prerequisite': case.get('testPreCondition') or '',
                 'steps': [{'command': s['stepInfo'], 'expected': s['expectedResult']} for s in steps]}}
         except TaskError:
             raise

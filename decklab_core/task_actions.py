@@ -11,7 +11,7 @@ from .flash_tasks import FlashActions
 
 
 class TaskActions:
-    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'adb-connect', 'file-copy', 'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test', 'adb-command')) | frozenset(
+    kinds = frozenset(('identify', 'ssh-enable', 'ssh-connect', 'adb-connect', 'file-copy', 'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test', 'adb-command', 'ssh-command', 'serial-command')) | frozenset(
         'hardware-' + action for action in ACTIONS)
 
     def __init__(self, manager):
@@ -33,8 +33,11 @@ class TaskActions:
                 raise TaskError('unsupported task kind')
             if not isinstance(actor, str) or not actor or len(actor) > 80:
                 raise TaskError('invalid task actor')
-            if kind == 'adb-command':
-                from .adb_tasks import start
+            if kind in ('adb-command', 'ssh-command', 'serial-command'):
+                if kind in ('adb-command', 'ssh-command'):
+                    from .adb_tasks import start
+                else:
+                    from .serial_tasks import start
                 self.tasks._check_actor(actor)
                 return response(202, {'ok': True, 'task': start(self.manager, device, payload, actor)})
             if kind == 'board-test':
@@ -53,6 +56,24 @@ class TaskActions:
                 return FlashActions(self.manager).start(payload, device, actor)
             self.tasks._check_actor(actor)
             request_id, input_digest = payload.get('request_id'), None
+            recovery_boot = None
+            if 'recover_from' in payload:
+                from .board_cases import BOOT_ID
+                original_id = payload['recover_from']
+                if (kind != 'adb-connect' or actor != 'web' or not isinstance(original_id, str)
+                        or not re.fullmatch(r'[0-9a-f]{24}', original_id)):
+                    raise TaskError('无效的 ADB 恢复请求', 403)
+                original = self.tasks.store.get(original_id)
+                if (not original or original['kind'] != 'adb-connect' or original['state'] != 'failed'
+                        or not device.serial or payload.get('serial') != device.serial
+                        or not any(target['serial'] == device.serial and target['connection_id'] == device.connection_id
+                                   for target in original['targets'])):
+                    raise TaskError('原 ADB 诊断与当前板卡连接不匹配', 409)
+                recovery_boot = next((step.get('endpoint', '') for step in original['progress'].get('stages', [])
+                                      if step['phase'] == 'adb-usb-transport-closed'), '')
+                if not BOOT_ID.fullmatch(recovery_boot):
+                    raise TaskError('原任务没有可用于恢复的 ADB 断连证据', 409)
+                request_id = 'adb-recovery-' + original_id
             if request_id is not None:
                 from .flash_store import validate_request
                 validate_request(request_id, '0' * 64)
@@ -89,9 +110,18 @@ class TaskActions:
                 transactions.check_owner(actor)
             if kind.startswith('hardware-'):
                 if set(payload) - {'kind', 'key', 'serial', 'connection_id', 'actor', 'client_id', 'request_id',
-                                   'execution_lease', 'wiring_revision'}:
+                                   'execution_lease', 'wiring_revision', 'resolve_flash_target'}:
                     raise TaskError('hardware task accepts only a configured action and target')
-                operation = HardwareOperation(self.manager, device, kind[9:], actor, client)
+                resolve_flash_target = payload.get('resolve_flash_target', False)
+                if type(resolve_flash_target) is not bool or (resolve_flash_target and kind != 'hardware-enter-download'):
+                    raise TaskError('刷机目标检测仅适用于进入下载模式')
+                if resolve_flash_target:
+                    from .board_ownership import ownership_for
+                    owner = ownership_for(self.manager).current(source_serial)
+                    if not owner or owner['state'] != 'active' or not request_id:
+                        raise TaskError('检测下载目标需要当前板卡占用和请求编号', 423)
+                operation = HardwareOperation(self.manager, device, kind[9:], actor, client,
+                                              resolve_flash_target=resolve_flash_target)
                 if 'wiring_revision' in payload and payload['wiring_revision'] != (
                         operation.book.wiring(source_serial) or {}).get('revision', ''):
                     raise TaskError('接线已更新，请重新打开电源与启动并核对槽位', 409)
@@ -148,6 +178,8 @@ class TaskActions:
                 try:
                     with transactions.task_scope(context.cancelled, connection, stop):
                         context.issued()
+                        if recovery_boot:
+                            action_options['recovery_boot'] = recovery_boot
                         result = DeviceActions(self.manager).execute(kind, request, device, actor, **action_options)
                 except TransactionError:
                     context.check()
@@ -184,6 +216,8 @@ class TaskActions:
                     'ok', 'device_key', 'serial', 'hostname', 'ips', 'sshd', 'identity_status',
                     'serial_source', 'sid', 'ip', 'auto_configured', 'already_connected',
                     'ssh_credentials_saved', 'ssh_credentials_note')}
+                if recovery_boot:
+                    output['recover_from'] = request['recover_from']
                 # Preserve a completed result if cancellation races the final response.
                 if start_phase:
                     context.stage('probe-finished' if kind == 'identify' else 'session-ready', done=1, total=1)

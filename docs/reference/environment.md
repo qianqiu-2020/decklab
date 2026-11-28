@@ -198,12 +198,9 @@ root password login. It requires authorization for that board change.
 
 ### Manual root SSH setup
 
-If root password SSH is required, run these steps yourself in the board's serial
-terminal using an account with sudo privileges. Finish each interactive prompt
-before pasting the next command; the UI only provides guidance and never sends
-these commands automatically. With an existing root shell, run `passwd root`,
-edit the file directly with an available editor such as `vi` or `nano`, and omit
-`sudo` from the validation and restart commands.
+For a Debian or Ubuntu board with OpenSSH already running and a usable root password, open its SSH settings and expand the root password login guide. Select the ADB setup button to preview a command for this board, then run it. An authorized USB ADB shell needs no board username or password. The command requires root or passwordless sudo. It checks the candidate sshd policy and reloads the service. It does not change the password. Once the task reports `SSH_CONFIG_OK=1`, connect in SSH settings to verify and save the account for this board.
+
+If ADB is unavailable, use the serial terminal. Log in using the credentials supplied for the installed image, or use a sudo-capable account. Run the following steps individually, waiting for the prompt between them. In an existing root shell use `passwd root` only if a password needs setting, use an editor such as `vi` for the configuration, and omit `sudo` from the commands below.
 
 Set the root password; sudo first asks for the current user's password, then
 passwd asks twice for the new root password:

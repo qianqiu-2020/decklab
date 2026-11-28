@@ -63,6 +63,33 @@ async function until(check, description) {
   await rpc('Emulation.setDeviceMetricsOverride', {width: 1440, height: 960, deviceScaleFactor: 1, mobile: false});
   await until(() => evaluate('document.querySelectorAll(".dev").length === 3'), 'device list');
   await evaluate('DeckLabI18n.setLocale("zh-CN")');
+  await evaluate(`window.stationFetch = window.fetch;
+    window.stationFixture = {configured:false, node_id:'demo-station', boards:[
+      {serial:'DEMO-A',label:'Pico',online:true,project:'K3'},
+      {serial:'DEMO-B',label:'K1',online:true,project:'K1'}]};
+    window.fetch = (url,init) => url === '/api/settings' && JSON.parse(init.body).action === 'titanx-status'
+      ? Promise.resolve(Response.json(stationFixture)) : stationFetch(url,init);
+    DeckLabTitanX.openBoard({serial:'DEMO-A', label:'Pico'});`);
+  await until(() => evaluate('document.querySelectorAll(".tx-pick-board").length === 2'), 'station board picker');
+  assert.deepEqual(await evaluate('Array.from(document.querySelectorAll(".tx-pick-board [type=checkbox]"), x=>x.checked)'), [true,false]);
+  await evaluate(`document.querySelector('#titanx-close').click();
+    window.stationFixture = {configured:true,node_id:'demo-station',lab_id:1,lab_name:'Demo',
+      worker_state:'active',platform_state:'online',first_com:1,revision:'abc',
+      slots:{1:'DEMO-A',2:'DEMO-B'},registered:['DEMO-A','DEMO-B'],
+      applied_slots:{1:'DEMO-A',2:'DEMO-B'},board_states:{'DEMO-A':'idle','DEMO-B':'busy'},
+      connection:{lab_id:1,api_url:'https://example.test',broker:'mqtt.example.test',project:'K3'}};
+    DeckLabTitanX.open();`);
+  await until(() => evaluate('document.querySelectorAll("#titanx-registered li").length === 2'), 'registered station');
+  for (const width of [1440,390]) {
+    await rpc('Emulation.setDeviceMetricsOverride', {width,height:844,deviceScaleFactor:1,mobile:width<500});
+    await evaluate('document.querySelector("#titanx-boards-tab").click()');
+    assert.ok(await evaluate('document.querySelector("#titanx-board-panel").checkVisibility()'));
+    assert.ok(await evaluate('document.querySelector("#titanx-registered").scrollWidth <= document.querySelector("#titanx-registered").clientWidth'));
+    await evaluate('document.querySelector("#titanx-connection-tab").click()');
+    assert.ok(await evaluate('document.querySelector("#titanx-maintenance").checkVisibility() && !document.querySelector("#titanx-maintain-mqtt-auth").open'));
+  }
+  await evaluate('document.querySelector("#titanx-close").click(); window.fetch=window.stationFetch; delete window.stationFixture; delete window.stationFetch;');
+  await rpc('Emulation.setDeviceMetricsOverride', {width:1440,height:960,deviceScaleFactor:1,mobile:false});
   await evaluate('document.querySelector("#b-system-diagnostics").click()');
   await until(() => evaluate('document.querySelector("#diagnostics-body").textContent.includes("日志磁盘剩余")'), 'system diagnostics');
   await evaluate('document.querySelector("#diagnostics-close").click()');

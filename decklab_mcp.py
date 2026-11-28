@@ -310,6 +310,24 @@ class Adapter:
         with self.writing(client):
             return execute(client, command, timeout)
 
+    def team_cases(self, device, name='', page=1, case_id=None, connection_id='', token=None):
+        client = self.client(token, device, connection_id)
+        if case_id is None:
+            return client.get('/api/team-test-cases', view='cases', name=name, page=page)
+        return client.get('/api/team-test-cases', view='detail', id=case_id)
+
+    def team_round(self, device, task_id, round_number, token=None):
+        return self.client(token, device).get('/api/team-test-cases', view='round',
+                                              task_id=task_id, round=round_number)
+
+    def run_team_case(self, device, case_id, request_id, connection_id, rounds=1, token=None):
+        if not request_id or not connection_id:
+            raise ClientError('Use the selected connection_id and a stable request_id')
+        client = self.client(token, device, connection_id, writing=True)
+        with self.writing(client):
+            return client.submit_task('board-test', request_id, source='titanx', case=case_id,
+                                      rounds=rounds, connection_id=client.connection_id)
+
     def start_task(self, device, kind, connection_id='', token=None, request_id=''):
         if kind not in ('identify', 'ssh-connect', 'adb-connect', 'ssh-enable', 'hardware-reset',
                         'hardware-power-on', 'hardware-power-off', 'hardware-enter-download'):
@@ -679,6 +697,29 @@ def create_server(settings, adapter=None):
         """Start one USB ADB shell command on a verified board. Check get_task for the saved command, output, confirmed exit and serial cursor. Command and output enter history. A lost receipt requires observing the original task."""
         return call(ctx, adapter.adb_command, device=device, command=command, request_id=request_id,
                     timeout=timeout, connection_id=connection_id, execution_lease=execution_lease)
+
+    @server.tool(annotations=read_only, structured_output=True)
+    def list_team_test_cases(device: str, ctx: Context, name: str = '', page: int = 1) -> dict[str, Any]:
+        """Search the TitanX case catalogue for a registered board by name. Returns case IDs and execution eligibility."""
+        return call(ctx, adapter.team_cases, device=device, name=name, page=page)
+
+    @server.tool(annotations=read_only, structured_output=True)
+    def get_team_test_case(device: str, case_id: int, ctx: Context) -> dict[str, Any]:
+        """Read the selected case's prerequisites, steps, review status and execution eligibility."""
+        return call(ctx, adapter.team_cases, device=device, case_id=case_id)
+
+    @server.tool(annotations=read_only, structured_output=True)
+    def get_team_test_round(device: str, task_id: str, round_number: int, ctx: Context) -> dict[str, Any]:
+        """Read a round of your TitanX task on this board, including commands, script, output and serial log."""
+        return call(ctx, adapter.team_round, device=device, task_id=task_id, round_number=round_number)
+
+    @server.tool(annotations=write, structured_output=True)
+    def run_team_test_case(device: str, connection_id: str, case_id: int, request_id: str,
+                           ctx: Context, rounds: int = 1) -> dict[str, Any]:
+        """Dispatch one TitanX case for 1–100 rounds on this board. Use connection_id from list_devices.
+        Query get_task with the same request_id after a lost reply. Edge claims the board for the job."""
+        return call(ctx, adapter.run_team_case, device=device, connection_id=connection_id,
+                    case_id=case_id, request_id=request_id, rounds=rounds)
 
     @server.tool(annotations=write, structured_output=True)
     def start_task(device: str, kind: Literal['identify', 'ssh-connect', 'adb-connect', 'ssh-enable', 'hardware-reset',

@@ -9,11 +9,27 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from decklab_core.adb_session import ADBD_DIAGNOSTIC, AdbSession, connect, packet, read_exact, usb_endpoints
+from decklab_core.adb_session import ADBD_DIAGNOSTIC, AdbSession, connect, packet, read_exact, recover_transport, usb_endpoints
 from decklab_core.board_cases import AdbTransportUnavailable
 
 
 class AdbDiagnosisTests(unittest.TestCase):
+    def test_recovery_sends_one_restart_then_waits_for_the_original_boot(self):
+        device = SimpleNamespace(console=Mock())
+        device.console.run_idle_command.return_value = True, 'recovery=acknowledged\n'
+        boot = '12345678-1234-1234-1234-1234567890ab'
+        candidate = ('2-1', '7', {'boot_id': boot})
+        resolve = Mock(side_effect=[AdbTransportUnavailable('offline'), candidate])
+        stage = Mock()
+        with patch('decklab_core.adb_session.time.sleep'):
+            self.assertEqual(recover_transport(device, 'connection', 'fixture', boot, resolve, Mock(), stage), candidate)
+        device.console.run_idle_command.assert_called_once()
+        command = device.console.run_idle_command.call_args.args[0]
+        self.assertIn(boot, command)
+        self.assertEqual(command.count('restart adbd.service'), 1)
+        self.assertEqual(resolve.call_count, 2)
+        stage.assert_any_call('adbd-restart-acknowledged')
+
     def test_web_connect_reports_board_evidence_after_usb_lookup_fails(self):
         registry = SimpleNamespace(lock=threading.Lock(), sessions={}, pending=0)
         device = SimpleNamespace(serial='fixture', connection_id='connection', stop=threading.Event(),

@@ -103,11 +103,19 @@ case "$1" in
           $deferred || echo "decklab: collector started (was not running)"
         fi
         if [ -e /lib/systemd/system/decklab-titanx.path ]; then
-          deb-systemd-helper enable decklab-titanx.path >/dev/null
+          deb-systemd-helper enable decklab-titanx.path decklab-titanx-boards.path >/dev/null
         fi
         service_action restart decklab.service
         if [ -e /lib/systemd/system/decklab-titanx.path ]; then
           service_action restart decklab-titanx.path
+          service_action restart decklab-titanx-boards.path
+          # A running standalone worker can survive the web service restart.
+          # Load the installed Edge when dpkg replaced its executable.
+          edge_pid=$(systemctl show -p MainPID --value decklab-titanx.service)
+          if [ "${edge_pid:-0}" -gt 0 ] && [ -e "/proc/$edge_pid/exe" ] &&
+             ! [ "/proc/$edge_pid/exe" -ef /usr/libexec/decklab/titanx/edge ]; then
+            service_action restart decklab-titanx.service
+          fi
         fi
       fi
       if $deferred; then exit 0; fi

@@ -76,6 +76,65 @@ class BoardOwnershipTests(unittest.TestCase):
         self.owner.release('BOARD-A', 'platform', '', proof)
         self.assertIsNone(self.owner.current('BOARD-A'))
 
+    def test_completed_titanx_plan_keeps_its_result_while_the_board_is_still_reserved(self):
+        from decklab_core import team_run
+
+        serial, connection = self.device.serial, self.device.connection_id
+        mapping = {'code': 'TEST', 'device_id': 'edge:0'}
+        row = {'code': 'TEST', 'deviceId': 'edge:0', 'decklabSerial': serial, 'decklabSlot': 0,
+               'serial': 'usb:2-1', 'state': 'idle', 'project': 'K1'}
+        info, proof = {}, {}
+
+        def request(route, payload=None):
+            if route == '/taskInfo/saveOrUpdate':
+                info.update(payload['taskInfo'], id=23, status=0)
+                return {'id': 23}
+            if route == '/taskInfo/start?taskId=23':
+                proof.update(self.claim())
+                info['status'] = 2
+                return None
+            return {
+                '/deviceBoard/listVO': {'list': [row], 'total': 1},
+                '/userInfo/detail': {'id': 1},
+                '/taskInfo/23': info,
+                '/taskInfo/taskDevice/list/23': [{'deviceId': 'TEST'}],
+                '/taskInfo/taskCase/list/23': [{'id': 42, 'caseId': 5, 'times': 1}],
+                '/taskInfo/listJob/page': {'list': [{'id': 'job-23', 'taskId': 23, 'deviceId': 'TEST'}], 'total': 1},
+                '/task/record/job/job-23': [{'jobId': 'job-23', 'taskCaseId': 42, 'index': 1, 'status': 1}],
+            }[route]
+
+        platform = mock.Mock()
+        platform.request.side_effect = request
+        platform.browse.return_value = {'case': {'name': 'Read-only test', 'runnable': True, 'reviewed': True, 'automated': True}}
+        binding = {'serial': serial, 'connection_id': connection, 'usb_port': '2-1'}
+        with mock.patch.object(team_run.TeamCases, 'configured', return_value=platform), \
+                mock.patch.object(team_run, 'board_mapping', return_value=mapping), \
+                mock.patch.object(team_run, 'adb_binding', return_value=binding):
+            task = team_run.start(self.manager, self.device, {
+                'source': 'titanx', 'serial': serial, 'connection_id': connection, 'case': 5,
+                'rounds': 1, 'request_id': 'handoff-observation',
+            }, 'web')
+            tasks = self.manager.tasks
+            with tasks._lock:
+                worker = tasks._active.get(task['id'])
+            if worker is not None:
+                worker[1].join(5)
+            task = tasks.store.get(task['id'])
+
+        self.assertEqual((task['state'], task['outcome']), ('completed', 'acknowledged'), task['error'])
+        self.assertEqual([(r['round'], r['status'], r['job_id']) for r in task['result']['recent_rounds']], [(1, 'passed', 'job-23')])
+        self.assertEqual(self.owner.current(serial)['id'], proof['id'])
+        with self.assertRaises(TransactionError), self.owner.maintenance.admission(serial, actor='web'):
+            self.fail('maintenance must wait for the execution lease to be released')
+        with mock.patch.object(self.device, '_write', return_value=(True, '')) as write:
+            self.assertEqual(self.actions.execute('send', {'data': 'debug'}, self.device, 'web').status, 423)
+            write.assert_not_called()
+            self.owner.release(serial, 'platform', '', proof)
+            with self.owner.maintenance.admission(serial, actor='web') as resources:
+                self.assertEqual(resources, ['board:' + serial])
+            self.assertEqual(self.actions.execute('send', {'data': 'debug'}, self.device, 'web').status, 200)
+            write.assert_called_once()
+
     def test_concurrent_claims_have_one_winner(self):
         gate = threading.Barrier(3)
         results = []

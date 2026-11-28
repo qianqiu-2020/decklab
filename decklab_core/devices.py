@@ -52,6 +52,8 @@ class Manager:
         self.boards = {}                  # immutable serial -> persistent Board
         self.lock = threading.RLock()
         self.flash_discovery_lock = threading.RLock()
+        from .board_cases import AdbDiscoveryScans
+        self.adb_discovery = AdbDiscoveryScans()
         self.scan_lock = threading.Lock()
         self.stopping = threading.Event()
         self.handoff = {}
@@ -559,6 +561,7 @@ class Manager:
             d.cv.notify_all()
 
     def _capture(self, d):
+        opened = False
         try:
             while not d.stop.is_set() and not d.capture_paused.is_set() and self._matches(d):
                 if d.fd is None:
@@ -576,7 +579,10 @@ class Manager:
                             d.serial_settings = settings
                             # 重连也可能已有启动日志排队,flush 会直接丢掉这些字节。
                         d.fail_count = 0
+                        opened = True
+                        d.capture_event('serial-capture-started')
                         d._say('decklab 已接入 %s' % d.dev)
+                        d.flush_capture_events()
                     except (OSError, termios.error) as e:
                         self._close_reader(d)
                         d.fail_count += 1
@@ -601,6 +607,7 @@ class Manager:
                         # EOF 的 fd 会一直 readable;不关闭/退避会空转占满 CPU。
                         raise OSError(errno.EIO, '串口 EOF')
                     d.append(data)
+                    d.flush_capture_events()
                     d.last_health_check = time.time()
                 except (BlockingIOError, InterruptedError):
                     continue
@@ -612,6 +619,11 @@ class Manager:
                     break
         finally:
             self._close_reader(d)
+            if opened:
+                d.capture_event('serial-collector-stopped' if self.stopping.is_set()
+                                else 'serial-capture-paused' if d.capture_paused.is_set()
+                                else 'serial-reader-disconnected')
+                d.flush_capture_events()
             if not d.capture_paused.is_set() or d.stop.is_set():
                 d.stop.set()
                 d.dead = True

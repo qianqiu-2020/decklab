@@ -139,6 +139,7 @@
       }
       switchSession(result.sid);
     },
+    retryADB: function (task) { recoverAdb(terminalView.current, task); },
     retrySSH: function (task) {
       openSshCredentials(terminalView.current, task.result.ssh_user);
     },
@@ -166,6 +167,7 @@
     canRecover: function () { return boardRecoveryAuthorized; }
   });
   var boardTests = window.DeckLabBoardTests && window.DeckLabBoardTests.create({
+    openAdbReceipt: function (task) { adbUI.open(task); },
     byId:$, fetch:fetch, copyText:copyText, getView:function () {
       var ctx = terminalView.current;
       return ctx && {key:ctx.key, serial:ctx.serial, connectionId:ctx.connectionId, label:deviceDirectory.find(ctx.key)?.label};
@@ -522,14 +524,17 @@
     status.appendChild(details);
   }
 
-  async function connectAdb(ctx) {
+  function recoverAdb(ctx, task) {
+    if (boardRecoveryAuthorized && window.DeckLabTasks.adbRecoverable(task, ctx)) connectAdb(ctx, task.id);
+  }
+  async function connectAdb(ctx, recoverFrom) {
     if (ctx.adbConnecting || !isCurrent(ctx)) return;
     ctx.adbConnecting = true;
     var connection = ctx.connectionId;
     renderTabs();
-    $('d-status').textContent = '正在连接 USB ADB…';
+    $('d-status').textContent = recoverFrom ? '正在恢复 USB ADB…' : '正在连接 USB ADB…';
     try {
-      var result = await taskUI.run('adb-connect', ctx);
+      var result = await taskUI.run('adb-connect', ctx, recoverFrom ? {recover_from: recoverFrom} : undefined);
       if (!sshConnectionCurrent(ctx, connection)) return;
       if (!result.ok || !result.sid) throw new Error(result.error || 'ADB 连接失败');
       if (!sessions.some(function (s) { return s.sid === result.sid; })) {
@@ -537,7 +542,15 @@
       }
       switchSession(result.sid);
     } catch (error) {
-      if (sshConnectionCurrent(ctx, connection)) showTaskStatus(ctx, error.message, error.taskId);
+      if (sshConnectionCurrent(ctx, connection)) {
+        showTaskStatus(ctx, error.message, error.taskId);
+        if (!recoverFrom && boardRecoveryAuthorized && window.DeckLabTasks.adbRecoverable(error.task, ctx)) {
+          var recover = document.createElement('button'); recover.type = 'button';
+          recover.textContent = '重启 ADB 服务并重连';
+          recover.addEventListener('click', function () { recoverAdb(ctx, error.task); });
+          $('d-status').appendChild(recover);
+        }
+      }
     } finally {
       ctx.adbConnecting = false;
       if (isCurrent(ctx)) renderTabs();
@@ -673,6 +686,20 @@
     var credentials = { ssh_user: user, ssh_password: $('ssh-credentials-password').value };
     closeSshCredentials();
     connectSSH(state.ctx, credentials);
+  });
+  $('ssh-root-adb').addEventListener('click', async function () {
+    var state = sshCredentials;
+    if (!state || !sshConnectionCurrent(state.ctx, state.connectionId)) return;
+    try {
+      var response = await fetch('/static/root-ssh-policy.sh', {cache:'no-store'});
+      if (!response.ok) throw new Error();
+      var command = await response.text();
+      if (sshCredentials !== state || !sshConnectionCurrent(state.ctx, state.connectionId)) return;
+      closeSshCredentials();
+      adbUI.open(null, command);
+    } catch (_) {
+      if (sshCredentials === state) $('ssh-root-copy-status').textContent = '无法读取配置命令，请重试。';
+    }
   });
   ['passwd', 'edit', 'config', 'restart', 'check'].forEach(function (name) {
     if (name !== 'config') $('ssh-root-stage-' + name).addEventListener('click', function () {

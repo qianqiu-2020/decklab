@@ -384,12 +384,12 @@
         ctx.terminalRevision = state.revision;
         if (!metadataOnly) {
           ctx.screenManaged = true; ctx.screenPhase = state.phase;
-          ctx.needsBootViewport = state.needs_boot_viewport === true;
+          ctx.needsBootViewport = state.needs_boot_viewport === true || (['text', 'shell'].includes(state.phase) && state.geometry?.rows < 5);
           ctx.linuxConsole = state.phase !== 'firmware';
           applyManagedGeometry(ctx, state.geometry);
         }
       }
-      ctx.serialConfigured = state.serial_configured;
+      ctx.serialConfigured = state.serial_configured && !(state.geometry && state.geometry.rows < 5);
       if (ctx.sid === 'serial' && state.serial_ready && state.serial_configured
           && !state.internal_output && !state.error) {
         completeSerialSize(ctx, state.geometry, payload.off);
@@ -487,11 +487,17 @@
       var proposed = ctx.fit.proposeDimensions();
       if (!proposed) return null;
       var capacity = serialCapacity(ctx, proposed);
+      var host = $('d-term'), cell = cellDimensions(ctx);
+      // Measure the available host, independent of xterm's current shared grid.
+      if (host.clientHeight && cell && cell.height) capacity.rows = (host.clientHeight - 2) / cell.height;
       var ratio = ctx.term.options.fontSize / preferredFontSize;
       // A shared grid can change the renderer font and scrollbar measurements.
       // Keep the requested grid stable until the browser container changes.
       var grid = {cols: Math.max(20, Math.min(500, Math.floor(capacity.cols * ratio))),
         rows: Math.max(2, Math.min(200, Math.floor(capacity.rows * ratio)))};
+      // A collapsed pane can temporarily measure just one or two rows.
+      // Never publish that measurement to the board or cache it across layout.
+      if (ctx.sid === 'serial' && grid.rows < 5) return null;
       ctx.preferredGridKey = viewSize;
       ctx.preferredGrid = grid;
       return grid;
@@ -648,7 +654,7 @@
       });
     }
     function syncSerialPresentation(ctx) {
-      if (!terminalVisible(ctx) || !ctx.screenManaged || ctx.sid !== 'serial' || ctx.screenPhase !== 'text'
+      if (!terminalVisible(ctx) || !ctx.screenManaged || ctx.sid !== 'serial' || (ctx.screenPhase !== 'text' && !(ctx.screenPhase === 'shell' && ctx.screenGeometry.rows < 5))
           || (ctx.readonly && !ctx.needsBootViewport) || ctx.internalOutput || ctx.inputQueue.length || ctx.inputSending) return;
       var grid = preferredGrid(ctx);
       // A firmware or boot reset can replace the shared grid in an unchanged viewport.
@@ -664,6 +670,9 @@
     function renderTerminalPayload(ctx, payload, done) {
       var epoch = ctx.renderEpoch;
       if (!isCurrent(ctx)) return;
+      if (ctx.sid === 'serial' && payload.terminal_gap) {
+        ctx.lastCaptureGap = Object.assign({at:Date.now() / 1000}, payload.terminal_gap);
+      }
       if (payload.terminal_state && payload.terminal_state.managed) {
         updateTerminalState(ctx, payload);
         var snapshot = payload.terminal_snapshot;
@@ -788,7 +797,11 @@
       }
       if (typeof payload.data_b64 === 'string') {
         var raw = atob(payload.data_b64);
-        if (ctx.sid === 'serial' && ctx.lastRenderedOff != null && payload.off - raw.length !== ctx.lastRenderedOff) resetProgress(ctx);
+        if (ctx.sid === 'serial' && ctx.lastRenderedOff != null && payload.off - raw.length !== ctx.lastRenderedOff) {
+          if (payload.off - raw.length > ctx.lastRenderedOff)
+            ctx.lastCaptureGap = {from:ctx.lastRenderedOff, to:payload.off - raw.length, at:Date.now() / 1000};
+          resetProgress(ctx);
+        }
         ctx.lastRenderedOff = payload.off;
         raw = newestBootCycle(raw);
         raw = prepareSerialGeometry(raw);

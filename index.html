@@ -230,7 +230,10 @@
       </form>
       <details id="ssh-root-guide" class="ssh-root-guide">
         <summary>需要 root 密码登录？</summary>
-        <p>已有普通用户可直接通过上方表单连接。以下步骤适用于 Ubuntu / Debian，需要板端 sudo 权限。</p>
+        <p>普通 SSH 用户可直接连接。需要 root 密码登录时，先在板上启用对应策略，再到上方验证并保存账号。</p>
+        <p>Debian / Ubuntu 已运行 OpenSSH 时，优先使用本板已授权的 USB ADB。ADB 无需输入板端账号密码，配置命令需要 root 或免密 sudo。点击后可预览命令，执行时会检查配置并重新加载 SSH 服务，沿用已有 root 密码。</p>
+        <button id="ssh-root-adb" type="button">在 ADB 命令中打开配置</button>
+        <p>没有可用的 ADB 时，在串口用该镜像提供的 root 账号密码或有 sudo 权限的账号登录。已是 root 时省略 sudo，编辑器可用 vi。仅在需要设置新密码时执行第一步。</p>
         <p>请分步执行，完成当前命令的密码输入并返回 shell 后，再执行下一步。不要将整份指引一次性粘贴到串口。</p>
         <div class="ssh-root-step"><strong>1. 设置 root 密码</strong><button id="ssh-root-stage-passwd" type="button">填入串口</button><button id="ssh-root-copy-passwd" type="button">复制改密命令</button></div>
         <p>sudo 提示时输入当前普通用户密码；随后按提示输入两次你选择的 root 新密码。</p>
@@ -333,8 +336,8 @@ PasswordAuthentication yes</code></pre>
   <p id="adb-command-status" class="log-note" role="status"></p>
   <section id="adb-command-receipt" hidden>
     <details id="adb-command-original" open><summary>原命令</summary><pre id="adb-command-text" data-i18n-ignore></pre></details>
-    <div><strong>标准输出</strong><pre id="adb-command-stdout" data-i18n-ignore></pre></div>
-    <div><strong>标准错误</strong><pre id="adb-command-stderr" data-i18n-ignore></pre></div>
+    <div><strong id="adb-command-output-title">标准输出</strong><pre id="adb-command-stdout" data-i18n-ignore></pre></div>
+    <div id="adb-command-error-output"><strong>标准错误</strong><pre id="adb-command-stderr" data-i18n-ignore></pre></div>
     <div class="adb-command-actions">
       <button id="adb-command-read-serial" type="button">查看本次串口</button>
       <button id="adb-command-open-logs" type="button">打开串口归档</button>
@@ -358,61 +361,129 @@ PasswordAuthentication yes</code></pre>
   <div class="ft-actions"><span id="shortcuts-status" role="status"></span><button id="shortcuts-reset" type="button">恢复默认快捷键</button></div>
 </dialog>
 <dialog id="titanx-setup" class="board-tests-dialog" aria-labelledby="titanx-title">
-  <header class="board-tests-head"><h2 id="titanx-title">TitanX 工位接入</h2><button type="button" id="titanx-close">关闭</button></header>
+  <header class="board-tests-head"><h2 id="titanx-title"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-plug-connected"/></svg>TitanX 工位接入</h2><button type="button" id="titanx-close" class="icon-button" aria-label="关闭" title="关闭"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button></header>
   <div class="board-tests-body">
     <form id="titanx-form" hidden>
-      <h3>目标实验室</h3>
+      <section class="tx-section"><h3>目标实验室</h3>
       <div class="settings-grid">
         <label class="ft-field">TitanX 平台地址<input name="api_url" type="url" placeholder="https://titanx.example.test" required></label>
         <label class="ft-field">平台访问令牌<input name="api_token" type="password" autocomplete="new-password" required></label>
       </div>
-      <div class="board-tests-actions"><button type="button" id="titanx-labs">读取实验室</button>
-        <label class="ft-field">实验室<select name="lab_id" required><option value="">请先读取实验室</option></select></label>
+      <div class="tx-labs"><label class="ft-field">实验室<select name="lab_id" required><option value="">请先读取实验室</option></select></label>
+        <button type="button" id="titanx-labs">读取实验室</button>
       </div>
-      <h3>工位连接</h3>
+      </section>
+      <section class="tx-section"><h3>工位连接</h3>
       <div class="settings-grid">
-        <label class="ft-field">TitanX 节点 ID<input name="node_id" maxlength="80" required></label>
+        <label class="ft-field">TitanX 节点 ID（可沿用已有节点）<input name="node_id" maxlength="80" required></label>
         <label class="ft-field">MQTT 地址<input name="broker" placeholder="ssl://mqtt.example.test:8883" required></label>
-        <label class="ft-field">DeckLab 对外 HTTPS 地址<input name="web_origin" type="url" required></label>
-        <label class="ft-field">默认项目类型<input name="project" placeholder="如 K1" maxlength="80" required></label>
       </div>
-      <details><summary>MQTT 账号与密码</summary><div class="settings-grid">
+      <details id="titanx-mqtt-auth"><summary>MQTT 认证（仅在消息服务器要求登录时填写）</summary>
+        <p class="log-note">允许匿名连接时留空。需要登录时，请向实验室管理员索取该工位的 MQTT 用户名和密码。</p>
+        <div class="settings-grid">
         <label class="ft-field">MQTT 用户名<input name="username" autocomplete="off"></label>
         <label class="ft-field">MQTT 密码<input name="password" type="password" autocomplete="new-password"></label>
       </div></details>
-      <h3>登记板卡</h3>
-      <div class="board-tests-actions"><label><input type="checkbox" id="titanx-all" checked> 全选已确认板卡</label>
+      </section>
+      <section class="tx-section"><h3>登记板卡</h3>
+      <div class="settings-grid">
+        <label class="ft-field">默认项目类型<input name="project" placeholder="如 K1" maxlength="80" required></label>
         <label class="ft-field">起始 COM（服务器 100）<input name="first_com" type="number" min="1" max="65535" value="1" required></label>
       </div>
+      <label class="tx-select-all"><input type="checkbox" id="titanx-all" checked> 全选已确认板卡</label>
       <div id="titanx-boards"></div>
       <p class="log-note">所有勾选的板卡登记到同一实验室。离线板保留槽位，待上线并核对身份后建档。</p>
       <label><input name="accept_dispatch" type="checkbox"> 允许 TitanX 自动调度新登记的板卡</label>
-      <div class="board-tests-actions"><button type="submit" class="pri" id="titanx-submit">初始化并登记</button></div>
+      </section>
+      <div class="tx-submit"><button type="submit" class="pri" id="titanx-submit">初始化并登记</button></div>
     </form>
-    <section id="titanx-readback" hidden><p id="titanx-summary"></p><p id="titanx-scope"></p><ul id="titanx-registered"></ul>
-      <button id="titanx-refresh" type="button">刷新登记状态</button>
+    <section id="titanx-readback" hidden>
+      <div class="is-tabs tx-tabs" role="group" aria-label="TitanX 工位设置">
+        <button type="button" id="titanx-boards-tab" aria-pressed="true" aria-controls="titanx-board-panel">板卡接入</button>
+        <button type="button" id="titanx-connection-tab" aria-pressed="false" aria-controls="titanx-maintenance">连接设置</button>
+      </div>
+      <div id="titanx-board-panel">
+      <section class="tx-section">
+        <div class="tx-heading"><h3>工位概况</h3><button id="titanx-refresh" type="button"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>刷新状态</button></div>
+        <dl id="titanx-summary" class="tx-facts">
+          <div><dt>实验室</dt><dd id="titanx-lab-name" data-i18n-ignore></dd></div>
+          <div><dt>节点 ID</dt><dd id="titanx-node-name" class="mono" data-i18n-ignore></dd></div>
+          <div><dt>本机执行器</dt><dd id="titanx-worker-state"></dd></div>
+          <div><dt>TitanX 节点</dt><dd id="titanx-platform-state"></dd></div>
+        </dl>
+      </section>
+      <section class="tx-section">
+        <div class="tx-heading"><h3>已配置板卡</h3><span id="titanx-scope"></span></div>
+        <ul id="titanx-registered" class="tx-board-list"></ul>
+      </section>
+      <details id="titanx-add-panel" class="tx-section" hidden><summary>添加板卡</summary>
+        <form id="titanx-add-form" hidden>
+        <div class="settings-grid">
+          <label class="ft-field">板卡<select id="titanx-add-serial" required></select></label>
+          <label class="ft-field">项目类型<input id="titanx-add-project" maxlength="80" required></label>
+        </div>
+        <details><summary>自定义 COM</summary>
+          <label class="ft-field">服务器 100 的 COM<input id="titanx-add-com" type="number" min="1" max="65535" required></label>
+        </details>
+        <p id="titanx-add-preview"></p>
+        <p class="log-note">添加时会重新连接工位执行器。请在工位空闲时操作。</p>
+        <button class="pri" type="submit" id="titanx-add-submit">接入当前实验室</button>
+      </form>
+      </details>
+      </div>
+      <section class="tx-section" id="titanx-maintenance" hidden><h3>连接设置</h3>
+        <form id="titanx-connection">
+          <div class="settings-grid">
+            <label class="ft-field">平台 HTTPS 地址<input name="api_url" type="url" required></label>
+            <label class="ft-field">实验室编号<input name="lab_id" type="number" min="1" required></label>
+            <label class="ft-field">平台访问令牌<input name="api_token" type="password" autocomplete="new-password" placeholder="留空保留现有值"></label>
+            <label class="ft-field">MQTT 地址<input name="broker" required></label>
+            <label class="ft-field">默认项目类型<input name="project" maxlength="80" required></label>
+          </div>
+          <details id="titanx-maintain-mqtt-auth"><summary>MQTT 认证（仅在消息服务器要求登录时填写）</summary>
+            <p class="log-note">沿用当前连接时无需填写。更换需要登录的消息服务器时，请填写新服务器的工位凭据。</p>
+            <div class="settings-grid">
+              <label class="ft-field">MQTT 用户名<input name="username" autocomplete="off"></label>
+              <label class="ft-field">MQTT 密码<input name="password" type="password" autocomplete="new-password" placeholder="留空保留现有值"></label>
+            </div>
+            <label><input name="clear_mqtt" type="checkbox"> 清除已保存的 MQTT 用户名和密码</label>
+          </details>
+          <label><input name="accept_dispatch" type="checkbox"> 允许 TitanX 自动调度新登记的板卡</label>
+          <div class="board-tests-actions"><button type="submit" class="pri">保存连接配置</button>
+            <button id="titanx-retry" type="button">重新连接并核对登记</button></div>
+        </form>
+      </section>
     </section>
-    <p role="status" id="titanx-message"></p>
   </div>
+  <footer class="tx-feedback">
+    <p role="status" id="titanx-message" class="settings-status"></p>
+    <button id="titanx-reload" type="button" hidden>重新读取工位</button>
+  </footer>
 </dialog>
 <dialog id="board-tests-dialog" class="board-tests-dialog" aria-labelledby="board-tests-title">
-  <header class="board-tests-head"><div><h2 id="board-tests-title">用例库</h2><small id="board-tests-board" data-i18n-ignore></small></div><button id="board-tests-close" type="button">关闭</button></header>
+  <header class="board-tests-head"><div><h2 id="board-tests-title">用例库</h2><small id="board-tests-board" data-i18n-ignore></small></div><button id="board-tests-close" type="button" class="icon-button" aria-label="关闭" title="关闭"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button></header>
   <div class="board-tests-body">
-    <div class="board-tests-sources" role="group" aria-label="用例来源">
+    <div class="case-toolbar"><div class="board-tests-sources is-tabs" role="group" aria-label="用例来源">
       <button type="button" id="board-tests-local-tab" aria-pressed="true">本地用例</button>
       <button type="button" id="board-tests-team-tab" aria-pressed="false">TitanX 团队用例</button>
-    </div>
+    </div><button type="button" id="titanx-setup-open" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>工位接入</button></div>
     <section id="board-tests-team" hidden>
-      <button type="button" id="titanx-setup-open">TitanX 工位接入</button>
-      <form id="board-tests-team-search" class="board-tests-actions">
+      <form id="board-tests-team-search" class="team-search">
         <label class="ft-field">用例组<select id="board-tests-team-group"><option value="">全部用例</option></select></label>
-        <label class="ft-field">用例名称<input id="board-tests-team-name" type="search" maxlength="200"></label>
+        <label class="ft-field">用例名称<input id="board-tests-team-name" type="search" maxlength="200" placeholder="输入用例名称"></label>
         <button type="submit">搜索</button>
       </form>
-      <p id="board-tests-team-status" role="status"></p>
-      <section id="board-tests-team-detail" hidden></section>
-      <ul id="board-tests-team-list" class="board-tests-team-list"></ul>
-      <div class="board-tests-actions"><button id="board-tests-team-prev" type="button">上一页</button><button id="board-tests-team-next" type="button">下一页</button></div>
+      <div class="team-browser">
+        <section class="team-results" aria-label="用例列表">
+          <p id="board-tests-team-status" role="status"></p>
+          <ul id="board-tests-team-list" class="board-tests-team-list"></ul>
+          <div class="team-pagination"><button id="board-tests-team-prev" type="button">上一页</button><button id="board-tests-team-next" type="button">下一页</button></div>
+        </section>
+        <section class="team-inspector" aria-label="用例详情">
+          <p id="team-detail-prompt">选择用例查看步骤和执行条件。</p>
+          <section id="board-tests-team-detail" hidden></section>
+        </section>
+      </div>
     </section>
     <div id="board-tests-local">
     <section class="board-tests-form" aria-label="运行用例">
@@ -464,7 +535,7 @@ PasswordAuthentication yes</code></pre>
         <section id="board-tests-inspector" class="board-tests-inspector" aria-labelledby="board-tests-log-title">
           <div class="board-tests-log-head"><strong id="board-tests-log-title">本轮串口日志</strong><div class="board-tests-log-actions"><button id="board-tests-copy" type="button" hidden>复制日志</button><a id="board-tests-log-download" class="log-download" hidden>下载串口</a></div></div>
           <p id="board-tests-log-note" role="status"></p>
-          <p id="board-tests-command-results" class="log-note" data-i18n-ignore></p>
+          <div id="board-tests-command-results" class="log-note" data-i18n-ignore></div>
           <pre id="board-tests-log" aria-label="本轮原始串口日志" tabindex="0" data-i18n-ignore hidden></pre>
         </section>
       </div>
@@ -476,10 +547,13 @@ PasswordAuthentication yes</code></pre>
   <div class="agent-share-head"><strong id="board-control-title">板卡控制</strong><button id="board-control-close" type="button">关闭</button></div>
   <p id="board-control-target" data-i18n-ignore></p>
   <button type="button" id="board-slot-bind" hidden>绑定控制槽位</button>
-  <label class="ft-field" id="board-control-action-field">操作<select id="board-control-action"></select></label>
-  <p>操作会改变板卡电源或启动状态。</p>
+  <div id="board-control-actions" role="group" aria-label="电源与启动">
+    <button id="board-control-reset" type="button" title="复位板子" aria-label="复位板子" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg></button>
+    <button id="board-control-enter-download" type="button" title="进入下载模式" aria-label="进入下载模式" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-device-usb"/></svg></button>
+    <button id="board-control-power-on" type="button" title="上电" aria-label="上电" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-power"/></svg></button>
+    <button id="board-control-power-off" type="button" title="断电" aria-label="断电" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-power-off"/></svg></button>
+  </div>
   <p id="board-control-status" role="status"></p>
-  <div class="ft-actions"><button id="board-control-cancel" type="button">取消</button><button id="board-control-submit" class="pri" type="button">确认执行</button></div>
 </dialog>
 <dialog id="identity-association-dialog" class="identity-association-dialog" aria-labelledby="ia-title" aria-describedby="ia-intro ia-warning">
   <div class="agent-share-head"><strong id="ia-title">关联已有设备档案</strong><button id="ia-close" type="button" aria-label="关闭">关闭</button></div>
@@ -534,7 +608,7 @@ PasswordAuthentication yes</code></pre>
 <dialog id="flash-dialog" class="flash-dialog" aria-labelledby="fl-title">
   <div class="fl-head"><div><strong id="fl-title">刷机工作区</strong><small id="fl-board" data-i18n-ignore></small>
     <div class="fl-usb-link" id="fl-usb-link" hidden aria-live="polite">
-      <span id="fl-usb-speed"></span><span class="fl-usb-fast" id="fl-usb-fast" hidden>极速</span><span id="fl-usb-hint"></span>
+      <span id="fl-usb-speed"></span><span id="fl-usb-fast" hidden>不压缩传输</span><span id="fl-usb-hint"></span>
     </div></div><div><button id="fl-history" type="button">刷机记录</button> <button id="fl-close" type="button">关闭</button></div></div>
   <ol class="fl-stage-list" aria-label="刷机阶段"><li id="fl-step-setup" aria-current="step">准备镜像与设备</li><li id="fl-step-review">核对写入范围</li><li id="fl-step-run">执行与结果</li></ol>
   <div id="fl-stage-body" tabindex="-1">
@@ -560,6 +634,10 @@ PasswordAuthentication yes</code></pre>
         <button id="fl-download" type="button" hidden>重试下载</button>
       </div>
       <div class="fl-current-source"><span id="fl-source-summary" role="status">尚未选择镜像</span><button id="fl-download-cancel" type="button" hidden>取消镜像下载</button><button id="fl-source-clear" type="button" hidden>清除选择</button></div>
+      <div id="fl-image-transfer" hidden>
+        <div id="fl-image-transfer-text"></div>
+        <progress id="fl-image-transfer-progress" aria-labelledby="fl-image-transfer-text"></progress>
+      </div>
       <details id="fl-image-tools" class="fl-details fl-more" hidden><summary>镜像文件管理</summary>
         <div class="fl-source-actions"><button id="fl-workspace" type="button" hidden>打开工作目录</button><button id="fl-delete" type="button" aria-controls="fl-delete-field" aria-expanded="false" disabled>删除镜像缓存</button></div>
       </details>
@@ -601,7 +679,7 @@ PasswordAuthentication yes</code></pre>
     <div id="fl-board-context" class="fl-board-context" hidden>
       <div><strong id="fl-board-name" data-i18n-ignore></strong><small id="fl-board-identity" data-i18n-ignore></small>
         <span id="fl-board-link" role="status"></span></div>
-      <button id="fl-prepare-board" class="pri" type="button" hidden>进入下载模式并读取设备存储</button>
+      <button id="fl-prepare-board" class="pri" type="button" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-device-usb"/></svg><span id="fl-prepare-label">进入下载模式</span></button>
       <p id="fl-storage-limit" class="fl-hint" hidden></p>
     </div>
     <div id="fl-target-picker" class="fl-discovery"><label class="ft-field">下载模式设备<select id="fl-device" aria-label="选择下载模式设备"></select></label></div>
@@ -637,7 +715,7 @@ PasswordAuthentication yes</code></pre>
         </details>
       </div>
     </details>
-    <details id="fl-connection-details" class="fl-details" hidden><summary>连接详情</summary><dl id="fl-connections" class="fl-connections"></dl><button id="fl-discover" type="button">刷新 USB 列表</button></details>
+    <button id="fl-discover" class="icon-button" type="button" title="重新检测 USB" aria-label="重新检测 USB" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg></button>
   </section>
       <section id="fl-fast" class="fl-section" aria-label="系统包 URL" hidden>
         <div class="fl-discovery">
@@ -670,17 +748,6 @@ PasswordAuthentication yes</code></pre>
       </div>
     </fieldset>
   </section>
-      <details id="fl-tuning" class="fl-details" hidden>
-        <summary>刷写配置 <span id="fl-tuning-state"></span></summary>
-        <p class="fl-hint">在这块板上实测 USB、板上解压、控制机压缩速度和可选的写盘速度，为当前 USB 口生成刷写配置。</p>
-        <dl id="fl-tuning-summary" class="fl-tuning-summary"></dl>
-        <label class="ft-check"><input id="fl-tuning-write" type="checkbox">同时测写盘速度（读出 128 MiB 后原样写回，内容不变）</label>
-        <label id="fl-tuning-storage-field" class="ft-field" hidden>测速目标盘
-          <input id="fl-tuning-storage" list="fl-tuning-disks" type="text" spellcheck="false" placeholder="auto（单盘）或 nvme:0 / scsi:0">
-          <datalist id="fl-tuning-disks"></datalist>
-        </label>
-        <div class="fl-tuning-actions"><button id="fl-tuning-run" type="button" disabled>实测并生成配置</button><button id="fl-tuning-forget" type="button" hidden>清除此 USB 口的配置</button></div>
-      </details>
   </div>
   <section id="fl-review" class="fl-section" aria-labelledby="fl-review-title" hidden>
     <h3 id="fl-review-title">预计写入后布局</h3>
@@ -726,7 +793,7 @@ PasswordAuthentication yes</code></pre>
     <p id="fl-event-status" role="status"></p>
   </details>
   </div>
-  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-edit" type="button" hidden>返回修改</button><button id="fl-new" type="button" hidden>准备下一次刷写</button><label id="fl-target-storage-field" hidden>目标系统盘 <select id="fl-target-storage"></select></label><div id="fl-confirm-options"><label>回读校验 <select id="fl-verify"><option value="none" selected>关闭</option><option value="if-supported">能力支持时校验</option><option value="required">必须通过</option></select></label><label><input type="checkbox" id="fl-reset-after">刷完自动复位</label></div><button id="fl-fast-start" class="pri" type="button" hidden disabled>确认覆盖并刷写</button><button id="fl-ram-boot" class="pri" type="button" hidden>从镜像内存启动</button><button id="fl-plan" class="pri" type="button">预览写入范围</button><button id="fl-reenter" type="button" hidden>重新进入下载模式</button><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
+  <div class="ft-actions fl-actions"><div class="fl-messages"><p id="fl-status" role="status"></p><p id="fl-task-status" role="status"></p></div><button id="fl-edit" type="button" hidden>返回修改</button><button id="fl-new" type="button" hidden>准备下一次刷写</button><label id="fl-target-storage-field" hidden>目标系统盘 <select id="fl-target-storage"></select></label><div id="fl-confirm-options"><label>回读校验 <select id="fl-verify"><option value="none" selected>关闭</option><option value="if-supported">能力支持时校验</option><option value="required">必须通过</option></select></label><label><input type="checkbox" id="fl-reset-after">刷完自动复位</label></div><button id="fl-fast-start" class="pri" type="button" hidden disabled>确认覆盖并刷写</button><button id="fl-ram-boot" class="pri" type="button" hidden>从镜像内存启动</button><button id="fl-plan" class="pri" type="button">预览写入范围</button><button id="fl-reenter" type="button" hidden>重新进入下载模式</button><button id="fl-stream-use-normal" class="pri" type="button" hidden>下载镜像并改用普通刷机</button><button id="fl-recover" type="button" hidden>查询原任务</button><button id="fl-skip-verify" type="button" hidden>跳过剩余校验</button><button id="fl-cancel" type="button" disabled>取消刷机</button><button id="fl-select" class="pri" type="button" hidden>确认分区并继续</button><button id="fl-start" class="pri" type="button" disabled>开始刷写</button></div>
 </dialog>
 <dialog id="fl-history-dialog" class="identity-association-dialog" aria-labelledby="fl-history-title">
   <header class="ft-head"><strong id="fl-history-title">控制机刷机记录</strong><button id="fl-history-close" type="button">关闭</button></header>

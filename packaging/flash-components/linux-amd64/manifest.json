@@ -3,7 +3,7 @@
   "platform": "linux-amd64",
   "executor": {
     "path": "decklab-flash",
-    "sha256": "4d7290bd30babb7bcd5c5789d2b855ef8e14eb0ef50e652af0b3c45e42fe1503"
+    "sha256": "330138157f78af025d91dc31a69f444801f85b1403aad2ddf47ff3ccb2734f9c"
   },
   "loaders": {
     "path": "flash-loaders",

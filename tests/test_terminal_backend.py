@@ -97,6 +97,7 @@ class SharedTerminalTests(unittest.TestCase):
         terminal.feed(b'output\r\n' * (SCROLLBACK // 8), 11 + SCROLLBACK)
         recovered = terminal.presentation(5, revision)
         self.assertIn('terminal_snapshot', recovered)
+        self.assertEqual(recovered['terminal_gap'], {'from': 5, 'to': 11 + SCROLLBACK})
         self.assertEqual(recovered['terminal_snapshot']['cursor']['buffer'], 'alternate')
         terminal.close()
         self.assertEqual(terminal.presentation(0, revision)['terminal_snapshot']['data'], recovered['terminal_snapshot']['data'])
@@ -118,15 +119,33 @@ class SharedTerminalTests(unittest.TestCase):
         terminal.feed(b'continued', len(prefix) + len(raw) + 9)
         self.assertEqual(base64.b64decode(terminal.presentation(len(prefix) + len(raw), revision)['data_b64']), b'continued')
 
-    def test_firmware_clear_can_leave_edk2_grid_and_kernel_resets_the_background(self):
+    def test_grub_clear_preserves_the_firmware_grid_without_pulling_scrollback_into_the_menu(self):
         terminal = self.terminal('serial', 80, 24)
-        terminal.feed(b'\x1b[47m\x1b[2J\x1b[50;27HEDK2', 28)
+        raw = b''.join(b'OpenSBI boot log %d\r\n' % line for line in range(100))
+        terminal.feed(raw, len(raw), live=False)
+        edk2 = b'\x1b[47m\x1b[2J\x1b[50;27HEDK2'
+        terminal.feed(edk2, len(raw) + len(edk2), live=False)
         self.assertEqual(terminal.metadata()['geometry'], {'cols': 80, 'rows': 50})
-        terminal.feed(b'\x1b[2J\x1b[1;1HGRUB', 44)
-        self.assertEqual(terminal.metadata()['geometry'], {'cols': 80, 'rows': 24})
-        terminal.feed(b'\r\n[    0.000000] Linux version 6.18.0\r\n', 88)
+        offset = len(raw) + len(edk2)
+        for frame in (b'\x1b[0m\x1b[40m\x1b[2J\x1b[1;1H', b'\x1b[02;20HGNU GRUB',
+                      b'\r\n\r\n /----------------', b'\x1b[45;02HPress Ctrl-x to boot'):
+            offset += len(frame)
+            terminal.feed(frame, offset, live=False)
+        state = terminal.snapshot()
+        self.assertEqual(state['geometry'], {'cols': 80, 'rows': 50})
+        self.assertEqual(state['phase'], 'firmware')
+        self.assertEqual(state['cursor']['buffer'], 'alternate')
+        logs, menu = base64.b64decode(state['data']).split(b'\x1b[?1049h', 1)
+        self.assertIn(b'OpenSBI boot log', logs)
+        self.assertNotIn(b'OpenSBI boot log', menu)
+        self.assertNotIn(b'EDK2', menu)
+        self.assertIn(b'GNU GRUB', menu)
+        self.assertIn(b'Press Ctrl-x to boot', menu)
+        kernel = b'\r\n[    0.000000] Linux version 6.18.0\r\n'
+        terminal.feed(kernel, offset + len(kernel), live=False)
         state = terminal.snapshot()
         self.assertEqual(state['phase'], 'text')
+        self.assertEqual(state['cursor']['buffer'], 'normal')
         self.assertNotIn(b'EDK2', base64.b64decode(state['data']))
         self.assertNotIn(b'\x1b[47m', base64.b64decode(state['data']))
 

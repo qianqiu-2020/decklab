@@ -168,7 +168,7 @@ function harness(options = {}) {
     setInterval: (fn, delay) => { intervals.push({ fn, delay }); return intervals.length; },
     fetch: (url, options = {}) => new Promise((resolve, reject) => {
       requests.push({ url, options, body: options.body ? JSON.parse(options.body) : null,
-        resolve: (data, status = 200) => resolve({ status, ok: status < 400, json: () => Promise.resolve(data) }), reject, taken: false });
+        resolve: (data, status = 200) => resolve({ status, ok: status < 400, json: () => Promise.resolve(data), text: () => Promise.resolve(data) }), reject, taken: false });
     }),
   };
   if (options.sse) sandbox.EventSource = class {
@@ -262,12 +262,16 @@ test('TitanX shows only the selected board in the case library and every slot in
     if (serial) window.DeckLabTitanX.openBoard({serial});
     else window.DeckLabTitanX.open();
     await drain();
-    return list.children.map(row => row.textContent);
+    return list.children.map(row => row.children.map(cell => cell.textContent));
   }
-  assert.deepEqual(await view('BOARD-C'), ['BOARD-C · 槽位 3 · COM 6 · 已登记']);
+  assert.deepEqual(await view('BOARD-C'), [['BOARD-C', '槽位 3 · COM 6', '已登记']]);
+  byId('titanx-mqtt-auth').open = true;
+  byId('titanx-maintain-mqtt-auth').open = true;
   assert.deepEqual(await view('BOARD-B'), []);
+  assert.equal(byId('titanx-mqtt-auth').open, false);
+  assert.equal(byId('titanx-maintain-mqtt-auth').open, false);
   assert.match(byId('titanx-scope').textContent, /BOARD-B.*尚未分配/);
-  assert.deepEqual(await view(), ['BOARD-A · 槽位 1 · COM 4 · 已登记', 'BOARD-C · 槽位 3 · COM 6 · 已登记']);
+  assert.deepEqual(await view(), [['BOARD-A', '槽位 1 · COM 4', '已登记'], ['BOARD-C', '槽位 3 · COM 6', '已登记']]);
 });
 
 test('header shows the running Web version from the existing access response', async () => {
@@ -535,7 +539,7 @@ test('missing or invalid current board ownership never reuses a stale generation
 });
 
 test('device share bookmarks select the stable serial even after a label change', async () => {
-  const h = harness({ hash: '#device=SN%20A' });
+  const h = harness({ hash: '#device=SN%20A&plan=23&job=23_123&record=800' });
   h.take('/api/devices').resolve({ devices: [{ key: 'renamed', label: 'renamed', serial: 'SN A',
     dev: '/mock/tty', alive: true }] }); await drain();
   assert.equal(h.get('detail').hidden, false);
@@ -1045,6 +1049,21 @@ test('root SSH guidance copies individual steps without sending them to a termin
   assert.equal(h.requests.length, requestCount);
   assert.equal(h.sends().length, 0);
   assert.ok(h.get('ssh-root-copy-status').textContent.includes('分步执行'));
+});
+
+test('ADB root SSH setup previews the script only on the original board', async () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', 'static/root-ssh-policy.sh'), 'utf8');
+  for (const switched of [false, true]) {
+    const h = await sshCredentialFixture();
+    h.get('d-tabs').children.at(-1).children[1].click();
+    h.get('ssh-root-adb').click();
+    const request = h.take('/static/root-ssh-policy.sh');
+    if (switched) h.select('B');
+    request.resolve(script); await drain();
+    assert.equal(Boolean(h.get('adb-command-dialog').open), !switched);
+    if (!switched) assert.equal(h.get('adb-command-input').value, script);
+    assert.equal(h.requests.filter(req => req.url === '/api/task-start').length, 0);
+  }
 });
 
 test('late rename and SSH close responses cannot mutate another device', async () => {
@@ -2757,8 +2776,9 @@ test('device diagnostics read the selected connection and discard late responses
   const scoped = r => new URL(r.url, 'http://fixture').searchParams.get('connection_id') === 'connection-A';
   h.get('b-device-diagnostics').click();
   h.take('/api/sessions', scoped).resolve({sessions: []});
+  h.take('/api/activity', scoped).resolve({capture_events:[{event:'serial-archive-write-failed', at:1700000000, connection_id:'connection-A', received:4}]});
   await drain();
-  assert.match(h.get('diagnostics-body').textContent, /COM5.*本次连接尚未收到数据/);
+  assert.match(h.get('diagnostics-body').textContent, /COM5.*本次连接尚未收到数据.*归档写入失败/);
   h.get('diagnostics-refresh').click();
   const old = h.take('/api/sessions', scoped);
   h.select('B');

@@ -33,6 +33,7 @@ function backup(id, phase, bytes) {
 }
 let previewTask = null, previewSubmissions = 0, verificationSkips = 0, preparations = 0, fullWrites = 0;
 let current = null, upload = Buffer.alloc(0), artifact = null, preview = null, rejectPreview = true, urlDownloads = 0;
+let automaticStorage = false;
 const packageArtifact = {id:'9'.repeat(24),name:'firmware-fixture.tar.gz',size:2<<20,sha256:'a'.repeat(64),state:'ready'};
 const urlArtifact = {id:'8'.repeat(24),name:'url-fixture.itb',size:512,sha256:'b'.repeat(64),state:'ready'};
 const submissions = [], selections = [], errors = [], targetReads = [];
@@ -54,7 +55,8 @@ const server = http.createServer((req,res) => {
           current = {...current, state:'cancelled', error:'task cancelled'};
           return json({task:current});
         }
-        if(url.pathname==='/api/flash-target') {targetReads.push(payload);return json({target,capabilities:{supported:true,preparable:true,
+        if(url.pathname==='/api/flash-target') {targetReads.push(payload);return json({target,capabilities:{supported:true,preparable:!automaticStorage,
+          ...(automaticStorage ? {chip:'k3'} : {}),
           nor_workspace_supported:true,storage_inventory_supported:true,binding_revision:1,modes:['full','partitions'],artifacts:[],storages:[],
           executor:{provider:'goflash',node:'local',endpoint:'fixture-only'},console:null}});}
         if(url.pathname==='/api/flash-plan') {
@@ -395,13 +397,15 @@ let chrome,ws;
   await wait('document.querySelector("#flash-dialog").dataset.stage==="setup" && !document.querySelector("#fl-files").disabled');
   assert.equal(await evaluate('document.querySelector("#fl-task-id").textContent'),'');
   current={id:'failed-storage-read',kind:'flash',state:'failed',
-    error:'flashing executor reported failure: protocol-failed',progress:{phase:'reading-system-layout'},
-    flash:{operation:'nor-workspace',write_result:'not-started'}};
+    error:'flashing executor reported failure（诊断 aabbccddeeff）: target-not-found',progress:{phase:'reading-system-metadata'},
+    flash:{operation:'nor-workspace',write_result:'not-started',nor_before:backup('1'.repeat(24),'before',before)}};
   await evaluate('ui.open('+JSON.stringify(target)+','+JSON.stringify(current)+')');
-  await wait('document.querySelector("#fl-task-status").textContent.includes("protocol-failed")');
+  await wait('/读取系统盘版本信息.*已读完 NOR.*8.0 MiB.*本次未写盘.*重新检测设备.*aabbccddeeff/.test(document.querySelector("#fl-task-status").textContent)');
   assert.equal(await evaluate('document.querySelector("#flash-dialog").dataset.stage'),'setup');
   assert.equal(await evaluate('document.querySelector("#fl-new").getClientRects().length'),1);
   assert.equal(await evaluate('document.querySelector("#fl-new").textContent'),'重新检测设备');
+  assert.equal(await evaluate('document.querySelector("#fl-partition-read").checkVisibility()'),false);
+  await shot('usb-disconnected-during-system-read-fixture');
   const readsAfterFailure=targetReads.length;
   await evaluate('document.querySelector("#fl-new").click()');
   await wait('!document.querySelector("#fl-files").disabled && !document.querySelector("#fl-task-status").textContent');
@@ -431,8 +435,18 @@ let chrome,ws;
   await evaluate('document.querySelector("#fl-cache").click(); window.fixtureChooseFile('+JSON.stringify(urlArtifact)+')');
   assert.equal(await evaluate('document.querySelector("#fl-artifact").value'),urlArtifact.id);
   assert.equal(submissions.length,submissionsBeforeRedetect);
+  current=null;previewTask=null;automaticStorage=true;target.mode='loader';
+  await evaluate('sessionStorage.clear()');await rpc('Page.reload');
+  await wait('document.querySelector("#fl-read-status").checkVisibility() && !document.querySelector("#fl-cache").disabled');
+  assert.equal(submissions.length,submissionsBeforeRedetect+1);
+  assert.equal(submissions.at(-1).inventory_only,undefined);
+  assert.equal(await evaluate('document.querySelector("#fl-read-nor").checkVisibility()'),false);
+  await evaluate('document.querySelector("#fl-cache").click();window.fixtureChooseFile('+JSON.stringify(urlArtifact)+')');
+  assert.equal(await evaluate('document.querySelector("#fl-artifact").value'),urlArtifact.id);
+  assert.equal(await evaluate('document.querySelector("#fl-plan").disabled'),true);
+  await shot('automatic-storage-and-image-fixture');
   assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,preparations,fullWrites,async_preview_progress:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,
+  fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({simulated:true,hardware_access:false,unified_storage_read:true,automatic_storage_read:true,eeprom_priority_edit:true,eeprom_serial_fixture:true,full_package_preview:true,preparations,fullWrites,async_preview_progress:true,pasted_url_downloads:urlDownloads,automatic_file_upload:true,persistent_preview_error:true,submissions:submissions.length,selections:selections.length,
     verification_skips:verificationSkips,redetect_after_completed_task:true,redetect_after_failed_storage_read:true,
     screenshots:fs.readdirSync(out).filter(name=>name.endsWith('.png')),desktop:[1600,1100],mobile:[390,844]},null,2)+'\n');
   console.log('NOR browser workflow passed: full package preview, automatic URL/file imports, persistent errors, image-free read, six partition rows, same-task confirmation, byte progress, backups, desktop/mobile and light/dark (simulated data).');

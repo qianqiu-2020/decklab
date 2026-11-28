@@ -27,7 +27,7 @@ def collector_build_id(root=ROOT):
                if path.name not in excluded]
     sources.append(root / 'packaging/decklab-collector.service')
     for source in (root / 'decklab_core/terminal_worker.js', root / 'decklab_core/terminal_snapshot.js',
-                   root / 'static/serial-progress.js'):
+                   root / 'static/serial-progress.js', root / 'static/root-ssh-policy.sh'):
         if source.is_file():
             sources.append(source)
     sources.extend((root / 'vendor/terminal').glob('*.js'))
@@ -139,18 +139,21 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             manifest = json.loads((bundle / 'manifest.json').read_text())
             if not isinstance(manifest, dict) or set(manifest) != {'edge', 'case-cli'}:
                 raise ValueError('invalid TitanX component manifest')
-            for name, marker in [('edge', b'decklab-bundled-case-cli'), ('case-cli', b'CASE_CLI_BOARD_ENDPOINT')]:
+            for name, markers in [('edge', (b'decklab-bundled-case-cli', b'developer-edge/internal/decklab.(*Binder).startDiscoveryScan')),
+                                  ('case-cli', (b'CASE_CLI_BOARD_ENDPOINT',))]:
                 binary = bundle / name
                 expected = manifest.get(name)
                 metadata = flash_executor_metadata(binary, architecture)
-                if expected != metadata['sha256'] or marker not in binary.read_bytes():
+                content = binary.read_bytes()
+                if expected != metadata['sha256'] or not all(marker in content for marker in markers):
                     raise ValueError('incompatible TitanX component or digest mismatch: ' + name)
                 target = 'usr/libexec/decklab/titanx/' + name
                 put(binary, target, 0o755)
                 if hashlib.sha256((stage / target).read_bytes()).hexdigest() != expected:
                     raise ValueError('TitanX component changed while packaging')
             for unit in ('decklab-titanx.service', 'decklab-titanx-prepare.service',
-                         'decklab-titanx-enroll.service', 'decklab-titanx.path'):
+                         'decklab-titanx-enroll.service', 'decklab-titanx.path',
+                         'decklab-titanx-boards.path', 'decklab-titanx-boards.service'):
                 put('packaging/' + unit, 'lib/systemd/system/' + unit)
             wants = stage / 'lib/systemd/system/decklab.service.wants'
             wants.mkdir(exist_ok=True)

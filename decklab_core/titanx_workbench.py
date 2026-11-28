@@ -20,8 +20,7 @@ def config_path():
 
 
 def read_config(path=None):
-    path = config_path() if path is None else path
-    with path.open(encoding='utf-8') as stream:
+    with (path or config_path()).open(encoding='utf-8') as stream:
         data = stream.read(65537)
     if len(data) > 65536:
         raise ValueError('TitanX configuration is too large')
@@ -30,7 +29,43 @@ def read_config(path=None):
             'broker', 'node_id', 'username', 'password', 'slots', 'first_com', 'api_url', 'api_token',
             'lab_id', 'project', 'projects', 'web_origin', 'accept_dispatch'}:
         raise ValueError('unknown TitanX configuration field')
+    if path is not None:
+        return value
+    extra = board_additions(value)
+    if extra:
+        slots = dict(value.get('slots', extra['original_slots']))
+        projects = dict(value.get('projects', {}))
+        for key, board in extra['boards'].items():
+            if key in slots and slots[key] != board['serial']:
+                raise ValueError('TitanX board slot conflicts with the station configuration')
+            slots[key] = board['serial']
+            projects.setdefault(key, board['project'])
+        if slots:
+            assignments({'slots': slots}, {}, lambda: [])
+            value.update(slots=slots, projects=projects)
+        value.update(extra.get('connection', {}))
+        value['paused_slots'] = extra.get('paused_slots', [])
     return value
+
+
+def additions_path():
+    return GUI_CONFIG.with_name('titanx-boards.json')
+
+
+def station_key(settings):
+    return [settings.get(key) for key in ('api_url', 'lab_id', 'broker', 'node_id')] + [settings.get('first_com', 1)]
+
+
+def board_additions(settings):
+    try:
+        with additions_path().open() as stream:
+            data = stream.read(65537)
+    except FileNotFoundError:
+        return {}
+    if len(data) > 65536:
+        raise ValueError('TitanX board configuration is too large')
+    extra = json.loads(data)
+    return extra if extra['station'] == station_key(settings) else {}
 
 
 def write_private(path, content):
@@ -100,6 +135,8 @@ def prepare(settings, state, origin, grants, discover):
     slots = assignments(settings, saved, discover)
     if type(first) is not int or first < 1 or first + max(slots) - 1 > 65535:
         raise ValueError('RemoteUART COM outside 1..65535')
+    paused = set(settings.get('paused_slots', []))
+    slots = {i: serial for i, serial in slots.items() if str(i) not in paused}
     tokens = dict(saved.get('tokens', {}))
     for serial in slots.values():
         if serial in tokens:
@@ -118,10 +155,12 @@ def prepare(settings, state, origin, grants, discover):
         if grant:
             grants.revoke_request(grant['id'])
     write_private(state, json.dumps({'slots': slots, 'tokens': tokens}))
+    if not slots:
+        return ''
     # YAML integer keys are required by Edge. Quote every free-form string.
-    lines = ['node: ' + json.dumps({'id': node, 'name': node}), 'mqtt: ' + json.dumps(mqtt),
+    lines = ['backend: decklab', 'node: ' + json.dumps({'id': node, 'name': node}), 'mqtt: ' + json.dumps(mqtt),
              'dts: {topic_prefix: dts}', 'slots: ' + json.dumps([{'id': i} for i in sorted(slots)]),
-             'decklab:', '  manage_boards: true', '  execute_adb: true', '  base_url: ' + json.dumps(origin)]
+             'decklab:', '  base_url: ' + json.dumps(origin)]
     for key, values in [('slots', slots), ('slot_tokens', {i: tokens[s] for i, s in slots.items()}),
                         ('remote_uart_com', {i: first + i - 1 for i in slots})]:
         lines.append('  ' + key + ':')

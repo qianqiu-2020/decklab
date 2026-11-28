@@ -188,8 +188,12 @@ class SharedTerminal:
             complete = off == current or chunks and chunks[0][0] == off
             if off <= 0 or revision != self.state['revision'] or not complete:
                 snapshot = self.snapshot()
-                return {'off': snapshot['off'], 'data_b64': '', 'data': '',
-                        'terminal_snapshot': snapshot} if snapshot else None
+                if not snapshot:
+                    return None
+                result = {'off': snapshot['off'], 'data_b64': '', 'data': '', 'terminal_snapshot': snapshot}
+                if 0 < off < current and revision == self.state['revision'] and not complete:
+                    result['terminal_gap'] = {'from':off, 'to':current}
+                return result
             return {'off': current, 'data_b64': base64.b64encode(b''.join(c[2] for c in chunks)).decode('ascii'), 'data': ''}
 
     def restore(self, snapshot):

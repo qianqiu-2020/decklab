@@ -81,7 +81,9 @@ class CapabilitiesTests(unittest.TestCase):
         self.assertEqual(dedup['changed_input_http_status'], 409)
         self.assertTrue(set(tasks['kinds']).issubset(dedup['kinds']))
         self.assertEqual(set(dedup['required_kinds']),
-                         {'flash', 'nor-backup', 'desktop-input', 'image-download', 'board-test', 'adb-command'})
+                         {'flash', 'nor-backup', 'desktop-input', 'image-download', 'board-test',
+                          'adb-command', 'ssh-command', 'serial-command'})
+        self.assertEqual(tasks['serial_command_titanx'], {'parameter': 'titanx'})
         self.assertEqual(tasks['request_lookup'], {
             'supported': True, 'endpoint': '/api/task', 'parameter': 'request_id', 'scope': 'actor'})
         self.assertEqual(tasks['outcome']['values'], list(OUTCOMES))

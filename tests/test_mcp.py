@@ -151,6 +151,22 @@ class AdapterTests(APICase):
         self.assertEqual(writes[TOKEN_B]['execution_lease']['token'], 'proof-board-B')
         self.assertIsNone(self.adapter.client().execution_lease)
 
+    def test_team_case_tools_use_selected_board_and_durable_request(self):
+        self.adapter.team_cases('board-B', name='apt', page=2, token=TOKEN_B)
+        self.assertEqual(self.api.calls[-1][2]['name'], 'apt')
+        self.adapter.team_cases('board-B', case_id=42, token=TOKEN_B)
+        self.assertEqual(self.api.calls[-1][2]['view'], 'detail')
+        self.adapter.team_round('board-B', 'record', 2, token=TOKEN_B)
+        query = self.api.calls[-1][2]
+        self.assertEqual((query['view'], query['task_id'], query['round']), ('round', 'record', '2'))
+        with self.assertRaises(ClientError):
+            self.adapter.run_team_case('board-B', 42, 'case-123', 'old', token=TOKEN_B)
+        self.adapter.run_team_case('board-B', 42, 'case-123', 'connection-B', rounds=2, token=TOKEN_B)
+        body = self.api.calls[-1][2]
+        self.assertEqual((body['kind'], body['source'], body['case'], body['rounds'], body['serial'],
+                          body['connection_id'], body['request_id']),
+                         ('board-test', 'titanx', 42, 2, 'SNB', 'connection-B', 'case-123'))
+
     def test_task_request_id_is_forwarded_and_can_query_original_without_submission(self):
         self.adapter.start_task('raw-A', 'identify', connection_id='connection-A', request_id='identify-001')
         self.assertEqual(self.api.calls[-1][2]['request_id'], 'identify-001')
@@ -270,7 +286,8 @@ class MCPTransportTests(APICase):
                 names = {tool.name for tool in tools.tools}
                 self.assertTrue({'get_capabilities', 'get_input_owner', 'claim_board', 'renew_board', 'release_board',
                                  'list_devices', 'read_terminal', 'send_input', 'execute_command', 'execute_adb_command', 'start_task',
-                                 'get_task', 'cancel_task', 'read_boot', 'hardware_actions'}.issubset(names))
+                                 'get_task', 'cancel_task', 'read_boot', 'hardware_actions', 'list_team_test_cases',
+                                 'get_team_test_case', 'run_team_test_case', 'get_team_test_round'}.issubset(names))
                 schemas = {tool.name: tool.input_schema['properties'] for tool in tools.tools}
                 for name in ('send_input', 'execute_command', 'execute_adb_command', 'start_task', 'desktop_input',
                              'start_flash', 'confirm_flash_selection', 'set_boot_priority'):

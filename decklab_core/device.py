@@ -1,11 +1,14 @@
 """One board connection: console stream, probe transactions and SSH sessions."""
 from dataclasses import asdict, replace
+from collections import deque
 from contextlib import nullcontext
 import hashlib
+import json
 import os
 import re
 import secrets
 import shlex
+import sqlite3
 import threading
 import time
 import sys
@@ -61,6 +64,10 @@ class Device:
         self.last_rx = 0.0
         self.last_health_check = 0.0   # host-side UART check; does not probe the board
         self.started = time.time()
+        self.capture_lock = threading.Lock()
+        self.capture_events = deque(maxlen=16)
+        self.pending_capture_events = deque(maxlen=16)
+        self.capture_retry_at = 0
         self.probed = 0                   # 主动探测次数
         self.last_probe = 0.0
         self.fail_count = 0               # 连续打开失败次数(用于退避)
@@ -302,6 +309,8 @@ class Device:
         self.identity_error = '已进入换板识别模式；新板出现登录提示后自动识别一次'
         self.auto_identify_started = False
         self.started = time.time()
+        with self.capture_lock:
+            self.capture_events.clear()
         self.bytes = 0
         self.last_rx = 0.0
         self.last_health_check = 0.0
@@ -418,24 +427,25 @@ class Device:
 
     def append(self, data, received=True):
         b = data if isinstance(data, bytes) else data.encode('utf-8', 'replace')
+        replies = ()
         with self.log_lock:
+            connection, received_before = self.connection_id, self.bytes
+            had_log_error = bool(self.log.log_error)
             if received:
                 self.visibility.interrupt_for_system_output(b)
             internal = self.visibility.active
             text = self.log.consume(b, received, internal=internal)
-            if not received:
-                # Local status belongs only in archives, never in the UART bytes.
-                return
-            with self.cv:
-                terminal, connection = self.terminal, self.connection_id
-                self.terminal.observe(b)
-                self.buf += b
-                if len(self.buf) > SCROLLBACK:
-                    drop = len(self.buf) - SCROLLBACK
-                    del self.buf[:drop]
-                    self.base += drop
-                self.terminal.prune(self.base)
-                if received:
+            # Local status belongs only in archives, never in the UART bytes.
+            if received:
+                with self.cv:
+                    terminal = self.terminal
+                    self.terminal.observe(b)
+                    self.buf += b
+                    if len(self.buf) > SCROLLBACK:
+                        drop = len(self.buf) - SCROLLBACK
+                        del self.buf[:drop]
+                        self.base += drop
+                    self.terminal.prune(self.base)
                     self.bytes += len(b)
                     self.last_rx = time.time()
                     self.console_tail = (self.console_tail + text)[-4096:]
@@ -444,17 +454,52 @@ class Device:
                     if links is not None:
                         links.observe(self, self.console_tail)
                     self._maybe_auto_identify(self.console_tail)
-                end_off = self.base + len(self.buf)
-                replies = terminal.screen.feed(b, end_off)
-                if internal and terminal.screen.error:
-                    self.log.display(text)
-                    self.visibility.finish(self.visibility.token)
-                if (self.visibility.active and self.visibility.kind == 'terminal-setup'
-                        and not terminal.input_pending and terminal.prompt()):
-                    self.visibility.finish(self.visibility.token)
-                self.cv.notify_all()
+                    end_off = self.base + len(self.buf)
+                    replies = terminal.screen.feed(b, end_off)
+                    if internal and terminal.screen.error:
+                        self.log.display(text)
+                        self.visibility.finish(self.visibility.token)
+                    if (self.visibility.active and self.visibility.kind == 'terminal-setup'
+                            and not terminal.input_pending and terminal.prompt()):
+                        self.visibility.finish(self.visibility.token)
+                    self.cv.notify_all()
+            failed = bool(self.log.log_error)
+        if had_log_error != failed:
+            self.capture_event('serial-archive-write-failed' if failed else 'serial-archive-write-resumed',
+                               connection=connection, received=received_before)
         for reply in replies:
             self._protocol_reply(reply, connection)
+
+    def capture_event(self, name, *, connection=None, received=None):
+        store = getattr(self.manager, 'store', None)
+        with self.capture_lock:
+            if connection is not None and connection != self.connection_id:
+                return
+            item = {'event': name, 'at': time.time(), 'connection_id': self.connection_id,
+                    'received': self.bytes if received is None else received}
+            self.capture_events.append(item)
+            if self.serial and isinstance(store, Store):
+                self.pending_capture_events.append((self.serial, item))
+
+    def flush_capture_events(self):
+        store = getattr(self.manager, 'store', None)
+        if not (self.pending_capture_events and isinstance(store, Store)
+                and time.monotonic() >= self.capture_retry_at and store.lock.acquire(blocking=False)):
+            return
+        try:
+            with self.capture_lock:
+                while self.pending_capture_events:
+                    serial, event = self.pending_capture_events[0]
+                    try:
+                        store.event(serial, 'collector', event['event'], json.dumps(event))
+                    except sqlite3.Error:
+                        # The registry can be on the same full disk as the log.
+                        # Keep the boundary in memory until the next transition.
+                        self.capture_retry_at = time.monotonic() + 15
+                        break
+                    self.pending_capture_events.popleft()
+        finally:
+            store.lock.release()
 
     def _protocol_reply(self, text, connection=None):
         from .board_maintenance import maintenance_for
@@ -733,20 +778,32 @@ class Device:
         origin = self.stop
         connection_id = self.connection_id
         info = self.probe_info
+        store = getattr(self.manager, 'store', None)
+        explicit = ssh_user is not None or ssh_password is not None
+        # A resumed attachment may already show the archived serial and IP while
+        # its new connection ID still has no evidence in the identity store.
+        original_serial = self.serial
+        verify_identity = False
+        if actor == 'web' and explicit and original_serial and isinstance(store, Store):
+            try:
+                verify_identity = not store.connection_identified_as(connection_id, original_serial)
+            except sqlite3.Error:
+                # Opening a temporary shell still works if the store is unavailable.
+                pass
         stage('selecting-ssh-address')
-        if not info.get('ips') or (self.manager and not self.serial):
+        if verify_identity or not info.get('ips') or (self.manager and not self.serial):
             stage('reading-ssh-address-from-console')
             r = self.run_probe()
             if not r.get('ok'):
+                if verify_identity:
+                    return None, '保存 SSH 账号前未能核实本次连接的板号：%s' % r.get('error')
                 return None, '需要先拿到 IP,但识别失败: %s' % r.get('error')
+            if verify_identity and (self.stop is not origin or self.connection_id != connection_id
+                                    or self.serial != original_serial or r.get('serial') != original_serial):
+                return None, '本次连接尚未核实为所选板卡，请先识别设备后重试'
             info = self.probe_info
-        ip = None
-        for x in (info.get('ips') or []):
-            iface, cidr = (x.split(' ', 1) + [''])[:2]
-            if iface == 'docker0' or cidr.startswith('172.17.') or cidr.startswith('127.'):
-                continue                      # 跳过 docker0 之类的内部地址
-            ip = cidr.split('/')[0]
-            break
+        from .session_base import ssh_address
+        ip = ssh_address(info)
         if not ip:
             return None, '没找到可用 IP(只看到 docker0 之类的内部地址)'
         stage('found-ssh-address', ip)
@@ -778,7 +835,6 @@ class Device:
         session = None
         attempted_passwords = []
         credential_serial = self.serial
-        store = getattr(self.manager, 'store', None)
         stored = None
         credential_revision = 0
         credential_store_available = callable(getattr(store, 'get_ssh_credentials', None))
@@ -794,7 +850,6 @@ class Device:
             if self.stop is not origin or origin.is_set() or self.connection_id != connection_id:
                 return None, '设备已重新枚举,请重新识别 IP'
             profile = self.profile
-            explicit = ssh_user is not None or ssh_password is not None
             stage('reading-ssh-settings')
             if credential_serial and credential_store_available:
                 try:
@@ -975,6 +1030,8 @@ class Device:
 
     def snapshot(self):
         tail = ''
+        with self.capture_lock:
+            capture_events = list(self.capture_events)
         with self.cv:
             last = bytes(self.buf[-400:]).decode('utf-8', 'replace')
         for line in reversed(last.split('\n')):
@@ -1004,6 +1061,7 @@ class Device:
                 'bytes': self.bytes, 'last_rx': self.last_rx,
                 'last_health_check': self.last_health_check, 'capture_started': self.started,
                 'serial_health': self.health.snapshot(),
+                'capture_events': capture_events,
                 'capture_paused': self.capture_paused.is_set(),
                 'last_line': tail, 'log': os.path.basename(self.logpath or ''),
                 'log_error': self.log_error,

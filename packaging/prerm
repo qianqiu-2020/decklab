@@ -2,7 +2,7 @@
 set -e
 if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
   if [ -e /lib/systemd/system/decklab-titanx.path ]; then
-    deb-systemd-invoke stop decklab-titanx.path decklab-titanx.service || true
+    deb-systemd-invoke stop decklab-titanx-boards.path decklab-titanx.path decklab-titanx.service || true
   fi
   deb-systemd-invoke stop decklab.service || true
   deb-systemd-invoke stop decklab-web.service || true

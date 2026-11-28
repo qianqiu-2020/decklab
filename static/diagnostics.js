@@ -6,6 +6,10 @@
   var probeModes = {linux:'内置 Linux 探测', custom:'自定义 shell 命令', manual:'仅使用终端'};
   var healthStates = {pending:'等待首次检查', waiting:'等待空闲控制台', ok:'往返检查通过', error:'往返检查异常'};
   var osNames = {debian:'Debian', bianbu:'Bianbu', buildroot:'Buildroot'};
+  var captureLabels = {'serial-capture-started':'开始采集', 'serial-capture-paused':'采集暂停',
+    'serial-collector-stopped':'采集器停止', 'serial-reader-disconnected':'串口读取中断',
+    'serial-archive-write-failed':'归档写入失败', 'serial-archive-write-resumed':'归档恢复写入',
+    'browser-replay-gap':'网页无法连续补读，已用快照恢复画面'};
   var activationPhases = {'validating-settings':'核对保存的配置', 'checking-web-listener':'检查网页监听地址',
     'checking-service-paths':'检查服务目录', 'checking-backend-config':'检查硬件后端配置',
     'checking-collector-idle':'检查采集器是否空闲', 'waiting-collector-ready':'等待采集器就绪',
@@ -97,7 +101,7 @@
         return Promise.reject(new Error(translate('设备连接已变化，请重新打开诊断。')));
       }
       return Promise.allSettled([ctx.serial ? request('/api/hardware?' + query(ctx)) : Promise.resolve({}),
-        request('/api/sessions?' + query(ctx))])
+        request('/api/sessions?' + query(ctx)), request('/api/activity?capture=1&' + query(ctx))])
         .then(function (results) {
           return function () {
             var health = board.serial_health || {}, info = board.info || {};
@@ -117,6 +121,14 @@
               ['检查原因', health.reason], ['上次检查', time(health.last_attempt)], ['上次通过', time(health.last_success)],
               ['下次检查', time(health.next_check)], ['输入占用', owner.actor || translate('无')],
               ['运行中的操作', operation.kind], ['操作编号', operation.id]]);
+            var timeline = (results[2].value?.capture_events || board.capture_events || []).slice();
+            if (ctx.lastCaptureGap) timeline.push(Object.assign({event:'browser-replay-gap'}, ctx.lastCaptureGap));
+            timeline.sort(function (a, b) { return b.at - a.at; });
+            section('串口连续性', timeline.map(function (event) {
+              var position = event.event === 'browser-replay-gap' ? event.from + ' → ' + event.to
+                : [event.connection_id, size(event.received)].filter(Boolean).join(' · ');
+              return [known(captureLabels, event.event), time(event.at) + ' · ' + position];
+            }));
             section('板卡身份', [['板卡序列号', board.serial], ['固件原始编号', board.reported_serial || info.reported_serial],
               ['身份来源', info.serial_source], ['身份状态', known({confirmed:'已确认', provisional:'待确认'}, info.identity_status)],
               ['探测方式', known(probeModes, board.probe_mode)], ['当前识别的系统', known(osNames, board.ssh_settings?.os_family)],
@@ -176,6 +188,47 @@
           if (Array.isArray(p.stages)) section('执行经过', p.stages.map(function (stage) {
             return [translate(global.DeckLabTasks.phaseLabel(stage.phase) || stage.phase), [time(stage.at_ms / 1000), stage.endpoint].filter(Boolean).join(' · ')];
           }));
+          var summary = document.createElement('button');
+          summary.type = 'button'; summary.textContent = '复制脱敏摘要';
+          summary.addEventListener('click', function () {
+            options.copyText([t.kind + ' · ' + t.id, [known(taskStates, t.state), known(outcomes, t.outcome)].filter(Boolean).join(' · '),
+              [time(t.created), time(t.updated)].filter(Boolean).join(' → '),
+              ...(p.stages || []).map(function (stage) {
+                return [time(stage.at_ms / 1000), translate(global.DeckLabTasks.phaseLabel(stage.phase) || '')].filter(Boolean).join(' · ');
+              })].join('\n'));
+          });
+          var actions = document.createElement('div'); actions.className = 'ft-actions';
+          actions.appendChild(summary); body.appendChild(actions);
+          if (ctx?.serial) {
+            var serial = document.createElement('button'); serial.type = 'button'; serial.textContent = '查看任务时段串口';
+            actions.appendChild(serial);
+            serial.addEventListener('click', function () {
+              var state = active;
+              serial.disabled = true;
+              request('/api/logs?task_window=' + encodeURIComponent(id) + '&key=' + encodeURIComponent(ctx.key)
+                + '&serial=' + encodeURIComponent(ctx.serial)).then(function (windowLog) {
+                if (!current(state) || serial.parentNode !== actions || !body.contains(actions)) return;
+                var range = document.createElement('p');
+                range.textContent = [time(windowLog.from), time(windowLog.to),
+                  windowLog.limited ? translate('只显示可读取的末段日志') : ''].filter(Boolean).join(' · ');
+                var raw = document.createElement('pre'); raw.textContent = windowLog.data || translate('这个时段没有可用串口归档');
+                raw.className = 'diagnostics-serial';
+                body.appendChild(range); body.appendChild(raw);
+                if (windowLog.data) {
+                  var link = document.createElement('button'); link.type = 'button'; link.textContent = '下载串口片段';
+                  link.addEventListener('click', function () {
+                    var url = URL.createObjectURL(new Blob([windowLog.data], {type:'text/plain;charset=utf-8'}));
+                    var anchor = document.createElement('a'); anchor.href = url; anchor.download = 'serial-' + id + '.log';
+                    anchor.click();
+                    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+                  });
+                  actions.appendChild(link);
+                }
+              }).catch(function (error) {
+                if (current(state)) { serial.disabled = false; status.textContent = error.message; }
+              });
+            });
+          }
         };
       });
     }

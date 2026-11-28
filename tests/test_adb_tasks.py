@@ -88,6 +88,74 @@ else:
             time.sleep(.02)
         self.fail('fixture task did not finish')
 
+    def test_titanx_receipt_correlates_only_the_failed_case_round(self):
+        from decklab_core.board_ownership import ownership_for
+
+        serial = self.device.serial
+        payload = {'titanx': {'job_id': '51_999', 'command_id': 'step-1',
+                              'case_code': 'SAMPLE_TEST', 'round': 3}}
+        denied = self.actions.start(dict(self.payload, **payload), self.device, 'web')
+        self.assertEqual(denied.status, 423)
+        owner = ownership_for(self.manager)
+        proof = owner.claim(serial, 'web')['execution_lease']
+        try:
+            with owner.scope('web', proof=proof):
+                task = self.finish(**payload)
+            store = self.manager.tasks.store
+            steps = store.titanx_case_receipts(serial, '51_999', 'sample_test', 3)
+            self.assertEqual([row['id'] for row in steps], [task['id']])
+            self.assertEqual(steps[0]['exit_code'], 7)
+            self.assertEqual(store.titanx_case_receipts(serial, '51_999', 'OTHER', 3), [])
+            self.assertEqual(store.titanx_case_receipts(serial, '51_999', 'SAMPLE_TEST', 2), [])
+            self.assertEqual(store.titanx_case_receipts('OTHER', '51_999', 'SAMPLE_TEST', 3), [])
+        finally:
+            owner.release(serial, 'web', '', proof)
+
+    def test_ssh_command_uses_its_own_receipt_and_requires_the_board_lease(self):
+        from contextlib import nullcontext
+        from decklab_core.board_ownership import ownership_for
+        from decklab_core.tasks import TaskError
+
+        payload = dict(self.payload, kind='ssh-command')
+        self.assertEqual(self.actions.start(payload, self.device, 'web').status, 423)
+        owner = ownership_for(self.manager)
+        proof = owner.claim(self.device.serial, 'web')['execution_lease']
+        try:
+            with owner.scope('web', proof=proof), patch('decklab_core.adb_tasks.command_channel',
+                    return_value=nullcontext(['/bin/sh', '-c'])):
+                with patch.dict(os.environ, TEST_BOARD=self.device.serial):
+                    task = self.finish(kind='ssh-command', ssh_login={'user':'tester','password':'fixture-secret'})
+            self.assertNotIn('fixture-secret', str(task))
+            receipt = task['result']['ssh_receipt']
+            self.assertEqual((receipt['exit_code'], receipt['stderr']), (7, 'stderr'))
+            with owner.scope('web', proof=proof), patch('decklab_core.adb_tasks.command_channel',
+                    side_effect=TaskError('SSH host key unavailable', 409)):
+                failed = self.finish(kind='ssh-command', request_id='ssh-failed-login')
+            self.assertEqual(failed['outcome'], 'not-issued')
+        finally:
+            owner.release(self.device.serial, 'web', '', proof)
+
+    def test_missing_adb_uses_serial_identity_for_the_ssh_task(self):
+        from contextlib import nullcontext
+        from decklab_core.board_ownership import ownership_for
+        owner = ownership_for(self.manager)
+        serial = self.device.serial
+        proof = owner.claim(serial, 'web')['execution_lease']
+        facts = {'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(), 'host_keys': 'fixture'}
+        try:
+            with owner.scope('web', proof=proof), patch.dict(os.environ, TEST_BOARD=serial), \
+                    patch('decklab_core.adb_tasks.shutil.which', return_value=None), \
+                    patch('decklab_core.adb_tasks.serial_ssh_identity', return_value=facts) as identity, \
+                    patch('decklab_core.adb_tasks.command_channel', return_value=nullcontext(['/bin/sh', '-c'])) as channel:
+                task = self.finish(kind='ssh-command', request_id='ssh-without-adb')
+            identity.assert_called_once_with(self.device, 'web', '', self.device.connection_id)
+            self.assertIsNone(channel.call_args.args[1])
+            receipt = task['result']['ssh_receipt']
+            self.assertEqual((receipt['exit_code'], receipt['identity_channel']), (7, 'uart'))
+            self.assertEqual(receipt['stderr'], 'stderr')
+        finally:
+            owner.release(serial, 'web', '', proof)
+
     def test_sealed_input_is_streamed_to_guarded_shell_and_replay_is_idempotent(self):
         data = (b'#!/bin/sh\nprintf "hello"\n' * 4000)[:61440]
         spool = self.manager.artifacts

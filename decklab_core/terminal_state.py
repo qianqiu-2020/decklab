@@ -143,14 +143,28 @@ class SerialTerminalState:
         actor, client = d.transactions.source_actor, d.transactions.client_id
         with d.cv:
             state = self.screen.metadata()
-            if state.get('phase') != 'text' or state.get('internal_output') or self.geometry:
+            # Earlier browsers could sync a collapsed panel to the live UART.
+            # Recover its normal text viewport without typing stty into the board.
+            old_grid = state.get('geometry') or {}
+            collapsed = (self.geometry and 0 < old_grid.get('rows', 0) < 5
+                         and self.geometry['rows'] < 5 and rows >= 5
+                         and (state.get('cursor') or {}).get('buffer') == 'normal')
+            if (state.get('internal_output') or (self.geometry and not collapsed)
+                    or state.get('phase') != 'text' and not (collapsed and state.get('phase') == 'shell')):
                 return {'ok': True, 'skipped': True}
             # The first Linux log viewport can be supplied even while login is
             # pending. Keep any existing input controller and its shell guards.
-            initial = state.get('needs_boot_viewport')
+            initial = state.get('needs_boot_viewport') or collapsed
             if ((self.input_pending and not initial)
-                    or (not self.screen.control(actor, client) and not initial)):
+                    or (not collapsed and not self.screen.control(actor, client) and not initial)):
                 return {'ok': True, 'skipped': True}
+            if collapsed:
+                cols = old_grid['cols']  # Keep shell wrapping until its next idle stty.
             ok = self.screen.resize(cols, rows, presentation=True)
+            if ok and collapsed:
+                self.geometry = None
+                self.attempted = False
+                self.environment_pending = False
+                self.history.append((d.base + len(d.buf), None))
             d.cv.notify_all()
         return {'ok': ok, 'terminal_state': self.screen.metadata()}

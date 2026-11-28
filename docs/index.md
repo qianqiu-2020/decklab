@@ -21,6 +21,7 @@
 | [镜像商店](modules/image-store.md) · [刷机](modules/flashing.md) · [内存启动](modules/ram-boot.md) | 镜像缓存、目标盘、写入范围、进度和临时启动 |
 | [文件传输](modules/file-transfer.md) · [任务](modules/tasks.md) | 上传、下载、板间传输及后台执行的结果与恢复 |
 | [Agent 接入](modules/agent-access.md) · [MCP](modules/mcp.md) · [平台集成](modules/platform-integration.md) | 授权、工具调用和共享执行记录 |
+| [TitanX 接入](modules/titanx-integration.md) | 接管板卡、旁观测试、失败后跳转排查与复测、上位机 Agent 图形测试 |
 | [分离部署](modules/distributed-nodes.md) | 把浏览器入口和设备所在的硬件节点部署在不同主机 |
 
 ## 接口、开发与发布

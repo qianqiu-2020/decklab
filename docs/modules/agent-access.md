@@ -140,7 +140,7 @@ Agent 建连不会覆盖持久凭据，显式 Agent 凭据只用于该次连接�
 未识别连接没有可持久关联的设备身份，凭据不按 IP 或 COM/tty 保存。API 只公开保存状态和
 用户名，不提供读取密码的接口；详见[凭据保存说明](../reference/environment.md#remembered-ssh-credentials)。
 `exec`、`ssh-open` 和普通网页建连均不会因认证失败而自动重设 root 密码或修改 sshd。
-需要 root 密码登录时，由用户按[串口手工指引](../reference/environment.md#manual-root-ssh-setup)分步执行。
+需要 root 密码登录时，由用户按[ADB 或串口配置指引](../reference/environment.md#manual-root-ssh-setup)分步执行。
 
 `--timeout` 默认 60 秒，从会话创建完成后计时，包含登录和执行；创建请求单独受
 `--http-timeout` 控制（默认 180 秒）。缺少 IP 时服务可能先在串口识别；不会自动安装 sshd。

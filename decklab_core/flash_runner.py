@@ -1295,17 +1295,30 @@ class LocalFlashExecutor:
                         'system-package-loader-unsupported': '所选加载器不支持安全整包写入系统盘。可选用支持系统盘核对的 DeckLab 内置加载器',
                         'system-disk-unavailable': 'K1 下载环境未检测到可使用 partition_universal.json 的系统盘，请检查存储介质和启动模式',
                         'system-disk-selection-required': '有多块候选系统盘，请选择本次要写入的目标系统盘',
+                        'target-not-found': '找不到本次操作绑定的 USB 刷机设备',
                         'target-permission-denied': '控制机无权打开重新连接的 USB 下载设备。请检查安装包的 USB 权限规则后重新检测',
                         'image-archive-corrupt': '镜像压缩包不完整或校验失败，请重新下载',
                         'image-invalid': '镜像格式或包内布局无效'}
-                    if event.get('code') in reasons:
-                        message = reasons[event['code']]
+                    code = event.get('code')
+                    if code in reasons:
+                        message = reasons[code]
+                    if code == 'target-not-found':
+                        message = {
+                            'snapshot-nor': '读取 NOR 时失去原 USB 刷机连接',
+                            'storage-inventory': '识别板上存储介质时失去原 USB 刷机连接',
+                            'storage-metadata': '读取系统盘版本信息时失去原 USB 刷机连接',
+                        }.get(operation, message)
                     if operation == 'calibrate' and event.get('code') == 'system-disk-selection-required':
                         message = '写盘测速需要选定一块磁盘，请在「刷写配置」中填写测速目标盘'
                     # Reuse the service log for the complete diagnostic; the
                     # browser gets a correlation ID, never an arbitrary host path.
                     diagnostic = event.get('message')
                     diagnostic_id = secrets.token_hex(6) if isinstance(diagnostic, str) else ''
+                    if (operation == 'stream-flash' and code == 'image-invalid' and isinstance(diagnostic, str)
+                            and diagnostic.startswith('package stores ')
+                            and diagnostic.endswith(' before partition_universal.json; fast mode needs the partition table first, use the normal flashing path')):
+                        code = 'stream-layout-order'
+                        message = '包内分区表排在大文件之后，URL 极速刷机无法继续，本次未写入。请下载镜像后使用普通刷机。'
                     if (operation == 'image-plan' and event.get('code') == 'image-invalid'
                             and diagnostic == 'unsupported NOR partition package binding'
                             and binding.profile_data.get('chip_family') == 'k1'):
@@ -1356,6 +1369,12 @@ class LocalFlashExecutor:
                         message = '板上 NOR 内容在备份后发生变化，尚未写入；请重新读取备份并核对。'
                     if event.get('code') == 'nor-read-failed':
                         message = 'NOR 读取未完成，请查看原任务；不会自动重试写入。'
+                        if operation == 'snapshot-nor':
+                            if diagnostic == 'NOR read stopped; no retry: planned storage read returned an invalid or excessive byte count':
+                                message = ('板卡返回的 NOR 读取长度无效或与预期不符，尚未传输该段数据，本次未写入。'
+                                           '请点击「重新检测设备」再读取。')
+                            else:
+                                message = 'NOR 读取未完成，本次未写入。请在刷机记录中查看本次命令和应答。'
                     if event.get('code') == 'verify-failed':
                         message = '回读校验失败；请核对写入结果和回读文件，不会自动重刷。'
                     if event.get('code') == 'nor-package-requires-full':
@@ -1366,7 +1385,7 @@ class LocalFlashExecutor:
                         message = '这是 NOR 固件刷机包；当前自动刷机仅支持 GPT 镜像包，尚未支持 NOR 固件刷写。'
                     if diagnostic_id:
                         message += '（诊断 ' + diagnostic_id + '）'
-                    raise FlashRunnerError(message, outcome=outcome, code=event.get('code'))
+                    raise FlashRunnerError(message, outcome=outcome, code=code)
                 if result is not None:
                     raise FlashRunnerError('flashing executor emitted events after its result')
                 if event['event'] == 'result':

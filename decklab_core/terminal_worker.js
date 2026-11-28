@@ -47,7 +47,7 @@ function info(s) {
   if (s.internal) return {...s.internal.info, off: s.off, internal_output: true};
   const b = s.term.buffer.active;
   return {geometry: {cols: s.term.cols, rows: s.term.rows},
-    phase: b.type === 'alternate' || s.progress && s.progress.active() ? 'application' : s.phase,
+    phase: s.phase !== 'firmware' && (b.type === 'alternate' || s.progress && s.progress.active()) ? 'application' : s.phase,
     revision: s.revision, off: s.off, modes: s.term.modes,
     cursor: {x: b.cursorX, y: b.cursorY, buffer: b.type}, internal_output: false,
     needs_boot_viewport: s.kind === 'serial' && !!s.linux && !s.textGeometry && s.phase === 'text' && b.type === 'normal'};
@@ -99,10 +99,21 @@ function create(m) {
   });
   if (m.kind === 'serial') {
     s.progress = window.DeckLabSerialProgress.create({canonical: true, sourceRows: () => term.rows});
+    function enterFirmware() {
+      if (s.phase === 'firmware' && term.buffer.active.type === 'alternate') return;
+      // Growing the normal buffer pulls rows out of scrollback and shifts the
+      // menu under construction. Use a screen with no scrollback for firmware.
+      term._core._inputHandler.setModePrivate({length: 1, params: [1049]});
+      s.phase = 'firmware';
+      s.revision++;
+    }
     term.parser.registerCsiHandler({prefix: '>', final: 'z'}, p => { resize(s, term.cols, p[0]); return true; });
     term.parser.registerCsiHandler({final: 'J'}, p => {
       if (!s.restoring && p[0] === 2 && !s.linux && s.phase !== 'shell') {
-        s.phase = 'firmware'; resize(s, 80, 24);
+        // Clearing the screen does not announce a new size. EDK2 and GRUB
+        // both clear between draws while continuing to use the same rows.
+        const rows = s.phase === 'firmware' ? term.rows : 24;
+        enterFirmware(); resize(s, 80, rows);
       }
       return false;
     });
@@ -110,7 +121,7 @@ function create(m) {
       if (s.restoring) return false;
       if (s.phase === 'firmware' || s.phase === 'text' && !s.linux) {
         const row = p[0] || 1;
-        if (row <= 200) { s.phase = 'firmware'; resize(s, 80, Math.max(term.rows, row)); }
+        if (row <= 200) { enterFirmware(); resize(s, 80, Math.max(term.rows, row)); }
       }
       return false;
     });

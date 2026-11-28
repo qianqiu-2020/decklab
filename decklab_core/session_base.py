@@ -17,6 +17,14 @@ class SSHAuthenticationError(RuntimeError):
         super().__init__('请填写该系统的 SSH 用户和密码' if needs_credentials else 'SSH 认证失败，请填写 SSH 用户和密码后重试')
 
 
+def ssh_address(info):
+    for row in info.get('ips') or []:
+        interface, _, cidr = row.partition(' ')
+        if cidr and interface != 'docker0' and not cidr.startswith(('172.17.', '127.')):
+            return cidr.split('/')[0]
+    return None
+
+
 def valid_ssh_user(value):
     return (isinstance(value, str) and 0 < len(value) <= 128 and value.isprintable()
             and not value.startswith('-') and '@' not in value

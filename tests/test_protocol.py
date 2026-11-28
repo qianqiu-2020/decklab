@@ -271,6 +271,27 @@ class CustomProbeTests(DeviceFixture):
 
 class ShortLineScriptTests(unittest.TestCase):
     @unittest.skipUnless(pathlib.Path('/bin/sh').is_file(), 'requires a local POSIX shell')
+    def test_short_script_waits_for_its_complete_frame_before_running(self):
+        script = frame_command("printf '%s\\n' payload\n# trailing comment", NONCE, '\n')
+        pending, last_line, _ = script.rsplit('\n', 2)
+        with subprocess.Popen(['/bin/sh'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True) as shell:
+            shell.stdin.write("printf 'ready\\n'\n")
+            shell.stdin.flush()
+            try:
+                self.assertTrue(select.select([shell.stdout], [], [], 3)[0])
+                self.assertEqual(shell.stdout.readline(), 'ready\n')
+                shell.stdin.write(pending + '\n')
+                shell.stdin.flush()
+                self.assertFalse(select.select([shell.stdout], [], [], 0.3)[0])
+                output, errors = shell.communicate(last_line + '\n', timeout=3)
+                self.assertEqual(shell.returncode, 0, errors)
+                self.assertEqual(output, '\n' + BEGIN + '\npayload\n\n' + END + '\n')
+            finally:
+                if shell.poll() is None:
+                    shell.kill()
+
+    @unittest.skipUnless(pathlib.Path('/bin/sh').is_file(), 'requires a local POSIX shell')
     def test_staging_preserves_long_scripts_quotes_unicode_and_newlines(self):
         payload = ('a\'\"$`\\中\n' * 500) + 'end'
         command = 'printf %s ' + shlex.quote(payload)

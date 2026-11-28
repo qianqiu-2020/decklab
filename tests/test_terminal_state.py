@@ -226,6 +226,15 @@ class SerialTerminalTests(unittest.TestCase):
         self.assertTrue(self.resize().payload['skipped'])
         self.write.assert_called_once()
 
+    def test_collapsed_serial_view_recovers_history_without_writing_to_board(self):
+        self.feed(b'\x1b[8;2;84t' + b'old serial output\r\n' * 60)
+        self.assertEqual(self.device.terminal.geometry['rows'], 2)
+        self.assertTrue(self.resize(rows=2).payload['skipped'])
+        recovered = self.resize(presentation=True).payload['terminal_state']
+        self.assertEqual(recovered['geometry'], {'rows': 42, 'cols': 84})
+        self.assertIsNone(self.device.terminal.geometry)
+        self.write.assert_not_called()
+
     def test_boot_presentation_remembers_controller_grid_without_board_input(self):
         self.feed(b'\x00sys: 0x1\r\n')
         result = self.resize(presentation=True)

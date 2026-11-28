@@ -148,7 +148,33 @@ class TaskActionTests(unittest.TestCase):
         self.assertEqual(task['state'], 'failed')
         self.assertIsNone(task['result'])
 
+    def test_adb_recovery_reuses_one_request_and_requires_same_connection(self):
+        connection = self.device.connection_id
+        tasks = self.manager.tasks.store
+        original = tasks.create('adb-connect', 'web', 'page', [{'serial': 'SN1', 'connection_id': connection}])
+        boot = '12345678-1234-1234-1234-1234567890ab'
+        tasks.update(original, state='failed', progress={
+            'stages': [{'phase': 'adb-usb-transport-closed', 'endpoint': boot, 'at_ms': 1}]})
+        payload = {'kind': 'adb-connect', 'serial': 'SN1', 'connection_id': connection,
+                   'key': 'board', 'recover_from': original}
+        self.assertEqual(self.actions.start(payload, self.device, 'agent').status, 403)
+        with mock.patch('decklab_core.task_actions.DeviceActions.execute',
+                        return_value=response(200, {'ok': True, 'sid': 'adb-new'})) as execute:
+            first = self.actions.start(payload, self.device, 'web')
+            self.assertEqual(first.status, 202)
+            self.wait_task(first.payload['task']['id'])
+            second = self.actions.start(payload, self.device, 'web')
+        self.assertEqual(first.payload['task']['id'], second.payload['task']['id'])
+        execute.assert_called_once()
+        self.assertEqual(execute.call_args.args[0], 'adb-connect')
+        self.assertEqual(execute.call_args.kwargs['recovery_boot'], boot)
+        self.device.connection_id = 'another-connection'
+        self.assertEqual(self.actions.start(dict(payload, connection_id=self.device.connection_id),
+                                            self.device, 'web').status, 409)
+
     def test_ssh_network_failure_retains_selected_address_and_last_stage_without_credentials(self):
+        self.store.bind({'serial': 'SN1', 'serial_source': 'device-tree'},
+                        'usb', 'fake', connection_id=self.device.connection_id)
         self.device.probe_info = {'ips': ['docker0 172.17.0.1/16', 'eth0 192.0.2.23/24']}
         password = 'diagnostic-regression-password'
         with mock.patch('decklab_core.device.check_password_login',

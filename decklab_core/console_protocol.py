@@ -5,6 +5,7 @@ This service only consumes snapshots and uses the connection's guarded writer;
 it never opens a serial handle, reads an OS descriptor or binds board identity.
 Connection callbacks remain the seam for simulated firmware and test transports.
 """
+from pathlib import Path
 import re
 import secrets
 import shlex
@@ -27,9 +28,12 @@ def frame_command(cmd, nonce, newline):
               "printf '\\n%s%s\\n' '__SD_E_' '%s__'")
     framed = framed % ('%s', '%s', nonce, cmd, '%s', '%s', nonce)
     if max(len(line.encode('utf-8')) for line in framed.split('\n')) <= 512:
-        # Convert our command separator only; literal LF characters inside a
-        # quoted user script must not acquire an extra CR on CRLF consoles.
-        return newline.join(framed.rsplit('\n', 1)) + newline
+        # Parse the entire group before running any of it. A foreground command
+        # or the line editor can consume queued input when the end marker is a
+        # separate command. The group keeps the current shell's state.
+        body, end = framed.rsplit('\n', 1)
+        # Leave literal newlines inside the caller's script untouched.
+        return newline.join(('{', body, end, '}', ''))
     name = '__decklab_command'
     lines = [name + "=''"]
     offset = 0
@@ -47,33 +51,8 @@ def frame_command(cmd, nonce, newline):
 
 
 def root_ssh_config_command():
-    """Build a root-only, password-free command for the serial shell."""
-    script = (
-        'set -e; cfg=/etc/ssh/sshd_config; '
-        'tmp=$(mktemp /etc/ssh/.decklab-config.XXXXXX); '
-        'backup=$(mktemp /etc/ssh/.decklab-backup.XXXXXX); '
-        "trap 'rm -f \"$tmp\" \"$backup\"' EXIT; "
-        'cp -p "$cfg" "$backup"; '
-        'if [ "$(head -n 1 "$cfg")" = "PermitRootLogin yes" ] && '
-        '[ "$(sed -n 2p "$cfg")" = "PasswordAuthentication yes" ]; '
-        'then cp -p "$cfg" "$tmp"; '
-        'else { printf "PermitRootLogin yes\nPasswordAuthentication yes\n"; cat "$cfg"; } > "$tmp"; '
-        'chmod --reference="$cfg" "$tmp"; chown --reference="$cfg" "$tmp"; fi; '
-        'sshd_bin=$(command -v sshd || printf /usr/sbin/sshd); '
-        '"$sshd_bin" -t -f "$tmp" || { echo SSH_CONFIG_ERROR=invalid; exit 1; }; '
-        'mv "$tmp" "$cfg"; '
-        'if (systemctl restart ssh || systemctl restart sshd) && '
-        '"$sshd_bin" -T -C user=root,host=localhost,addr=127.0.0.1 '
-        '| grep -qx "permitrootlogin yes" && '
-        '"$sshd_bin" -T -C user=root,host=localhost,addr=127.0.0.1 '
-        '| grep -qx "passwordauthentication yes"; '
-        'then echo SSH_CONFIG_OK=1; '
-        'else mv "$backup" "$cfg"; '
-        '(systemctl restart ssh || systemctl restart sshd) >/dev/null 2>&1 || :; '
-        'echo SSH_CONFIG_ERROR=restart-or-policy; fi'
-    )
-    return 'if [ "$(id -u)" = 0 ]; then sh -c {s}; else sudo -n sh -c {s}; fi'.format(
-        s=shlex.quote(script))
+    """Use the same OpenSSH policy script as the interactive ADB setup."""
+    return (Path(__file__).resolve().parents[1] / 'static/root-ssh-policy.sh').read_text().strip()
 
 
 class ConsoleProtocol:

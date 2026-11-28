@@ -121,6 +121,20 @@ class DemoDevice(Device):
                         nonce, output, nonce, status)
                 except (ValueError, IndexError):
                     output = 'demo: unsupported command frame\n'
+            elif '__SD_B_' in line and '__DECKLAB_SERIAL_RC_' in line:
+                try:
+                    words = shlex.split(line)
+                    if len(words) != 13 or words[2] != '__SD_B_' or words[4:6] != ['sh', '-c']:
+                        raise ValueError('unsupported demo serial frame')
+                    output, status = self.command(words[6])
+                    output = '\n__SD_B_%s\n%s\n__DECKLAB_SERIAL_RC_%s:%d\n' % (
+                        words[3].rstrip(';'), output, words[11], status)
+                except (ValueError, IndexError):
+                    output = 'demo: unsupported serial command frame\n'
+            elif match := re.fullmatch(r"printf .* '__SD_E_' '([a-f0-9]+__)'", line):
+                output = '\n__SD_E_' + match[1] + '\n'
+            elif line in ('{', '}'):
+                output = ''
             else:
                 output, _ = self.command(line)
             echo.append((output + self.prompt()).replace('\n', '\r\n'))

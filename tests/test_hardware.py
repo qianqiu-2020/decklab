@@ -18,6 +18,25 @@ from decklab_core.task_actions import TaskActions
 
 
 class HardwareConfigTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'requires Linux USB port links')
+    def test_download_ports_uses_only_the_kernel_verified_usb_peer(self):
+        from decklab_core.flash_discovery import download_ports
+
+        with tempfile.TemporaryDirectory() as directory:
+            tree = Path(directory)
+            for source, peer, port, expected in (
+                    ('4-0:1.0/usb4-port1', '3-0:1.0/usb3-port2', '4-1', [[4, 1], [3, 2]]),
+                    ('5-3.5:1.0/5-3.5-port1', '6-2.7:1.0/6-2.7-port4', '5-3.5.1',
+                     [[5, 3, 5, 1], [6, 2, 7, 4]])):
+                with self.subTest(port=port):
+                    origin, companion = tree / source, tree / peer
+                    origin.mkdir(parents=True)
+                    companion.mkdir(parents=True)
+                    (origin / 'peer').symlink_to(companion)
+                    self.assertEqual(download_ports(port, tree), expected[:1])
+                    (companion / 'peer').symlink_to(origin)
+                    self.assertEqual(download_ports(port, tree), expected)
+
     def test_disabled_default_and_invalid_configuration(self):
         with self.assertRaises(TaskError):
             HardwareBook().command('SN', 'reset', 'web')
@@ -106,6 +125,57 @@ class HardwareTaskTests(unittest.TestCase):
         self.assertEqual(result.status, 409)
         self.assertIn('接线已更新', result.payload['error'])
         self.assertFalse(self.manager.tasks._active)
+
+    def test_enter_download_can_resolve_only_the_new_usb_connection_of_the_leased_board(self):
+        from decklab_core.board_ownership import ownership_for
+        from test_flash_discovery_integration import FakeDiscoveryExecutor, usb_candidate
+
+        serial = self.device.serial
+        actor = 'fixture-agent'
+        command = {'argv': [sys.executable, '-c', 'pass'], 'allow_agent': True}
+        self.manager.hardware = HardwareBook({'boards': {serial: {'enter-download': command, 'reset': command}}})
+        executor = self.manager.flash_executor = FakeDiscoveryExecutor()
+        self.manager.flash_discovery_argv = (sys.executable,)
+        executor.candidates = [usb_candidate(port=(1, 5), serial='BOARD-OTHER', strong=True)]
+        payload = {'kind': 'hardware-enter-download', 'connection_id': self.device.connection_id,
+                   'request_id': 'fixture-enter-download', 'resolve_flash_target': True}
+        self.assertEqual(self.actions.start(payload, self.device, actor).status, 423)
+        ownership = ownership_for(self.manager)
+        claim = ownership.claim(serial, actor, ttl=90)
+
+        def control(argv, timeout, check, cleanup_failed, outcome=None):
+            check()
+            outcome('issued')
+            executor.candidates.append(usb_candidate(serial=usb_serial, strong=True))
+            outcome('acknowledged')
+            return {'exit_code': 0, 'duration_ms': 1}
+
+        binding = {'serial': serial, 'connection_id': self.device.connection_id, 'usb_port': '1-4'}
+        with ownership.scope(actor, proof=claim['execution_lease']), \
+                mock.patch('decklab_core.board_cases.adb_binding', return_value=binding), \
+                mock.patch('decklab_core.hardware.run_command', side_effect=control) as sent:
+            usb_serial = 'WRONG-BOARD-42'
+            failed = self.finish(self.actions.start(payload, self.device, actor))
+            self.assertEqual(failed['state'], 'failed', failed)
+            self.assertEqual(failed['outcome'], 'unknown')
+            self.assertEqual(failed['result']['control_result'], 'acknowledged')
+            self.assertIn('未返回与原板一致', failed['error'])
+            self.assertNotIn('flash_target', failed['result'])
+            self.assertIsNone(self.store.get(usb_serial))
+            executor.candidates.pop()
+
+            usb_serial = serial
+            payload['request_id'] = 'fixture-enter-new-download'
+            complete = self.finish(self.actions.start(payload, self.device, actor))
+            self.assertEqual(complete['state'], 'completed', complete)
+            self.assertEqual(complete['outcome'], 'observed')
+            verified = complete['result']['flash_target']
+            self.assertEqual(verified['serial'], serial)
+            self.assertEqual(self.manager.flash_discovery.current_for_board(serial), verified)
+            self.assertEqual(self.finish(self.actions.start(payload, self.device, actor))['id'], complete['id'])
+            self.assertEqual(sent.call_count, 2)
+        self.assertEqual([call['device']['port_path'] for call in executor.discoveries if call['probe']], [[1, 4], [1, 4]])
+        self.assertFalse(executor.executions)
 
     def test_exclusive_command_uses_handoff_inside_task_lease(self):
         from contextlib import contextmanager

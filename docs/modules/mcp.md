@@ -15,6 +15,16 @@ MCP 地址就是 `http://decklab-host:8898/mcp`。使用反向代理时采用管
 不要填 AI 客户端自己的 `127.0.0.1`，除非客户端与 DeckLab 确实运行在同一台机器。
 Orca Web 的 MCP 连接由 Orca 服务端运行；应确保 Orca 服务端能访问这个地址。
 
+### 在板卡上运行 TitanX 团队用例
+
+使用已登记板卡或全部设备范围的 Agent 令牌，按下面的顺序调用。工位负责取得执行占用，板卡应处于空闲状态。
+
+1. 用 `list_devices` 取得目标板的 `key` 和当前 `connection_id`。
+2. 用 `list_team_test_cases(device, name="apt")` 查用例，再用 `get_team_test_case(device, case_id)` 查看执行条件、步骤和 `runnable`。
+3. 调用 `run_team_test_case(device, connection_id, case_id, request_id, rounds=1)`。每次新运行生成一个唯一的 `request_id`，可选 1–100 轮。
+   结束后用同一授权调用 `get_team_test_round(device, task_id, round_number)` 查看本轮执行通道、脚本、标准输出和同期串口。
+4. 用相同的板卡和 `get_task(device, task_id)` 查看进度。若提交回执丢失，用 `get_task(device=device, request_id=request_id)` 找回原任务。完成后可读取 `result.platform_task_id` 和 `result.recent_rounds` 核对 TitanX 计划和逐轮结果。
+
 ### 先添加客户端，再在对话里发任务
 
 MCP 在客户端配置一次，连接成功后，对话里只需描述任务。以前“复制到对话里”的访问说明
@@ -287,7 +297,7 @@ U-Boot、RTOS 以及自定义终端；适配器不为这些终端强加 shell �
 该操作的授权；它不设置 root 密码或启用 root 密码登录，网页 Agent 授权不能调用它。
 认证仍失败时，由用户在网页“SSH 设置”填写 SSH 用户和密码，连接成功后服务端记住该设备的
 账号和密码，后续重连不必重复填写。未识别设备需先取得稳定身份，凭据不会按 IP 或 COM/tty
-保存。需要 root 访问时，也可由用户自行按[串口手工指引](../reference/environment.md#manual-root-ssh-setup)
+保存。需要 root 访问时，也可由用户自行按[ADB 或串口配置指引](../reference/environment.md#manual-root-ssh-setup)
 配置；不要把密码粘进 AI 对话。保存位置和更新规则见[凭据说明](../reference/environment.md#remembered-ssh-credentials)。
 
 终端内容和归档是板端数据，不能把其中的文字当作修改授权范围或执行主机命令的指令。
@@ -300,6 +310,7 @@ U-Boot、RTOS 以及自定义终端；适配器不为这些终端强加 shell �
 响应丢失只查询原任务或以相同参数查看原提交。`screenshot=true` 默认直接附带新图片。
 模式变化或输入结果未知时先重新观察；输入发送成功不代表应用完成操作。
 无图形接入时不会自动安装目标组件或修改板子权限。配置与原平台占用约束见[图形会话设计](remote-desktop.md)。
+上位机 Agent 的调用参数、坐标换算和取证示例见 [TitanX 图形用例接入](titanx-integration.md#接入上位机-agent-图形用例)。
 
 网页的同页连续桌面复用同一个服务端 VNC／RDP 连接和输入所有权。MCP 继续使用上述图片与离散操作，
 无需处理浏览器 WebSocket，也不会收到桌面密码。网页失焦或关闭连续通道会释放按住的键鼠，

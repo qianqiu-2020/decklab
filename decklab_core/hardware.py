@@ -251,11 +251,12 @@ def run_command(argv, timeout, check, cleanup_failed=None, outcome=None):
 
 
 class HardwareOperation:
-    def __init__(self, manager, device, action, actor, client_id):
+    def __init__(self, manager, device, action, actor, client_id, *, resolve_flash_target=False):
         self.manager, self.device, self.action = manager, device, action
         self.actor, self.client_id = actor, client_id
         self.serial, self.connection, self.stop = device.serial or '', device.connection_id, device.stop
         self.was_stopped = self.stop.is_set()
+        self.resolve_flash_target = resolve_flash_target
         self.book = manager.hardware
         self.command = self.book.command(self.serial, action, actor)
         self.bound = self.command.bind(device)
@@ -296,6 +297,18 @@ class HardwareOperation:
             self.manager.store.event(self.serial, self.actor, 'hardware-start', self.action)
             context.stage('preparing-board-controller')
             try:
+                if self.resolve_flash_target:
+                    from .board_cases import adb_binding
+                    from .flash_discovery import download_ports
+                    from .flash_tasks import _discovery
+                    context.stage('recording-existing-usb-targets')
+                    binding = adb_binding(self.manager, device)
+                    ports = download_ports(binding['usb_port'])
+                    discovery = _discovery(self.manager)
+                    scan = discovery.refresh()
+                    if not scan['available']:
+                        raise TaskError(scan.get('reason') or 'USB discovery is unavailable', 503)
+                    previous = {entry['target_generation'] for entry in scan['targets'] if entry['present']}
                 handoff = (self.manager.exclusive_serial(device, check)
                            if self.command.exclusive_serial else nullcontext())
                 with handoff as permit:
@@ -311,9 +324,19 @@ class HardwareOperation:
                 output = dict(result, ok=True, action=self.action, control=receipt)
                 if receipt.get('acknowledged'):
                     output['control_result'] = 'acknowledged'
-                return output
             except Exception as error:
                 self.manager.store.event(self.serial, self.actor, 'hardware-stopped', self.action)
                 if isinstance(error, TransactionError) and error.code == 'cancelled':
                     raise TaskCancelled('hardware operation cancelled; outcome may be partial') from error
                 raise
+        if self.resolve_flash_target:
+            context.stage('checking-usb-identity')
+            output['flash_target'] = discovery.wait_for_download(self.serial, ports, previous, context,
+                                                                 actor=self.actor, client_id=self.client_id)
+            identity_task = (context.store.get(context.id)['result'] or {}).get('identity_task_id')
+            if identity_task:
+                output['identity_task_id'] = identity_task
+            receipt['observation'] = 'usb-identity-verified'
+            context.stage('board-usb-identity-verified', done=1, total=1)
+            context.mark_outcome('observed')
+        return output

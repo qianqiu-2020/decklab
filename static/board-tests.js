@@ -4,7 +4,7 @@
   const names = {'reboot-aging':'软件重启老化（NOR → UFS → Debian）','rtc-wake':'深度挂起与 RTC 唤醒'};
   const states = {queued:'排队',running:'运行中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
   const roundStates = {passed:'通过',failed:'失败',uncertain:'无结果',cancelled:'已停止'};
-  function create({byId:$,fetch,getView,copyText}) {
+  function create({byId:$,fetch,getView,copyText,openAdbReceipt}) {
     const client = global.DeckLabTasks.createClient(fetch);
     const dialog = $('board-tests-dialog');
     let selected, task, timer, sequence = 0, followSequence = 0, pending = false, requestId, runningId;
@@ -20,35 +20,99 @@
     let teamPage = 1, teamQuery = '', teamRequest = 0, detailRequest = 0;
     const groupSelect = $('board-tests-team-group');
     const teamDetail = $('board-tests-team-detail');
-    async function showTeamCase(id) {
+    const reviewStates = ['待评审', '评审中', '已评审', '评审未通过'];
+    function linkedRetry(serial) {
+      const params = new URLSearchParams((global.location?.hash || '').slice(1));
+      const plan = params.get('plan'), job = params.get('job'), record = params.get('record');
+      if (params.get('device') !== serial || !/^[1-9][0-9]{0,17}$/.test(plan || '')
+          || !/^[A-Za-z0-9_-]{1,100}$/.test(job || '') || !/^[1-9][0-9]{0,17}$/.test(record || '')) return null;
+      return {plan_id:plan, job_id:job, record_id:record};
+    }
+    function showOriginalReceipts(rows, gen, request, kind) {
+      if (!openAdbReceipt || !Array.isArray(rows) || !rows.length) return;
+      const group = text('details', '', teamDetail);
+      text('summary', '原作业的' + ({'serial-command':'串口','ssh-command':' SSH ','adb-command':' ADB '}[kind]) + '命令回执', group);
+      const list = text('ul', '', group);
+      for (const entry of rows) {
+        const title = entry.round ? '第 ' + entry.round + ' 轮' : '作业共用步骤';
+        const status = Number.isInteger(entry.exit_code) ? '退出码 ' + entry.exit_code : (states[entry.state] || entry.state);
+        const row = text('li', '', list);
+        const button = text('button', title + ' · ' + status + ' · ' + entry.command_id, row);
+        button.type = 'button';
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            const result = await client.request('/api/task?id=' + encodeURIComponent(entry.id) + query());
+            if (!current(gen) || request !== detailRequest) return;
+            if (result.task?.id !== entry.id || result.task?.kind !== kind) {
+              throw new Error('回执与选择的任务不符');
+            }
+            dialog.close();
+            openAdbReceipt(result.task);
+          } catch (error) {
+            if (current(gen) && request === detailRequest) message(error.message);
+          } finally {
+            button.disabled = false;
+          }
+        });
+      }
+    }
+    async function showTeamCase(id, retry) {
       const gen = sequence, request = ++detailRequest;
+      $('team-detail-prompt').hidden = true;
       teamDetail.hidden = false;
       teamDetail.textContent = '正在读取用例…';
       try {
-        const data = await client.request('/api/team-test-cases?' + new URLSearchParams({...scope(),view:'detail',id}));
+        const query = retry ? {...scope(),view:'retry',...retry} : {...scope(),view:'detail',id};
+        const data = await client.request('/api/team-test-cases?' + new URLSearchParams(query));
         if (!current(gen) || request !== detailRequest) return;
         teamDetail.replaceChildren();
-        text('h3', data.case.name, teamDetail);
-        if (data.case.prerequisite) text('p', data.case.prerequisite, teamDetail);
+        text('h3', data.case.name, teamDetail).setAttribute('data-i18n-ignore', '');
+        text('small', reviewStates[data.case.review_status] || '评审状态未知', teamDetail);
+        if (data.retry_of) {
+          text('p', '原 TitanX 计划 ' + data.retry_of.plan_id + ' · 第 ' + data.retry_of.round + ' 轮失败', teamDetail);
+        }
+        if (data.case.prerequisite) {
+          text('h4', '执行条件', teamDetail);
+          text('p', data.case.prerequisite, teamDetail).setAttribute('data-i18n-ignore', '');
+        }
+        if (data.case.steps.length) text('h4', '执行步骤', teamDetail);
         const steps = text('ol', '', teamDetail);
         for (const step of data.case.steps) {
-          const row = text('li', step.command || '', steps);
-          if (step.expected) text('p', '预期结果 · ' + step.expected, row);
+          const row = text('li', '', steps);
+          text('span', step.command || '', row).setAttribute('data-i18n-ignore', '');
+          if (step.expected) {
+            const expected = text('p', '预期结果 · ', row);
+            text('span', step.expected, expected).setAttribute('data-i18n-ignore', '');
+          }
         }
         if (!data.case.steps.length) text('p', '该用例尚未填写步骤。', teamDetail);
+        const execution = text('div', '', teamDetail);
+        execution.className = 'team-execution';
+        text('small', '执行板卡', execution);
+        const target = text('strong', selected.label || selected.key || selected.serial, execution);
+        target.setAttribute('data-i18n-ignore', '');
         if (!data.mapped) {
-          text('p', '此板尚未关联 TitanX 工位，可查看用例。', teamDetail);
-        } else if (data.case.automated && data.case.reviewed) {
-          const label = text('label', '轮数 ', teamDetail);
+          text('p', '此板尚未关联 TitanX 工位，可查看用例。', execution);
+          const setup = text('button', '接入当前板卡', execution);
+          setup.type = 'button';
+          setup.addEventListener('click', () => global.DeckLabTitanX.openBoard(selected));
+        } else if (data.case.runnable) {
+          const actions = text('div', '', execution);
+          actions.className = 'team-run-actions';
+          const label = text('label', '轮数', actions);
+          label.className = 'ft-field';
           const count = text('input', '', label);
           count.type = 'number'; count.value = count.min = '1'; count.max = '100';
-          const run = text('button', '在当前板上执行', teamDetail);
+          const run = text('button', retry ? '在当前板上复测' : '在当前板上执行', actions);
+          run.className = 'pri';
           run.type = 'button';
           run.disabled = active() || pending || !!requestId;
           run.addEventListener('click', async () => {
             if (!count.reportValidity() || !Number.isInteger(count.valueAsNumber)) return;
             const rounds = count.valueAsNumber;
-            if (!global.confirm('在 '+selected.key+' 上执行 '+data.case.name+'，共 '+rounds+' 轮？')) return;
+            const action = retry ? '复测' : '执行';
+            if (!global.confirm('在 '+selected.key+' 上'+action+' '+data.case.name+'，共 '+rounds+' 轮？')) return;
             run.disabled = true;
             const rid = global.crypto.randomUUID?.() || Array.from(global.crypto.getRandomValues(new Uint8Array(16)),
               n=>n.toString(16).padStart(2,'0')).join('');
@@ -56,8 +120,9 @@
             trackRequest(rid);
             selectSource(false);
             try {
-              const receipt = await client.request('/api/task-start', {...scope(),kind:'board-test',source:'titanx',
-                case:id,rounds,request_id:rid});
+              const parameters = {...scope(),kind:'board-test',source:'titanx',case:data.case.id,rounds,request_id:rid};
+              if (retry) parameters.retry = retry;
+              const receipt = await client.request('/api/task-start', parameters);
               if (current(gen)) { rememberRun(receipt.task); await follow(receipt.task.id); }
             } catch (error) {
               if (!current(gen)) return;
@@ -67,13 +132,19 @@
               if (current(gen)) {pending = false; render();}
             }
           });
+        } else {
+          text('p', !data.case.automated ? '此用例尚未自动化。' : data.case.review_status === 3 ? '此用例评审未通过。' : '无法确认用例的评审状态。', execution);
         }
+        showOriginalReceipts(data.adb_receipts, gen, request, 'adb-command');
+        showOriginalReceipts(data.ssh_receipts, gen, request, 'ssh-command');
+        showOriginalReceipts(data.serial_receipts, gen, request, 'serial-command');
       } catch (error) {
         if (current(gen) && request === detailRequest) teamDetail.textContent = error.message;
       }
     }
     function selectSource(team) {
       $('board-tests-team').hidden = !team;
+      $('titanx-setup-open').hidden = !team;
       $('board-tests-local').hidden = team;
       $('board-tests-team-tab').setAttribute('aria-pressed', String(team));
       $('board-tests-local-tab').setAttribute('aria-pressed', String(!team));
@@ -90,6 +161,7 @@
       detailRequest++;
       teamDetail.hidden = true;
       list.replaceChildren();
+      $('team-detail-prompt').hidden = false;
       status.textContent = '正在读取团队用例…';
       try {
         const params = new URLSearchParams({page: String(page), name: teamQuery});
@@ -103,7 +175,7 @@
           (group ? new URLSearchParams({view:'members', id:group}) : params));
         if (!current(gen) || request !== teamRequest) return;
         if (!data.configured) {
-          status.textContent = '控制机尚未配置团队测试平台。';
+          status.textContent = '请在系统设置中配置团队用例平台地址和令牌。';
           return;
         }
         if (group) {
@@ -115,11 +187,17 @@
         status.textContent = data.total ? '第 ' + teamPage + ' / ' + pages + ' 页 · ' + data.total + ' 项用例' : '没有匹配的团队用例';
         for (const item of data.cases) {
           const row = text('li', '', list);
-          const link = text('button', item.name, row);
+          const link = text('button', '', row);
+          text('strong', item.name, link).setAttribute('data-i18n-ignore', '');
           link.type = 'button';
-          link.addEventListener('click', () => showTeamCase(item.id));
-          if (group) text('small', item.code + ' · 顺序 ' + item.order + ' · ' + item.times + ' 次', row);
-          else text('small', [item.code, item.automated ? '已自动化' : '待自动化', item.reviewed ? '已评审' : '待评审'].filter(Boolean).join(' · '), row);
+          link.addEventListener('click', () => {
+            list.querySelector('[aria-current]')?.removeAttribute('aria-current');
+            link.setAttribute('aria-current', 'true');
+            showTeamCase(item.id);
+            if (global.matchMedia('(max-width: 700px)').matches) teamDetail.scrollIntoView({block:'nearest'});
+          });
+          if (group) text('small', item.code + ' · 顺序 ' + item.order + ' · ' + item.times + ' 次', link);
+          else text('small', [item.code, item.automated ? '已自动化' : '待自动化', reviewStates[item.review_status] || '评审状态未知'].filter(Boolean).join(' · '), link);
         }
         prev.disabled = page <= 1;
         next.disabled = page >= pages;
@@ -283,6 +361,75 @@
         button.setAttribute('aria-pressed', String(Number(button.dataset.round) === round?.round));
       }
     }
+    async function inspectTeamRound(row, summary, note) {
+      const request = logRequest = new AbortController();
+      const params = new URLSearchParams({...scope(), view:'round', task_id:task.id, round:row.round});
+      note.textContent = '正在读取本轮回执…';
+      try {
+        const response = await fetch('/api/team-test-cases?' + params, {signal:request.signal});
+        const data = await response.json();
+        if (request !== logRequest) return;
+        if (!response.ok) throw new Error(data.error || '读取本轮回执失败');
+        const box = $('board-tests-command-results');
+        const commands = data.commands || [];
+        const channels = [...new Set(commands.filter(step => step.round === row.round)
+          .map(step => ({'serial-command':'UART 串口','ssh-command':'SSH','adb-command':'ADB'}[step.kind])))];
+        note.textContent = [summary, '计划 ' + task.result.platform_task_id,
+          channels.length ? '本轮命令通道 · ' + channels.join('、') : '没有匹配的本轮命令回执',
+          data.round.started_at, data.round.ended_at].filter(Boolean).join(' · ');
+        function section(label, content, expanded) {
+          const block = text('details', '', box);
+          block.open = !!expanded;
+          text('summary', label, block);
+          text('pre', content, block);
+          return block;
+        }
+        const phases = {network:'网络准备与检查', probe:'探测执行通道', prepare:'创建目录', upload:'上传并校验脚本', syntax:'检查脚本语法',
+          execute:'执行脚本', cleanup:'清理脚本', command:'板端命令'};
+        const channelNames = {'serial-command':'UART 串口','ssh-command':'SSH','adb-command':'ADB'};
+        const label = step => (step.scope === 'reservation' ? '同次占用 · ' : step.round ? '' : '作业共用 · ') + (phases[step.phase] || '板端命令') +
+          ' · ' + (channelNames[step.kind] || '通道未知') + ' · ' +
+          (Number.isInteger(step.exit_code) ? '退出码 ' + step.exit_code : states[step.state] || step.state);
+        if (commands.length) {
+          section('本轮执行过程', commands.map(label).join('\n') +
+            (commands.some(step => step.phase === 'upload') ? '' : '\n上传脚本 · 无匹配回执'), true);
+        }
+        for (const step of commands) {
+          const output = [step.identity_channel && '板号核对通道 · ' + ({uart:'UART 串口',adb:'ADB'}[step.identity_channel] || step.identity_channel),
+            '命令\n' + step.command,
+            (step.kind === 'serial-command' ? '串口合并输出' : '标准输出') + '\n' + (step.stdout || '（空）'),
+            step.kind !== 'serial-command' && '标准错误\n' + (step.stderr || '（空）'),
+            step.stdout_truncated_bytes && '输出省略 ' + step.stdout_truncated_bytes + ' 字节',
+            step.stderr_truncated_bytes && '标准错误省略 ' + step.stderr_truncated_bytes + ' 字节',
+            step.error, 'DeckLab 任务 ' + step.id].filter(Boolean).join('\n\n');
+          section(label(step), output);
+        }
+        if (data.logs?.length) section('用例执行输出（' + data.logs.length + ' 条平台日志）', data.logs.join('\n'));
+        const script = data.script || {};
+        const scriptBox = section('用例脚本' + (script.stdin_size ? '（' + script.stdin_size + ' 字节）' : ''),
+          [script.script_preview || '此执行记录未保存脚本正文。', script.stdin_size > 65536 && '仅显示前 64 KiB。',
+            script.matched_digest && '正文来自本板另一份上传回执，已核对本轮上传的 SHA-256。',
+            script.stdin_sha256 && '上传时的 SHA-256 · ' + script.stdin_sha256].filter(Boolean).join('\n'));
+        if (data.script_url) {
+          let url;
+          try { url = new URL(data.script_url); } catch (_) {}
+          if (url && ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password) {
+            const link = text('a', '打开用例库中的脚本来源', scriptBox);
+            link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          }
+        }
+        section('同期板卡串口日志', data.serial?.data || '该时段未找到串口归档行。');
+        if (data.serial?.limited) text('p', '串口归档预览已截断。', box);
+        for (const warning of data.warnings || []) text('p', warning, box);
+      } catch (error) {
+        if (request === logRequest && !request.signal.aborted) {
+          note.textContent = error.message;
+          const retry = text('button', '重新读取本轮', $('board-tests-command-results'));
+          retry.type = 'button';
+          retry.addEventListener('click', () => { inspected = ''; inspectRound(row); });
+        }
+      }
+    }
     async function inspectRound(row) {
       round = row;
       updateRoundSelection();
@@ -299,6 +446,10 @@
       $('board-tests-command-results').textContent = (row.command_results || []).map(step=>'命令 '+step.index+' '+(roundStates[step.status] || '未执行')
         +(step.expected_matched === true ? '（匹配串口）' : '')).concat(row.failed_expected ? ['预期串口输出 · '+row.failed_expected] : []).join(' · ');
       const summary = [roundStates[row.status], row.reason].filter(Boolean).join(' · ');
+      if (result.source === 'titanx') {
+        $('board-tests-log-title').textContent = '第 ' + row.round + ' 轮执行详情';
+        return inspectTeamRound(row, summary, note);
+      }
       if (!id) {
         const missing = row.serial_artifact_error || result.serial_artifact_error
           || (active() && row.serial_size ? '本次任务结束后可查看串口归档。' : '这轮没有保存串口日志。');
@@ -379,6 +530,8 @@
       text('span',states[task.state] || task.state,summary).dataset.state = task.state;
       if (result.source === 'titanx') text('p','TitanX · ' + result.platform_device + ' · ' +
         (result.platform_task_id ? '任务 '+result.platform_task_id : result.platform_plan),box);
+      if (result.retry_of) text('p', '复测 TitanX 原计划 ' + result.retry_of.plan_id +
+        ' · 第 ' + result.retry_of.round + ' 轮 · 失败记录 ' + result.retry_of.record_id, box);
       text('p','通过 '+(result.completed_rounds || 0)+' 轮'+(total?' / '+total:'')
         +(result.in_flight?' · 正在观察第 '+result.in_flight+' 轮':'')
         +(result.current_command?' · 命令 '+result.current_command+' / '+result.total_commands:''),box);
@@ -447,7 +600,8 @@
       selected=getView();
       if (!selected?.serial) return;
       const gen=++sequence;
-      selectSource(false);
+      const retry = existing ? null : linkedRetry(selected.serial);
+      selectSource(!!retry);
       clearTimeout(timer);
       task=null; pending=false; requestId=null; runningId=null; round=null; roundSignature='';
       cases=[];allowedBuiltins=[];canCreate=false;
@@ -460,6 +614,7 @@
       $('board-tests-history').replaceChildren();
       $('board-tests-rounds').replaceChildren();
       if (!dialog.open) dialog.showModal();
+      if (retry) showTeamCase(null, retry);
       message('正在读取用例…');
       render();
       try {

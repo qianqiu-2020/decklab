@@ -8,7 +8,7 @@ import threading
 import unittest
 from unittest.mock import Mock, mock_open, patch
 
-from decklab_core.board_cases import BoardCase, SerialEvidence, adb_binding, config, find_transport, library, resolve_connection, save_case, select_transport, verify_boot
+from decklab_core.board_cases import AdbDiscoveryScans, BoardCase, SerialEvidence, adb_binding, config, find_transport, library, resolve_connection, save_case, select_transport, verify_boot
 from decklab_core import board_case_target
 from decklab_core.board_case_target import run_command
 from decklab_core.board_maintenance import maintenance_for
@@ -185,6 +185,41 @@ class BoardCasesTests(unittest.TestCase):
                 resolve_connection('/fixture/adb', 'OFFLINE-BOARD', None)
             registered = {'usb_port':'2-1.3','uart':'/dev/ttyS0','cases':['reboot-aging']}
             self.assertEqual(resolve_connection('/fixture/adb', SERIAL, registered)['cases'], ['reboot-aging', 'rtc-wake'])
+
+    def test_two_boards_share_one_discovery_scan_but_live_lookup_reads_again(self):
+        from collections import Counter
+        from concurrent.futures import ThreadPoolExecutor
+        scans = AdbDiscoveryScans()
+        manager = SimpleNamespace(store=SimpleNamespace(has_conflict=lambda serial: False),
+                                  hardware=SimpleNamespace(board_tests={}))
+        devices = [SimpleNamespace(serial=serial, connection_id='gen-' + serial, present=True)
+                   for serial in ('A', 'B')]
+        reported = {'81': 'A', '82': 'B'}
+        calls = Counter()
+        def execute(executable, *args, **options):
+            if args == ('devices', '-l'):
+                calls['list'] += 1
+                output = 'clone device usb:1-1 transport_id:81\nclone device usb:1-2 transport_id:82'
+            else:
+                endpoint = args[1]
+                calls[endpoint] += 1
+                output = f'serial={reported[endpoint]}\nboot_id={BOOT1}'
+            return SimpleNamespace(returncode=0, stdout=output)
+        with patch('decklab_core.board_cases.adb_command', side_effect=execute), \
+                patch('decklab_core.board_cases.shutil.which', return_value='adb'):
+            for round_number in (1, 2):
+                scan = scans.get(scans.start())
+                with ThreadPoolExecutor(2) as pool:
+                    rows = list(pool.map(lambda device: adb_binding(manager, device, scan), devices))
+                self.assertEqual([(r['serial'], r['usb_port']) for r in rows], [('A', '1-1'), ('B', '1-2')])
+                self.assertEqual(calls, {'list': round_number, '81': round_number, '82': round_number})
+            reported['81'] = 'replacement'
+            with self.assertRaises(TaskError):
+                adb_binding(manager, devices[0])
+            self.assertEqual(calls['list'], 3)
+            with self.assertRaises(TaskError):
+                scans.get('unknown')
+            self.assertEqual(calls['list'], 3)
 
     def test_new_adb_operation_follows_unique_board_identity_after_usb_move(self):
         listing = ('cloned device usb:2-3.2 transport_id:81\n'

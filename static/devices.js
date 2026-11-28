@@ -68,7 +68,7 @@
       }
     } catch (_) { /* Private browsing and damaged preferences do not block devices. */ }
     try {
-      var sharedMatch = /^#device=(.*)$/.exec(global.location && global.location.hash || '');
+      var sharedMatch = /^#device=([^&]*)/.exec(global.location && global.location.hash || '');
       if (sharedMatch) requestedDevice = decodeURIComponent(sharedMatch[1]);
     } catch (_) { /* A malformed bookmark must not break device discovery. */ }
     $('device-sort').value = manualOrder ? 'manual' : 'status';

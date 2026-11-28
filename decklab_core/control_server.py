@@ -217,7 +217,7 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
     default_language = ''
     settings = None
     allowed_static = frozenset(('/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/titanx-setup.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js', '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/diagnostics.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js',
-                                '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
+                                '/static/root-ssh-policy.sh', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg', '/static/icons-LICENSE.txt', '/vendor/xterm.js',
                                 '/vendor/xterm.css', '/vendor/addon-fit.js', '/vendor/ace/ace.js',
                                 '/vendor/ace/mode-json.js', '/vendor/ace/mode-yaml.js',
                                 '/vendor/ace/theme-github.js', '/vendor/ace/theme-tomorrow_night.js'))
@@ -434,12 +434,14 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
             if (activation_status(self.server).get('state') == 'applying'
                     and action != 'export'):
                 raise SettingsError('正在应用配置，请稍候', 409)
-            if action in ('titanx-status', 'titanx-labs', 'titanx-initialize'):
+            if action in ('titanx-status', 'titanx-labs', 'titanx-initialize', 'titanx-add-board', 'titanx-maintain'):
                 from . import titanx_setup
                 if self.collector_link or not titanx_setup.available():
                     raise SettingsError('此入口需要在单机 DeckLab 上安装含 TitanX 组件的工位包', 409)
                 if action == 'titanx-labs':
                     return self._json(200, {'labs': titanx_setup.labs(payload)})
+                if action in ('titanx-add-board', 'titanx-maintain'):
+                    titanx_setup.update_station(payload, self._collector_connection)
                 if action == 'titanx-initialize':
                     titanx_setup.initialize(payload.get('configuration'), self._collector_connection)
                 return self._json(200, titanx_setup.status(self._collector_connection, check_platform=action == 'titanx-status'))
@@ -643,11 +645,16 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
                 return self._json(400, {'error': 'incomplete body'})
             if self.command == 'POST' and route == '/api/task-start' and not self._owner_authorized():
                 try:
-                    kind = load_object(body or b'').get('kind')
-                    if kind == 'board-test':
-                        return self._json(403, {'error': '板卡用例仅限主访问身份'})
-                    if kind in ('adb-command', 'adb-connect') and not grant:
-                        return self._json(403, {'error': 'ADB 命令需要主访问身份或 Agent 授权'})
+                    task_payload = load_object(body or b'')
+                    kind = task_payload.get('kind')
+                    if kind == 'board-test' and not (
+                            grant and grant['scope'] in ('device', 'all') and task_payload.get('source') == 'titanx'
+                            and 'retry' not in task_payload):
+                        return self._json(403, {'error': '运行团队用例需要已登记板卡的授权'})
+                    if kind == 'adb-connect' and 'recover_from' in task_payload:
+                        return self._json(403, {'error': 'ADB 服务恢复仅限主访问身份'})
+                    if kind in ('adb-command', 'ssh-command', 'serial-command', 'adb-connect') and not grant:
+                        return self._json(403, {'error': '板端命令需要主访问身份或 Agent 授权'})
                 except (ValueError, AttributeError):
                     return self._json(400, {'error': 'bad json'})
             if self.command == 'POST' and route == '/api/task-recovery' and not self._owner_authorized():
@@ -673,8 +680,10 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
                         return self._json(403, {'error': '此令牌需要指定设备 key 或已核实的 USB 目标'})
                     payload['serial'] = grant['serial']
                 if grant and grant['scope'] == 'connection':
-                    if route == '/api/task-start' and payload.get('kind') in ('adb-command', 'adb-connect'):
-                        return self._json(403, {'error': 'ADB 命令需要已登记板卡范围的授权'})
+                    if route == '/api/task-start' and payload.get('resolve_flash_target'):
+                        return self._json(403, {'error': '检测刷机目标需要已登记板卡范围的授权'})
+                    if route == '/api/task-start' and payload.get('kind') in ('adb-command', 'ssh-command', 'serial-command', 'adb-connect'):
+                        return self._json(403, {'error': '板端命令需要已登记板卡范围的授权'})
                     if (route in ('/api/flash-plan', '/api/flash-selection', '/api/flash-stream')
                             or route == '/api/task-start' and payload.get('kind') in ('flash', 'nor-backup', 'ram-boot')):
                         return self._json(403, {'error': '刷机需要已登记板卡范围的授权'})
@@ -710,12 +719,13 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
                                               '/api/image-catalog', '/api/image-library')
                                      or grant['scope'] == 'device' and any(name == 'target_id' and value for name, value in query))):
                         return self._json(403, {'error': '此令牌需要指定设备 key'})
-                    binding = route == '/api/hardware' and ('adb_binding', '1') in query
+                    binding = route == '/api/hardware' and (('adb_binding', '1') in query
+                                                           or ('adb_discovery', 'start') in query)
                     if binding and grant['scope'] != 'device':
                         return self._json(403, {'error': '查询 ADB 接线需要已登记板卡范围的授权'})
                     if binding and [v for k, v in query if k == 'serial'] != [grant['serial']]:
                         return self._json(403, {'error': '板号与授权范围不符'})
-                    strip = ('serial',) if binding else ('serial', 'connection_id')
+                    strip = ('serial',) if binding or route == '/api/team-test-cases' else ('serial', 'connection_id')
                     query = [(name, value) for name, value in query if name not in strip]
                     if grant['scope'] == 'device':
                         query.append(('serial', grant['serial']))
@@ -849,7 +859,13 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
                 return self._json(200, check_update())
             except UpdateError as error:
                 return self._json(503, {'error': str(error)})
-        if route in ('/api/device-preferences', '/api/control-slots', '/api/board-test-cases', '/api/team-test-cases'):
+        if route == '/api/team-test-cases':
+            if not self._owner_authorized():
+                grant = self._agent_grant()
+                if not grant or grant['scope'] not in ('device', 'all'):
+                    return self._json(403, {'error': '读取团队用例需要已登记板卡的授权'})
+            return self._proxy()
+        if route in ('/api/device-preferences', '/api/control-slots', '/api/board-test-cases'):
             if not self._owner_authorized():
                 return self._json(403, {'error': '只有主访问凭证可以管理此配置'})
             return self._proxy()
@@ -966,7 +982,7 @@ class ControlHandler(LegacyRequest, http.server.SimpleHTTPRequestHandler):
         if urlparse(self.path).path.startswith('/vendor/novnc/'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         if urlparse(self.path).path in ('/', '', '/index.html', '/static/i18n.js', '/static/app.js', '/static/settings.js', '/static/titanx-setup.js', '/static/file-transfer.js', '/static/flashing.js', '/static/image-store.js', '/static/image-workspaces.js', '/static/boot-compare.js', '/static/share.js', '/static/ui-common.js',
-                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/diagnostics.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
+                                        '/static/terminal-policy.js', '/static/serial-progress.js', '/static/terminal-navigation.js', '/static/terminal-view.js', '/static/archives.js', '/static/devices.js', '/static/tasks.js', '/static/diagnostics.js', '/static/control-slots.js', '/static/board-control.js', '/static/board-tests.js', '/static/desktop.js', '/static/root-ssh-policy.sh', '/static/app.css', '/static/decklab.svg', '/static/decklab.png', '/static/icons.svg'):
             self.send_header('Cache-Control', 'no-cache, must-revalidate')
         super().end_headers()
 

@@ -6,6 +6,8 @@ After=decklab-titanx-prepare.service
 ConditionPathExists=|/etc/decklab/titanx.json
 ConditionPathExists=|/var/lib/decklab-workbench/titanx.json
 
+ConditionFileNotEmpty=/run/decklab-titanx-config/edge.yaml
+
 [Service]
 DynamicUser=yes
 User=decklab-titanx

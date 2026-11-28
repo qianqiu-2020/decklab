@@ -138,6 +138,29 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(code, 200)
             self.assertNotEqual(opened['session']['id'], sid)
 
+    def test_desktop_input_uses_the_callers_board_lease(self):
+        with fixture.automatic_flashing([('GRAPHICS-SN', 'graphics')]) as f:
+            screen, adapter, _ = setup(f)
+            serial = 'GRAPHICS-SN'
+            self.assertEqual(adapter.claim_board(serial)['input_owner']['state'], 'active')
+            sid = adapter.desktop(serial, 'open')['session']['id']
+            frame = adapter.desktop(serial, 'frame', sid)['frame']['id']
+            click = {'x': 1, 'y': 1, 'button': 'left'}
+
+            without_proof = Adapter(adapter.settings)
+            rejected = without_proof.desktop_input(serial, sid, frame, 'desktop-lease-missing',
+                                                    'click', click, screenshot=False)['task']
+            self.assertEqual((rejected['state'], rejected['outcome']), ('failed', 'not-issued'))
+            self.assertEqual(screen.inputs, [])
+
+            accepted = adapter.desktop_input(serial, sid, frame, 'desktop-lease-current',
+                                             'click', click, screenshot=False)['task']
+            self.assertEqual((accepted['state'], accepted['outcome']), ('completed', 'acknowledged'))
+            self.assertEqual(screen.inputs, [dict(click, action='click')])
+            adapter.desktop(serial, 'close', sid)
+            self.assertEqual(adapter.input_owner(serial)['input_owner']['state'], 'active')
+            self.assertIsNone(adapter.release_board(serial)['input_owner'])
+
     def test_tasks_observations_unknown_input_and_modes_are_not_replayed(self):
         with fixture.automatic_flashing([('GRAPHICS-SN', 'graphics')]) as f:
             screen, adapter, grant = setup(f)

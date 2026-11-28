@@ -7,18 +7,19 @@ request's authorization still decide whether an operation may run.
 API_VERSION = 1
 CONTRACT_NAME = 'decklab-execution'
 CONTRACT_REVISION = 1
+RESERVED_COMMAND_MAX_SECONDS = 7 * 24 * 60 * 60
 ADB_STDIN_MAX_BYTES = 1024 ** 2
 
 OUTCOMES = ('not-issued', 'issued', 'acknowledged', 'observed', 'verified', 'unknown')
 BASE_TASK_KINDS = ('identify', 'ssh-enable', 'ssh-connect', 'adb-connect', 'file-copy',
-                   'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test', 'adb-command')
+                   'file-upload', 'file-download', 'flash', 'nor-backup', 'board-test', 'adb-command', 'ssh-command', 'serial-command')
 
 
 def execution_capabilities(version, hardware_actions, hardware_adapter):
     """Return fresh JSON-compatible data; never inspect an active device."""
     submitted = list(BASE_TASK_KINDS) + ['hardware-' + action for action in hardware_actions]
     produced = [kind for kind in submitted if kind != 'nor-backup'] + [
-        'flash-inspect', 'desktop-input', 'image-download', 'ram-boot']
+        'flash-inspect', 'flash-preview', 'desktop-input', 'image-download', 'ram-boot']
     return {
         'api_version': API_VERSION, 'version': version,
         'contract': {
@@ -67,14 +68,21 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
                 '/api/desktop/input': ['desktop-input'],
                 '/api/image-download': ['image-download'],
                 '/api/image-prepare': ['image-prepare'],
+                '/api/flash-plan': ['flash-preview'],
             },
             'kind_aliases': {'nor-backup': 'flash'},
+            'reserved_command_max_seconds': RESERVED_COMMAND_MAX_SECONDS,
             'adb_command_stdin': {'parameter': 'stdin_artifact', 'max_bytes': ADB_STDIN_MAX_BYTES},
+            'ssh_command_stdin': {'parameter': 'stdin_artifact', 'max_bytes': ADB_STDIN_MAX_BYTES},
+            'serial_command_stdin': {'parameter': 'stdin_artifact', 'max_bytes': ADB_STDIN_MAX_BYTES},
+            'adb_command_titanx': {'parameter': 'titanx'},
+            'ssh_command_titanx': {'parameter': 'titanx'},
+            'serial_command_titanx': {'parameter': 'titanx'},
             'request_dedup': {
                 'supported': True, 'parameter': 'request_id',
                 'scope': ['actor', 'request_id'], 'persistent': True,
-                'kinds': submitted + ['desktop-input', 'image-download', 'image-prepare'],
-                'required_kinds': ['flash', 'nor-backup', 'desktop-input', 'image-download', 'board-test', 'adb-command'],
+                'kinds': submitted + ['desktop-input', 'image-download', 'image-prepare', 'flash-preview'],
+                'required_kinds': ['flash', 'nor-backup', 'desktop-input', 'image-download', 'board-test', 'adb-command', 'ssh-command', 'serial-command'],
                 'format': '[A-Za-z0-9_-]{8,100}',
                 'same_input': 'return-existing-task', 'changed_input_http_status': 409,
             },
@@ -114,6 +122,7 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
             'actions': list(hardware_actions), 'configuration': 'explicit-serial',
             'host_adapter': hardware_adapter, 'default': 'disabled',
             'availability_endpoint': '/api/hardware',
+            'adb_discovery_scan': True,
         },
         'desktop': {
             'availability_endpoint': '/api/desktop/sessions',
@@ -133,6 +142,8 @@ def execution_capabilities(version, hardware_actions, hardware_adapter):
             'configuration': 'automatic-usb-or-explicit-board-binding',
             'discovery': 'local-usb', 'requires_executor': True, 'automatic_actor': 'web',
             'reset': 'manual', 'task_target': 'board-or-usb-target',
+            'download_target_resolution_field': 'resolve_flash_target',
+            'agent_preview_requires_board_lease': True,
             'reset_after': 'explicit-preview-option',
             'availability_endpoint': '/api/flash-capabilities',
             'discovery_endpoint': '/api/flash-discover', 'probe_endpoint': '/api/flash-target',

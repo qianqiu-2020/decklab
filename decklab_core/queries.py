@@ -2,6 +2,7 @@
 import base64
 from dataclasses import dataclass
 import os
+import time
 
 from .results import response
 from .archive_io import open_archive
@@ -88,19 +89,27 @@ class ArchiveQueries:
         self.search_epochs = searcher if searcher is not None else search_epochs
         self.compare_boots = comparator if comparator is not None else compare_boots
 
-    def execute(self, action, values, device, allow_connection_history=True):
+    def execute(self, action, values, device, allow_connection_history=True, actor='web'):
         params = parameters(values)
         if params is None:
             return response(400, {'error': 'invalid query parameters'})
         if action not in ('activity', 'commands', 'logs', 'boot-search', 'boot-log', 'log'):
             return response(404, {'error': 'not found'})
         try:
-            return self._query(action, params, device, allow_connection_history)
+            return self._query(action, params, device, allow_connection_history, actor)
         except OSError:
             return response(404, {'error': 'log unavailable'})
 
-    def _query(self, action, params, d, allow_connection_history=True):
+    def _query(self, action, params, d, allow_connection_history=True, actor='web'):
         if action == 'activity':
+            if params.get('capture') == '1':
+                saved = (self.manager.store.serial_capture_events(d.serial)
+                         if d.serial and allow_connection_history else [])
+                with d.capture_lock:
+                    current = list(d.capture_events)
+                events = {(event['at'], event['connection_id'], event['event']): event for event in saved + current}
+                return response(200, {'capture_events': sorted(
+                    events.values(), key=lambda event: event['at'], reverse=True)[:24]})
             try:
                 legacy_offset = params.get('offset', '0')
                 session_offset = int(params.get('session_offset', legacy_offset))
@@ -125,6 +134,8 @@ class ArchiveQueries:
         if action == 'commands':
             commands = self.manager.store.commands(d.serial, 20) if d.serial else []
             return response(200, {'commands': commands})
+        if action == 'logs' and params.get('task_window'):
+            return self._task_window(d, params['task_window'], allow_connection_history, actor)
         connection = params.get('archive_connection', '')
         if connection and (d.serial or not allow_connection_history):
             return response(403, {'error': '此授权不能读取其他串口连接的归档'})
@@ -198,6 +209,48 @@ class ArchiveQueries:
             return response(400, {'error': 'bad offset'})
         except OSError:
             return response(404, {'error': 'log unavailable'})
+
+    def _task_window(self, device, task_id, allow_connection_history, actor):
+        from .tasks import TaskError
+
+        tasks = getattr(self.manager, 'tasks', None)
+        if not tasks or not device.serial or not allow_connection_history:
+            return response(403, {'error': '当前授权不能读取任务时段的历史串口'})
+        try:
+            task = tasks.store.get(task_id)
+        except TaskError as error:
+            return response(error.status, {'error': str(error)})
+        if (actor != 'web' and task['actor'] != actor) or not tasks.store.visible_serial(task, device.serial):
+            return response(404, {'error': '该板卡不在此任务的目标中'})
+        end = task['updated']
+        start = max(task['created'], end - 300)
+        return response(200, self.serial_interval(device, start, end))
+
+    @staticmethod
+    def serial_interval(device, start, end):
+        start_text, end_text = (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stamp)).encode()
+                                for stamp in (start, end))
+        output = bytearray()
+        limited = False
+        for entry in reversed(device.log_files()):
+            if entry['kind'] != 'serial' or not start_text[:10].decode() <= entry['date'] <= end_text[:10].decode():
+                continue
+            with open_archive(os.path.join(device.stable_dir(), entry['name'])) as source:
+                skip = max(0, os.fstat(source.fileno()).st_size - (16 << 20))
+                if skip:
+                    limited = True
+                    source.seek(skip)
+                    source.readline(16384)
+                for line in source:
+                    if len(line) >= 21 and line[19:21] == b'  ' and start_text <= line[:19] <= end_text:
+                        output.extend(line)
+                        if len(output) > (512 << 10):
+                            limited = True
+                            del output[:len(output) - (512 << 10)]
+        if limited and output and not output[:4].isdigit():
+            first_newline = output.find(b'\n')
+            del output[:first_newline + 1]
+        return {'data': output.decode('utf-8', 'replace'), 'from': start, 'to': end, 'limited': limited}
 
     def compare(self, values):
         params = parameters(values)

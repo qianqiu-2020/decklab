@@ -103,6 +103,7 @@ class WindowsManager(Manager):
             device.cv.notify_all()
 
     def _capture(self, device):
+        opened = False
         try:
             if device.stop.is_set() or device.capture_paused.is_set() or not self._matches(device):
                 return
@@ -119,7 +120,10 @@ class WindowsManager(Manager):
                                               **settings.pyserial_options())
                     device.serial_settings = settings
                 device.fail_count = 0
+                opened = True
+                device.capture_event('serial-capture-started')
                 device._say('decklab 已接入 %s' % device.dev)
+                device.flush_capture_events()
             except (OSError, serial.SerialException) as error:
                 device.fail_count += 1
                 device._say('打不开 %s: %s' % (device.dev, error))
@@ -129,6 +133,7 @@ class WindowsManager(Manager):
                     data = device.fd.read(min(max(device.fd.in_waiting, 1), 65536))
                     if data:
                         device.append(data)
+                        device.flush_capture_events()
                         device.last_health_check = time.time()
                     elif time.time() - device.last_health_check >= 30:
                         if not device.fd.is_open or not self._matches(device):
@@ -140,6 +145,11 @@ class WindowsManager(Manager):
                     break
         finally:
             self._close_reader(device)
+            if opened:
+                device.capture_event('serial-collector-stopped' if self.stopping.is_set()
+                                     else 'serial-capture-paused' if device.capture_paused.is_set()
+                                     else 'serial-reader-disconnected')
+                device.flush_capture_events()
             if not device.capture_paused.is_set() or device.stop.is_set():
                 device.stop.set()
                 device.dead = True

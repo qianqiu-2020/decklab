@@ -81,6 +81,69 @@ class SetupTest(unittest.TestCase):
             setup.initialize(dict(self.config, node_id='other'), self.connect)
         self.assertEqual(setup.worker.read_config(), read)
 
+    def test_maintain_system_station_without_editing_its_file(self):
+        base = dict(self.config, slots={'1':'ONE'}, projects={})
+        self.worker_file = setup.worker.CONFIG
+        self.worker_file.write_text(json.dumps(base))
+        self.nodes.append({'id':9, 'originNodeId':'station', 'state':'online'})
+        self.boards.append({'nodeId':9, 'code':'station:1', 'remoteComserver':100, 'remoteCom':1, 'state':'idle'})
+        self.live.append({'nodeId':'another', 'remoteComserver':100, 'remoteCom':2})
+        def status():
+            return setup.status(self.connect, True)
+        def change(action, **values):
+            setup.update_station(dict(revision=status()['revision'], action=action, **values), self.connect)
+        original = status()
+        self.assertEqual(original['next_slot'], 3)
+        self.assertEqual([b['serial'] for b in original['available_boards']], ['TWO'])
+        add = dict(node_id='station', lab_id=3, slot=3, com=3, serial='TWO', project='K3')
+        self.boards[0]['state'] = 'busy'
+        with self.assertRaisesRegex(SettingsError, '正在使用'):
+            change('titanx-add-board', **add)
+        self.boards[0]['state'] = 'idle'
+        change('titanx-add-board', **add)
+        self.assertEqual(status()['slots'], {'1':'ONE','3':'TWO'})
+        self.assertEqual(setup.worker.read_config()['projects']['3'], 'K3')
+        with self.assertRaisesRegex(SettingsError, '刷新'):
+            setup.update_station(dict(action='titanx-add-board', revision=original['revision'], **add), self.connect)
+        for op, expected in [('pause',['1']), ('resume',[])]:
+            change('titanx-maintain', operation=op, slot=1, serial='ONE')
+            self.assertEqual(status()['paused_slots'], expected)
+            self.assertEqual(status()['slots']['1'], 'ONE')
+        change('titanx-maintain', operation='connection', connection={'api_token':'updated-test-key'})
+        self.assertNotIn('updated-test-key', json.dumps(status()))
+        self.assertEqual(setup.worker.read_config()['api_token'], 'updated-test-key')
+        change('titanx-maintain', operation='retry')
+        self.assertEqual(json.loads(self.worker_file.read_text()), base)
+        self.assertEqual(setup.worker.additions_path().stat().st_mode & 0o777, 0o600)
+        self.assertFalse(self.writes)
+
+    def test_original_platform_reuses_node_and_checks_reported_usb(self):
+        config = dict(self.config)
+        del config['web_origin']
+        self.nodes.append({'id': 9, 'namespaceId': 3, 'originNodeId': 'station', 'state': 'offline'})
+        setup.initialize(config, self.connect)
+        self.live.append({'nodeId': 'station', 'deviceId': 'station:1', 'serial': 'usb:2-1',
+                          'remoteComserver': 100, 'remoteCom': 1})
+        def advance(usb):
+            return enroll(config, config['slots'], self.platform, self.root/'pending', lambda serial: usb)
+        self.assertFalse(advance(None))
+        with self.assertRaisesRegex(ValueError, 'USB path'):
+            advance('usb:3-2')
+        self.assertEqual(self.writes, [])
+        self.assertFalse(advance('usb:2-1'))
+        self.assertFalse(advance('usb:2-1'))
+        self.assertEqual([path for path, body in self.writes], ['/deviceBoard/add'])
+        self.assertFalse(any(key.startswith('decklab') for key in self.boards[0]))
+        self.assertEqual(setup.status(self.connect, True)['registered'], ['ONE'])
+
+    def test_existing_offline_board_can_keep_its_archive_code(self):
+        self.nodes.append({'id': 9, 'namespaceId': 3, 'originNodeId': 'station', 'state': 'offline'})
+        self.boards.append({'nodeId': 9, 'code': 'rack-board', 'deviceId': None,
+                            'remoteComserver': 100, 'remoteCom': 1})
+        setup.initialize(self.config, self.connect)
+        self.assertEqual(setup.status(self.connect, True)['registered'], ['ONE'])
+        self.assertEqual(self.writes, [])
+
     def test_stale_selection_and_foreign_lab_do_not_create(self):
         for change in [{'slots': {'1':'UNKNOWN'}}, {'lab_id': 2}, {'first_com':65535}]:
             with self.subTest(change=change), self.assertRaises(SettingsError):

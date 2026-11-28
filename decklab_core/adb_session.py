@@ -9,7 +9,7 @@ import struct
 import time
 from contextlib import nullcontext
 
-from .board_cases import AdbTransportUnavailable, READ_IDENTITY, find_transport
+from .board_cases import AdbTransportUnavailable, BOOT_ID, READ_IDENTITY, find_transport
 from .config import SSH_LIMIT
 from .session_base import SessionBase
 from .terminal_backend import control_session
@@ -20,6 +20,7 @@ ADBD_DIAGNOSTIC = r"""(
 unit=$(systemctl show --no-pager -p LoadState -p ActiveState -p SubState adbd.service 2>/dev/null)
 if printf '%s\n' "$unit" | grep -qx 'SubState=running' || pidof adbd >/dev/null 2>&1; then
     echo adbd=running
+    printf 'boot_id='; cat /proc/sys/kernel/random/boot_id 2>/dev/null
     journalctl -b -u adbd.service -n 50 --no-pager -o cat 2>/dev/null | awk '
         /FUNCTIONFS_ENABLE|UsbFfs: online/ { state="enabled" }
         /UsbFfs: (connection terminated|offline)|FUNCTIONFS_(DISABLE|UNBIND)/ { state="closed" }
@@ -60,12 +61,42 @@ def diagnose_over_serial(device, connection, check, on_stage):
         if 'gadget=configured' in facts:
             stage('adb-gadget-configured')
         if 'usb_event=closed' in facts:
-            stage('adb-usb-transport-closed')
+            boot = next((line[8:] for line in facts if line.startswith('boot_id=') and BOOT_ID.fullmatch(line[8:])), '')
+            stage('adb-usb-transport-closed', boot) if boot else stage('adb-usb-transport-closed')
             return ('串口确认 adbd 正在运行。本次启动最近的 ADB USB 日志显示连接已关闭，'
                     '控制机尚未识别到当前板卡在线。可在串口执行 systemctl restart adbd 后重试。')
         return '串口确认 adbd 正在运行，暂未读到能解释当前故障的板端 USB 日志。'
     stage('adb-serial-evidence-unavailable')
     return '串口已响应，但没有读到可确认的 adbd 服务状态。'
+
+
+def recover_transport(device, connection, serial, boot, resolve, check, stage):
+    check()
+    stage('restarting-adbd-over-serial')
+    command = ('(\n' + READ_IDENTITY
+               + '[ "$serial" = ' + shlex.quote(serial) + ' ] && [ "$(cat /proc/sys/kernel/random/boot_id)" = '
+               + shlex.quote(boot) + ' ] && [ "$(id -u)" = 0 ] && systemctl is-active --quiet adbd.service '
+               + '|| { echo recovery=not-issued; exit; }\n'
+               + 'systemctl --no-block restart adbd.service && echo recovery=acknowledged\n)')
+    ok, output = device.console.run_idle_command(command, expected_connection=connection)
+    check()
+    if 'recovery=not-issued' in output.splitlines():
+        raise ConnectionError('板卡身份、启动编号、串口权限或 adbd 状态未通过核对，请重新诊断。')
+    stage('adbd-restart-acknowledged' if ok and 'recovery=acknowledged' in output.splitlines()
+          else 'adbd-restart-unconfirmed')
+    stage('waiting-adb-recovery')
+    deadline = time.monotonic() + 15
+    while True:
+        check()
+        try:
+            candidate = resolve()
+            if candidate[2].get('boot_id') != boot:
+                raise ConnectionError('板卡已经重新启动，请重新打开 ADB 标签页。')
+            return candidate
+        except AdbTransportUnavailable as error:
+            if time.monotonic() >= deadline:
+                raise ConnectionError('已等待原板卡重新上线，仍无匹配的 ADB 连接。请查看本次任务回执和串口。') from error
+        time.sleep(0.5)
 
 
 def read_exact(sock, length):
@@ -188,7 +219,7 @@ class AdbSession(SessionBase):
             self.fd.shutdown(socket.SHUT_RDWR)
 
 
-def connect(manager, device, payload, actor, *, on_stage=None):
+def connect(manager, device, payload, actor, *, on_stage=None, recovery_boot=None):
     serial, connection, stop = device.serial, device.connection_id, device.stop
     registry = device._sessions
 
@@ -214,14 +245,21 @@ def connect(manager, device, payload, actor, *, on_stage=None):
     try:
         registered = manager.hardware.board_tests.get(serial)
         stages = {'on_stage': on_stage} if on_stage is not None else {}
+        def resolve(trace=True):
+            return find_transport(executable, serial, registered, usb_endpoints=usb_endpoints,
+                                  allow_relocation=True, **(stages if trace else {}))
+
         try:
-            port, endpoint, facts = find_transport(executable, serial, registered, usb_endpoints=usb_endpoints,
-                                                   allow_relocation=True, **stages)
+            port, endpoint, facts = resolve()
         except AdbTransportUnavailable as error:
             if actor != 'web':
                 raise
-            diagnosis = diagnose_over_serial(device, connection, check, on_stage)
-            raise ConnectionError(str(error).rstrip('。') + '。' + diagnosis) from error
+            if recovery_boot:
+                port, endpoint, facts = recover_transport(device, connection, serial, recovery_boot, lambda: resolve(False),
+                                                          check, on_stage or (lambda *args: None))
+            else:
+                diagnosis = diagnose_over_serial(device, connection, check, on_stage)
+                raise ConnectionError(str(error).rstrip('。') + '。' + diagnosis) from error
         check()
         if on_stage is not None:
             on_stage('opening-adb-terminal', port)

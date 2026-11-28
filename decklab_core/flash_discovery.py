@@ -32,6 +32,33 @@ def _encoded(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
+def download_ports(adb_port, sys_usb=Path('/sys/bus/usb/devices')):
+    """Use Linux's reciprocal USB 2/3 peer link when one socket has two addresses."""
+    def numeric(path):
+        return [int(part) for part in path.replace('-', '.').split('.')]
+
+    ports = [numeric(adb_port)]
+    bus, _, path = adb_port.partition('-')
+    upstream, separator, port = path.rpartition('.')
+    hub = bus + '-' + (upstream if separator else '0')
+    port_name = (hub if separator else 'usb' + bus) + '-port' + port
+    entries = list(sys_usb.glob(hub + ':*/' + port_name))
+    if len(entries) == 1:
+        try:
+            entry = entries[0].resolve(strict=True)
+            peer = (entry / 'peer').resolve(strict=True)
+            if (peer / 'peer').resolve(strict=True) == entry:
+                parent, _, _ = peer.parent.name.partition(':')
+                match = re.fullmatch(r'([1-9][0-9]*)-(0|[1-9][0-9]*(?:\.[1-9][0-9]*)*)', parent)
+                suffix = re.fullmatch(r'(?:usb' + match[1] + '|' + re.escape(parent) +
+                                      r')-port([1-9][0-9]*)', peer.name) if match else None
+                if suffix and peer != entry:
+                    ports.append(numeric(match[1] + '-' + (match[2] + '.' if match[2] != '0' else '') + suffix[1]))
+        except (OSError, RuntimeError):
+            pass  # A missing or unstable kernel link leaves the original port as the only candidate.
+    return ports
+
+
 def _diagnostic(value):
     if value is None:
         return ''
@@ -228,6 +255,85 @@ class FlashDiscovery:
                             'targets': retained}
                 raise
 
+    def current_for_board(self, serial):
+        """Resolve a probed download target using the current USB enumeration."""
+        result = self.refresh()
+        if not result['available'] or self.store.has_conflict(serial):
+            return None
+        matches = []
+        for target in result['targets']:
+            if not target['present']:
+                continue
+            link = target['console_link'] or {}
+            if link.get('state') in ('ambiguous', 'mismatch') and serial in (
+                    target['serial'], link.get('serial'), link.get('usb_serial')):
+                return None
+            if target['serial'] == serial:
+                matches.append(target)
+        if len(matches) != 1 or not matches[0]['supported']:
+            return None
+        return {key: matches[0][key] for key in ('serial', 'target_id', 'target_generation')}
+
+    def wait_for_download(self, serial, ports, previous, context, *, actor, client_id):
+        """Prefer the verified socket and require a serial echo on a different path."""
+        deadline = time.monotonic() + 15
+        while True:
+            context.check()
+            scan = self.refresh()
+            if not scan['available']:
+                raise TaskError(scan.get('reason') or 'USB discovery is unavailable', 503)
+            fresh = [target for target in scan['targets'] if target['present']
+                     and target['target_generation'] not in previous]
+            matches = [target for target in fresh if target['usb']['port_path'] in ports]
+            if len(matches) > 1:
+                raise TaskError('同一 USB 插座出现多个下载目标，无法确认当前板卡', 409)
+            if not matches and time.monotonic() < deadline:
+                context.cancelled.wait(.25)
+                continue
+            alternate_path = not matches
+            if alternate_path and len(fresh) != 1:
+                break
+            target = (matches or fresh)[0]
+            context.check()
+            verified = self.probe(target['target_id'], target['target_generation'], actor=actor,
+                                  client_id=client_id, require_identity=serial,
+                                  require_console_link=alternate_path)
+            if verified['mode'] == 'bootrom' and verified['supported']:
+                verified = self._identify_download(verified, serial, context, actor, client_id)
+            link = verified['console_link'] or {}
+            if (not verified['supported'] or verified['serial'] != serial or self.store.has_conflict(serial)
+                    or link.get('state') in ('ambiguous', 'mismatch')):
+                raise TaskError(verified.get('reason') or 'USB flash target is not ready', 409)
+            return {key: verified[key] for key in ('serial', 'target_id', 'target_generation')}
+        raise TaskError('控制器已确认请求，但已核实的 USB 端口未出现新的下载设备', 409)
+
+    def _identify_download(self, target, serial, context, actor, client_id):
+        from .flash_tasks import FlashActions
+        tasks = self.manager.tasks
+        result = FlashActions(self.manager).backup({
+            'target_id': target['target_id'], 'target_generation': target['target_generation'],
+            'binding_revision': 1, 'request_id': 'identify-usb-' + context.id, 'client_id': client_id,
+        }, None, actor, identity_only=True, expected_serial=serial)
+        if result.status != 202:
+            raise TaskError(result.payload['error'], result.status)
+        identity_task = result.payload['task']['id']
+        receipt = context.store.get(context.id)['result'] or {}
+        context.store.update(context.id, result=dict(receipt, identity_task_id=identity_task))
+        context.on_cancel(lambda: tasks.cancel(identity_task, actor))
+        context.stage('reading-board-serial')
+        while True:
+            receipt = tasks.store.get(identity_task)
+            if receipt['state'] not in ('queued', 'running'):
+                break
+            context.check()
+            context.cancelled.wait(.25)
+        context.check()
+        if receipt['state'] != 'completed' or (receipt.get('result') or {}).get('serial') != serial:
+            raise TaskError(receipt['error'] or '未能核实下载设备的板载序列号', 409)
+        generation = receipt['result']['target_generation']
+        return self.probe(target['target_id'], generation, actor=actor, client_id=client_id,
+                          expected_serial=serial, require_identity=serial)
+
     def _recoverable_targets(self, exclude=()):
         """Outstanding executions stay reachable even after their cable vanishes."""
         with self.store.lock:
@@ -317,21 +423,27 @@ class FlashDiscovery:
             BoardControl(), SerialEndpoint('none'), 'auto-' + row['id'], self.argv, data['device'],
             target_id=row['id'], target_generation=row['generation'])
 
-    def probe(self, target_id, generation):
+    def probe(self, target_id, generation, *, actor='web', client_id='', expected_serial=None,
+              require_identity=None, require_console_link=False):
         if not isinstance(generation, str) or not generation:
             raise TaskError('USB target generation is required')
         self.refresh()
-        row = self.get(target_id, generation)
-        data = row['document']
-        resources = ['flash-usb:local:' + '.'.join(map(str, data['device']['port_path']))]
         maintenance = maintenance_for(self.manager)
         links = getattr(self.manager, 'console_links', None)
         token = links.start() if links is not None else None
-        echoed, pending_bind = [], None
         try:
-            with self.lock, maintenance.inspect_target_scope(target_id, generation, row.get('serial') or '', resources):
-                row, pending_bind = self._probe_locked(row, data, target_id, generation, resources,
-                                                       maintenance, links, token)
+            with self.lock:
+                row = self.get(target_id, generation)
+                serial = row.get('serial') or ''
+                if (expected_serial is not None and expected_serial != serial
+                        or require_identity and serial and require_identity != serial):
+                    raise TaskError('USB flash target board identity changed', 409)
+                data = row['document']
+                resources = ['flash-usb:local:' + '.'.join(map(str, data['device']['port_path']))]
+                with maintenance.inspect_target_scope(target_id, generation, serial, resources, actor, client_id):
+                    row, pending_bind = self._probe_locked(row, data, target_id, generation, resources,
+                                                           maintenance, links, token, actor, client_id,
+                                                           require_identity, require_console_link)
         finally:
             if token:
                 links.cancel(token)
@@ -340,7 +452,8 @@ class FlashDiscovery:
         self.manager.refresh_flash_presence()
         return self.public(row)
 
-    def _probe_locked(self, row, data, target_id, generation, resources, maintenance, links, token):
+    def _probe_locked(self, row, data, target_id, generation, resources, maintenance, links, token,
+                      actor, client_id, require_identity, require_console_link):
         pending_bind = None
         try:
             if token:
@@ -350,7 +463,7 @@ class FlashDiscovery:
         except BaseException as error:
             if getattr(error, 'cleanup_confirmed', True) is False:
                 task = maintenance.retain_target_inspection_failure(target_id, generation,
-                    row.get('serial') or '', resources, attempt_id=secrets.token_hex(12),
+                    row.get('serial') or '', resources, actor, client_id, attempt_id=secrets.token_hex(12),
                     details={'target_id': target_id, 'target_generation': generation})
                 error.recovery_task_id = task['id']
             raise
@@ -363,6 +476,14 @@ class FlashDiscovery:
         if _selector(candidate.get('device')) != data['device']:
             raise TaskError('USB connection changed during capability detection', 409)
         serial = _strong_serial(candidate)
+        can_read_bootrom = not (serial or row.get('serial')) and candidate.get('mode') == 'bootrom' and (
+            candidate.get('preparable') is True or candidate.get('can_prepare_from_image') is True)
+        if require_identity and require_identity != serial and not can_read_bootrom:
+            raise TaskError('下载设备未返回与原板一致的硬件序列号，需先核实身份', 409)
+        echoed = links.finish(token) if token and candidate.get('link_sent') is True else []
+        link, console = self._link_document(echoed, serial)
+        if require_console_link and (not link or link['state'] != 'linked' or link['serial'] != require_identity):
+            raise TaskError('下载设备换了 USB 路径，原板串口没有返回唯一匹配的识别回显', 409)
         if serial:
             duplicate = any(other['id'] != row['id'] and other['present'] and other['serial'] == serial
                             for other in self._rows())
@@ -393,8 +514,6 @@ class FlashDiscovery:
         data['preparable'] = bool(candidate.get('preparable') or candidate.get('can_prepare_from_image'))
         if 'usb_address' not in data['device']:
             data.update(supported=False, reason='USB connection generation is unavailable; reconnect and detect again')
-        echoed = links.finish(token) if token and candidate.get('link_sent') is True else []
-        link, console = self._link_document(echoed, serial)
         if link is None:
             data.pop('uart_link', None)
         else:

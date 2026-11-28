@@ -6,6 +6,15 @@ private loopback collector. Both expose the following operations through control
 The standalone `decklabctl.py` is the reference client; run its `--help` for CLI
 options. API version and optional features come from `GET /api/capabilities`.
 
+## ADB discovery rounds
+
+Collectors with `hardware.adb_discovery_scan` support shared discovery.
+On `GET /api/hardware`, supply the authorized board's `key`, `serial` and
+`connection_id` with `adb_discovery=start` to enumerate ADB once. Use the
+returned `adb_scan` with `adb_binding=1` for each board in the round, passing
+that board's own credentials and identity. A scan that has expired returns
+HTTP 409. Omit `adb_scan` for a fresh binding check before execution.
+
 ## Capability and compatibility contract
 
 `GET /api/capabilities` is a read-only protocol manifest. It does not resolve a
@@ -232,6 +241,17 @@ address, target mapping, credential, reset type or helper arguments. The BMC
 provider's outbound `/api/v1/login` belongs to the configured BMC service, not
 DeckLab's public API. See [control adapters](../modules/hardware-control.md#板卡控制适配).
 
+A caller with the current board execution lease can set
+`resolve_flash_target=true` on `hardware-enter-download` with a stable
+`request_id`. DeckLab snapshots the verified ADB USB socket and checks for a new
+download generation there, including a USB 2/3 companion port when the kernel
+reports a reciprocal link. If a supported SpacemiT BootROM supplies no serial,
+DeckLab starts a RAM-only identity task to read the EEPROM. Its ID is recorded
+as `result.identity_task_id`. The original task returns `result.flash_target`
+only after reading the same serial on a supported download connection. It
+retains the controller acknowledgement if identification fails. These steps
+leave persistent storage untouched.
+
 `/api/health` returns process responsiveness separately from logging and storage
 status: HTTP 200 and `ok=true` do not imply a healthy board or successful log
 writes. Inspect `logging_ok`, `log_errors` and `storage.warning`. If disk status
@@ -260,11 +280,11 @@ triples, without a separate top-level `key`.
 
 | GET route | Additional parameters / result |
 | --- | --- |
-| `/api/logs` | File list and detected boots with stable IDs |
+| `/api/logs` | File list and detected boots with stable IDs. With `task_window=<task ID>`, reads a bounded raw-serial excerpt from up to five minutes before the referenced task's last update, for a board that belongs to the task. |
 | `/api/log` | `file`; default last 64 KiB, or `off` for 64 KiB pages; `full=1` reads the full snapshot, `download=1` streams attachment |
 | `/api/boot-log` | `id` from the boots list; complete currently archived boot, including cross-day parts |
 | `/api/boot-search` | `q` (1–200 characters after trimming), `offset=0`, `limit=20` (1–50); case-insensitive search across archived boots |
-| `/api/activity` | `session_offset=0`, `event_offset=0`, `limit=50` (1–50); independent history pages |
+| `/api/activity` | `session_offset=0`, `event_offset=0`, `limit=50` (1–50); independent history pages. With `capture=1`, return recent serial capture and archive boundaries. |
 | `/api/commands` | Recently recorded commands for this board |
 | `/api/boot-compare` | `left_key`, `left_serial`, `left_id`, `right_key`, `right_serial`, `right_id` |
 
@@ -272,6 +292,23 @@ Boot comparison uses two explicit identities; single-board grants cannot compare
 another board. It limits each side to 4 MiB / 12000 lines and at most 1500 diff
 context rows. Full boot retrieval has no such comparison limit. The newest boot
 ID means the newest detected boundary, not necessarily a currently running board.
+
+### Durable serial command receipt
+
+On a DeckLab-managed Linux station, submit `kind=ssh-command` with the board serial, connection ID, request ID, active board lease and shell command. TitanX can supply an optional per-command `ssh_login` with `user` and `password` over the authenticated connection. The collector prefers credentials verified and saved for this board in DeckLab. Only when none are saved does it use the job credentials for this command, followed by applicable profile defaults if neither is available. It verifies the server host key over the bound ADB connection or the reserved serial console when ADB is unavailable. Round evidence includes a phase and channel for each matched command and the receipt of the actual script upload. Read `result.ssh_receipt` on the original task for stdout, stderr and the board exit code. An SSH login failure occurs before the command is issued.
+
+Submit `kind=serial-command` to `POST /api/task-start` with the board identity
+`key`, `serial`, and `connection_id`, the current board `execution_lease`,
+a stable `request_id`, and a shell `command` of up to 2048 UTF-8 bytes. Literal terminal control
+characters are rejected.
+Optional fields are `timeout` (1–3600 seconds, default 60, or up to the advertised reserved_command_max_seconds with a current board lease) and `titanx`
+with the original `job_id`, `command_id`, optional `case_code`, and optional `round`.
+
+The shared collector verifies the shell response and records
+`result.serial_receipt` with the command, combined console output, confirmed exit code
+and the byte range in the original serial connection. Query the same request
+after transport errors. A task with an unconfirmed exit keeps the original
+board protected for human recovery via `/api/task-recovery`.
 
 ## Input and sessions
 
@@ -408,6 +445,19 @@ DeckLab checks the physical serial and boot ID before starting the shell.
 The task receipt records the input size and SHA-256. The command consumes
 the staged input only after a confirmed zero exit code.
 
+A leased `adb-command` may also pass `titanx` with `job_id` and `command_id`,
+plus optional `case_code` and `round`. The DeckLab receipt stores those
+identifiers. The failed-round preview can then list recent matching receipts
+on the original board, including job-wide steps.
+
+A TitanX failed-round link may include `plan`, `job`, and `record` parameters
+after the board serial in the fragment. The board's case library can resolve
+the exact failed case through `GET /api/team-test-cases?view=retry` using
+`plan_id`, `job_id`, and `record_id`. Submitting a TitanX board test can include
+the same keys in `retry`. DeckLab checks the original board, completed plan,
+and failed round before starting a new plan. The new task and the TitanX plan
+remark carry the original round reference.
+
 Low-level POST `/api/file-transfer/start`, `/api/file-transfer/chunk`,
 `/api/file-transfer/batch`, `/api/file-transfer/finish` and
 `/api/file-transfer/abort` remain available. They use a
@@ -430,11 +480,11 @@ not the flash target. Other connection-bound operations keep their existing guar
 | GET `/api/flash-discover` | Human-only USB download-device discovery; returns candidate target IDs and observed target generations, without resetting or writing storage |
 | POST `/api/flash-stream` | Human-only fast mode for a detected K3 target: `target_id`, `target_generation`, `url` (`.tar.gz`/`.tgz`/`.tar`), optional `sha256`, `system_storage` (`auto` or `nvme:N`/`scsi:N`), `reset_after`, `memory_budget`, `request_id`. Streams, decompresses and writes in executor memory; writes the package GPT first; returns a durable `flash` task with `operation: stream` |
 | POST `/api/flash-calibrate` | Human-only measurement for a detected K3 target: `target_id`, `target_generation`, optional `system_storage`, `measure_write` (default `true`: reads 128 MiB and writes the same bytes back), `request_id`. Returns a durable `flash` task with `operation: calibrate`; its `flash.configuration` holds the measured rates and the chosen configuration (`tuning`), which later flashes of this USB port use. `action: forget` instead removes this port's configuration and returns the one now in effect. `GET /api/flash-capabilities` reports `calibrate_supported` and `flash_configuration` |
-| POST `/api/flash-target` | Human-only target selection with `target_id` and expected `target_generation`; reads supported device identity/layout information and rejects a changed or ambiguous target |
-| GET `/api/flash-capabilities` | `key`, expected `serial`; configured execution location, supported modes and ready artifacts; no reset or storage write |
+| POST `/api/flash-target` | Select `target_id` and expected `target_generation`; reads supported device identity/layout information and rejects a changed or ambiguous target. A board-scoped agent needs an already identified target for its board and the matching execution lease if the board is occupied |
+| GET `/api/flash-capabilities` | `key`, expected `serial`; configured execution location, supported modes and ready artifacts. With `resolve_target=1`, refresh USB presence and return `automatic_target` for the uniquely identified download target of this board. No reset, USB identity probe or storage write |
 | POST `/api/image-prepare` | Prepare a controller-cached image without a connected board. The returned `image-prepare` task reports extraction, payload checks and filesystem metadata. |
 | POST `/api/image-workspace` | Owner access to image directories on the controller. Browse files, import an extracted image or create a new revision after replacing a file. |
-| POST `/api/flash-plan` | `key`, `serial`, `artifact_id`, `mode` (`full` or `partitions`), `binding_revision`, `verify` (`none`, `if-supported` or `required`), optional boolean `reset_after` (default false), optional `selections` and optional full-disk `target_storage`; without `request_id` returns an immutable plan preview. A Web operator can supply a stable `request_id` to return HTTP 202 with a durable `flash-preview` task; poll the original `/api/task` for byte progress and the final plan, cancel through `/api/task-cancel`. Repeated identical input uses the original task; changed input with the same ID is rejected |
+| POST `/api/flash-plan` | `key`, `serial`, `artifact_id`, `mode` (`full` or `partitions`), `binding_revision`, `verify` (`none`, `if-supported` or `required`), optional boolean `reset_after` (default false), optional `selections` and optional full-disk `target_storage`; without `request_id` returns an immutable plan preview. Supply a stable `request_id` for HTTP 202 with a durable `flash-preview` task. Agent calls need an identified board and its current execution lease. Poll the original `/api/task` for progress and the final plan in `result.plan`, or cancel through `/api/task-cancel`. Repeated identical input uses the original task; changed input with the same ID is rejected |
 | GET `/api/flash-events` | `key`, `serial`, task `id` and nonnegative `after` event cursor; bounded events and flash details |
 | POST `/api/flash-selection` | For the same task in `awaiting-selection`, `id`, `layout_digest` and `selections` with `preview=true` return a preview; optional boolean `reset_after` is sealed with this preview; a storage workspace can also choose `verify=none|if-supported|required`; submit its `plan_id` and unique `request_id` to continue |
 | POST `/api/flash-recovery` | Human-only recovery receipt: `key`, `serial`, task `id`, expected `attempt_id`, nonempty `reason` and `confirm_stopped=true`; releases recovery resources after the operator verifies the original executor stopped |
@@ -473,6 +523,21 @@ associate the target with its existing board; otherwise task history retains a
 USB target and no invented serial or UART connection. Target-specific task/event
 queries use `target_id` and the original task ID. Human callers may use automatic
 targets; agent grants do not gain access by guessing their target IDs.
+
+An integration that already knows the board can pass `resolve_target=1` with
+its board key and serial. `automatic_target` contains the verified serial, USB
+target ID and connection generation, or `null` if no unique supported target is
+currently identified. Use those target fields in the existing target-scoped
+requests. The top-level `supported` describes the fixed configuration.
+The lookup only refreshes USB enumeration. A caller still holding the board
+execution lease can request detection as part of `hardware-enter-download`
+using `resolve_flash_target=true`. Use board-scoped or owner authorization
+for the lookup.
+
+Detection checks the last verified USB socket first. If one new download
+device appears on a different path, DeckLab accepts it only after a unique
+serial console echo from the original board. A BootROM target still needs an
+EEPROM serial readback before flashing.
 
 Automatic partition capabilities require reliable live GPT/layout and target
 partition-size checks. Raw full-disk capability additionally requires an

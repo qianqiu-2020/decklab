@@ -148,6 +148,22 @@ class FlashRunnerTests(unittest.TestCase):
             with self.assertRaises((TaskError, OSError)):
                 self.runner.snapshot(binding, path, task_id='task-fixed', attempt_id='attempt-fixed')
 
+    def test_snapshot_failure_distinguishes_invalid_length_from_interrupted_upload(self):
+        workspace = self.runner._directory(self.runner.root / 'cache' / 'plan-nor-failure')
+        for diagnostic, expected in [
+            ('planned storage read returned an invalid or excessive byte count', 'NOR 读取长度无效或与预期不符'),
+            ('planned storage upload stopped after 0 of 8388608 bytes: /private/host-path', 'NOR 读取未完成'),
+        ]:
+            with self.subTest(diagnostic=diagnostic):
+                event = {'event': 'error', 'code': 'nor-read-failed', 'message': 'NOR read stopped; no retry: ' + diagnostic}
+                binding = self.binding('print(json.dumps(%r))' % event)
+                with self.assertRaises(FlashRunnerError) as error:
+                    self.runner.snapshot(binding, workspace, task_id='task-nor', attempt_id='attempt-nor')
+                self.assertEqual(error.exception.code, 'nor-read-failed')
+                self.assertIn(expected, str(error.exception))
+                self.assertIn('本次未写入', str(error.exception))
+                self.assertNotIn('/private/host-path', str(error.exception))
+
     def test_snapshot_accepts_flash_audit_events_from_executor_process(self):
         audit = [
             {'event': 'loader-material', 'partition': 'factory/FSBL.bin'},
@@ -506,6 +522,33 @@ class FlashRunnerTests(unittest.TestCase):
         self.assertIn('尚未支持', str(error.exception))
         self.assertNotIn('host-secret', str(error.exception))
         self.assertNotIn('/private', str(error.exception))
+
+    def test_stream_layout_order_failure_explains_the_standard_flash_route(self):
+        error_event = {
+            'event': 'error', 'code': 'image-invalid',
+            'message': ('package stores rootfs.ext4 before partition_universal.json; '
+                        'fast mode needs the partition table first, use the normal flashing path'),
+        }
+        binding = self.binding('print(json.dumps(%r))' % error_event)
+        with self.assertRaises(FlashRunnerError) as error:
+            self.runner.stream_flash(binding, {'version': 1})
+        self.assertEqual(error.exception.code, 'stream-layout-order')
+        self.assertIn('分区表排在大文件之后', str(error.exception))
+        self.assertIn('本次未写入', str(error.exception))
+
+    def test_target_not_found_explains_the_operation_without_exposing_the_usb_address(self):
+        for operation, expected in [
+            ('storage-metadata', '读取系统盘版本信息时失去原 USB 刷机连接'),
+            ('execute', '找不到本次操作绑定的 USB 刷机设备'),
+        ]:
+            with self.subTest(operation=operation):
+                event = {'event': 'error', 'code': 'target-not-found', 'message': 'no fastboot device at /private/endpoint'}
+                binding = self.binding('print(json.dumps(%r))' % event)
+                with self.assertRaises(FlashRunnerError) as error:
+                    self.runner._run(binding, operation, {})
+                self.assertEqual(error.exception.code, 'target-not-found')
+                self.assertIn(expected, str(error.exception))
+                self.assertNotIn('/private/endpoint', str(error.exception))
 
     def test_loader_failure_discards_the_embedded_training_result_of_that_port(self):
         from decklab_core import flash_loaders
