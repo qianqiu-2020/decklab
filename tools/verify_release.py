@@ -120,6 +120,13 @@ def inspect_linux_runtime(runtime, architecture):
     return manifest
 
 
+def inspect_platform_tools(tools):
+    for name, option in (('adb', 'version'), ('fastboot', '--version')):
+        subprocess.run([str(tools / name), option], check=True, capture_output=True, timeout=10)
+    if not (tools / 'NOTICE.txt').stat().st_size:
+        raise ValueError('Bundled USB tool notices are missing')
+
+
 def inspect_release(directory, version):
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
         raise ValueError('invalid package version')
@@ -159,11 +166,7 @@ def inspect_release(directory, version):
         root = Path(temporary)
         inspect_complete_install(root, 'linux-amd64')
         code = root / 'usr/lib/decklab'
-        tools = code / 'platform-tools'
-        for name, option in (('adb', 'version'), ('fastboot', '--version')):
-            subprocess.run([str(tools / name), option], check=True, capture_output=True, timeout=10)
-        if not (tools / 'NOTICE.txt').stat().st_size:
-            raise ValueError('Bundled USB tool notices are missing')
+        inspect_platform_tools(code / 'platform-tools')
         inspect_desktop_runtime(code / 'mcp-runtime' / DESKTOP_RUNTIME, 'linux-amd64')
         runtime = inspect_linux_runtime(code / 'mcp-runtime', 'amd64')
         for name in ('decklab_mcp.py', 'decklabctl.py'):

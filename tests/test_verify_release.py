@@ -158,8 +158,10 @@ class ReleaseVerificationTests(unittest.TestCase):
             return SimpleNamespace(returncode=0)
         with patch('tools.verify_release.subprocess.run', side_effect=dpkg), \
              patch('tools.verify_release.inspect_complete_install'), \
-             patch('tools.verify_release.inspect_desktop_runtime'):
+             patch('tools.verify_release.inspect_desktop_runtime'), \
+             patch('tools.verify_release.inspect_platform_tools') as platform_tools:
             result = inspect_release(self.root, '1.19.0')
+        platform_tools.assert_called_once()
         self.assertEqual(result['debian_architectures'], ['amd64'])
         self.assertEqual(result['bundle_files'], 26)
 

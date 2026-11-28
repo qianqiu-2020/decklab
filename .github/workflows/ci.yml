@@ -127,14 +127,18 @@ jobs:
         run: |
           mapfile -t modules < <(python -c 'from pathlib import Path; import os; print("\n".join([p.stem for p in sorted(Path("tests").glob("test_*.py"))][int(os.environ["TEST_SHARD"])::3]))')
           terminal=()
+          protocol=()
           remaining=()
           for module in "${modules[@]}"; do
             case "$module" in
               test_console_visibility|test_sse|test_terminal_backend|test_terminal_geometry|test_terminal_state) terminal+=("$module") ;;
+              test_websocket_io) protocol+=("$module") ;;
               *) remaining+=("$module") ;;
             esac
           done
           if (( ${#terminal[@]} )); then python -m unittest "${terminal[@]}"; fi
+          # The pinned wheel must be loaded before the MCP stack imports h11.
+          if (( ${#protocol[@]} )); then python -m unittest "${protocol[@]}"; fi
           python -m unittest "${remaining[@]}"
   browser:
     runs-on: ubuntu-latest
