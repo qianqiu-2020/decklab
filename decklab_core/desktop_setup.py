@@ -7,7 +7,6 @@ import json
 import logging
 from pathlib import Path
 import shlex
-import shutil
 import subprocess
 import re
 import secrets
@@ -19,6 +18,7 @@ import threading
 import time
 from urllib.parse import quote, unquote, urlsplit
 
+from .platform_tools import adb_executable
 from .tasks import TaskError
 from .web_settings import SettingsError
 
@@ -155,7 +155,7 @@ class DesktopSetup:
                 'protocols': ['vnc', 'rdp']}
 
     def quick_eligible(self, device, fields):
-        return (bool(device.present and shutil.which('adb'))
+        return (bool(device.present and adb_executable())
                 and (not self.desktop.book.boards.get(device.serial)
                      or fields.get('provider') == 'rdp' and fields.get('host') in hosts_for(device)
                      and fields.get('port') in (3389, 3390) and fields.get('username') == 'rdp'))
@@ -167,7 +167,7 @@ class DesktopSetup:
         if not self.quick_eligible(device, fields):
             return None, ''
         serial, connection = device.serial, device.connection_id
-        executable = shutil.which('adb')
+        executable = adb_executable()
         registered = self.desktop.manager.hardware.board_tests.get(serial)
         started = time.monotonic()
         step = 'adb devices -l · 匹配 USB 连接并核对板卡身份'

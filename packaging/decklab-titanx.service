@@ -13,6 +13,7 @@ DynamicUser=yes
 User=decklab-titanx
 StateDirectory=decklab-titanx
 WorkingDirectory=/var/lib/decklab-titanx
+Environment=PATH=/usr/lib/decklab/platform-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 LoadCredential=edge.yaml:/run/decklab-titanx-config/edge.yaml
 ExecStart=/usr/libexec/decklab/titanx/edge ${CREDENTIALS_DIRECTORY}/edge.yaml
 Restart=on-failure

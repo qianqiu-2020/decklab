@@ -1,8 +1,10 @@
 # Windows 安装和升级
 
-DeckLab 的 Windows x64 安装器包含主程序、网页、MCP 和刷机所需的运行时。下载并运行 [Windows 安装器](https://github.com/qianqiu-2020/decklab/releases/latest/download/decklab-windows-x64-setup.exe)，选择控制机上的安装目录。
+DeckLab 的 Windows x64 安装器包含主程序、网页、MCP、ADB、Fastboot 和刷机所需的运行时。DeckLab 自动使用安装目录下的 ADB。下载并运行 [Windows 安装器](https://github.com/qianqiu-2020/decklab/releases/latest/download/decklab-windows-x64-setup.exe)，选择控制机上的安装目录。
 
 在安装完成页启动 DeckLab，或从开始菜单选择本机访问。默认入口是 `http://127.0.0.1:8898/`。接入串口板卡后，在页内按 COM 端口或板卡名称查找。使用刷机 USB 时，需要板通过数据线进入下载模式，控制机还须能访问该 USB 接口。[设备身份](../modules/device-identity.md) · [硬件控制](../modules/hardware-control.md)
+
+TitanX 的本机工位登记和 Edge 作业执行使用专用 Linux 工位包。Windows 上可用浏览器访问这台 Linux 工位。
 
 ## 局域网访问
 

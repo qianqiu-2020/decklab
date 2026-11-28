@@ -171,6 +171,8 @@ try {
         else { $componentArguments += @('--executor', $FlashExecutor, '--notices', $FlashNotices, '--loaders', $FlashLoaders, '--driver', $FlashDriver) }
         & $python @componentArguments
         if ($LASTEXITCODE -ne 0) { throw 'Complete standalone installation inputs failed validation.' }
+        & $python tools/stage_platform_tools.py win (Join-Path $bundle 'platform-tools')
+        if ($LASTEXITCODE -ne 0) { throw 'ADB and Fastboot inputs failed validation.' }
     } else {
         Set-Content -LiteralPath (Join-Path $bundle 'installation.json') -Value '{"profile":"core"}' -Encoding ASCII
     }

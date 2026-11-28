@@ -10,6 +10,7 @@ import threading
 import time
 from urllib.parse import urlparse, parse_qs, quote
 
+from .platform_tools import adb_executable
 from .compat import LegacyRequest
 from .config import BY_PATH, LOG_ROOT, RESCUE_BIN
 from .transport import try_rescue
@@ -446,8 +447,7 @@ class Handler(LegacyRequest, http.server.BaseHTTPRequestHandler):
                 result['wiring'] = hardware.wiring(device.serial)
                 cases = getattr(hardware, 'board_tests', {}).get(device.serial)
                 if cases:
-                    from shutil import which
-                    result['test_cases'] = cases['cases'] if which('adb') else []
+                    result['test_cases'] = cases['cases'] if adb_executable() else []
                     result['test_cases_configured'] = True
                 if q.get('test_cases') == ['1']:
                     from .board_cases import case_availability

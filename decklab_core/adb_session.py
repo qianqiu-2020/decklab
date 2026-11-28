@@ -3,12 +3,12 @@ import re
 import secrets
 import select
 import shlex
-import shutil
 import socket
 import struct
 import time
 from contextlib import nullcontext
 
+from .platform_tools import adb_executable
 from .board_cases import AdbTransportUnavailable, BOOT_ID, READ_IDENTITY, find_transport
 from .config import SSH_LIMIT
 from .session_base import SessionBase
@@ -233,7 +233,7 @@ def connect(manager, device, payload, actor, *, on_stage=None, recovery_boot=Non
             raise ConnectionError('请重新确认当前板卡的串口与 USB 连接')
 
     check()
-    executable = shutil.which('adb')
+    executable = adb_executable()
     if not executable:
         raise ConnectionError('控制机缺少 adb')
     device.reap_sessions()

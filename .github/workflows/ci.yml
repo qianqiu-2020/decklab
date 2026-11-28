@@ -130,7 +130,7 @@ jobs:
           remaining=()
           for module in "${modules[@]}"; do
             case "$module" in
-              test_console_visibility|test_terminal_backend|test_terminal_state) terminal+=("$module") ;;
+              test_console_visibility|test_sse|test_terminal_backend|test_terminal_geometry|test_terminal_state) terminal+=("$module") ;;
               *) remaining+=("$module") ;;
             esac
           done

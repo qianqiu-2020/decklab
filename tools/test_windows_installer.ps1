@@ -86,6 +86,10 @@ try {
     if ((Get-FileHash -LiteralPath $programFile).Hash -ne (Get-FileHash -LiteralPath $sourceReadme).Hash) { throw 'Upgrade did not replace old program files.' }
     & (Join-Path $target 'decklab.exe') --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Installed host launcher failed.' }
+    & (Join-Path $target 'platform-tools\adb.exe') version
+    if ($LASTEXITCODE -ne 0) { throw 'Installed ADB failed to start.' }
+    & (Join-Path $target 'platform-tools\fastboot.exe') --version
+    if ($LASTEXITCODE -ne 0) { throw 'Installed Fastboot failed to start.' }
     foreach ($name in @('Start-decklab.cmd', 'Start-decklab-LAN-Open.cmd', 'Start-decklab-LAN.cmd')) {
         if (-not (Test-Path -LiteralPath (Join-Path $target $name))) { throw "Missing launcher: $name" }
     }

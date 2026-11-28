@@ -35,6 +35,14 @@ assert config.stat().st_gid == account.pw_gid
 assert stat.S_IMODE(config.stat().st_mode) == 0o640
 helper = pathlib.Path('/usr/libexec/decklab/rescue.sh')
 assert helper.stat().st_uid == 0 and not helper.stat().st_mode & 0o022
+tools = pathlib.Path('/usr/lib/decklab/platform-tools')
+if tools.is_dir():
+    for name, argument in [('adb', 'version'), ('fastboot', '--version')]:
+        path = tools / name
+        assert path.stat().st_uid == 0 and not path.stat().st_mode & 0o022
+        output = subprocess.check_output(['runuser', '-u', 'decklab', '--', str(path), argument], text=True)
+        assert name in output.lower() or 'Android Debug Bridge' in output
+    assert (tools / 'NOTICE.txt').stat().st_size > 0
 subprocess.run(['visudo', '-c'], check=True)
 original = config.read_bytes()
 config.write_bytes(original + b'\n# installation preservation fixture\n')

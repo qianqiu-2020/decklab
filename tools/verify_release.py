@@ -159,6 +159,11 @@ def inspect_release(directory, version):
         root = Path(temporary)
         inspect_complete_install(root, 'linux-amd64')
         code = root / 'usr/lib/decklab'
+        tools = code / 'platform-tools'
+        for name, option in (('adb', 'version'), ('fastboot', '--version')):
+            subprocess.run([str(tools / name), option], check=True, capture_output=True, timeout=10)
+        if not (tools / 'NOTICE.txt').stat().st_size:
+            raise ValueError('Bundled USB tool notices are missing')
         inspect_desktop_runtime(code / 'mcp-runtime' / DESKTOP_RUNTIME, 'linux-amd64')
         runtime = inspect_linux_runtime(code / 'mcp-runtime', 'amd64')
         for name in ('decklab_mcp.py', 'decklabctl.py'):

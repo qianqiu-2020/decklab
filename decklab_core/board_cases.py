@@ -7,12 +7,12 @@ from pathlib import Path
 import re
 import secrets
 import shlex
-import shutil
 import subprocess
 import tempfile
 import threading
 import time
 
+from .platform_tools import adb_executable
 from .board_maintenance import maintenance_for
 from .flash_store import FlashStore, validate_request
 from .tasks import TaskCancelled, TaskError
@@ -248,7 +248,7 @@ class AdbDiscoveryScans:
         self._scans = {}
 
     def start(self):
-        executable = shutil.which('adb')
+        executable = adb_executable()
         if not executable:
             raise TaskError('控制机缺少 adb', 503)
         try:
@@ -356,7 +356,7 @@ def adb_binding(manager, device, scan=None):
     serial, generation = device.serial, device.connection_id
     if not serial or not device.present or manager.store.has_conflict(serial):
         raise TaskError('板卡尚未在线或身份有冲突', 409)
-    executable = shutil.which('adb')
+    executable = adb_executable()
     if not executable:
         raise TaskError('控制机缺少 adb', 503)
     try:
@@ -372,7 +372,7 @@ def adb_binding(manager, device, scan=None):
 
 
 def case_availability(manager, device):
-    executable = shutil.which('adb')
+    executable = adb_executable()
     if not executable:
         return {'test_cases': [], 'test_cases_reason': '控制机缺少 adb'}
     if not device.present or not device.serial:
@@ -756,7 +756,7 @@ def start(manager, device, payload, actor):
             (seconds is not None and (type(seconds) is not int or not 1 <= seconds <= 7 * 86400))):
         raise TaskError('请填写轮数或时长')
     registered = manager.hardware.board_tests.get(device.serial)
-    executable = shutil.which('adb')
+    executable = adb_executable()
     revision = payload.get('case_revision')
     custom_case = isinstance(case, str) and CUSTOM_CASE.fullmatch(case) is not None
     if ((custom_case and (type(revision) is not int or revision < 1))

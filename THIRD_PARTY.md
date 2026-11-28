@@ -119,6 +119,14 @@ unchanged. Linux places them under `/usr/lib/decklab/vendor/`; Windows bundles
 place them under `_internal/vendor/`. Windows `bundle-manifest.json` inventories
 all these actual resource files and rejects later changes.
 
+## ADB and Fastboot
+
+Complete amd64/x64 installers include the ADB and Fastboot components from
+Android SDK Platform Tools 37.0.3, including the ADB WinUSB support DLLs on
+Windows. The corresponding upstream NOTICE and revision metadata accompany
+these files in `platform-tools/`. Build inputs and digests are pinned in
+`tools/stage_platform_tools.py`.
+
 ## Binary flashing component
 
 The goflash flashing executor is a separate, non-open-source component. This

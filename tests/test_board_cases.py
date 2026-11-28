@@ -206,7 +206,7 @@ class BoardCasesTests(unittest.TestCase):
                 output = f'serial={reported[endpoint]}\nboot_id={BOOT1}'
             return SimpleNamespace(returncode=0, stdout=output)
         with patch('decklab_core.board_cases.adb_command', side_effect=execute), \
-                patch('decklab_core.board_cases.shutil.which', return_value='adb'):
+                patch('decklab_core.board_cases.adb_executable', return_value='adb'):
             for round_number in (1, 2):
                 scan = scans.get(scans.start())
                 with ThreadPoolExecutor(2) as pool:
@@ -246,7 +246,7 @@ class BoardCasesTests(unittest.TestCase):
             manager = SimpleNamespace(store=SimpleNamespace(has_conflict=lambda serial: False),
                                       hardware=SimpleNamespace(board_tests={SERIAL: registered}))
             device = SimpleNamespace(serial=SERIAL, connection_id='fixture', present=True)
-            with patch('decklab_core.board_cases.shutil.which', return_value='/fixture/adb'):
+            with patch('decklab_core.board_cases.adb_executable', return_value='/fixture/adb'):
                 self.assertEqual(adb_binding(manager, device)['usb_port'], '2-3.3')
             reported['81'] = SERIAL
             with self.assertRaisesRegex(ConnectionError, '多个 USB 调试连接'):
@@ -485,7 +485,7 @@ class BoardCasesTests(unittest.TestCase):
                        'case':custom['id'],'case_revision':1,'rounds':1,'request_id':'test-request-1'}
             actions = TaskActions(manager)
             with patch('decklab_core.board_cases.BoardCase.run', run), \
-                    patch('decklab_core.board_cases.shutil.which', return_value='/fixture/adb'), \
+                    patch('decklab_core.board_cases.adb_executable', return_value='/fixture/adb'), \
                     patch('decklab_core.board_cases.find_transport', return_value=('2-3.3', '82', {'uid': '0'})) as transport:
                 first = actions.start(payload, device, 'web')
                 self.assertEqual(first.status, 202, first.payload)

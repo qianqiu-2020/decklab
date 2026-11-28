@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a native Ubuntu package from a prepared MCP runtime, entirely offline."""
+"""Build a native Ubuntu package from reviewed inputs and a prepared MCP runtime."""
 import argparse
 import hashlib
 import json
@@ -18,6 +18,7 @@ from decklab_core import __version__
 from tools.package_docs import publish as publish_docs
 from tools.package_flash_loaders import publish as publish_flash_loaders
 from tools.build_linux_mcp import DESKTOP_RUNTIME, MACHINES, validate_runtime
+from tools.stage_platform_tools import stage as stage_platform_tools
 
 
 def collector_build_id(root=ROOT):
@@ -85,7 +86,7 @@ def flash_notice_files(directory):
 
 
 def build(output, version, runtime=None, flash_executor=None, flash_notices=None, flash_loaders=None,
-          complete=False, components_manifest=None, local_fast=False, titanx_tools=None):
+          complete=False, components_manifest=None, local_fast=False, titanx_tools=None, bundle_platform_tools=False):
     if runtime is None:
         architecture = {'x86_64': 'amd64', 'aarch64': 'arm64',
                         'riscv64': 'riscv64'}.get(platform.machine())
@@ -173,6 +174,9 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             for path in (ROOT / name).rglob('*'):
                 if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':
                     put(path.relative_to(ROOT), 'usr/lib/decklab/' + str(path.relative_to(ROOT)))
+        bundled_tools = bundle_platform_tools and architecture == 'amd64'
+        if bundled_tools:
+            stage_platform_tools('linux', stage / 'usr/lib/decklab/platform-tools')
         for path in sorted(runtime.rglob('*')):
             if path.is_file():
                 destination = stage / 'usr/lib/decklab/mcp-runtime' / path.relative_to(runtime)
@@ -241,10 +245,11 @@ def build(output, version, runtime=None, flash_executor=None, flash_notices=None
             flash_dependency = ', libusb-1.0-0, udev, e2fsprogs, device-tree-compiler, initramfs-tools-core, zstd'
             if lz4 is None:
                 flash_dependency += ', lz4'
-        if titanx_tools:
+        if titanx_tools and not bundled_tools:
             flash_dependency += ', adb'
         desktop_dependency = ', libstdc++6, libgcc-s1' if desktop_runtime.is_dir() else ''
-        write('DEBIAN/control', 'Package: decklab\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nConflicts: seriald\nReplaces: seriald\nMaintainer: DeckLab contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), python3-cryptography, nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers, iproute2%s%s\nRecommends: adb\nDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency))
+        recommends = '' if bundled_tools or titanx_tools else 'Recommends: adb\n'
+        write('DEBIAN/control', 'Package: decklab\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: %s\nConflicts: seriald\nReplaces: seriald\nMaintainer: DeckLab contributors <root@localhost>\nDepends: libc6 (>= 2.35), python3 (>= 3.10), python3-cryptography, nodejs (>= 12), openssh-client, sshpass, sudo, adduser, init-system-helpers, iproute2%s%s\n%sDescription: Persistent serial board registry and shared agent console\n Serial capture, web terminals, agent operation history and JSON CLI.\n Includes a private Python runtime and MCP server dependencies.\n' % (version, architecture, flash_dependency, desktop_dependency, recommends))
         compression = ['-Zgzip', '-z1'] if local_fast else []
         with tempfile.TemporaryDirectory(dir=output) as package_dir:
             candidate = Path(package_dir) / artifact.name
@@ -275,4 +280,5 @@ if __name__ == '__main__':
         parser.error('--core-only cannot be combined with flashing components')
     print(build(args.output, args.version, runtime=args.runtime, flash_executor=args.flash_executor,
                 flash_notices=args.flash_notices, flash_loaders=args.flash_loaders,
-                complete=not args.core_only, components_manifest=args.components_manifest, local_fast=args.local_fast, titanx_tools=args.titanx_tools))
+                complete=not args.core_only, components_manifest=args.components_manifest, local_fast=args.local_fast,
+                titanx_tools=args.titanx_tools, bundle_platform_tools=not args.core_only))
